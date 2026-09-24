@@ -31,6 +31,21 @@ import (
 // register the job before calling the start failed.
 const jobSupervisorReportTimeout = 10 * time.Second
 
+// jobSupervisorStartupReadLimit bounds how much of a supervisor's own output a
+// failed start reads back to name the cause with.
+const jobSupervisorStartupReadLimit = 4 << 10
+
+// jobSupervisorStartupQuoteLimit bounds the cause a failed start quotes, so a
+// supervisor that died shouting does not turn the start error into a transcript.
+const jobSupervisorStartupQuoteLimit = 240
+
+// environmentJobLogPath is the one place the capture path and every reader of it
+// agree: the supervisor writes the work's output here, and a start reads back
+// the supervisor's own last words from the same file when it never got that far.
+func environmentJobLogPath(dir, id string) string {
+	return filepath.Join(dir, id+".log")
+}
+
 // StartEnvironmentJobParams is the work to detach.
 type StartEnvironmentJobParams struct {
 	Tenant      string
@@ -382,7 +397,7 @@ func StartEnvironmentJob(ctx Context, params StartEnvironmentJobParams) (Environ
 		return EnvironmentJob{}, err
 	}
 
-	logPath := filepath.Join(dir, params.ID+".log")
+	logPath := environmentJobLogPath(dir, params.ID)
 	args := environmentJobSupervisorArgs(params)
 	ctx.Trace(fmt.Sprintf("job: detaching %q as job %s, output at %s", params.Name, params.ID, logPath))
 	ctx.Trace(fmt.Sprintf("job: holding activity lease %s for the job's lifetime", environmentJobLeaseID(params.ID)))
@@ -417,12 +432,23 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 	// the transport dropping or the caller exiting cannot take it with them.
 	cmd.Dir = ""
 	cmd.Stdin = nil
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// Its own output is the exception, because it is the only account of a
+	// supervisor that ends before registering anything: there is no record to
+	// read a cause from, and the process itself is gone. Send it to the job's
+	// log -- which a supervisor that does reach registration truncates again on
+	// its way in -- rather than to the null device, so the start failure below
+	// can name what happened instead of only that nothing did.
+	startup := openEnvironmentJobStartupCapture(dir, params.ID)
+	if startup != nil {
+		cmd.Stdout = startup
+		cmd.Stderr = startup
+	}
 	detachEnvironmentJobSupervisor(cmd)
-	if err := cmd.Start(); err != nil {
+	startErr := cmd.Start()
+	closeEnvironmentJobStartupCapture(startup)
+	if startErr != nil {
 		releaseUnsupervisedEnvironmentJobExclusivityClaim(params, 0)
-		return EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", err)
+		return EnvironmentJob{}, fmt.Errorf("start job supervisor: %w", startErr)
 	}
 	// Reap the supervisor when it eventually exits. A long-lived caller (the MCP
 	// server) would otherwise collect a zombie per job.
@@ -434,6 +460,58 @@ func spawnEnvironmentJobSupervisor(dir string, params StartEnvironmentJobParams,
 		return EnvironmentJob{}, err
 	}
 	return job, nil
+}
+
+// openEnvironmentJobStartupCapture opens the file a detached supervisor's own
+// output is captured to, or returns nil when it cannot be opened at all: a start
+// must never fail because its diagnostics could not be arranged, and a nil
+// writer leaves the supervisor on the null device exactly as it always was.
+//
+// Truncating is the same decision reserveEnvironmentJobID already took -- this
+// start owns the id, and any record and log under it belonged to finished work --
+// and it is what makes the file unambiguously this attempt's, so a reader can
+// never quote an earlier run's leftovers back as this death's cause.
+func openEnvironmentJobStartupCapture(dir, id string) *os.File {
+	file, err := os.OpenFile(environmentJobLogPath(dir, id), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil
+	}
+	return file
+}
+
+// closeEnvironmentJobStartupCapture drops this process's copy of the capture
+// file once the supervisor holds its own. The supervisor survives this call.
+func closeEnvironmentJobStartupCapture(file *os.File) {
+	if file != nil {
+		_ = file.Close()
+	}
+}
+
+// jobSupervisorStartupFailureCause reads back what the supervisor process itself
+// wrote before it died, so a start that failed before any record existed reports
+// why the supervisor ended rather than only that it is gone.
+//
+// The file it reads was truncated by this start before the supervisor was
+// spawned and is truncated again by any supervisor that reaches registration, so
+// what it finds belongs to this attempt. Empty is a real answer and the one this
+// returns for a supervisor killed outright, which gets no chance to say anything
+// -- the bare "exited without registering" is then the whole truth, and nothing
+// here may invent a cause to fill that gap.
+func jobSupervisorStartupFailureCause(dir, id string) string {
+	data, _, err := readEnvironmentJobLogPage(environmentJobLogPath(dir, id), 0, jobSupervisorStartupReadLimit)
+	if err != nil {
+		return ""
+	}
+	// Collapsed to one line, because the start error is one line and a
+	// supervisor's dying words are routinely several.
+	text := strings.Join(strings.Fields(string(data)), " ")
+	if text == "" {
+		return ""
+	}
+	if runes := []rune(text); len(runes) > jobSupervisorStartupQuoteLimit {
+		text = string(runes[:jobSupervisorStartupQuoteLimit]) + "..."
+	}
+	return ": " + text
 }
 
 // releaseUnsupervisedEnvironmentJobExclusivityClaim drops a claim this start
@@ -498,7 +576,10 @@ func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (EnvironmentJo
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
 		if !ProcessAlive(supervisorPID) {
-			return EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q", supervisorPID, id)
+			// The supervisor is gone and there is no record to read a cause
+			// from. Its own output is the one place that cause can survive, so
+			// the failure to register is reported with it rather than alone.
+			return EnvironmentJob{}, fmt.Errorf("job supervisor %d exited without registering job %q%s", supervisorPID, id, jobSupervisorStartupFailureCause(dir, id))
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -685,7 +766,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 		// heartbeat at all. An attached job has no supervisor and is stamped by
 		// its own renew instead.
 		LastAliveAt:      now,
-		LogPath:          filepath.Join(dir, id+".log"),
+		LogPath:          environmentJobLogPath(dir, id),
 		OutputLimitBytes: limit,
 		LeaseID:          environmentJobLeaseID(id),
 		Hostname:         currentJobHostname(),

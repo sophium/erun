@@ -36,25 +36,42 @@ const (
 	workspaceSyncStubFetchMarkerEnv   = "ERUN_COMMON_TEST_SSH_STUB_FETCH_MARKER"
 )
 
-// TestMain doubles as the stub `ssh` binary: the test executable is copied onto
-// a PATH the pass sees, and re-entering it with the stub env var set answers the
-// remote commands instead of running the suite. Compiling the stub from the test
-// binary keeps it executable on every host, which a shell script is not.
+// runReenteredJobHelper serves every process this binary is re-executed as, so
+// TestMain's own decision surface stays a single call rather than a chain that
+// grows with each helper. The second return is false when this is the ordinary
+// test binary and the suite should run.
+//
+// Each helper is a real process on purpose, because each stands in for
+// something only a real process can be: the stub `ssh` answers a PATH lookup,
+// and the supervisor helpers give the job store a supervisor pid that genuinely
+// ran and genuinely exited. Only one TestMain is allowed per test binary, so
+// they all hook in here.
+func runReenteredJobHelper() (int, bool) {
+	switch {
+	case os.Getenv(workspaceSyncSSHStubEnv) != "":
+		// The test executable is copied onto a PATH the pass sees, and
+		// re-entering it with the stub env var set answers the remote commands
+		// instead of running the suite. Compiling the stub from the test binary
+		// keeps it executable on every host, which a shell script is not.
+		return runWorkspaceSyncSSHStub(os.Args), true
+	case os.Getenv(jobAliveSupervisorHelperEnv) != "":
+		return runJobAliveSupervisorHelper(), true
+	case os.Getenv(jobSupervisorSetupFailureHelperEnv) != "":
+		// A supervisor that ends on its own setup failure, after its running
+		// record is already durable (job_supervisor_failure_test.go).
+		return runJobSupervisorSetupFailureHelper(), true
+	case os.Getenv(jobSupervisorStartupHelperEnv) != "":
+		// A supervisor that ends before registering anything at all
+		// (job_supervisor_startup_test.go), so a start failure is read back
+		// against a supervisor that never wrote a record.
+		return runJobSupervisorStartupHelper(os.Getenv(jobSupervisorStartupHelperEnv)), true
+	}
+	return 0, false
+}
+
 func TestMain(m *testing.M) {
-	if os.Getenv(workspaceSyncSSHStubEnv) != "" {
-		os.Exit(runWorkspaceSyncSSHStub(os.Args))
-	}
-	// Only one TestMain is allowed per test binary, so the job-alive-contract
-	// test's re-entered supervisor helper (job_alive_test.go) hooks in here too.
-	if os.Getenv(jobAliveSupervisorHelperEnv) != "" {
-		os.Exit(runJobAliveSupervisorHelper())
-	}
-	// The supervisor-failure test re-enters this binary as a supervisor that
-	// ends on its own setup failure (job_supervisor_failure_test.go), for the
-	// same reason the alive-contract helper above is a real process: the record
-	// must be reconciled against a supervisor pid that genuinely ran and exited.
-	if os.Getenv(jobSupervisorSetupFailureHelperEnv) != "" {
-		os.Exit(runJobSupervisorSetupFailureHelper())
+	if code, reentered := runReenteredJobHelper(); reentered {
+		os.Exit(code)
 	}
 	// This suite must never depend on the invoking shell's own environment:
 	// running `go test` from inside an actual runtime pod (as this repo's own

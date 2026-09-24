@@ -48,6 +48,16 @@ this file for the conventions below.
   progress ticks and terminal outcomes. Never let a late progress write replace
   the final result. Lease renewal, expiry, supervisor reconciliation, and the
   maximum lifetime must remain bounded.
+- A supervisor that ends before it registers leaves no record, so the start
+  call is the only surface that can say why — and the only process that knows
+  is the supervisor itself. Its stdout and stderr are therefore captured to the
+  job's log rather than discarded to the null device
+  (`spawnEnvironmentJobSupervisor`), and the start failure quotes that capture
+  back (`jobSupervisorStartupFailureCause`). An empty capture is a real answer:
+  a supervisor killed outright never got to say anything, and the bare
+  "exited without registering" is then the whole truth — never invent a cause
+  for it. The post-registration flavour is the other half of this and is
+  `recordEnvironmentJobSupervisorFailure`'s, not this path's.
 - Agent reinvocation is bounded recovery, not a general retry loop:
   `decideEnvironmentJobReinvocation` accepts only an agent with a captured session
   ID whose started work was incomplete or failed. Reuse the same job, supervisor,
