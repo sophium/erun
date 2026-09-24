@@ -1121,7 +1121,7 @@ func removeEnvironmentJobFiles(dir, id string) {
 		return
 	}
 	_ = os.Remove(filepath.Join(dir, id+".json"))
-	_ = os.Remove(filepath.Join(dir, id+".log"))
+	_ = os.Remove(environmentJobLogPath(dir, id))
 	_ = os.Remove(environmentJobCancelMarkerPath(dir, id))
 }
 
