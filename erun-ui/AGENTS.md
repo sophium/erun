@@ -72,6 +72,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Edit source files, not generated artifacts such as bindings, bundles, generated models, generated clients, or generated component output. Regenerate artifacts through the repository's generator command and inspect the generated diff instead of hand-editing the output.
 - Do not patch generated files manually, even temporarily to satisfy a compiler, type checker, import, or test. When generated output is missing or stale, first change the source contract that owns it, then run the appropriate generator.
 - If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `wails generate module` from `erun-ui`.
+- Every surface that type-checks, lints, or builds `erun-ui/frontend` regenerates `wailsjs/` first, through the one shared `./erun-ui/generate-wailsjs.sh` (`build.sh`, the root `Makefile`'s `test-frontend`, and `.githooks/pre-commit`). `wailsjs/` is gitignored, so a checkout's copy is only as current as the last surface that regenerated it, and linting against a stale one reports type-aware errors inside source the change never touched — which as a commit veto reads as a defect in a branch that is sound. A surface that cannot regenerate skips that lint visibly, never silently.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
 
 ## Frontend Code Organization
@@ -165,6 +166,8 @@ are alerts.
   this module independently; sibling-module test commands cannot reach it.
 - Frontend changes: `yarn typecheck && yarn lint && yarn format:check && yarn build &&
   yarn test` in `frontend/`; root `test-frontend` runs the same gates.
+- `.githooks/pre-commit` changes: `sh scripts/pre-commit_test.sh`, which
+  `make fast-check` also runs.
 - Observable interaction/lifecycle changes also run `./playwright/run.sh`
   (force `--build` after backend edits). See the coverage contract below.
 - Packaging, Wails, CGO, or asset embedding changes run `./build.sh <target>`.
