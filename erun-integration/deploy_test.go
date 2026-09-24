@@ -1872,6 +1872,77 @@ esac
 		golden.Equal(t, "deploy/dry_run_remote_env_stated_chart_ignores_stale_stock_runtimeimage", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_moves_the_tenant_umbrella_pin_with_the_deploy_version", func(t *testing.T) {
+		// The reported failure, at the surface it was reported from: a deploy of
+		// frs/prod at 1.0.143 resolved the tenant's own frs-devops
+		// umbrella at its stated 1.0.142 while the same command set the runtime
+		// image to frs-devops:1.0.143 -- and reported success. The umbrella is
+		// where the wrapped erun version lives, so that deploy would have run a
+		// 1.0.143 image wrapped around an older erun. The umbrella is on the
+		// tenant's own line, the one --version names, so it moves with it.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "frs", "prod", "/nonexistent-remote/frs")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "prod", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/frs-devops:1.0.142\n")
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=frs-devops:1.0.143")
+		result := erun.Run(t, []string{"deploy", "frs", "prod", "--version", "1.0.143", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// The golden normalizes every version to <VERSION>, so it cannot carry
+		// the pair that was the reported failure -- the umbrella's --version and
+		// the image override's tag. Assert them verbatim.
+		if !strings.Contains(result.Combined, "charts/frs-devops --version 1.0.143") {
+			t.Errorf("the umbrella is not installed at the deploy version:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/test/frs-devops:1.0.143") {
+			t.Errorf("the image override does not name the deploy version:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_moves_the_tenant_umbrella_pin_with_the_deploy_version", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_says_when_it_holds_the_tenant_umbrella_back", func(t *testing.T) {
+		// The other half of the same report: when the deploy version is not published for
+		// the umbrella, the stated version stays -- an unconfirmed coordinate is
+		// never substituted -- but the deploy must not stay silent about it. The
+		// reported run printed a version, waited for a rollout and succeeded, so
+		// nothing distinguished a moved umbrella from a stranded one.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "frs", "prod", "/nonexistent-remote/frs")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "frs", "prod", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+
+			"runtimeregistry: ghcr.io/sophium\n"+
+			"runtimechart: oci://ghcr.io/sophium/charts/frs-devops:1.0.142\n")
+		// The umbrella line stops at the stated version.
+		envVars := append(setup.Env(), "ERUN_PUBLISHED_CHART_PROBE_OVERRIDE=frs-devops:1.0.142")
+		result := erun.Run(t, []string{"deploy", "frs", "prod", "--version", "1.0.143", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Same normalization caveat as the scenario above: the goldens pin the
+		// prose, these pin the versions it is about.
+		if !strings.Contains(result.Combined, "charts/frs-devops --version 1.0.142") {
+			t.Errorf("an unconfirmed coordinate must not be substituted:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "imageOverrides.erun-devops=registry.example/test/frs-devops:1.0.143") {
+			t.Errorf("the runtime image still moves to the deploy version:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "holding back the env's runtime umbrella") {
+			t.Errorf("the deploy does not say it left the umbrella behind:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_says_when_it_holds_the_tenant_umbrella_back", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_runtime_chart_flag_rescues_a_stock_runtime_image_override", func(t *testing.T) {
 		// erun#1249: an env recorded at an old runtimechart version, deployed with
 		// --version/--runtime-image/--runtime-chart together moving it forward.
