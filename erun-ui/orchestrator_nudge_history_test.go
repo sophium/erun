@@ -198,6 +198,7 @@ func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *te
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 

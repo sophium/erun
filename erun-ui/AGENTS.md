@@ -18,6 +18,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Automatic agent spawning is resource-bounded by `investigation_bounds.go`: input floor, one spawn per event, duplicate-signature exclusion, cooldown, population cap, and lifetime. Reserve the slot atomically with the cap check; derive liveness from the session registry.
 - Register spawned agents as attached environment jobs with activity leases (`AttachEnvironmentJob`) so status and busy indicators account for them.
 - Test report/state paths belong on the owning struct, defaulted at construction and overridden per test; never write shared host locations.
+- Every test that reaches orchestrator provisioning must stub `runOrchestratorLabelCommand`. Its production default shells out to `gh`, and on a missing label it creates it — so an unstubbed test mints a real `wip:<id>` label on a real repository. The shared orchestrator test helpers already stub it; a new App built directly under `NewApp` must too.
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.
 - Keep terminal session ownership in Go. The frontend should attach to sessions by ID, render buffered output, and send input, but it should not start shells on its own.
 - Prefer small transport-facing Go methods with JSON-safe structs over leaking backend internals into the frontend contract.

@@ -567,23 +567,28 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	return dir, nil
 }
 
-// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus this
-// orchestrator's own role file. Separate from it rather than an extra parameter
-// on it: the workspace itself is id-independent, and the shared root is ensured
-// from a dozen places that have no id to give.
+// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus the two
+// things that belong to a particular orchestrator rather than to the shared
+// root: its own role file, and the claim label its claim protocol addresses
+// issues by. Separate from ensureOrchestratorWorkspace rather than an extra
+// parameter on it: the workspace itself is id-independent, and the shared root
+// is ensured from a dozen places that have no id to give.
 //
 // Seeding here rather than at creation means an orchestrator that already
-// existed gets a role file on its next launch too, not only newly created ones.
+// existed gets both on its next launch too, not only newly created ones.
 func (a *App) ensureOrchestratorWorkspaceFor(id string) (string, error) {
 	dir, err := a.ensureOrchestratorWorkspace()
 	if err != nil {
 		return "", err
 	}
-	// Best-effort, like the skills install and the SessionStart hook: a role
-	// file that could not be seeded must not stop the orchestrator launching,
-	// but it is reported rather than passed over in silence.
+	// Best-effort, like the skills install and the SessionStart hook: neither
+	// of these must stop the orchestrator launching, but they are reported
+	// rather than passed over in silence.
 	if roleErr := ensureOrchestratorRoleFile(dir, id); roleErr != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not seed orchestrator role file for %s: %v\n", id, roleErr)
+	}
+	if labelErr := a.ensureOrchestratorClaimLabel(a.ctx, dir, id); labelErr != nil {
+		fmt.Fprintf(os.Stderr, "erun: could not provision the claim label for %s: %v\n", id, labelErr)
 	}
 	return dir, nil
 }
