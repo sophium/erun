@@ -246,9 +246,9 @@ func TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheL
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentTenantMismatch {
 		t.Fatalf("expected no enrolment claim for a platform tenant that is not the local one, got %+v", statuses)
 	}
-	// The row must be able to say which tenant the platform answered for --
-	// "not this one" without naming the one it is is the same dead end as no
-	// state at all.
+	// The row must be able to say which tenant the platform answered for -- "not
+	// this one" without naming the one it is, is the same dead end as no state
+	// at all.
 	if statuses[0].PlatformTenant != "erun" {
 		t.Fatalf("expected the status to name the platform tenant the credential resolved to, got %q", statuses[0].PlatformTenant)
 	}
@@ -301,6 +301,12 @@ func TestListTenantPlatformEnrollmentStatusesUnknownOnWhoamiFault(t *testing.T) 
 // for lacking permissions on the read itself -- that is enrolled, and must
 // never fall through to the invite-request lookup (which this server would
 // fail, proving the code path is not reached).
+//
+// This is also the boundary of the tenant-correspondence check above: a 403
+// carries a bare status string, no tenant name, so there is nothing to hold
+// against this row -- the state is read as it was before that check existed,
+// exactly as a whoami that reports no name is. The two are the same "no answer
+// to compare", reached from a success and a failure.
 func TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path != "/v1/whoami" {
