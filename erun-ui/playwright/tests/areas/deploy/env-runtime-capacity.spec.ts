@@ -84,7 +84,9 @@ test.describe('runtime resources capacity reading', () => {
 
     // The worst-case reading keeps its answer, labelled as the other question.
     await expect(dialog.getByText(/at its declared limit at once/)).toBeVisible();
-    await expect(dialog.getByText(/namespace quota or by running fewer environments/)).toBeVisible();
+    await expect(
+      dialog.getByText(/namespace quota or by running fewer environments/),
+    ).toBeVisible();
 
     // The reported behaviour: a pending deploy predicted from the limits sum,
     // with the harmful remedy under it. Neither may appear on this reading.

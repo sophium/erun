@@ -44,13 +44,27 @@ async function stubDialogCluster(
       // fixed ceiling, so each carries its own live message.
       const schedulable = {
         cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8', floored: false },
-        memory: { total: 16, used: 0, free: 16, unit: 'GiB', formatted: '16.0 GiB', floored: false },
+        memory: {
+          total: 16,
+          used: 0,
+          free: 16,
+          unit: 'GiB',
+          formatted: '16.0 GiB',
+          floored: false,
+        },
         message:
           'Right now on node-a (the emptiest node): the scheduler can admit 8 CPU and 16.0 GiB memory more.',
       };
       const worstCase = {
         cpu: { total: 8, used: 2, free: 6, unit: 'cores', formatted: '6', floored: false },
-        memory: { total: 16, used: 4, free: 12, unit: 'GiB', formatted: '12.0 GiB', floored: false },
+        memory: {
+          total: 16,
+          used: 4,
+          free: 12,
+          unit: 'GiB',
+          formatted: '12.0 GiB',
+          floored: false,
+        },
         message:
           'Worst case, with every container on node-a at its declared limit at once: 6 CPU and 12.0 GiB memory left.',
       };
