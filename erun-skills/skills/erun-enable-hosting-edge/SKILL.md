@@ -180,6 +180,31 @@ does not `import /etc/coredns/custom/*.server` means the entry would be written
 and never read, so the apply would report success while in-cluster resolution
 stayed exactly as broken as before.
 
+**Storage reclamation on a pressured node.** `local-path` is the only storage
+class these clusters ship, and the provisioner does both provisioning and
+reclamation through a short-lived helper pod that it pins onto the node holding
+the volume — the node under DiskPressure. kubelet's eviction manager admits and
+evicts by whether a pod is *critical*, and a helper pod with no
+`priorityClassName` resolves to priority 0, so it is turned away while the node
+has conditions and evicted first when it has any. The provisioner then waits out
+its 120-second create timeout and retries, and neither a new PVC nor the
+deletion of an existing one can complete: on a node at 93% used, deleting a
+50 GiB PVC frees no bytes. Adding `-var
+install_local_path_helper_pod_resilience=true` merges
+`priorityClassName: system-node-critical` into the distribution's own helper pod
+template — keeping its image and every other field — and states the
+disk-pressure toleration explicitly, because a helper pod template that declares
+any tolerations at all stops the provisioner from adding its own default. It
+also annotates the provisioner Deployment's pod template with a digest of the
+template it wrote, since the provisioner reads that template once at startup and
+on k3s has no reload (its 30-second refresh is a no-op without
+`CONFIG_MOUNT_PATH`, which k3s's manifest does not set): a ConfigMap write alone
+applies cleanly and changes nothing until the provisioner happens to restart.
+Both the ConfigMap key and the annotation belong to the distribution's own
+manifest, so a k3s upgrade that rewrites it reverts either — re-apply this
+module if reclamation on a pressured node stops working after one. Off by
+default, so an existing cluster's provisioner is untouched on a module upgrade.
+
 **Delegated services zone (PowerDNS DNS-01).** Once the services zone is delegated
 off Cloudflare to the platform's own PowerDNS, the Cloudflare DNS-01 solver can no
 longer prove control of it — switch the solver to RFC2136 (DNS UPDATE + TSIG) and
