@@ -8,12 +8,32 @@ import (
 	"strings"
 )
 
+// publishedChartRepoPath is the path segment every published chart lives under,
+// keeping the chart's tag space separate from the image repository of the same
+// name (<registry>/erun-devops), which holds the image tags.
+const publishedChartRepoPath = "charts"
+
 // PublishedDevopsChartOCIRepo is the OCI repository the release flow pushes
 // the canonical runtime chart to. The "/charts" suffix keeps the chart's tag
 // space separate from the image repository of the same name
 // (<registry>/erun-devops), which holds the runtime image tags.
 func PublishedDevopsChartOCIRepo(containerRegistry string) string {
-	return "oci://" + strings.TrimSpace(containerRegistry) + "/charts"
+	return "oci://" + strings.TrimSpace(containerRegistry) + "/" + publishedChartRepoPath
+}
+
+// ociChartReferenceRegistry is PublishedDevopsChartOCIRepo's inverse: the
+// registry a published-chart reference addresses, or "" for a reference that is
+// not an OCI chart URL under that path.
+func ociChartReferenceRegistry(reference string) string {
+	trimmed := strings.TrimSpace(reference)
+	if !isOCIChartReference(trimmed) {
+		return ""
+	}
+	registry, _, ok := strings.Cut(strings.TrimPrefix(trimmed, "oci://"), "/"+publishedChartRepoPath+"/")
+	if !ok {
+		return ""
+	}
+	return registry
 }
 
 // runtimeChartCandidate is one coordinate the published-runtime-chart ladder
@@ -149,9 +169,12 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 // as a pair.
 //
 // A stated version is normally taken as the chart's own, which is how an env
-// rides a chart on another line entirely. The exception is a stated stock
-// erun-devops chart on the deploy's own line at a version the deploy has moved
-// past: see stockRuntimePinMovesWithDeployVersion. Honoring that one installs the
+// rides a chart on another line entirely. The exceptions are both cases where
+// the chart and the image the same deploy installs are one coordinate that must
+// move together: a stated stock erun-devops chart on the deploy's own line at a
+// version the deploy has moved past (stockRuntimePinMovesWithDeployVersion),
+// and a stated <tenant>-devops umbrella at a version behind the deploy on that
+// umbrella's own line (resolveTenantUmbrellaPin). Honoring either installs the
 // older chart while the deploy records the newer version, so the operator reads
 // a version roll that did not happen.
 func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
@@ -169,6 +192,9 @@ func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, ver
 			chart.movedPin = true
 			return chart, nil
 		}
+		if settled, handled := resolveTenantUmbrellaPin(ctx, target, chart, version, deferToOverride); handled {
+			return settled, nil
+		}
 		ctx.Trace("deploy: " + reason + "; using the env's runtime chart " + reference + " version " + chartVersion)
 		return chart, nil
 	}
@@ -178,6 +204,106 @@ func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, ver
 	}
 	ctx.Trace("deploy: " + reason + "; using published chart " + chart.reference + " version " + version)
 	return chart, nil
+}
+
+// resolveTenantUmbrellaPin decides what a stated <tenant>-devops umbrella does
+// when the deploy is at a different version on that umbrella's own line, and
+// reports the decision. It returns handled=false when the stated chart is not
+// the tenant's own umbrella, leaving the coordinate to the caller's own trace.
+//
+// A tenant that publishes its own artifacts runs its runtime on the tenant's
+// own version line: <tenant>-devops wraps the canonical erun-devops as a
+// subchart, and it is the umbrella that names the erun version the environment
+// actually runs. --version names that same line, so a stated umbrella behind it
+// is a lagging pin, not a cross-line coordinate: the image the same deploy
+// derives is the deploy version, and honoring the older umbrella installs a
+// newer runtime image under an umbrella wrapped around an older erun -- then
+// reports success. This is the tenant-umbrella counterpart of
+// stockRuntimePinMovesWithDeployVersion, which covers the stock chart on erun's
+// own line; a tenant stating the *stock* erun-devops chart is genuinely naming
+// another line (that tenant's own line is not erun's) and stays untouched.
+//
+// The move is never a guess. The deploy version must be confirmed published for
+// this chart -- the same probe the by-reference ladder uses -- because a
+// tenant's umbrella is published per version by the tenant's own release, so a
+// coordinate without a published chart behind it cannot be installed. An
+// unconfirmed deploy version (absent, or a registry read that failed outright
+// and is therefore not evidence of absence) leaves the pin alone and says so
+// rather than staying silent: the reported failure's whole harm was that
+// nothing distinguished a moved umbrella from a stranded one.
+//
+// overrideComing is true when an operator-stated --runtime-chart is about to
+// replace this coordinate wholesale; the hold is reported against the
+// coordinate that override discards, so nothing is said or probed here.
+func resolveTenantUmbrellaPin(ctx Context, target OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (resolvedRuntimeChart, bool) {
+	name, stated, version, lagging := laggingTenantUmbrellaPin(target, chart, deployVersion, overrideComing)
+	if !lagging {
+		return chart, false
+	}
+	registry := tenantUmbrellaChartRegistry(target, chart.reference)
+	found, err := probeChartVersion(context.Background(), registry, name, version, chartRegistryInsecure(target, registry))
+	switch {
+	case err != nil:
+		ctx.Trace(tenantUmbrellaHoldTrace(chart, name, stated, version,
+			"could not be confirmed at this deploy's "+version+" in "+registry+" ("+err.Error()+") — the deploy will not move a pin it cannot confirm"))
+	case !found:
+		ctx.Trace(tenantUmbrellaHoldTrace(chart, name, stated, version,
+			"has no published chart at this deploy's "+version+" in "+registry+" — the deploy will not install a coordinate that cannot exist"))
+	default:
+		ctx.Trace("deploy: the env's runtime umbrella " + chart.reference + " is pinned at " + stated +
+			", which is behind this deploy's " + version + " on " + name + "'s own release line; moving the pin to the deploy version")
+		chart.version = version
+		chart.movedPin = true
+	}
+	return chart, true
+}
+
+// laggingTenantUmbrellaPin answers whether a stated chart coordinate is the
+// tenant's own runtime umbrella left at a version this deploy has moved past,
+// and names the chart, the version it states, and the version to move it to.
+func laggingTenantUmbrellaPin(target OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (name, stated, version string, ok bool) {
+	if overrideComing || !isTenantRuntimeUmbrella(target.Tenant, chart.name) {
+		return "", "", "", false
+	}
+	stated, version = strings.TrimSpace(chart.version), strings.TrimSpace(deployVersion)
+	if stated == "" || version == "" || stated == version {
+		// Nothing to decide: either the chart already rides the deploy version,
+		// or there is no version to move it to.
+		return "", "", "", false
+	}
+	return strings.TrimSpace(chart.name), stated, version, true
+}
+
+// isTenantRuntimeUmbrella reports whether chartName is the runtime umbrella a
+// tenant publishes for itself, rather than the shared erun-devops chart the
+// canonical product tenant installs directly.
+func isTenantRuntimeUmbrella(tenant, chartName string) bool {
+	tenant, chartName = strings.TrimSpace(tenant), strings.TrimSpace(chartName)
+	if tenant == "" || chartName == "" {
+		return false
+	}
+	return chartName == RuntimeReleaseName(tenant) && chartName != DevopsComponentName
+}
+
+// tenantUmbrellaHoldTrace is the one message both unconfirmed outcomes share:
+// what the deploy left in place, why it could not move it, and the remedy.
+// reason is the outcome-specific clause.
+func tenantUmbrellaHoldTrace(chart resolvedRuntimeChart, name, stated, version, reason string) string {
+	return "deploy: holding back the env's runtime umbrella " + chart.reference + " at " + stated + ": the tenant's own " + name + " " +
+		reason + ". The runtime image still moves to " + version + ", so the umbrella stays wrapped around an older " + DevopsComponentName +
+		" than the one deployed; publish the tenant's charts at " + version + " (`erun push --version " + version + "`) and redeploy"
+}
+
+// tenantUmbrellaChartRegistry answers which registry an umbrella reference is
+// probed in: the one the reference itself addresses, so the line under question
+// is the one the operator pointed at, falling back to the deploy registry the
+// tenant's own charts are published to for a reference that is not an OCI chart
+// URL.
+func tenantUmbrellaChartRegistry(target OpenResult, reference string) string {
+	if registry := ociChartReferenceRegistry(reference); registry != "" {
+		return registry
+	}
+	return publishedTenantComponentChartRegistry(target)
 }
 
 // traceRuntimeRegistryMemo surfaces what this deploy does to the env's
@@ -353,7 +479,7 @@ func probeChartVersion(ctx context.Context, containerRegistry, chartName, versio
 	}
 	versions, err := ResolveConfiguredRuntimeRegistryVersions(ctx, RuntimeRegistryConfig{
 		Namespace:  containerRegistry,
-		Repository: "charts/" + chartName,
+		Repository: publishedChartRepoPath + "/" + chartName,
 		Insecure:   insecure,
 	})
 	if err != nil {
@@ -891,8 +1017,11 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 //   - The deploy's own version must be able to be on that line at all. A tenant
 //     that publishes a devops image of its own runs its components on its own
 //     version line — which is exactly why it states its runtime chart
-//     separately — so there the stated version is the deliberate coordinate and
-//     must not move.
+//     separately — so a stated *stock* chart there is a deliberate coordinate on
+//     erun's line, not this deploy's, and must not move. That exemption is about
+//     which line the stated chart is on, not about the tenant: a tenant that
+//     states its *own* <tenant>-devops umbrella has named a chart on the
+//     deploy's own line, which resolveTenantUmbrellaPin handles.
 func stockRuntimePinMovesWithDeployVersion(tenant string, env EnvConfig, pinName, pinVersion, version string) bool {
 	if strings.TrimSpace(pinName) != DevopsComponentName {
 		return false

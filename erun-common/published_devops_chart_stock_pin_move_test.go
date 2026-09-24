@@ -49,9 +49,12 @@ func TestDeployMovesStockRuntimePinWithTheDeployVersion(t *testing.T) {
 
 // TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone is the other half of
 // the same decision: a tenant that publishes a devops image of its own runs its
-// components on its own version line, which is exactly why it states its runtime
-// chart separately. There the stated version is the operator's coordinate and
-// must not move onto the deploy version.
+// components on its own version line, which is exactly why it states the stock
+// runtime chart separately. That chart is on erun's line, not this deploy's, so
+// the stated version is the operator's coordinate and must not move onto the
+// deploy version. A tenant stating its *own* <tenant>-devops umbrella is naming
+// a chart on the deploy's own line instead, and that one does move -- see
+// TestDeployMovesTenantUmbrellaPinWithTheDeployVersion.
 func TestStockRuntimePinMoveLeavesADeliberateCoordinateAlone(t *testing.T) {
 	target := OpenResult{
 		Tenant: "frs",
