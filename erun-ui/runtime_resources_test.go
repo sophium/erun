@@ -437,3 +437,87 @@ func TestRuntimeResourceStatusCountsTheInitPhaseInThePodRequest(t *testing.T) {
 		t.Fatalf("schedulable memory free = %v, want 12 (16Gi minus the init phase's 4Gi)", status.Schedulable.Memory.Free)
 	}
 }
+
+// TestRuntimeResourceStatusKeepsAnExistingEnvironmentResizableOnARequestFullNode
+// covers the floor on the scheduling reading, which is where it matters most.
+// A node whose pods' requests have consumed everything the scheduler has is a
+// node that cannot admit another pod -- but the environment already on it is
+// admitted, and resizing it re-creates it against a request the scheduler has
+// already placed. Without that floor the schedulable figure reads zero, the
+// control's maximum goes to zero, and the environment's own size becomes
+// uneditable on a reading that does not govern it.
+func TestRuntimeResourceStatusKeepsAnExistingEnvironmentResizableOnARequestFullNode(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "node-a"
+	node.Status.Allocatable.CPU = "8"
+	node.Status.Allocatable.Memory = "16Gi"
+
+	// This environment's own pod, holding 4 CPU / 8Gi of limits and the chart's
+	// 250m / 1024Mi of requests.
+	var target kubernetesPod
+	target.Metadata.Namespace = "team-dev"
+	target.Spec.NodeName = "node-a"
+	target.Spec.Containers = []kubernetesContainer{{Name: "erun-devops"}}
+	target.Spec.Containers[0].Resources.Limits.CPU = "4"
+	target.Spec.Containers[0].Resources.Limits.Memory = "8Gi"
+	target.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "250m", "memory": "1024Mi"}
+
+	// A neighbour whose requests have taken the rest of the node.
+	var neighbour kubernetesPod
+	neighbour.Metadata.Namespace = "other"
+	neighbour.Spec.NodeName = "node-a"
+	neighbour.Spec.Containers = []kubernetesContainer{{Name: "other"}}
+	neighbour.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "8", "memory": "15Gi"}
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		kubernetesPodList{Items: []kubernetesPod{target, neighbour}},
+		nil,
+	)
+	if status.Schedulable.CPU.Free != 4 || status.Schedulable.Memory.Free != 8 {
+		t.Fatalf("expected the environment's own size to stay selectable, got %+v", status.Schedulable)
+	}
+	if !status.Schedulable.CPU.Floored || !status.Schedulable.Memory.Floored {
+		t.Fatalf("a figure clamped up to the environment's own size must be marked floored: %+v", status.Schedulable)
+	}
+	if !strings.Contains(status.Schedulable.Notice, "not spare capacity") {
+		t.Fatalf("a floored scheduling figure must say what it is, got %q", status.Schedulable.Notice)
+	}
+	if !strings.Contains(status.Schedulable.Notice, "Stopping an environment nobody is using") {
+		t.Fatalf("a floored scheduling figure must name the remedy that returns capacity, got %q", status.Schedulable.Notice)
+	}
+}
+
+// TestRuntimeResourceStatusReportsNoSchedulingRoomForANewEnvironment is the
+// other half of that floor: an environment not yet on the node holds nothing,
+// so there is nothing to floor at, and a node with no request headroom says so
+// rather than borrowing a size the environment does not have.
+func TestRuntimeResourceStatusReportsNoSchedulingRoomForANewEnvironment(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "node-a"
+	node.Status.Allocatable.CPU = "8"
+	node.Status.Allocatable.Memory = "16Gi"
+
+	var neighbour kubernetesPod
+	neighbour.Metadata.Namespace = "other"
+	neighbour.Spec.NodeName = "node-a"
+	neighbour.Spec.Containers = []kubernetesContainer{{Name: "other"}}
+	neighbour.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "8", "memory": "16Gi"}
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		kubernetesPodList{Items: []kubernetesPod{neighbour}},
+		nil,
+	)
+	if status.Schedulable.CPU.Free != 0 || status.Schedulable.Memory.Free != 0 {
+		t.Fatalf("expected a request-full node to report no room, got %+v", status.Schedulable)
+	}
+	if status.Schedulable.CPU.Floored || status.Schedulable.Memory.Floored {
+		t.Fatalf("nothing is held for an environment not on the node, so nothing may be floored: %+v", status.Schedulable)
+	}
+	if !strings.Contains(status.Schedulable.Notice, "nothing left on this node") {
+		t.Fatalf("expected the reading to name the shortfall, got %q", status.Schedulable.Notice)
+	}
+}

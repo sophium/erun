@@ -134,12 +134,19 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 			Name: name,
 			// What the scheduler will do: allocatable minus what the pods on the
 			// node request. This is the reading a deploy's outcome follows, and
-			// it is deliberately *not* floored at this environment's own size --
-			// a floor here would report scheduling capacity the node does not
-			// have, which is the one claim this reading exists to make honestly.
+			// what the configuration dialog's bounds come from.
+			//
+			// It carries the same floor the worst-case reading does, for the
+			// same reason and only where an environment is already on the node:
+			// a pod that exists is already admitted, and resizing it re-creates
+			// it against a request the scheduler has already placed -- so a node
+			// whose requests are exhausted must not render that environment's
+			// own size uneditable. For an environment not yet on the node there
+			// is nothing held, the floor is zero, and a node with no request
+			// headroom correctly reports that it cannot admit one.
 			Schedulable: uiRuntimeResourceReading{
-				CPU:    cpuMetricFree(cpuTotal, requests.CPUMilli),
-				Memory: memoryMetricFree(memoryTotal, requests.MemoryMi),
+				CPU:    cpuMetricWithMinimumFree(cpuTotal, requests.CPUMilli, targetHeld.CPUMilli),
+				Memory: memoryMetricWithMinimumFree(memoryTotal, requests.MemoryMi, targetHeld.MemoryMi),
 			},
 			SchedulableComplete: accounting.unreadable[name] == 0,
 			// Worst case: what would be left if every container on the node ran
@@ -225,11 +232,18 @@ func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
 		return fmt.Sprintf("%s on this node declares a request this reading could not read, so the free figure above is an upper bound.",
 			pluralizePods(status.UnreadableRequests))
 	}
-	if status.Schedulable.CPU.Free > 0 && status.Schedulable.Memory.Free > 0 {
+	floored := status.Schedulable.CPU.Floored || status.Schedulable.Memory.Floored
+	exhausted := status.Schedulable.CPU.Free <= 0 || status.Schedulable.Memory.Free <= 0
+	if !floored && !exhausted {
 		return ""
 	}
-	return "The scheduler has nothing left on this node to admit another pod with. " +
-		"Stopping an environment nobody is using on it returns its reservation."
+	notice := "The scheduler has nothing left on this node to admit another pod with."
+	if floored {
+		// A floored figure equals what this environment is already running at,
+		// which reads as a product ceiling unless the reading says otherwise.
+		notice += " What is shown is the size this environment already holds, not spare capacity."
+	}
+	return notice + " Stopping an environment nobody is using on it returns its reservation."
 }
 
 // runtimeWorstCaseNotice carries what the worst-case figure alone cannot say:
@@ -475,21 +489,6 @@ func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiR
 		freeMilli = minimumFreeMilli
 		floored = minimumFreeMilli > 0
 	}
-	return cpuMetric(totalMilli, freeMilli, usedMilli, floored)
-}
-
-// cpuMetricFree is the unfloored form: free capacity is exactly what the node
-// has left, and a node with nothing left says zero rather than borrowing this
-// environment's own size as a floor.
-func cpuMetricFree(totalMilli, usedMilli int64) uiRuntimeResourceMetric {
-	freeMilli := totalMilli - usedMilli
-	if freeMilli < 0 {
-		freeMilli = 0
-	}
-	return cpuMetric(totalMilli, freeMilli, usedMilli, false)
-}
-
-func cpuMetric(totalMilli, freeMilli, usedMilli int64, floored bool) uiRuntimeResourceMetric {
 	return uiRuntimeResourceMetric{
 		Total:     round1(float64(totalMilli) / 1000),
 		Used:      round1(float64(usedMilli) / 1000),
@@ -517,18 +516,6 @@ func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntime
 		freeMi = minimumFreeMi
 		floored = minimumFreeMi > 0
 	}
-	return memoryMetric(totalMi, freeMi, usedMi, floored)
-}
-
-func memoryMetricFree(totalMi, usedMi int64) uiRuntimeResourceMetric {
-	freeMi := totalMi - usedMi
-	if freeMi < 0 {
-		freeMi = 0
-	}
-	return memoryMetric(totalMi, freeMi, usedMi, false)
-}
-
-func memoryMetric(totalMi, freeMi, usedMi int64, floored bool) uiRuntimeResourceMetric {
 	return uiRuntimeResourceMetric{
 		Total:     round1(float64(totalMi) / 1024),
 		Used:      round1(float64(usedMi) / 1024),
