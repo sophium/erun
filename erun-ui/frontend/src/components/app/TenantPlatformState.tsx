@@ -1,5 +1,6 @@
 import { Button, EmptyState, FieldLabel, Input, StatusBadge } from 'erun-kit';
 import {
+  Building2,
   Copy,
   KeyRound,
   Link2,
@@ -15,7 +16,10 @@ import * as React from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { HOSTED_PLATFORM_API_URL } from '@/app/hostedPlatform';
 import { showNotification } from '@/app/notificationThunks';
-import { tenantDashboardEnvironmentName } from '@/app/tenantDashboardPanels';
+import {
+  tenantDashboardEnvironmentName,
+  tenantDashboardPlatformTenantName,
+} from '@/app/tenantDashboardPanels';
 import {
   chooseTenantPlatformAlias,
   loadTenantDashboard,
@@ -37,6 +41,7 @@ import {
   TENANT_PLATFORM_STATE_NOT_CONNECTED,
   TENANT_PLATFORM_STATE_NOT_ENROLLED,
   TENANT_PLATFORM_STATE_NOT_SIGNED_IN,
+  TENANT_PLATFORM_STATE_TENANT_MISMATCH,
   type UITenantDashboard,
 } from '@/types';
 
@@ -45,12 +50,18 @@ import { InlineAlert } from './InlineAlert';
 import { SignInAction } from './PlatformSignInAlert';
 import { RequestInvitationDialog } from './RequestInvitationDialog';
 
-// TenantPlatformState.tsx renders the tenant dashboard's four/five platform-
-// readiness states: not-connected, choose-alias, not-signed-in,
-// not-enrolled, no-permission. Each is a distinct user situation with its
-// own next action — never one generic "sign in again" sentence — per the
+// TenantPlatformState.tsx renders the tenant dashboard's platform-readiness
+// states: not-connected, choose-alias, not-signed-in, not-enrolled,
+// no-permission, and tenant-mismatch. Each is a distinct user situation with
+// its own next action — never one generic "sign in again" sentence — per the
 // repo's "Smooth, Seamless, No Dead Ends" standard: a state with no action
 // is a defect of the same severity as a crash.
+//
+// tenant-mismatch is the one that is not about a *failed* resolution: the
+// identity resolved and the platform answered, with a tenant that is not the
+// local tenant this dashboard was opened from. It is rendered instead of the
+// rows rather than beside them, because everything below the tab strip would
+// be that tenant's — including the writes it offers.
 
 export function TenantPlatformStateCard({
   data,
@@ -68,6 +79,8 @@ export function TenantPlatformStateCard({
       return <NotEnrolledState data={data} />;
     case TENANT_PLATFORM_STATE_NO_PERMISSION:
       return <NoPermissionState data={data} />;
+    case TENANT_PLATFORM_STATE_TENANT_MISMATCH:
+      return <TenantMismatchState data={data} />;
     default:
       return null;
   }
@@ -99,8 +112,6 @@ function PlatformContactLine({ data }: { data: UITenantDashboard }): React.React
 function NotConnectedState(): React.ReactElement {
   const dispatch = useAppDispatch();
   const draft = useAppSelector((state) => state.tenantDashboard.connectApiUrlDraft);
-  const connecting = useAppSelector((state) => state.tenantDashboard.connecting);
-  const error = useAppSelector((state) => state.tenantDashboard.connectError);
   // Prefill with the one hosted platform's own API URL — a property of the
   // platform, not of the tenant connecting to it. Interpolating the tenant
   // name here previously produced a host that only ever resolved for
@@ -124,33 +135,88 @@ function NotConnectedState(): React.ReactElement {
       // as an account of what is unavailable and leaves the rest looking
       // usable, and any list drifts as tabs are added.
       body="This tenant isn't connected to a hosted erun platform yet, so none of this dashboard's tabs can load."
-      action={
-        <div className="grid w-full max-w-sm gap-2 text-left">
-          <FieldLabel htmlFor="connect-platform-url" required>
-            Platform API URL
-          </FieldLabel>
-          <Input
-            id="connect-platform-url"
-            placeholder={HOSTED_PLATFORM_API_URL}
-            value={draft}
-            disabled={connecting}
-            onChange={(event) => {
-              dispatch(setConnectApiUrlDraft(event.target.value));
-            }}
-          />
-          <Button
-            type="button"
-            disabled={connecting || !draft.trim()}
-            onClick={() => {
-              void dispatch(connectTenantPlatform(draft || HOSTED_PLATFORM_API_URL));
-            }}
-          >
-            {connecting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-            {connecting ? 'Connecting…' : 'Connect'}
-          </Button>
-          {error && <InlineAlert id="platform-connect-error">{error}</InlineAlert>}
+      action={<ConnectPlatformForm />}
+    />
+  );
+}
+
+// ConnectPlatformForm is the URL field + Connect button both states that end
+// in "connect this local tenant to the platform that serves it" need: the
+// not-connected state, and tenant-mismatch, whose remedy is to reach the
+// platform tenant this local tenant actually is rather than the one its
+// current credential happens to resolve to. Shared rather than copied so the
+// two cannot drift into offering different ways to do the same thing.
+function ConnectPlatformForm(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const draft = useAppSelector((state) => state.tenantDashboard.connectApiUrlDraft);
+  const connecting = useAppSelector((state) => state.tenantDashboard.connecting);
+  const error = useAppSelector((state) => state.tenantDashboard.connectError);
+  return (
+    <div className="grid w-full max-w-sm gap-2 text-left">
+      <FieldLabel htmlFor="connect-platform-url" required>
+        Platform API URL
+      </FieldLabel>
+      <Input
+        id="connect-platform-url"
+        placeholder={HOSTED_PLATFORM_API_URL}
+        value={draft}
+        disabled={connecting}
+        onChange={(event) => {
+          dispatch(setConnectApiUrlDraft(event.target.value));
+        }}
+      />
+      <Button
+        type="button"
+        disabled={connecting || !draft.trim()}
+        onClick={() => {
+          void dispatch(connectTenantPlatform(draft || HOSTED_PLATFORM_API_URL));
+        }}
+      >
+        {connecting && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+        {connecting ? 'Connecting…' : 'Connect'}
+      </Button>
+      {error && <InlineAlert id="platform-connect-error">{error}</InlineAlert>}
+    </div>
+  );
+}
+
+// TenantMismatchState is the one state here that is not a failure: the
+// platform answered, and what it answered with is a tenant that is not the
+// local tenant this dashboard was opened from. Nothing in the two configs
+// links them, so the platform's own name for the tenant behind the bearer is
+// the only thing that can say whether the rows are this tenant's — and it
+// says they are not. Rendering them anyway would show another tenant's
+// reviews, merge queue, users and audit under this tenant's own heading,
+// behind the write controls that act on them, which is exactly what an
+// operator cannot tell apart from their own tenant. The header above still
+// names the platform tenant, so the mismatch is stated whichever state the
+// body is in.
+function TenantMismatchState({ data }: { data: UITenantDashboard }): React.ReactElement {
+  const platformTenant = tenantDashboardPlatformTenantName(data);
+  return (
+    <EmptyState
+      icon={<Building2 />}
+      heading="This platform connection belongs to a different tenant"
+      body={
+        <div className="grid gap-2 text-left">
+          <p>
+            This dashboard was opened from the local tenant{' '}
+            <span className="font-mono">{data.tenant}</span>, but the platform identity it resolved
+            belongs to the platform tenant <span className="font-mono">{platformTenant}</span>.
+            Those are two different tenants: the reviews, merge queue, users and audit behind this
+            connection are {platformTenant}&apos;s, not {data.tenant}&apos;s, so erun does not load
+            them here.
+          </p>
+          <p>
+            Connect this tenant to the platform that serves it — the one whose tenant is named{' '}
+            <span className="font-mono">{data.tenant}</span> — or open the dashboard for the local
+            tenant named <span className="font-mono">{platformTenant}</span> if that is the one you
+            meant.
+          </p>
+          <PlatformContactLine data={data} />
         </div>
       }
+      action={<ConnectPlatformForm />}
     />
   );
 }

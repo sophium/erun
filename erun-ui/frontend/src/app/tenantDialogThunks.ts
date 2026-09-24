@@ -3,6 +3,7 @@ import {
   TENANT_PLATFORM_STATE_CHOOSE_ALIAS,
   TENANT_PLATFORM_STATE_NOT_CONNECTED,
   TENANT_PLATFORM_STATE_NOT_SIGNED_IN,
+  TENANT_PLATFORM_STATE_TENANT_MISMATCH,
   type UITenant,
   type UITenantConfig,
   type UITenantDashboardInput,
@@ -377,13 +378,18 @@ export const setReviewStatusFilter =
 
 // tenantDashboardWhoamiResolved reports whether loadTenantDashboard's own
 // load actually reached the platform's GET /v1/whoami -- true for every
-// platformState except the three that mean the identity resolution never
-// got that far (not connected, ambiguous alias, or no session at all).
+// platformState except the ones that mean the identity resolution never got
+// that far (not connected, ambiguous alias, or no session at all), and except
+// tenant-mismatch, whose whoami did answer but answered for a different
+// platform tenant: that is evidence about that tenant's enrollment, never
+// about this local tenant's, and invalidating the sidebar's enrollment poll on
+// it would let another tenant's roster state answer for this one.
 function tenantDashboardWhoamiResolved(platformState: string | undefined): boolean {
   return (
     platformState !== TENANT_PLATFORM_STATE_NOT_CONNECTED &&
     platformState !== TENANT_PLATFORM_STATE_CHOOSE_ALIAS &&
-    platformState !== TENANT_PLATFORM_STATE_NOT_SIGNED_IN
+    platformState !== TENANT_PLATFORM_STATE_NOT_SIGNED_IN &&
+    platformState !== TENANT_PLATFORM_STATE_TENANT_MISMATCH
   );
 }
 

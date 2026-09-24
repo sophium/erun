@@ -371,6 +371,21 @@ export class TenantDashboard {
     });
   }
 
+  // tenant-mismatch is the one platform-readiness state that is not a failed
+  // resolution: the identity resolved and the platform answered, with a tenant
+  // that is not the local tenant the dashboard was opened from. Its body names
+  // both tenants, so the whole card is the locator — the second name is the
+  // point, and a locator on the heading alone cannot hold the card to it.
+  tenantMismatchHeading(): Locator {
+    return this.page.getByText('This platform connection belongs to a different tenant', {
+      exact: true,
+    });
+  }
+
+  tenantMismatchBody(): Locator {
+    return this.page.getByText(/belongs to the platform tenant/);
+  }
+
   platformContactLine(): Locator {
     return this.page.getByText('Platform:', { exact: false });
   }
