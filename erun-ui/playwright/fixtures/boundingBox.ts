@@ -12,8 +12,22 @@ export interface ElementBox {
   height: number;
 }
 
-export async function boundingBoxOf(locator: Locator, label: string): Promise<ElementBox> {
-  const box = await locator.boundingBox();
+// boundingBox() carries no timeout of its own: with no explicit one it waits
+// for the element until the enclosing test's clock expires. A caller reading a
+// surface that can be dropped and put back -- a hover card, a status pill
+// cleared by terminal output -- therefore cannot be wrapped in a re-drivable
+// block without one, because a dropped element does not fail the attempt, it
+// consumes the whole budget inside it. `timeoutMs` bounds a single attempt so
+// the caller can retry; the default keeps the unbounded behaviour every other
+// caller has today.
+export async function boundingBoxOf(
+  locator: Locator,
+  label: string,
+  timeoutMs?: number,
+): Promise<ElementBox> {
+  const box = await locator.boundingBox(
+    timeoutMs === undefined ? undefined : { timeout: timeoutMs },
+  );
   expect(box, `${label} has no bounding box`).not.toBeNull();
   if (box === null) {
     throw new Error(`${label} has no bounding box`);
