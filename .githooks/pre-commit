@@ -94,11 +94,44 @@ fi
 # when yarn or a project's node_modules are absent so a Go-only contributor is
 # never blocked. Unlike the Go path it does not auto-fix — TS fixes are left to
 # the author to review.
+#
+# erun-ui/frontend imports the generated Wails bindings (wailsjs/), which are
+# gitignored/dockerignored like any other generated artifact, so a checkout's
+# copy is only as current as the last surface that regenerated it. Linting
+# against a stale copy reports type-aware errors inside source the commit does
+# not touch -- a binding that does not resolve reads as `any` -- and that false
+# failure vetoes the commit, including the squash a merge gate commits through
+# this hook. So regenerate first, via the same generator the Makefile's
+# test-frontend and erun-ui/build.sh call (it writes only gitignored artifacts,
+# never staged content), and skip this workspace's lint when the bindings
+# cannot be regenerated rather than lint against ones that cannot be trusted.
+# Playwright does not read wailsjs/, so it is left alone.
+regenerate_wailsjs() {
+  if [ ! -x "$REPO_ROOT/erun-ui/generate-wailsjs.sh" ]; then
+    echo "note: erun-ui/generate-wailsjs.sh missing or not executable; skipping erun-ui/frontend lint" >&2
+    return 1
+  fi
+  printf 'regenerating erun-ui/frontend wailsjs bindings\n'
+  if ! "$REPO_ROOT/erun-ui/generate-wailsjs.sh"; then
+    cat <<'MSG' >&2
+note: could not regenerate erun-ui/frontend's Wails bindings; skipping its
+      lint here rather than reporting lint errors against stale generated
+      code. Run ./erun-ui/generate-wailsjs.sh to regenerate them by hand; the
+      check gate regenerates them for its own run either way.
+MSG
+    return 1
+  fi
+  return 0
+}
+
 if [ -n "$CHANGED_FRONTEND" ]; then
   if command -v yarn >/dev/null 2>&1; then
     for fe in erun-ui/frontend erun-ui/playwright; do
       if printf '%s\n' "$CHANGED_FRONTEND" | grep -q "^$fe/"; then
         if [ -d "$REPO_ROOT/$fe/node_modules" ]; then
+          if [ "$fe" = "erun-ui/frontend" ]; then
+            regenerate_wailsjs || continue
+          fi
           printf 'yarn lint %s\n' "$fe"
           (
             cd "$REPO_ROOT/$fe"
