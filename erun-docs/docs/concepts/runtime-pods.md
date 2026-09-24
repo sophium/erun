@@ -99,9 +99,10 @@ There are **two of them, because there are two questions**, and each states whic
 - **Schedulable capacity — what a deploy depends on.** This is the scheduler's own arithmetic:
   allocatable minus what the pods on the node *request*. Kubernetes admits a pod on its requests, so
   this is the figure that decides whether an environment can be placed at all, and it is what the
-  sliders are bounded by. It is never floored or guessed at — a node with nothing left says zero —
-  and when a pod on the node declares a request the reading could not parse, the figure is stated as
-  the upper bound it is rather than as an answer or a zero.
+  sliders are bounded by. For an environment not yet on the node it is stated exactly — a node with
+  nothing left says zero — and where a pod on the node declares a request the reading could not
+  parse, the figure is stated as the upper bound it is rather than as an answer. An environment
+  already on the node keeps the floor below, because a pod that exists has already been admitted.
 - **Worst-case headroom — what is left if everything bursts.** The same node, with every container on
   it running to its declared *limit* at once. This is a real capacity-planning question and it is
   labelled as one, kept visually apart from the scheduling figure. It is not a scheduling limit:
@@ -114,9 +115,11 @@ There are **two of them, because there are two questions**, and each states whic
 Two cases neither figure alone can explain, so the tab spells them out:
 
 - **The maximum equals what this environment already has.** An environment can always keep what it
-  is already running with, so the worst-case maximum is floored at the current value. That reads
-  like a product limit but means the opposite — the node is committed at those limits. The remedy
-  that raises it is capacity on the node: [stop an environment](/cli/stop) nobody is using there.
+  is already running with, so both readings floor their free figure at the current value for an
+  environment that is already on the node. That reads like a product limit but means the opposite —
+  the node is fully committed, by limits in the worst-case reading and by requests in the scheduling
+  one. The remedy that raises either is capacity on the node: [stop an environment](/cli/stop)
+  nobody is using there.
 - **Some usage is not counted.** The worst-case reading prefers a container's declared limits, falls
   back to its measured usage when the cluster reports metrics, and says how many containers it could
   not account for at all when neither is available. The runtime pod's own two containers
