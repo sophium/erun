@@ -127,19 +127,38 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 		}
 		cpuTotal, _ := eruncommon.ParseKubernetesCPUToMilli(node.Status.Allocatable.CPU)
 		memoryTotal, _ := eruncommon.ParseKubernetesMemoryToMi(node.Status.Allocatable.Memory)
-		used := accounting.usage[name]
-		targetUsed := accounting.targetUsage[name]
+		bursting := accounting.usage[name]
+		requests := accounting.requests[name]
+		targetHeld := accounting.targetUsage[name]
 		item := uiRuntimeResourceNode{
-			Name:   name,
-			CPU:    cpuMetricWithMinimumFree(cpuTotal, used.CPUMilli, targetUsed.CPUMilli),
-			Memory: memoryMetricWithMinimumFree(memoryTotal, used.MemoryMi, targetUsed.MemoryMi),
+			Name: name,
+			// What the scheduler will do: allocatable minus what the pods on the
+			// node request. This is the reading a deploy's outcome follows, and
+			// it is deliberately *not* floored at this environment's own size --
+			// a floor here would report scheduling capacity the node does not
+			// have, which is the one claim this reading exists to make honestly.
+			Schedulable: uiRuntimeResourceReading{
+				CPU:    cpuMetricFree(cpuTotal, requests.CPUMilli),
+				Memory: memoryMetricFree(memoryTotal, requests.MemoryMi),
+			},
+			SchedulableComplete: accounting.unreadable[name] == 0,
+			// Worst case: what would be left if every container on the node ran
+			// to its declared limit at once. Floored at what this environment
+			// already holds so its current setting stays representable, and
+			// labelled as headroom rather than scheduling.
+			WorstCase: uiRuntimeResourceReading{
+				CPU:    cpuMetricWithMinimumFree(cpuTotal, bursting.CPUMilli, targetHeld.CPUMilli),
+				Memory: memoryMetricWithMinimumFree(memoryTotal, bursting.MemoryMi, targetHeld.MemoryMi),
+			},
 		}
 		result.Nodes = append(result.Nodes, item)
 		if shouldUseRuntimeResourceNode(name, accounting.targetNode, item, result) {
 			result.Node = name
-			result.CPU = item.CPU
-			result.Memory = item.Memory
+			result.Schedulable = item.Schedulable
+			result.SchedulableComplete = item.SchedulableComplete
+			result.WorstCase = item.WorstCase
 			result.UnmeasuredContainers = accounting.unaccounted[name]
+			result.UnreadableRequests = accounting.unreadable[name]
 		}
 	}
 	sort.Slice(result.Nodes, func(i, j int) bool {
@@ -148,44 +167,99 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 	if len(result.Nodes) == 0 {
 		return unavailableRuntimeResourceStatus(input.KubernetesContext, "No Kubernetes nodes reported allocatable capacity.")
 	}
-	result.Floored = result.CPU.Floored || result.Memory.Floored
-	result.Message = runtimeResourceMessage(result, accounting.targetNode != "")
-	result.Notice = runtimeResourceNotice(result)
+	result.Floored = result.WorstCase.CPU.Floored || result.WorstCase.Memory.Floored
+	result.Schedulable.Message = runtimeSchedulableMessage(result, accounting.targetNode != "")
+	result.Schedulable.Notice = runtimeSchedulableNotice(result)
+	result.WorstCase.Message = runtimeWorstCaseMessage(result)
+	result.WorstCase.Notice = runtimeWorstCaseNotice(result)
 	return result
 }
 
-// runtimeResourceMessage states what the figure is: one reading of a node whose
-// allocatable capacity and neighbouring pods both move on their own. The old
-// wording ("Available for this runtime") read as a fixed product ceiling, which
-// is how an operator ends up believing their environment cannot be given more
-// memory than it already has.
-func runtimeResourceMessage(status uiRuntimeResourceStatus, targeted bool) string {
-	node := strings.TrimSpace(status.Node)
-	if node == "" {
-		node = "the selected node"
+func runtimeResourceNodeLabel(status uiRuntimeResourceStatus) string {
+	if node := strings.TrimSpace(status.Node); node != "" {
+		return node
 	}
-	if targeted {
-		return fmt.Sprintf("Right now on %s: %s CPU and %s memory free for this runtime.", node, status.CPU.Formatted, status.Memory.Formatted)
-	}
-	return fmt.Sprintf("Right now on %s (the emptiest node): %s CPU and %s memory free.", node, status.CPU.Formatted, status.Memory.Formatted)
+	return "the selected node"
 }
 
-// runtimeResourceNotice carries what the number alone cannot say: that the cap
-// is the node being full rather than a limit on this environment, and that part
-// of the node's real consumption is invisible to the reading. Both are the
-// difference between an operator who is stuck and one who knows to stop an
-// environment nobody is using.
-func runtimeResourceNotice(status uiRuntimeResourceStatus) string {
+// runtimeSchedulableMessage states which question the schedulable reading
+// answers. It is the reading a deploy's outcome follows: the scheduler admits a
+// pod on what it *requests*, and the CPU/memory the configuration dialog sets
+// are *limits*, which reserve nothing. Reporting one figure without saying
+// which question it answers is the reported defect -- the panel read 0 free
+// from the limits sum, an operator read that as "a deploy will not schedule",
+// and the remedy it offered was to shrink the very limit the node's capacity
+// planning assumes will be burst into.
+func runtimeSchedulableMessage(status uiRuntimeResourceStatus, targeted bool) string {
+	node := runtimeResourceNodeLabel(status)
+	if !status.SchedulableComplete {
+		return fmt.Sprintf("Right now on %s: at most %s CPU and %s memory free for the scheduler to admit a pod with -- an upper bound, "+
+			"because a pod on this node declares a request this reading could not read and so holds back more of the node than is shown here.",
+			node, status.Schedulable.CPU.Formatted, status.Schedulable.Memory.Formatted)
+	}
+	if targeted {
+		return fmt.Sprintf("Right now on %s: the scheduler can admit %s CPU and %s memory more for this environment. "+
+			"It places by what each pod requests, which is what a deploy depends on; the limits set here reserve none of it.",
+			node, status.Schedulable.CPU.Formatted, status.Schedulable.Memory.Formatted)
+	}
+	return fmt.Sprintf("Right now on %s (the emptiest node): the scheduler can admit %s CPU and %s memory more. "+
+		"It places by what each pod requests, which is what a deploy depends on -- not by limits, which reserve none of it.",
+		node, status.Schedulable.CPU.Formatted, status.Schedulable.Memory.Formatted)
+}
+
+// runtimeWorstCaseMessage labels the limits reading as the capacity-planning
+// question it is. It answers "how much of this node is committed if everything
+// bursts at once", which is a legitimate question and not the one a deploy
+// outcome follows.
+func runtimeWorstCaseMessage(status uiRuntimeResourceStatus) string {
+	return fmt.Sprintf("Worst case, with every container on %s at its declared limit at once: %s CPU and %s memory left. "+
+		"That is oversubscription headroom, not scheduling capacity.",
+		runtimeResourceNodeLabel(status), status.WorstCase.CPU.Formatted, status.WorstCase.Memory.Formatted)
+}
+
+// runtimeSchedulableNotice carries the one thing this reading's figures cannot:
+// what to do when the node has nothing left to admit a pod with. The remedy is
+// capacity on the node, because that is what the scheduler is short of.
+func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
+	if !status.SchedulableComplete && status.UnreadableRequests > 0 {
+		return fmt.Sprintf("%s on this node declares a request this reading could not read, so the free figure above is an upper bound.",
+			pluralizePods(status.UnreadableRequests))
+	}
+	if status.Schedulable.CPU.Free > 0 && status.Schedulable.Memory.Free > 0 {
+		return ""
+	}
+	return "The scheduler has nothing left on this node to admit another pod with. " +
+		"Stopping an environment nobody is using on it returns its reservation."
+}
+
+// runtimeWorstCaseNotice carries what the worst-case figure alone cannot say:
+// that it is the node being committed rather than a ceiling on this
+// environment, what part of the node's real consumption is invisible to it, and
+// -- the reported defect -- which levers actually move it. It never offers a
+// smaller limit: the runtime limit is sized for the cold `make check-gate` an
+// agent runs in that container, and lowering it re-creates the out-of-memory
+// kills that destroy an in-pod agent run and its unpushed work.
+func runtimeWorstCaseNotice(status uiRuntimeResourceStatus) string {
 	var notices []string
 	if status.Floored {
-		notices = append(notices, "The node is fully committed, so this is the amount this environment already holds, not spare capacity. "+
-			"Stopping an environment nobody is using on this node returns its CPU and memory and raises this figure.")
+		notices = append(notices, "The node is fully committed at those limits, so this figure is what this environment already holds rather than spare capacity.")
 	}
 	if status.UnmeasuredContainers > 0 {
 		notices = append(notices, fmt.Sprintf("%s on this node declare no limits, so the real usage is higher than shown.",
 			pluralizeContainers(status.UnmeasuredContainers)))
 	}
+	if status.Floored || status.WorstCase.CPU.Free <= 0 || status.WorstCase.Memory.Free <= 0 {
+		notices = append(notices, "Oversubscription headroom is managed with a namespace quota or by running fewer environments on this node. "+
+			"Shrinking a limit sized for the work is not the move: it re-creates the out-of-memory kills that destroy an in-pod agent run and its unpushed work.")
+	}
 	return strings.Join(notices, " ")
+}
+
+func pluralizePods(count int) string {
+	if count == 1 {
+		return "1 pod"
+	}
+	return fmt.Sprintf("%d pods", count)
 }
 
 func pluralizeContainers(count int) string {
@@ -195,30 +269,51 @@ func pluralizeContainers(count int) string {
 	return fmt.Sprintf("%d containers", count)
 }
 
-// runtimeResourceAccounting is the per-node picture the status is built from:
-// what every other pod holds, what this environment already holds, and how many
-// containers the reading could not account for at all.
+// runtimeResourceAccounting is the per-node picture the status is built from,
+// in both resource domains: what every pod holds at its declared limit, what
+// every pod requests of the scheduler, what this environment's own container
+// holds, and how much of either the reading could not account for at all.
 type runtimeResourceAccounting struct {
-	usage       map[string]runtimeResourceTotals
+	// usage is the node's commitment if every container bursts to its limit.
+	usage map[string]runtimeResourceTotals
+	// requests is what the scheduler has admitted the node's pods on. A limit
+	// reserves nothing and a request is not in any cgroup, so this comes from
+	// the pod specs rather than from the same reading as usage.
+	requests map[string]runtimeResourceTotals
+	// targetUsage is what this environment's own runtime container holds at its
+	// limit, which is the floor the worst-case reading must not fall below.
 	targetUsage map[string]runtimeResourceTotals
+	// unaccounted counts containers that declare no limit and had no measured
+	// usage either; unreadable counts pods whose declared requests could not be
+	// read. Neither is ever counted as zero.
 	unaccounted map[string]int
+	unreadable  map[string]int
 	targetNode  string
 }
 
-// accumulateRuntimePodUsage sums what the node is committed to. A container's
-// limit is the best answer when it declares one; when it does not, its measured
-// usage is used instead, and when there is no measurement either the container
-// is counted as unaccounted rather than as zero.
+// accumulateRuntimePodUsage sums what the node is committed to, in both
+// domains. A container's limit is the best answer when it declares one; when it
+// does not, its measured usage is used instead, and when there is no
+// measurement either the container is counted as unaccounted rather than as
+// zero.
 //
 // Treating a limitless container as zero is what made the figure wrong in
 // practice: every erun-dind sidecar declares no limits, so a node's real
 // consumption — Testcontainers, the buildkit cache — was entirely invisible to
 // a reading that summed limits alone.
+//
+// The request leg applies erun-common's EffectiveKubernetesPodRequests, which
+// is the same admission rule the per-environment usage reading reports: a
+// second spelling of "max over the init containers, sum over the containers"
+// would understate what a node has already committed and report scheduling
+// capacity that is not there.
 func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTargetSpec, measured kubernetesContainerUsage) runtimeResourceAccounting {
 	accounting := runtimeResourceAccounting{
 		usage:       make(map[string]runtimeResourceTotals),
+		requests:    make(map[string]runtimeResourceTotals),
 		targetUsage: make(map[string]runtimeResourceTotals),
 		unaccounted: make(map[string]int),
+		unreadable:  make(map[string]int),
 	}
 	for _, pod := range pods.Items {
 		if isTerminalKubernetesPodPhase(pod.Status.Phase) {
@@ -242,8 +337,41 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 			totals = addTotals(totals, consumed)
 		}
 		accounting.usage[nodeName] = totals
+
+		// The scheduler counts the whole pod -- the runtime container, the
+		// erun-dind sidecar, and the init phase's own peak -- including this
+		// environment's own pod, which is on the node and is holding its
+		// reservation right now.
+		podRequests, err := eruncommon.EffectiveKubernetesPodRequests(
+			kubernetesContainerResources(pod.Spec.Containers),
+			kubernetesContainerResources(pod.Spec.InitContainers),
+		)
+		if err != nil {
+			// Unreadable is not zero: this pod reserves an amount the reading
+			// cannot size, so the free figure is an upper bound rather than an
+			// answer, and the status says so.
+			accounting.unreadable[nodeName]++
+			continue
+		}
+		accounting.requests[nodeName] = addTotals(accounting.requests[nodeName], runtimeResourceTotals{
+			CPUMilli: podRequests.CPUMilli,
+			MemoryMi: podRequests.MemoryBytes / (1 << 20),
+		})
 	}
 	return accounting
+}
+
+// kubernetesContainerResources projects a decoded pod spec onto erun-common's
+// request-rule input, so the desktop never re-derives the rule itself.
+func kubernetesContainerResources(containers []kubernetesContainer) []eruncommon.KubernetesContainerResources {
+	out := make([]eruncommon.KubernetesContainerResources, 0, len(containers))
+	for _, container := range containers {
+		out = append(out, eruncommon.KubernetesContainerResources{
+			Name:     container.Name,
+			Requests: container.Resources.Requests,
+		})
+	}
+	return out
 }
 
 // containerConsumption resolves one container's contribution and reports
@@ -278,14 +406,19 @@ func addTotals(totals, add runtimeResourceTotals) runtimeResourceTotals {
 	return totals
 }
 
+// shouldUseRuntimeResourceNode picks the node the reading is anchored to. "The
+// emptiest node" is the node a deploy would land on, and the scheduler decides
+// that by requests, so the schedulable reading -- not the worst-case one -- is
+// what selects it.
 func shouldUseRuntimeResourceNode(name, targetNode string, item uiRuntimeResourceNode, result uiRuntimeResourceStatus) bool {
 	if targetNode != "" {
 		return name == targetNode
 	}
-	if result.CPU.Unit == "" {
+	if result.Schedulable.CPU.Unit == "" {
 		return true
 	}
-	return item.CPU.Free*item.Memory.Free > result.CPU.Free*result.Memory.Free
+	return item.Schedulable.CPU.Free*item.Schedulable.Memory.Free >
+		result.Schedulable.CPU.Free*result.Schedulable.Memory.Free
 }
 
 type runtimeResourceTargetSpec struct {
@@ -342,6 +475,21 @@ func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiR
 		freeMilli = minimumFreeMilli
 		floored = minimumFreeMilli > 0
 	}
+	return cpuMetric(totalMilli, freeMilli, usedMilli, floored)
+}
+
+// cpuMetricFree is the unfloored form: free capacity is exactly what the node
+// has left, and a node with nothing left says zero rather than borrowing this
+// environment's own size as a floor.
+func cpuMetricFree(totalMilli, usedMilli int64) uiRuntimeResourceMetric {
+	freeMilli := totalMilli - usedMilli
+	if freeMilli < 0 {
+		freeMilli = 0
+	}
+	return cpuMetric(totalMilli, freeMilli, usedMilli, false)
+}
+
+func cpuMetric(totalMilli, freeMilli, usedMilli int64, floored bool) uiRuntimeResourceMetric {
 	return uiRuntimeResourceMetric{
 		Total:     round1(float64(totalMilli) / 1000),
 		Used:      round1(float64(usedMilli) / 1000),
@@ -369,6 +517,18 @@ func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntime
 		freeMi = minimumFreeMi
 		floored = minimumFreeMi > 0
 	}
+	return memoryMetric(totalMi, freeMi, usedMi, floored)
+}
+
+func memoryMetricFree(totalMi, usedMi int64) uiRuntimeResourceMetric {
+	freeMi := totalMi - usedMi
+	if freeMi < 0 {
+		freeMi = 0
+	}
+	return memoryMetric(totalMi, freeMi, usedMi, false)
+}
+
+func memoryMetric(totalMi, freeMi, usedMi int64, floored bool) uiRuntimeResourceMetric {
 	return uiRuntimeResourceMetric{
 		Total:     round1(float64(totalMi) / 1024),
 		Used:      round1(float64(usedMi) / 1024),
@@ -514,15 +674,25 @@ type kubernetesPod struct {
 	Spec struct {
 		NodeName   string                `json:"nodeName"`
 		Containers []kubernetesContainer `json:"containers"`
+		// InitContainers are read because Kubernetes admits a pod on
+		// max(max over these, sum over Containers); a request reading that
+		// skipped them would understate what the node has committed.
+		InitContainers []kubernetesContainer `json:"initContainers"`
 	} `json:"spec"`
 }
 
 type kubernetesContainer struct {
 	Name      string `json:"name"`
 	Resources struct {
-		Limits struct {
-			CPU    string `json:"cpu"`
-			Memory string `json:"memory"`
-		} `json:"limits"`
+		// Limits is the cgroup ceiling the worst-case reading sums. Requests is
+		// what the scheduler admits the pod on, and no cgroup file carries it --
+		// it is read from the pod spec, where it exists.
+		Limits   kubernetesResourceQuantity `json:"limits"`
+		Requests map[string]string          `json:"requests"`
 	} `json:"resources"`
+}
+
+type kubernetesResourceQuantity struct {
+	CPU    string `json:"cpu"`
+	Memory string `json:"memory"`
 }

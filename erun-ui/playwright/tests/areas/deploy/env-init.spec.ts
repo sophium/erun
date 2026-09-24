@@ -37,28 +37,36 @@ async function stubDialogCluster(
       });
     }
     if (body.method === 'LoadRuntimeResourceStatus') {
+      // Mirrors the backend's contract: a reading always names the node it came
+      // from and carries two readings, each stating which question it answers --
+      // the scheduler's (it places by requests) and the worst case's (what is
+      // left if everything bursts to its declared limit at once). Neither is a
+      // fixed ceiling, so each carries its own live message.
+      const schedulable = {
+        cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8', floored: false },
+        memory: { total: 16, used: 0, free: 16, unit: 'GiB', formatted: '16.0 GiB', floored: false },
+        message:
+          'Right now on node-a (the emptiest node): the scheduler can admit 8 CPU and 16.0 GiB memory more.',
+      };
+      const worstCase = {
+        cpu: { total: 8, used: 2, free: 6, unit: 'cores', formatted: '6', floored: false },
+        memory: { total: 16, used: 4, free: 12, unit: 'GiB', formatted: '12.0 GiB', floored: false },
+        message:
+          'Worst case, with every container on node-a at its declared limit at once: 6 CPU and 12.0 GiB memory left.',
+      };
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
-          // Mirrors the backend's contract: a reading always names the node it
-          // came from and carries its own message, because the figure is a
-          // snapshot of one node rather than a fixed ceiling.
           data: {
             kubernetesContext: 'orbstack',
             available: true,
             node: 'node-a',
             floored: false,
             measuredUsage: true,
-            message: 'Right now on node-a (the emptiest node): 8 CPU and 16.0 GiB memory free.',
-            cpu: { total: 8, used: 0, free: 8, unit: 'cores', formatted: '8', floored: false },
-            memory: {
-              total: 16,
-              used: 0,
-              free: 16,
-              unit: 'GiB',
-              formatted: '16',
-              floored: false,
-            },
+            schedulable,
+            schedulableComplete: true,
+            worstCase,
+            nodes: [{ name: 'node-a', schedulable, schedulableComplete: true, worstCase }],
           },
         }),
       });

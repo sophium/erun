@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -25,8 +26,13 @@ func TestRuntimeResourceStatusUsesBestAvailableNode(t *testing.T) {
 	if !status.Available {
 		t.Fatalf("expected status to be available: %+v", status)
 	}
-	if status.CPU.Free != 6 || status.Memory.Free != 12 {
-		t.Fatalf("unexpected best free capacity: %+v", status)
+	if status.WorstCase.CPU.Free != 6 || status.WorstCase.Memory.Free != 12 {
+		t.Fatalf("unexpected best worst-case free capacity: %+v", status)
+	}
+	// The pod declares no requests, so the scheduler has admitted nothing on the
+	// node it sits on and that node's whole allocatable capacity is free to it.
+	if status.Schedulable.CPU.Free != 8 || status.Schedulable.Memory.Free != 16 {
+		t.Fatalf("unexpected best schedulable free capacity: %+v", status)
 	}
 }
 
@@ -58,7 +64,7 @@ func TestRuntimeResourceStatusExcludesCurrentRuntimePodAllocation(t *testing.T) 
 		kubernetesPodList{Items: []kubernetesPod{runtimePod, otherPod}},
 		nil,
 	)
-	if status.CPU.Free != 6 || status.Memory.Free != 12 {
+	if status.WorstCase.CPU.Free != 6 || status.WorstCase.Memory.Free != 12 {
 		t.Fatalf("expected current runtime allocation to be reusable, got %+v", status)
 	}
 }
@@ -91,24 +97,24 @@ func TestRuntimeResourceStatusKeepsCurrentRuntimeAllocationAsMinimumCapacity(t *
 		kubernetesPodList{Items: []kubernetesPod{runtimePod, otherPod}},
 		nil,
 	)
-	if status.CPU.Free != 4 || status.Memory.Free != 8 {
+	if status.WorstCase.CPU.Free != 4 || status.WorstCase.Memory.Free != 8 {
 		t.Fatalf("expected current runtime allocation to remain selectable when node is overcommitted, got %+v", status)
 	}
 	// The arithmetic above is correct but renders as a hard ceiling equal to
 	// what the environment already has, which reads as "this is the maximum
 	// this environment supports". The reading must say what actually happened
-	// and name the remedy this PR added.
-	if !status.Floored || !status.CPU.Floored || !status.Memory.Floored {
+	// and name the remedy that moves it.
+	if !status.Floored || !status.WorstCase.CPU.Floored || !status.WorstCase.Memory.Floored {
 		t.Fatalf("a free value clamped up to the env's own limit must be marked floored: %+v", status)
 	}
-	if !strings.Contains(status.Notice, "fully committed") {
-		t.Fatalf("floored reading must explain that the node is full, got %q", status.Notice)
+	if !strings.Contains(status.WorstCase.Notice, "fully committed") {
+		t.Fatalf("floored reading must explain that the node is full, got %q", status.WorstCase.Notice)
 	}
-	if !strings.Contains(status.Notice, "Stopping an environment nobody is using") {
-		t.Fatalf("floored reading must name stopping an idle environment as the remedy, got %q", status.Notice)
+	if !strings.Contains(status.WorstCase.Notice, "namespace quota") {
+		t.Fatalf("floored reading must name the levers that move it, got %q", status.WorstCase.Notice)
 	}
-	if !strings.HasPrefix(status.Message, "Right now on node-a:") {
-		t.Fatalf("the figure must read as a live snapshot of a named node, got %q", status.Message)
+	if !strings.HasPrefix(status.Schedulable.Message, "Right now on node-a:") {
+		t.Fatalf("the figure must read as a live snapshot of a named node, got %q", status.Schedulable.Message)
 	}
 }
 
@@ -141,7 +147,7 @@ func TestRuntimeResourceStatusCountsLimitlessContainersAtMeasuredUsage(t *testin
 		kubernetesPodList{Items: []kubernetesPod{neighbour}},
 		measured,
 	)
-	if status.CPU.Free != 5 || status.Memory.Free != 6 {
+	if status.WorstCase.CPU.Free != 5 || status.WorstCase.Memory.Free != 6 {
 		t.Fatalf("limitless container must be counted at its measured usage, got %+v", status)
 	}
 	if !status.MeasuredUsage {
@@ -150,8 +156,9 @@ func TestRuntimeResourceStatusCountsLimitlessContainersAtMeasuredUsage(t *testin
 	if status.UnmeasuredContainers != 0 {
 		t.Fatalf("a measured container is accounted for, not unaccounted: %+v", status)
 	}
-	if status.Notice != "" {
-		t.Fatalf("a fully accounted, unfloored reading needs no notice, got %q", status.Notice)
+	if status.WorstCase.Notice != "" || status.Schedulable.Notice != "" {
+		t.Fatalf("a fully accounted, unfloored reading needs no notice, got %q / %q",
+			status.Schedulable.Notice, status.WorstCase.Notice)
 	}
 }
 
@@ -184,11 +191,11 @@ func TestRuntimeResourceStatusSurfacesUnaccountedContainers(t *testing.T) {
 	if status.UnmeasuredContainers != 1 {
 		t.Fatalf("expected the limitless container to be counted as unaccounted, got %+v", status)
 	}
-	if !strings.Contains(status.Notice, "1 container on this node declare") {
-		t.Fatalf("the reading must name how much it cannot see, got %q", status.Notice)
+	if !strings.Contains(status.WorstCase.Notice, "1 container on this node declare") {
+		t.Fatalf("the reading must name how much it cannot see, got %q", status.WorstCase.Notice)
 	}
-	if !strings.Contains(status.Notice, "real usage is higher than shown") {
-		t.Fatalf("the reading must not present itself as exact, got %q", status.Notice)
+	if !strings.Contains(status.WorstCase.Notice, "real usage is higher than shown") {
+		t.Fatalf("the reading must not present itself as exact, got %q", status.WorstCase.Notice)
 	}
 }
 
@@ -228,11 +235,11 @@ func TestRuntimeResourceStatusFormatsZeroCPUCapacity(t *testing.T) {
 		kubernetesPodList{Items: []kubernetesPod{pod}},
 		nil,
 	)
-	if status.CPU.Free != 0 || status.CPU.Formatted != "0" {
-		t.Fatalf("expected zero CPU to be visible, got %+v", status.CPU)
+	if status.WorstCase.CPU.Free != 0 || status.WorstCase.CPU.Formatted != "0" {
+		t.Fatalf("expected zero CPU to be visible, got %+v", status.WorstCase.CPU)
 	}
-	if !strings.Contains(status.Message, "0 CPU") {
-		t.Fatalf("expected message to include zero CPU, got %q", status.Message)
+	if !strings.Contains(status.WorstCase.Message, "0 CPU") {
+		t.Fatalf("expected message to include zero CPU, got %q", status.WorstCase.Message)
 	}
 }
 
@@ -267,7 +274,166 @@ func TestRuntimeResourceStatusIgnoresTerminalPodAllocation(t *testing.T) {
 	if !status.Available {
 		t.Fatalf("expected status to be available: %+v", status)
 	}
-	if status.CPU.Free != 4 || status.Memory.Free != 15.4 {
+	if status.WorstCase.CPU.Free != 4 || status.WorstCase.Memory.Free != 15.4 {
 		t.Fatalf("expected terminal pod limits to be ignored, got %+v", status)
+	}
+}
+
+// reportingNodeRuntimePod is one environment's runtime pod as the chart shapes
+// it on the cluster the report came from: a runtime container and an erun-dind
+// sidecar whose declared limits are the sizes the operator chose, and whose
+// declared requests are the chart's fixed 250m / 1024Mi each. The gap between
+// the two is the whole point -- a limit reserves nothing, so a node can be
+// "fully committed" by limits and still have room to place a pod.
+func reportingNodeRuntimePod(namespace, nodeName string) kubernetesPod {
+	var pod kubernetesPod
+	pod.Metadata.Namespace = namespace
+	pod.Spec.NodeName = nodeName
+	pod.Spec.Containers = []kubernetesContainer{{Name: "erun-devops"}, {Name: "erun-dind"}}
+	for i, limits := range [][2]string{{"4", "16Gi"}, {"12", "20Gi"}} {
+		pod.Spec.Containers[i].Resources.Limits.CPU = limits[0]
+		pod.Spec.Containers[i].Resources.Limits.Memory = limits[1]
+		pod.Spec.Containers[i].Resources.Requests = map[string]string{"cpu": "250m", "memory": "1024Mi"}
+	}
+	return pod
+}
+
+// TestRuntimeResourceStatusReportsSchedulableCapacityFromRequests is the
+// reproduction of the reported defect. The node hosts five environments whose
+// container limits sum past its allocatable capacity while their requests leave
+// most of it free -- the normal shape of an erun cluster, since the chart sizes
+// requests for scheduling and limits for the work -- and the panel reported
+// "0 CPU and 0.0 GiB memory free" and refused the values the operator had
+// entered. Both statements came from the limits sum, which answers a different
+// question than the one the refusal claimed to answer.
+func TestRuntimeResourceStatusReportsSchedulableCapacityFromRequests(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "erun-node1"
+	node.Status.Allocatable.CPU = "16"
+	node.Status.Allocatable.Memory = "32Gi"
+
+	pods := kubernetesPodList{}
+	for i := 0; i < 5; i++ {
+		pods.Items = append(pods.Items, reportingNodeRuntimePod(fmt.Sprintf("team%d-dev", i), "erun-node1"))
+	}
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		pods,
+		nil,
+	)
+	if !status.Available {
+		t.Fatalf("expected an available reading: %+v", status)
+	}
+
+	// Five pods x (250m + 250m) of requests against 16 allocatable cores, and
+	// 5 x 2Gi against 32Gi: the scheduler can admit another pod, comfortably.
+	if status.Schedulable.CPU.Free != 13.5 {
+		t.Fatalf("schedulable CPU free = %v, want 13.5 (16 allocatable minus 2.5 requested)", status.Schedulable.CPU.Free)
+	}
+	if status.Schedulable.Memory.Free != 22 {
+		t.Fatalf("schedulable memory free = %v, want 22 (32Gi allocatable minus 10Gi requested)", status.Schedulable.Memory.Free)
+	}
+
+	// The same node's worst case is genuinely zero: the limits the operator
+	// chose sum past allocatable capacity. That reading stays, labelled, so the
+	// capacity-planning question keeps its answer.
+	if status.WorstCase.CPU.Free != 0 || status.WorstCase.Memory.Free != 0 {
+		t.Fatalf("worst-case free = %v CPU / %v GiB, want the limits sum to exhaust the node",
+			status.WorstCase.CPU.Free, status.WorstCase.Memory.Free)
+	}
+
+	// Each reading says which question it answers; the two headline figures
+	// alone are indistinguishable.
+	if !strings.Contains(status.Schedulable.Message, "scheduler can admit 13.5 CPU") {
+		t.Fatalf("schedulable message does not state the scheduling figure: %q", status.Schedulable.Message)
+	}
+	if !strings.Contains(status.WorstCase.Message, "declared limit") {
+		t.Fatalf("worst-case message does not label itself as the bursting reading: %q", status.WorstCase.Message)
+	}
+
+	assertCapacityRemedyIsNotASmallerLimit(t, status.WorstCase.Notice)
+}
+
+// assertCapacityRemedyIsNotASmallerLimit pins the one thing the report's
+// operator was told to do and must not be told again. The runtime container's
+// limit is sized for the cold `make check-gate` an agent runs inside it, so
+// shrinking it re-creates the out-of-memory kills that destroy the run and its
+// unpushed work; the levers that actually move a fully-committed node are a
+// namespace quota and fewer environments on it.
+func assertCapacityRemedyIsNotASmallerLimit(t *testing.T, notice string) {
+	t.Helper()
+	if !strings.Contains(notice, "namespace quota") {
+		t.Fatalf("notice does not name the lever that moves it: %q", notice)
+	}
+	if strings.Contains(notice, "lower your request") {
+		t.Fatalf("notice offers the harmful remedy: %q", notice)
+	}
+}
+
+// TestRuntimeResourceStatusNeverReadsAnUnreadableRequestAsZero covers the
+// discipline the shared request reading already enforces: a pod that declares a
+// request this parser cannot size has not reserved nothing. Counting it as zero
+// would report free capacity the scheduler does not have, so the reading states
+// its own incompleteness instead.
+func TestRuntimeResourceStatusNeverReadsAnUnreadableRequestAsZero(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "node-a"
+	node.Status.Allocatable.CPU = "16"
+	node.Status.Allocatable.Memory = "32Gi"
+
+	pod := reportingNodeRuntimePod("team-dev", "node-a")
+	pod.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "plenty", "memory": "1024Mi"}
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		kubernetesPodList{Items: []kubernetesPod{pod}},
+		nil,
+	)
+	if status.SchedulableComplete {
+		t.Fatalf("expected the request reading to report itself incomplete: %+v", status)
+	}
+	if status.UnreadableRequests != 1 {
+		t.Fatalf("unreadable requests = %d, want 1", status.UnreadableRequests)
+	}
+	if !strings.Contains(status.Schedulable.Message, "an upper bound") {
+		t.Fatalf("schedulable message does not bound its own figure: %q", status.Schedulable.Message)
+	}
+	if !strings.Contains(status.Schedulable.Notice, "1 pod on this node declares") {
+		t.Fatalf("schedulable notice does not say what it could not read: %q", status.Schedulable.Notice)
+	}
+}
+
+// TestRuntimeResourceStatusCountsTheInitPhaseInThePodRequest covers the
+// admission rule the desktop consumes rather than re-derives: Kubernetes admits
+// a pod on max(max over the init containers, sum over the containers), so a
+// node-capacity reading that summed only the containers would report free
+// capacity its own init containers have already taken.
+func TestRuntimeResourceStatusCountsTheInitPhaseInThePodRequest(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "node-a"
+	node.Status.Allocatable.CPU = "8"
+	node.Status.Allocatable.Memory = "16Gi"
+
+	var pod kubernetesPod
+	pod.Spec.NodeName = "node-a"
+	pod.Spec.Containers = []kubernetesContainer{{Name: "erun-devops"}}
+	pod.Spec.Containers[0].Resources.Requests = map[string]string{"cpu": "250m", "memory": "1024Mi"}
+	pod.Spec.InitContainers = []kubernetesContainer{{Name: "prepare-volumes"}}
+	pod.Spec.InitContainers[0].Resources.Requests = map[string]string{"cpu": "2", "memory": "4Gi"}
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		kubernetesPodList{Items: []kubernetesPod{pod}},
+		nil,
+	)
+	if status.Schedulable.CPU.Free != 6 {
+		t.Fatalf("schedulable CPU free = %v, want 6 (8 allocatable minus the init phase's 2)", status.Schedulable.CPU.Free)
+	}
+	if status.Schedulable.Memory.Free != 12 {
+		t.Fatalf("schedulable memory free = %v, want 12 (16Gi minus the init phase's 4Gi)", status.Schedulable.Memory.Free)
 	}
 }

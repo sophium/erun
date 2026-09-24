@@ -530,22 +530,41 @@ export interface UIRuntimePodConfig {
   memory: string;
 }
 
-// A reading of node capacity taken at one instant, not a fixed ceiling. `notice`
-// explains what the number alone cannot: `floored` means the maximum equals what
-// this env already holds because the node is full, and `unmeasuredContainers`
-// counts capacity the reading cannot see.
+// A reading of node capacity taken at one instant, not a fixed ceiling. It
+// carries two readings because the two capacity questions have different
+// answers, and each states which question it answers: `schedulable` is what the
+// scheduler will do -- it admits a pod on what it requests -- while `worstCase`
+// is what would be left if every container on the node ran to its declared
+// limit at once. `floored` means the worst-case maximum equals what this env
+// already holds because the node is full, and `unmeasuredContainers` counts
+// capacity the worst-case reading cannot see.
 export interface UIRuntimeResourceStatus {
   kubernetesContext: string;
   available: boolean;
+  // message is why no reading was taken; empty whenever one was, because the
+  // headline an operator reads then belongs to a reading.
   message?: string;
-  notice?: string;
   node?: string;
+  schedulable: UIRuntimeResourceReading;
+  // schedulableComplete is false when a pod on the chosen node declares a
+  // request the reading could not parse, which makes its free figure an upper
+  // bound rather than an answer.
+  schedulableComplete: boolean;
+  worstCase: UIRuntimeResourceReading;
   floored: boolean;
   measuredUsage: boolean;
   unmeasuredContainers?: number;
+  unreadableRequests?: number;
+  nodes?: UIRuntimeResourceNode[];
+}
+
+// UIRuntimeResourceReading is one node's answer to one capacity question, and
+// says which question that is.
+export interface UIRuntimeResourceReading {
   cpu: UIRuntimeResourceMetric;
   memory: UIRuntimeResourceMetric;
-  nodes?: UIRuntimeResourceNode[];
+  message?: string;
+  notice?: string;
 }
 
 export interface UIRuntimeResourceMetric {
@@ -559,8 +578,9 @@ export interface UIRuntimeResourceMetric {
 
 export interface UIRuntimeResourceNode {
   name: string;
-  cpu: UIRuntimeResourceMetric;
-  memory: UIRuntimeResourceMetric;
+  schedulable: UIRuntimeResourceReading;
+  schedulableComplete: boolean;
+  worstCase: UIRuntimeResourceReading;
 }
 
 export interface StartSessionResult {

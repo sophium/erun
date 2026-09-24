@@ -194,21 +194,62 @@ func declaredContainerRequests(pod podStatusItem) (map[string]KubernetesRequests
 
 // effectivePodRequests is the request the scheduler admits the pod on.
 func effectivePodRequests(pod podStatusItem) (KubernetesRequests, error) {
-	sum, err := sumContainerRequests(pod.Spec.Containers)
+	return EffectiveKubernetesPodRequests(
+		kubernetesContainerResources(pod.Spec.Containers),
+		kubernetesContainerResources(pod.Spec.InitContainers),
+	)
+}
+
+// KubernetesContainerResources is one container's declared resources as a pod
+// spec carries them: the resources.requests map the scheduler sums, and the
+// name a quantity this parser cannot read is reported against.
+//
+// It is exported because the admission rule below is not a caller's to
+// re-derive. The desktop's node-capacity reading applies it to every pod on a
+// node, and a second spelling of "max over the init containers, sum over the
+// containers" would disagree with this one the first time either changed --
+// silently, since both would still return a plausible number.
+type KubernetesContainerResources struct {
+	Name     string
+	Requests map[string]string
+}
+
+func kubernetesContainerResources(containers []specContainerEntry) []KubernetesContainerResources {
+	out := make([]KubernetesContainerResources, 0, len(containers))
+	for _, container := range containers {
+		out = append(out, KubernetesContainerResources{
+			Name:     container.Name,
+			Requests: container.Resources.Requests,
+		})
+	}
+	return out
+}
+
+// EffectiveKubernetesPodRequests is the request the scheduler admits a pod on:
+// max(max over the init containers, sum over the containers), per resource.
+// Summing the containers alone understates any pod whose init container asks
+// for more than their total, and a node-capacity reading that understates what
+// is committed reports free capacity the scheduler does not have.
+//
+// A container that declares nothing for a resource contributes zero, which is
+// the scheduler's own reading of it; a declared quantity that cannot be parsed
+// is an error, never a dropped zero.
+func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (KubernetesRequests, error) {
+	sum, err := sumContainerRequests(containers)
 	if err != nil {
 		return KubernetesRequests{}, err
 	}
-	initPeak, err := maxContainerRequests(pod.Spec.InitContainers)
+	initPeak, err := maxContainerRequests(initContainers)
 	if err != nil {
 		return KubernetesRequests{}, err
 	}
 	return kubectlRequestsMax(sum, initPeak), nil
 }
 
-func sumContainerRequests(containers []specContainerEntry) (KubernetesRequests, error) {
+func sumContainerRequests(containers []KubernetesContainerResources) (KubernetesRequests, error) {
 	total := KubernetesRequests{}
 	for _, container := range containers {
-		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
+		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
 			return KubernetesRequests{}, fmt.Errorf("container %s: %w", container.Name, err)
 		}
@@ -218,10 +259,10 @@ func sumContainerRequests(containers []specContainerEntry) (KubernetesRequests, 
 	return total, nil
 }
 
-func maxContainerRequests(containers []specContainerEntry) (KubernetesRequests, error) {
+func maxContainerRequests(containers []KubernetesContainerResources) (KubernetesRequests, error) {
 	peak := KubernetesRequests{}
 	for _, container := range containers {
-		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
+		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
 			return KubernetesRequests{}, fmt.Errorf("init container %s: %w", container.Name, err)
 		}
