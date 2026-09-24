@@ -1,0 +1,14 @@
+audit: erun build --dry-run --gate
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
+build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
+build: version file configured as build/VERSION (.erun/config.yaml paths.version)
+docker info -f '{{.DockerRootDir}}'
+rebuilding ghcr.io/sophium/api:<VERSION> because its Dockerfile's test stage runs the build's own gate (never promoted from a cached fingerprint)
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain --allow network.host --no-cache-filter test -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-amd64
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain --allow network.host --no-cache-filter test -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/api:<VERSION> ghcr.io/sophium/api:<VERSION>

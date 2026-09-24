@@ -244,6 +244,14 @@ else
 fi
 ```
 
+A build that watched BuildKit replay a Dockerfile's whole `test` stage — the
+stage `make check` runs in — exits non-zero and refuses to record; see the
+failure detail it prints. That is deliberate: a replay built images without
+running the project's gate, and a green exit over it would read as a gate that
+ran. Re-run the same step as `erun build --gate --output json`, which executes
+just that stage instead of accepting the replay, and record that version
+normally.
+
 **`READY` asserts "this commit builds", not "a publishable artifact exists
 at version X".** The plain build above mints the version `record-build`
 records and builds it; it publishes nothing. The artifact that ships is cut

@@ -1,6 +1,6 @@
 ---
 name: erun-merge-queue-drive
-description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
+description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build --gate`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
 ---
 
 # Drive already-promoted reviews through the gate
@@ -129,8 +129,11 @@ stop this drive; do not clear another live lease or schedule probes beside it.
 ## 2. Gate the landed stack
 
 Renew the environment claim, start one `erun exec gate-run start` for the
-target/final merge commit, and run one real `erun build` — never release.
-The gate publishes nothing. Save its complete stdout/stderr and composition
+target/final merge commit, and run one real `erun build --gate` — never release.
+`--gate` is what makes the build execute the Dockerfile's test stage instead of
+reporting that BuildKit replayed it from its layer cache, which is the one
+outcome whose exit code a cache hit cannot be told apart from. The gate
+publishes nothing. Save its complete stdout/stderr and composition
 under the attempt's durable log/artifact location.
 
 Use a tracked job and explicit execution timeout when the build outlives one

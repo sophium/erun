@@ -505,9 +505,10 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"commit — leaving a stack of one commit per landed source. Repeat --source to batch several " +
 			"unmerged branches into one prospective merge, so the gate that follows tests whether they compile " +
 			"*together*, not just individually; a single --source is the ordinary one-branch gate. This is for " +
-			"the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build` against " +
-			"the result, then `erun review record-build --gate` and, only on success, `erun exec push` and " +
-			"`erun review report-merged`.\n\n" +
+			"the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build --gate` " +
+			"against the result (--gate is what makes the build execute the Dockerfile's test stage rather " +
+			"than report a replay of it), then `erun review record-build --gate` and, only on success, " +
+			"`erun exec push` and `erun review report-merged`.\n\n" +
 			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
 			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
 			"--source needs no separator at all).\n\n" +
@@ -628,7 +629,7 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 		Use:   "report-commit-status COMMIT",
 		Short: "Report a GitHub commit status for a merge queue gate result",
 		Long: "Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate " +
-			"(`erun exec gate-merge`, `erun build`, `erun review record-build --gate`): report success once the " +
+			"(`erun exec gate-merge`, `erun build --gate`, `erun review record-build --gate`): report success once the " +
 			"gate build is green, or failure the moment it is not, naming which gate step failed in " +
 			"--description. A required status check on the remote's branch protection has nothing to require " +
 			"until this reports it.\n\n" +
