@@ -184,6 +184,14 @@ composition and release invariants belong to root/shared logic, not chart policy
   preserve data. The migration release has its own hook plus a periodic repair
   CronJob using the same idempotent migration command. Retention controls and
   policies belong to the DB guide; test rendered controls and their public docs.
+- Every CronJob chart sets `ttlSecondsAfterFinished` alongside
+  `failedJobsHistoryLimit`. The history limit bounds how many failures are kept
+  and never expires them on age, so a healthy database reported weeks-old `Error`
+  pods forever — noise a real regression hides behind. Size the TTL from the
+  schedule: long enough that a live break always has a fresh failure to read, and
+  that a failing daily sweep outlives the 24h to its next attempt, but short
+  enough that a stale failure stops reading as current state.
+  `erun-backend-db-chart_test.sh` sweeps every rendered CronJob for one.
 - API consumes the PostgreSQL secret and follows migrations. Registry bearer auth
   is delegated to the API token service: require token realm and an existing public
   signing-key Secret; expose the destructive retention window as an explicit value.

@@ -562,6 +562,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// debug verbosity; this flag only has to make the output exist to capture.
 	args = append(args, "--progress=plain")
 	args = append(args, dockerBuildEntitlementArgs(buildInput)...)
+	args = append(args, dockerBuildGateStageArgs(buildInput)...)
 	args = append(args, "-t", tag)
 	buildArgVersion := dockerBuildArgVersion(buildInput)
 	// A base this run keeps local — a snapshot base, or a pinned-version base built
@@ -618,6 +619,36 @@ func dockerBuildEntitlementArgs(buildInput DockerBuildSpec) []string {
 		return nil
 	}
 	return []string{"--allow", "network.host"}
+}
+
+// dockerBuildGateStageArgs returns the layer-cache invalidation a declared gate
+// build grants its own test stage, empty for every other build.
+//
+// It exists because the guard that keeps a gate image out of erun's *fingerprint*
+// cache (dockerfileHasGateTestStage, applyIncrementalPromotion) has a second cache
+// underneath it: when the tree is byte-identical to a previous build, BuildKit
+// serves every instruction of the test stage from its own layer cache, the build
+// finishes in seconds at zero CPU, `make check` never executes, and the run exits
+// zero exactly like one that spent minutes gating the tree. Only the builder's
+// cache can be cleared, and clearing it wholesale (`docker builder prune`) throws
+// away a shared cache and a cold rebuild to re-run one stage.
+//
+// `--no-cache-filter=<stage>` is the narrow instrument: it makes this build ignore
+// its cached result for that one stage, so the stage's instructions execute while
+// every other stage keeps its cache. Named from gateStageName, the same constant
+// the Dockerfile predicate and the build's own provenance parser use, so the stage
+// erun invalidates cannot drift from the stage erun watches.
+//
+// It is scoped to the run that declares itself the merge queue's gate rather than
+// every build of such a Dockerfile: an ordinary incremental build replaying a
+// cached stage is a cache working as designed, and forcing the project's whole
+// gate to re-run there would charge every developer a full `make check` for
+// rebuilding an image nothing changed in.
+func dockerBuildGateStageArgs(buildInput DockerBuildSpec) []string {
+	if !buildInput.ForceGateTestStage {
+		return nil
+	}
+	return []string{"--no-cache-filter", gateStageName}
 }
 
 // dockerBuildArgVersion is the value the ERUN_VERSION build arg carries before

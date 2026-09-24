@@ -111,17 +111,19 @@ func TestGateBuildAcceptsAScriptOrLinuxPlan(t *testing.T) {
 // These drive the umbrella that brackets a build and decides what the finished
 // run reports, handing the stub builder the verbatim BuildKit streams captured
 // from real builds (see build_gate_test_stage_evidence_test.go), so the
-// reproduction runs the same code a real `erun build --gate` runs.
+// reproduction runs the same code a real `erun build` runs.
+//
+// There is deliberately no `--gate` parameter here any more. Which answer is
+// correct used to depend on it, and that was the defect: the run that reads a
+// build's exit code as a verdict is the plain one.
 
 // runGateBuildThroughTheUmbrella builds one gate image with the stub builder
 // reporting the given BuildKit stream, and returns what the run's outcome would
-// be. gate is a parameter because which of the two answers is correct depends on
-// it: a replayed stage is a working cache for an ordinary build and a false
-// green for the merge queue's.
-func runGateBuildThroughTheUmbrella(t *testing.T, build DockerBuildSpec, buildOutput string, gate bool) error {
+// be.
+func runGateBuildThroughTheUmbrella(t *testing.T, build DockerBuildSpec, buildOutput string) error {
 	t.Helper()
 	var log bytes.Buffer
-	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build}, gate)
+	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build})
 
 	err := RunDockerBuild(ctx, build, func(input DockerBuildSpec, stdout, stderr io.Writer) error {
 		if input.PlatformObserver == nil {
@@ -134,15 +136,16 @@ func runGateBuildThroughTheUmbrella(t *testing.T, build DockerBuildSpec, buildOu
 	return err
 }
 
-// TestGateBuildRefusesATestStageBuildKitReplayed is the defect reproduction.
-// Driven through the umbrella with the captured stream of a real warm build -- a
-// gate image whose test stage BuildKit served entirely from its layer cache --
-// a --gate run used to report no error at all, certifying a tree whose `make
-// check` never executed. It must now fail with ErrGateTestStageReplayed.
+// TestGateBuildRefusesATestStageBuildKitReplayed holds the refusal for the run
+// that does declare itself the gate. Driven through the umbrella with the
+// captured stream of a real warm build -- a gate image whose test stage BuildKit
+// served entirely from its layer cache -- such a run must fail with
+// ErrGateTestStageReplayed rather than certify a tree whose `make check` never
+// executed.
 func TestGateBuildRefusesATestStageBuildKitReplayed(t *testing.T) {
-	err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), cachedTestStageBuildOutput, true)
+	err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), cachedTestStageBuildOutput)
 	if err == nil {
-		t.Fatal("expected a --gate build whose test stage BuildKit replayed to fail instead of certifying a gate that never ran make check")
+		t.Fatal("expected a build whose test stage BuildKit replayed to fail instead of certifying a gate that never ran make check")
 	}
 	if !errors.Is(err, ErrGateTestStageReplayed) {
 		t.Fatalf("expected ErrGateTestStageReplayed, got %T: %v", err, err)
@@ -167,7 +170,7 @@ func TestGateBuildRefusesATestStageBuildKitReplayed(t *testing.T) {
 // build's own stream -- every instruction of the test stage DONE -- must not be
 // refused, or the guard would reject the runs it exists to bless.
 func TestGateBuildAcceptsATestStageThatReallyRan(t *testing.T) {
-	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), liveTestStageBuildOutput, true); err != nil {
+	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), liveTestStageBuildOutput); err != nil {
 		t.Fatalf("expected a gate build that executed its test stage to proceed, got %v", err)
 	}
 }
@@ -176,17 +179,38 @@ func TestGateBuildAcceptsATestStageThatReallyRan(t *testing.T) {
 // COPY carrying the change and the gate after it both run. The stage did execute,
 // so refusing it would be a false alarm on the ordinary case.
 func TestGateBuildAcceptsAPartiallyCachedTestStage(t *testing.T) {
-	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), partialTestStageBuildOutput, true); err != nil {
-		t.Fatalf("expected a gate build whose test stage ran despite cached early steps to proceed, got %v", err)
+	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), partialTestStageBuildOutput); err != nil {
+		t.Fatalf("expected a build whose test stage ran despite cached early steps to proceed, got %v", err)
 	}
 }
 
-// The refusal is what --gate asks for, and the very same replayed stream on an
-// ordinary incremental build keeps today's behaviour: replaying a cached stage
-// is a cache working as designed when no gate verdict rides on the exit code.
-func TestOrdinaryBuildStillAcceptsAReplayedTestStage(t *testing.T) {
-	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), cachedTestStageBuildOutput, false); err != nil {
-		t.Fatalf("expected an ordinary incremental build to keep accepting a replayed test stage, got %v", err)
+// TestPlainBuildRefusesATestStageBuildKitReplayed is the defect reproduction for
+// the run the guard used to leave unguarded. `--gate` was what armed the refusal,
+// so the very stream above -- a warm build BuildKit served the whole test stage
+// from its layer cache -- was printed as REPLAYED and then *accepted* by the plain
+// `erun build` that both documented gate flows actually run: `erun exec gate-merge`
+// -> `erun build` -> `erun review record-build --gate` reads its exit code as the
+// queue's verdict, and the erun-merge skill's READY rung turns it into READY. A
+// build that ran no `make check` must not exit zero whatever flags it was given,
+// so this case now fails with ErrGateTestStageReplayed. It fails on the pre-fix
+// code for the reason the report gave -- the guard was armed by the flag, and this
+// build passes none.
+func TestPlainBuildRefusesATestStageBuildKitReplayed(t *testing.T) {
+	err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), cachedTestStageBuildOutput)
+	if err == nil {
+		t.Fatal("expected an ordinary build whose test stage BuildKit replayed to fail instead of exiting 0 over a suite that never ran")
+	}
+	if !errors.Is(err, ErrGateTestStageReplayed) {
+		t.Fatalf("expected ErrGateTestStageReplayed, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "erun-devops") {
+		t.Errorf("expected the refusal to name the replayed image, got %v", err)
+	}
+	// The remedy has to be reachable from the failure: pruning a shared cache is
+	// the expensive answer, and --no-incremental is the wrong one (a different
+	// cache), which the sibling test below holds the line on.
+	if !strings.Contains(err.Error(), "--gate") {
+		t.Errorf("expected the refusal to name the cheap remedy that re-runs just this stage, got %v", err)
 	}
 }
 
@@ -195,7 +219,7 @@ func TestOrdinaryBuildStillAcceptsAReplayedTestStage(t *testing.T) {
 // cannot read, must not be refused on a guess -- the same best-effort contract
 // the rest of the stream's parsers hold to.
 func TestGateBuildAcceptsAStageTheBuilderSaidNothingAbout(t *testing.T) {
-	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), "", true); err != nil {
+	if err := runGateBuildThroughTheUmbrella(t, gateBuildFixture("erun-devops"), ""); err != nil {
 		t.Fatalf("expected a gate build with no evidence about its test stage to proceed rather than be refused on a guess, got %v", err)
 	}
 }

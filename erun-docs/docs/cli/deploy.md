@@ -97,7 +97,18 @@ The override applies to the runtime release only; component charts keep resolvin
 
 The desktop resolves this before you commit: picking a version reports which chart it would install, disables Deploy when the registry says there is none, and offers the chart that fixes it — see [Desktop app · Deploying a version](/desktop/deploying-a-version).
 
-For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. A stated version is honored as stated, with one exception: a stated version of ERun's own stock `erun-devops` chart on an environment whose runtime coordinates ride ERun's release line is a pin an earlier deploy left behind, so a deploy to a newer version *moves* it to `--version` and records the chart it installed instead of installing the older one. An environment whose runtime image is versioned on the project's own line — the case `runtimechart` exists for — keeps its stated version. The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
+For an environment that rides a separately-versioned chart *permanently* -- rather than for one run -- state it once on the environment instead, with [`runtimechart`](/reference/configuration#envconfig). Every later deploy then installs that chart, including one driven from the desktop, which passes only a version. A stated version is honored as stated, with one exception: a version that is *behind* `--version` on the line that chart itself ships on is a pin an earlier deploy left behind, so a deploy to a newer version *moves* it and records the chart it installed instead of installing the older one. That covers ERun's own stock `erun-devops` chart on an environment whose runtime coordinates ride ERun's release line, and a tenant's own `charts/<tenant>-devops` umbrella — which is versioned on the tenant's own line, the same line `--version` names, so the umbrella and the runtime image must move together or the deploy would run a newer image wrapped around an older ERun. A chart naming a line `--version` is not on (a tenant stating the *stock* `erun-devops` chart, for instance) keeps its stated version.
+
+The move is never a guess: the deploy version must be confirmed published for that chart, because a version with no published chart behind it cannot be installed. When it can't be confirmed — the chart is absent at that version, or the registry didn't answer — the stated version stays, and the deploy says so out loud rather than leaving the two halves of one coordinate silently apart:
+
+```
+deploy: holding back the env's runtime umbrella oci://ghcr.io/sophium/charts/frs-devops at 1.0.142: the tenant's own frs-devops
+has no published chart at this deploy's 1.0.143 in ghcr.io/sophium — the deploy will not install a coordinate that cannot exist.
+The runtime image still moves to 1.0.143, so the umbrella stays wrapped around an older erun-devops than the one deployed;
+publish the tenant's charts at 1.0.143 (`erun push --version 1.0.143`) and redeploy
+```
+
+The flag beats the field for a single run and leaves it unchanged, the same way `--runtime-image` relates to `runtimeimage`.
 
 ## Flags
 

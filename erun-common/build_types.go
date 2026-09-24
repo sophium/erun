@@ -108,6 +108,16 @@ type DockerBuildSpec struct {
 	// two set together, so a cached fingerprint can never stand in for the gate
 	// having actually run.
 	GateTestStage bool
+	// ForceGateTestStage makes this build's `docker build` invalidate the test
+	// stage's layers (`--no-cache-filter=<stage>`), so the stage executes in this
+	// run instead of being served from BuildKit's layer cache. It is set by a run
+	// that declares itself the merge queue's gate (`--gate`): a gate's whole claim
+	// is that make check ran against this tree, and a memoized verdict from a
+	// previous build of byte-identical content is not that claim. It deliberately
+	// invalidates *only* the test stage — the rest of the layer cache, which is
+	// shared and expensive, is untouched, so declaring a gate costs the gate and
+	// not a cold rebuild.
+	ForceGateTestStage bool
 	// MissingFingerprintPlatforms lists platforms that lacked a matching
 	// fingerprint tag, so the trace can explain why a build is rebuilding rather
 	// than promoting. For non-multi-platform builds the slot is the empty string.

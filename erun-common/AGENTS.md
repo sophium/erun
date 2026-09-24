@@ -139,7 +139,17 @@ demonstrated:
   image out of the *fingerprint* promotion path, but BuildKit's layer cache sits
   underneath that guard and can serve the whole test stage on its own: the build
   finishes in seconds at zero CPU, `make check` never executes, and the exit code
-  is 0 — the same green as a real gate run. `gateTestStagePlanLines` announces the
+  is 0 — the same green as a real gate run. Two mechanisms close it, and neither
+  is optional. A run that declares itself the merge queue's gate
+  (`ForceGateTestStage`, set from `--gate`) makes its own `docker build`
+  invalidate just that stage (`--no-cache-filter`, `dockerBuildGateStageArgs`), so
+  declaring a gate costs the gate and not a cold rebuild of the shared cache. A
+  wholly replayed stage is otherwise **refused by every build, not only by
+  `--gate`** (`ensureGateTestStageExecuted`): both documented gate flows — the
+  merge queue's `gate-merge` → build → `record-build --gate`, and the erun-merge
+  skill's READY rung — run plain builds, so a guard the flag arms never covered
+  the run it was written for. Do not re-key that refusal on a flag.
+  `gateTestStagePlanLines` announces the
   plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
   reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
   captured `--progress=plain` stream, which is the one report a warm cache cannot

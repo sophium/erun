@@ -1,4 +1,4 @@
-Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate (`erun exec gate-merge`, `erun build`, `erun review record-build --gate`): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in --description. A required status check on the remote's branch protection has nothing to require until this reports it.
+Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate (`erun exec gate-merge`, `erun build --gate`, `erun review record-build --gate`): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in --description. A required status check on the remote's branch protection has nothing to require until this reports it.
 
 COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed.
 

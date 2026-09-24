@@ -210,6 +210,39 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_dockerfile_test_stage_grants_host_network_entitlement", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_gate_invalidates_only_the_test_stage_layers", func(t *testing.T) {
+		// A build that declares itself the merge queue's gate must execute the
+		// Dockerfile's test stage rather than read a memoized verdict on
+		// byte-identical content. BuildKit's layer cache is the second door into
+		// that stage — erun's own fingerprint cache is the first, and the
+		// promotion guard already closes it — and `--no-cache-filter <stage>` is
+		// the narrow way to close it: only this stage is rebuilt, so a gate costs
+		// the gate and not the shared cache underneath the other stages.
+		//
+		// The plain `build --dry-run` golden beside this one is the contrast and
+		// is deliberately unchanged: an ordinary incremental build replaying a
+		// cached stage is a cache working as designed, and charging every
+		// developer the project's whole `make check` for it would be a different
+		// change than the one this scenario pins.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
+		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "api", "Dockerfile"),
+			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS test\n"+
+				"RUN --network=host true && touch /test-ok\n"+
+				"\n"+
+				"FROM alpine:3.22 AS builder\n"+
+				"COPY --from=test /test-ok /tmp/erun-test-ok\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
+		result := erun.Run(t, []string{"build", "--dry-run", "--gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_gate_invalidates_only_the_test_stage_layers", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
 		// Two components: entries declared (two independent harnesses in one
 		// monorepo); --component selects one by name, without editing the

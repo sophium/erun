@@ -384,7 +384,10 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
   own. A `--release` at that step instead publishes a two-architecture
   `-pr.<sha>` image and chart set per pull request that nothing consumes, and
   it discards the environment's `docker.platforms` pin, which a release never
-  consults. The merge queue's own gate build stays plain `erun build` too.
+  consults. The merge queue's own gate build is `erun build --gate` — not a
+  release either, and `--gate` is what makes it execute the Dockerfile's test
+  stage rather than accept BuildKit's replay of it (see `erun-common/AGENTS.md`
+  § "Gate execution and verdicts").
 - That pre-merge build reads `docker.platforms` from the **checked-out
   branch's** `.erun/config.yaml`, so a branch cut before the pin landed still
   builds both architectures and emulates the foreign one. Read the build's own

@@ -30,7 +30,16 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # Bounds failure *age*, which failedJobsHistoryLimit above does not: that
+      # limit only bounds how many failures are kept, so the three most recent
+      # stay forever. Three failures from one bad afternoon therefore sat in
+      # `kubectl get pods` as Error for weeks and made a healthy database read
+      # as permanently broken. An hour spans twelve scheduling intervals: a
+      # database that is genuinely broken keeps failing every five minutes and
+      # always has a fresh failure to read, while a transient one stops being
+      # reported as current state within the hour.
       backoffLimit: 0
+      ttlSecondsAfterFinished: 3600
       template:
         metadata:
           labels:

@@ -1,0 +1,17 @@
+audit: erun deploy --dry-run --version <VERSION> frs prod
+trace-log: would append the full trace to <TMP>
+deploy: tenant=frs environment=prod version-override=<VERSION> components=[] force=false current=false
+deploy: configured repo path /nonexistent-remote/frs is not present on this machine; no k8s.deployments plan could be read
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: the env's runtime umbrella oci://ghcr.io/sophium/charts/frs-devops is pinned at <VERSION>, which is behind this deploy's <VERSION> on frs-devops's own release line; moving the pin to the deploy version
+deploy: defaulting runtime image to the frs-devops chart's own image registry.example/test/frs-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: resolved 1 spec(s)
+kubectl --context test-context get namespace frs-prod -o name
+deploy: namespace frs-prod is created if the check above reports it missing
+kubectl --context test-context --namespace frs-prod get pvc frs-devops-worktree -o name
+deploy: worktree <HOME>/git/frs is served by the frs-devops-worktree volume; a deploy that creates that volume adopts an existing tree from the frs-devops-home volume before the pod starts
+helm pull oci://ghcr.io/sophium/charts/frs-devops --version <VERSION> --untar --untardir <TMP>
+helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflicts --timeout 15m0s --namespace frs-prod --debug --kube-context test-context -f <TMP> --set-string erun-devops.tenant=frs --set-string erun-devops.environment=prod --set-string erun-devops.worktreeStorage=pvc --set-string erun-devops.worktreeRepoName=frs --set-string erun-devops.worktreeHostPath=/nonexistent-remote/frs --set erun-devops.sshdEnabled=false --set erun-devops.mcpPort=17000 --set erun-devops.apiPort=17033 --set erun-devops.sshPort=17022 --set erun-devops.managedCloud=false --set-string erun-devops.cloudContext.name= --set-string erun-devops.cloudContext.provider= --set-string erun-devops.cloudContext.providerAlias= --set-string erun-devops.cloudContext.instanceId= --set erun-devops.cloudContext.useHostCredentials=false --set erun-devops.api.postgres.reset=false --set-string erun-devops.containerRegistry=ghcr.io/sophium --set-string erun-devops.runtimeRegistry=ghcr.io/sophium --set-json 'erun-devops.containerRegistries=[{"registry":"registry.example/test","roles":["build","deploy"]}]' --set erun-devops.disableBuildScript=false --set-string erun-devops.imageOverrides.erun-devops=registry.example/test/frs-devops:<VERSION> --set-string erun-devops.idle.timeout=5m0s --set-string erun-devops.idle.workingHours=08:00-20:00 --set-string erun-devops.idle.timezone= --set erun-devops.idle.trafficBytes=0 --set-string erun-devops.runtime.resources.limits.cpu=4 --set-string erun-devops.runtime.resources.limits.memory=16384Mi --set-string erun-devops.runtime.dind.resources.limits.cpu=12 --set-string erun-devops.runtime.dind.resources.limits.memory=20Gi --set-string erun-devops.claude.useMantle=0 --set-string erun-devops.claude.useBedrock=0 frs-devops oci://ghcr.io/sophium/charts/frs-devops --version <VERSION>
+deploy: would watch pods in frs-prod on context test-context for early container failure (release frs-devops)
+kubectl --context test-context --namespace frs-prod get pods -o json
+dedup: ready (release=test-context-frs-prod-frs-devops, hash=<HASH>)
