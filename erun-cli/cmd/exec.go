@@ -516,7 +516,10 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"`Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
 			"what the branch declared about itself survives a squash that replaces the rest of its history. " +
 			"The message stays the commit's subject and the whole of its own body, and a trailer the message " +
-			"already carries is not repeated.\n\n" +
+			"already carries is not repeated. They are read from every line of the branch's own commit bodies " +
+			"rather than from a trailing trailer block, so a declaration is not lost to whatever paragraph an " +
+			"author put after it, and each landed source reports the trailers it carried — including when it " +
+			"carried none, which is otherwise invisible in the squash message.\n\n" +
 			"The working tree must already be clean: this checks out a different local branch than whatever the " +
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
@@ -601,12 +604,25 @@ func readGateMergeSources(ctx common.Context, sourceBranches []string) ([]common
 	return sources, nil
 }
 
+// gateMergeCarriedTrailerSummary names what one landed source's squash
+// carried. The empty case is spelled out rather than left blank: a carriage
+// that found nothing is the state a caller cannot otherwise see, since the
+// landed commit and a successful exit look the same either way.
+func gateMergeCarriedTrailerSummary(trailers []string) string {
+	if len(trailers) == 0 {
+		return "no trailers of its own"
+	}
+	return "its own trailers: " + strings.Join(trailers, "; ")
+}
+
 // reportGateMergeResult prints each landed and skipped source, then refuses
 // if the batch landed nothing at all — there is nothing to gate against an
 // unchanged target.
 func reportGateMergeResult(ctx common.Context, result common.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
-		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit))
+		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",
+			result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit,
+			gateMergeCarriedTrailerSummary(landed.CarriedTrailers)))
 	}
 	for _, skipped := range result.Skipped {
 		ctx.Info(fmt.Sprintf("Skipped %s/%s: %s.", result.Remote, skipped.SourceBranch, skipped.Reason))

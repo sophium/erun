@@ -1668,6 +1668,67 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_carries_trailers_past_a_trailing_issue_reference", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's commit
+		// declares "Closes #N" and the reproduction trailers a defect fix
+		// declares, and closes with a bare "Refs #N" — the same "Token #N"
+		// spelling "Closes #N" uses, so it carries no colon to read as a
+		// trailer token. The block walk stopped at that paragraph, read an
+		// empty block, and squash-merged the branch under the review name
+		// alone: every declaration was gone, the issue stayed open with its fix
+		// on the target, and nothing said so. The "Refs #N" is the whole point
+		// of the scenario — without it the branch lands its trailers and the
+		// failure this exists for is never reached.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2662\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n\nRefs #2662")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Assemble the widget in declared order"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
+			t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
+		}
+		// The observable behaviour the report is about: a reader grepping the
+		// target for the issue reference finds the commit that closed it.
+		grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2662", "--format=%s"))
+		if grepped != "Assemble the widget in declared order" {
+			t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
+		}
+		body := captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B")
+		for _, want := range []string{
+			"Reproduces: a caller reading the widget got its parts in the wrong order.",
+			"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected the landed commit to carry %q, got:\n%s", want, body)
+			}
+		}
+		// The other half of the guarantee: the run says what it carried, so a
+		// carriage that found nothing is never left to be counted out of the
+		// squash message afterwards.
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 {
+			t.Fatalf("expected one landed source, got %+v", parsed.Landed)
+		}
+		carried := parsed.Landed[0].CarriedTrailers
+		if len(carried) != 3 || carried[0] != "Closes #2662" {
+			t.Fatalf("expected the result to name the three trailers it carried, got %q", carried)
+		}
+	})
+
 	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
 		// The reported failure: --remote takes a URL, not only a configured
 		// remote name. A URL creates no remote-tracking refs, so the ref the

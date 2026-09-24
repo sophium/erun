@@ -60,6 +60,15 @@ type GateMergeLandedSource struct {
 	SourceCommit string `json:"sourceCommit"`
 	// Commit is the squash commit that landed this branch.
 	Commit string `json:"commit"`
+	// CarriedTrailers names the branch's own load-bearing trailers this squash
+	// appended beneath the caller's message, in the order they were read. It is
+	// reported rather than left implicit because an empty list is otherwise
+	// indistinguishable from a carriage that found nothing to carry: the squash
+	// message looks the same, the gate-merge reports success, and the missing
+	// "Closes #N" is only discovered later by reading the landed commit. Always
+	// serialized, including when empty, so a caller never has to tell "carried
+	// none" from "this field was not read".
+	CarriedTrailers []string `json:"carriedTrailers"`
 }
 
 // GateMergeSkippedSource is one source branch that did not land — a
@@ -277,79 +286,29 @@ func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps Ga
 }
 
 // gateMergeTrailersFromBody extracts the carried trailer entries from one
-// commit body. Only the trailer block — the trailer-shaped paragraphs closing
-// the body — is considered, and an entry extends over the indented continuation
-// lines git folds into it, so a wrapped "Reproduces:" arrives whole rather
-// than truncated at its first line break.
-func gateMergeTrailersFromBody(body string) []string {
-	return gateMergeTrailerEntries(gateMergeTrailerBlock(body))
-}
-
-// gateMergeTrailerToken is a "Token:" line: a token at the start of the line
-// followed immediately by a colon. It is deliberately narrower than
-// gateMergeStartsTrailerBlock, which also accepts a bare "Token value" so an
-// unrecognised entry between two carried ones ends the first rather than
-// folding into it. That looseness matches nearly every line of ordinary prose,
-// and it is not what should decide whether a paragraph joins the block.
-var gateMergeTrailerToken = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*:`)
-
-// gateMergeIsTrailerParagraph reports whether one blank-line-separated
-// paragraph of a commit body is one a trailer block can contain: at least one
-// of its lines is a "Token:" line or a load-bearing trailer. Any line, not just
-// the first, because a paragraph the author wrapped by hand can carry its prose
-// above the trailer it belongs to. A paragraph that is only prose is not one,
-// which is what keeps the block from running up the body.
-func gateMergeIsTrailerParagraph(paragraph []string) bool {
-	for _, line := range paragraph {
-		if gateMergeTrailerToken.MatchString(line) || gateMergeCarriesTrailer(line) {
-			return true
-		}
-	}
-	return false
-}
-
-// gateMergeTrailerBlock is the trailer block of one commit body: the trailing
-// group of trailer-shaped paragraphs, blank lines and all, or nothing when the
-// body has none.
+// commit body. Every line of the body is considered, and an entry extends over
+// the indented continuation lines git folds into it, so a wrapped "Reproduces:"
+// arrives whole rather than truncated at its first line break.
 //
-// The walk runs back from the body's end a paragraph at a time rather than
-// taking the last run of non-empty lines. A "Co-Authored-By:" is itself a
-// trailer-shaped line, so that paragraph belongs to the block instead of being
-// the boundary that replaces everything above it, and a blank line between two
-// trailer paragraphs — which git permits — does not truncate the block at the
-// paragraph closest to the end. Reading only the final run of non-empty lines
-// collapsed the block to whatever sat nearest the end, which in that shape is
-// the one line that is not load-bearing; every authored "Closes #N" and
-// "Reproduces:" above it was discarded, and the gate-merge reported success.
-func gateMergeTrailerBlock(body string) []string {
-	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
-	end := len(lines)
-	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
-		end--
-	}
-	start := end
-	for next := end; next > 0; {
-		from := next
-		for from > 0 && strings.TrimSpace(lines[from-1]) != "" {
-			from--
-		}
-		if !gateMergeIsTrailerParagraph(lines[from:next]) {
-			break
-		}
-		start = from
-		// The blank line that separated this paragraph from the one above may
-		// be part of the block; whether it is, is decided by the paragraph
-		// above standing on its own.
-		next = from
-		for next > 0 && strings.TrimSpace(lines[next-1]) == "" {
-			next--
-		}
-	}
-	return lines[start:end]
+// There is deliberately no "trailer block" boundary deciding which lines are
+// looked at. Every such boundary this has had was a way to lose a declaration
+// silently: reading only the body's final run of non-empty lines discarded
+// everything above a trailing "Co-Authored-By:", and walking back a paragraph
+// at a time until a paragraph stopped looking like a trailer discarded
+// everything above a closing paragraph the walk did not recognise — a bare
+// "Refs #N" is the shape that did it, since it carries no colon to read as a
+// token. The author's declarations are not the part of a commit body whose
+// position makes them provisional, and the gate-merge reports success either
+// way, so the loss is invisible on the target. What decides carriage is the
+// closed set in gateMergeCarriedTrailerLines, which is narrow enough that a
+// line it matches is a declaration wherever it sits and a body of ordinary
+// prose matches none of it.
+func gateMergeTrailersFromBody(body string) []string {
+	return gateMergeTrailerEntries(strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n"))
 }
 
-// gateMergeTrailerEntries picks the carried entries out of a trailer block,
-// folding each one's indented continuation lines into it so a wrapped
+// gateMergeTrailerEntries picks the carried entries out of a commit body's
+// lines, folding each one's indented continuation lines into it so a wrapped
 // "Reproduces:" arrives whole rather than truncated at its first line break.
 func gateMergeTrailerEntries(lines []string) []string {
 	var carried []string
@@ -556,7 +515,12 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		return nil, nil, fmt.Errorf("resolve squash merge commit for %s: %w", source.Branch, err)
 	}
 
-	return &GateMergeLandedSource{SourceBranch: source.Branch, SourceCommit: sourceCommit, Commit: commit}, nil, nil
+	return &GateMergeLandedSource{
+		SourceBranch:    source.Branch,
+		SourceCommit:    sourceCommit,
+		Commit:          commit,
+		CarriedTrailers: trailers,
+	}, nil, nil
 }
 
 // skipConflictedGateMergeSource classifies a failed `git merge --squash` for

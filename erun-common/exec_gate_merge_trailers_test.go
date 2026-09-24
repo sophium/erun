@@ -116,32 +116,63 @@ func TestGateMergeOneSourceCarriesTrailersSeparatedFromACoAuthoredBy(t *testing.
 	}
 }
 
-// TestGateMergeTrailerBlockIsEmptyWhenTheBodyDeclaresNoTrailers pins the
-// ordinary case the collapse must not regress: a message whose trailing
-// paragraph is prose yields no block, so nothing is read as a trailer that was
-// never meant as one.
-func TestGateMergeTrailerBlockIsEmptyWhenTheBodyDeclaresNoTrailers(t *testing.T) {
-	body := "Fix the widget\n\n" +
+// TestGateMergeOneSourceCarriesTrailersWhenTheBranchEndsWithAnIssueReference is
+// the reproduction of the reported failure: a branch whose authored trailers
+// close with a bare "Refs #N" — a line at the start of the closing paragraph
+// with no colon, so not a "Token:" line — landed through the merge queue with
+// every declaration above it discarded. The block walk stopped at the
+// unrecognised paragraph, the block came back empty, and the squash carried
+// only the caller's message: the issue stayed open with its fix on the target,
+// and the commit asserted no reproduction for the defect it fixed, while the
+// gate-merge reported success either way.
+func TestGateMergeOneSourceCarriesTrailersWhenTheBranchEndsWithAnIssueReference(t *testing.T) {
+	const branchBody = "Fix the widget\n\n" +
 		"The widget was assembled backwards, so every caller reading it got\n" +
-		"the parts in the wrong order.\n"
-	if got := gateMergeTrailerBlock(body); len(got) != 0 {
-		t.Fatalf("expected no trailer block, got %q", got)
+		"the parts in the wrong order.\n\n" +
+		"Closes #2662\n" +
+		"Reproduces: a caller reading the widget got its parts in the order they\n" +
+		"  were appended rather than the order they were declared.\n" +
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n" +
+		"\n" +
+		"Refs #2662\n"
+	var committed string
+	deps := gateMergeTrailerSeam(branchBody, &committed)
+
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Assemble the widget in declared order"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+		t.Fatalf("gate-merge one source: %v", err)
 	}
-	if got := gateMergeTrailersFromBody(body); len(got) != 0 {
-		t.Fatalf("expected no carried trailers, got %q", got)
+
+	for _, want := range []string{
+		"Closes #2662",
+		"Reproduces: a caller reading the widget got its parts in the order they\n  were appended rather than the order they were declared.",
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+	} {
+		if !strings.Contains(committed, want) {
+			t.Fatalf("the squash commit must carry the branch's own %q trailer past a trailing issue reference, got:\n%s", want, committed)
+		}
+	}
+	if strings.Contains(committed, "assembled backwards") {
+		t.Fatalf("only the branch's trailers belong beneath the review name, not its prose, got:\n%s", committed)
 	}
 }
 
-// TestGateMergeTrailerBlockSpansABlankLineBetweenTrailerParagraphs covers the
-// other half of the collapse: git permits a blank line between two trailer
-// paragraphs, and the block has to span it rather than keep only the paragraph
-// closest to the end.
-func TestGateMergeTrailerBlockSpansABlankLineBetweenTrailerParagraphs(t *testing.T) {
+// TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer pins the boundary that
+// replaced the block walk, and the two shapes the walk decided wrongly in both
+// directions. A declaration sitting above a trailing paragraph the walk did not
+// recognise is carried; a line the closed set does not name is not carried
+// wherever it sits, so dropping the boundary did not widen what lands on the
+// target.
+func TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer(t *testing.T) {
 	body := "Fix the widget\n\n" +
+		"The widget was assembled backwards, so every caller reading it got\n" +
+		"the parts in the wrong order.\n\n" +
 		"Closes #2642\n" +
 		"\n" +
 		"Reproduces: the parts arrived in append order.\n" +
-		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n"
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n" +
+		"\n" +
+		"Refs #2642\n" +
+		"Note: this is a workaround for a quirk\n"
 
 	got := gateMergeTrailersFromBody(body)
 	want := []string{
@@ -150,12 +181,24 @@ func TestGateMergeTrailerBlockSpansABlankLineBetweenTrailerParagraphs(t *testing
 		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("expected %d trailers across the blank line, got %d: %q", len(want), len(got), got)
+		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
 	}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("trailer %d: expected %q, got %q", i, want[i], got[i])
 		}
+	}
+}
+
+// TestGateMergeTrailersFromBodyIsEmptyWhenTheBodyDeclaresNoTrailers pins the
+// ordinary case that must not regress: a message that declares nothing carried
+// yields nothing, so a body of ordinary prose is read as prose.
+func TestGateMergeTrailersFromBodyIsEmptyWhenTheBodyDeclaresNoTrailers(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"The widget was assembled backwards, so every caller reading it got\n" +
+		"the parts in the wrong order.\n"
+	if got := gateMergeTrailersFromBody(body); len(got) != 0 {
+		t.Fatalf("expected no carried trailers, got %q", got)
 	}
 }
 
