@@ -45,7 +45,14 @@ spec:
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      # See the repair CronJob's ttlSecondsAfterFinished for why age needs a
+      # bound of its own. Three days, not that Job's hour: this runs daily, so
+      # the next attempt -- and its own evidence -- is 24h away, and a shorter
+      # TTL would delete a failed sweep's log before anyone could read it. That
+      # is also why retention_runs, the durable record of the same runs, is
+      # deliberately left with no pruning policy.
       backoffLimit: 0
+      ttlSecondsAfterFinished: 259200
       template:
         metadata:
           labels:
