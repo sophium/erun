@@ -17,6 +17,7 @@ export const wailsApi = createApi({
     'RuntimeResourceStatus',
     'RuntimeActivity',
     'RuntimeUsage',
+    'RuntimeRunState',
     'RuntimeSizing',
     'VersionSuggestions',
     'CloudContexts',

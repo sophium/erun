@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -162,6 +163,108 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	}
 }
 
+// LoadRuntimeRunState is what the Runtime tab's Stop control reads before it
+// decides whether to offer the action at all. The reported defect was a control
+// that never asked: pressing Stop on an already-stopped runtime produced a
+// correct no-op whose only feedback was a terminal line, so the button read as
+// broken. These cases pin the three answers that control has to tell apart —
+// stopped, not deployed, and unreadable — because an unreadable cluster folded
+// into "not deployed" would state a fact nobody observed.
+func TestLoadRuntimeRunStateReportsTheAlreadyStoppedRuntime(t *testing.T) {
+	cases := []struct {
+		name  string
+		state eruncommon.RuntimeRunState
+		want  uiRuntimeRunState
+	}{
+		{
+			// The state the report describes.
+			name:  "scaled to zero is stopped with nothing to stop",
+			state: eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 0, ReadyReplicas: 0},
+			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 0, Stopped: true},
+		},
+		{
+			name:  "running carries the replica counts the operator is shown",
+			state: eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
+			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1},
+		},
+		{
+			// Wants a pod, has none: unhealthy, and still a legitimate thing to
+			// stop. It must not read as stopped.
+			name:  "running but not ready is not stopped",
+			state: eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 1},
+			want:  uiRuntimeRunState{Present: true, DesiredReplicas: 1},
+		},
+		{
+			name:  "an absent Deployment is not deployed rather than stopped",
+			state: eruncommon.RuntimeRunState{},
+			want:  uiRuntimeRunState{},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := loadRunStateReading(t, testCase.state, nil)
+			if got.Message != "" {
+				t.Fatalf("a readable cluster must not carry a message, got %q", got.Message)
+			}
+			testCase.want.Tenant, testCase.want.Environment = "erun", "remote"
+			if !reflect.DeepEqual(got, testCase.want) {
+				t.Fatalf("LoadRuntimeRunState = %+v, want %+v", got, testCase.want)
+			}
+		})
+	}
+}
+
+// loadRunStateReading drives LoadRuntimeRunState through one stubbed cluster
+// read. A read that surfaces as an error rather than a fail-soft reading fails
+// the test, because that is what would turn the Runtime tab into a failure
+// surface.
+func loadRunStateReading(t *testing.T, state eruncommon.RuntimeRunState, readErr error) uiRuntimeRunState {
+	t.Helper()
+	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
+		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+			return state, readErr
+		},
+	})
+	got, err := app.LoadRuntimeRunState(uiSelection{Tenant: "erun", Environment: "remote"})
+	if err != nil {
+		t.Fatalf("LoadRuntimeRunState must fail soft, got error %v", err)
+	}
+	return got
+}
+
+// An unreadable cluster is a third answer, and folding it into "not deployed"
+// would state a fact nobody observed — with a recovery ("deploy it") that is
+// wrong for the environment in front of the operator.
+func TestLoadRuntimeRunStateStatesAFailedReadRatherThanGuessing(t *testing.T) {
+	got := loadRunStateReading(t, eruncommon.RuntimeRunState{}, errors.New("connection refused"))
+	if got.Present || got.Stopped {
+		t.Fatalf("an unread cluster must claim neither state, got %+v", got)
+	}
+	if !strings.HasPrefix(got.Message, "Cannot read this environment's runtime run state: ") {
+		t.Fatalf("a failed read must say what could not be read, got %q", got.Message)
+	}
+}
+
+// A stop this desktop just issued is latched: the pod is already dropping while
+// the cluster read still reports the old replica count, so without the latch the
+// panel would flash "running" at the operator who just stopped it.
+func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *testing.T) {
+	app := stopTestApp(t, newCapturedEmits(), erunUIDeps{
+		readRuntimeRunState: func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error) {
+			return eruncommon.RuntimeRunState{Present: true, DesiredReplicas: 1, ReadyReplicas: 1}, nil
+		},
+	})
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	app.markRuntimeStopped(selection)
+	got, err := app.LoadRuntimeRunState(selection)
+	if err != nil {
+		t.Fatalf("LoadRuntimeRunState failed: %v", err)
+	}
+	if !got.Stopped {
+		t.Fatalf("the latch must report stopped while the cluster still reports the old count: %+v", got)
+	}
+}
+
 // The notice is the whole visible outcome of a stop for the tabs it ends: they
 // go dark a moment later, and without being told they went dark *because of
 // this*, the operator reads their own command as the environment breaking.
@@ -180,6 +283,45 @@ func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
 	quiet := stopEnvironmentNotice(eruncommon.StopEnvironmentResult{Tenant: "erun", Environment: "remote"})
 	if strings.Contains(quiet, "session") {
 		t.Fatalf("an environment nobody had open must not mention sessions: %q", quiet)
+	}
+	if strings.Contains(quiet, "component") {
+		t.Fatalf("a runtime-only environment must not gain a component sentence: %q", quiet)
+	}
+}
+
+// A stop scales one Deployment. The platform components rolled out alongside it
+// keep running and keep holding their capacity, so the outcome has to name
+// them: they are the pods still standing afterwards, and on an already-stopped
+// environment they are the entire explanation for why nothing changed.
+func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
+	result := eruncommon.StopEnvironmentResult{
+		Tenant:              "erun",
+		Environment:         "local",
+		RemainingComponents: []string{"erun-backend-api", "erun-backend-postgres"},
+	}
+	notice := stopEnvironmentNotice(result)
+	for _, want := range []string{
+		"keep running and keep holding capacity",
+		"erun-backend-api, erun-backend-postgres",
+	} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice = %q, want it to contain %q", notice, want)
+		}
+	}
+	if !strings.Contains(notice, "returned its runtime's capacity") {
+		t.Fatalf("the notice must not claim the whole environment's capacity came back: %q", notice)
+	}
+
+	// The already-stopped outcome changed nothing at all, so it needs the
+	// explanation most.
+	alreadyStopped := stopEnvironmentNotice(eruncommon.StopEnvironmentResult{
+		Tenant:              "erun",
+		Environment:         "local",
+		AlreadyStopped:      true,
+		RemainingComponents: []string{"erun-backend-api"},
+	})
+	if !strings.Contains(alreadyStopped, "erun-backend-api") {
+		t.Fatalf("the no-op outcome must still say what is left running: %q", alreadyStopped)
 	}
 }
 

@@ -3,11 +3,13 @@ import { RefreshCw, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useGetRuntimeUsageQuery } from '@/app/api/environmentApi';
+import { cumulativeCPUSeconds } from '@/app/runtimeCPUSeconds';
 import { RuntimePanelNotice } from '@/components/app/RuntimePanelNotice';
 import { UsageMeter } from '@/components/app/UsageMeter';
 import type { UISelection } from '@/types';
 import type {
   UIRuntimeCPUUsage,
+  UIRuntimeDindUsage,
   UIRuntimeDiskUsage,
   UIRuntimeMemoryUsage,
   UIRuntimeUsage,
@@ -96,8 +98,28 @@ function RuntimeUsageDetails({
           <DiskMeter key={disk.mount} disk={disk} />
         ))}
       </div>
+      {data.dind && <BuildsBlock dind={data.dind} />}
       <RuntimeUsageWarnings warnings={data.warnings} />
     </>
+  );
+}
+
+// BuildsBlock is the erun-dind sidecar's own reading, in its own zone under the
+// runtime container's. On a build-capable environment the figures above are
+// near-idle by construction — a release lane spends its time waiting on bounded
+// `erun exec job await` calls, so the CPU is near zero whether the build is
+// healthy or wedged — and this is the container the work is actually in. The
+// heading is not decoration: without it the operator has two CPU figures and no
+// way to tell which domain each belongs to, which is the whole defect.
+function BuildsBlock({ dind }: { dind: UIRuntimeDindUsage }): React.ReactElement {
+  return (
+    <div className="grid gap-2.5 border-t border-border/60 pt-2.5">
+      <span className="text-xs leading-[1.35] text-muted-foreground">
+        Builds — the erun-dind sidecar every image build runs in
+      </span>
+      <CPUMeter cpu={dind.cpu} label="Build CPU" />
+      <MemoryMeters memory={dind.memory} label="Build memory" />
+    </div>
   );
 }
 
@@ -157,14 +179,41 @@ function RuntimeUsageWarnings({
   );
 }
 
-function CPUMeter({ cpu }: { cpu: UIRuntimeCPUUsage }): React.ReactElement {
+// cpu is the runtime container's own reading by default, and the erun-dind
+// sidecar's when the Builds block passes its own label; nothing else differs,
+// so the same meter renders both.
+function CPUMeter({
+  cpu,
+  label = 'CPU',
+}: {
+  cpu: UIRuntimeCPUUsage;
+  label?: string;
+}): React.ReactElement {
   if (!cpu.available) {
-    return <UnavailableRow label="CPU" reason={cpu.unavailable} />;
+    // A container with no cpu.max quota cannot report utilisation — but it can
+    // report what it has done, and that is the common shape of the sidecar
+    // (declared without a limit so a build can use the node). Rendering the
+    // cumulative figure keeps a busy build from reading as an unavailable one;
+    // it is stated as CPU-seconds precisely because it is NOT a rate, and a
+    // "386 CPU-s of no quota" percentage-shaped line would invent the rate.
+    const seconds = cumulativeCPUSeconds(cpu.usageUsec);
+    if (seconds !== null) {
+      return (
+        <UsageMeter
+          label={label}
+          valueText={`${String(seconds)} CPU-s`}
+          percent={undefined}
+          warnAt={undefined}
+          detail="cumulative, no CPU quota to measure a rate against"
+        />
+      );
+    }
+    return <UnavailableRow label={label} reason={cpu.unavailable} />;
   }
   const quota = cpu.quota ? `of a ${cpu.quota} quota` : 'of an unset quota';
   return (
     <UsageMeter
-      label="CPU"
+      label={label}
       valueText={cpu.utilization ?? percentText(cpu.utilizationPercent)}
       percent={cpu.utilizationPercent}
       // CPU has no named warn threshold in erun-common -- bursting to the
@@ -175,9 +224,15 @@ function CPUMeter({ cpu }: { cpu: UIRuntimeCPUUsage }): React.ReactElement {
   );
 }
 
-function MemoryMeters({ memory }: { memory: UIRuntimeMemoryUsage }): React.ReactElement {
+function MemoryMeters({
+  memory,
+  label = 'Memory',
+}: {
+  memory: UIRuntimeMemoryUsage;
+  label?: string;
+}): React.ReactElement {
   if (!memory.available) {
-    return <UnavailableRow label="Memory" reason={memory.unavailable} />;
+    return <UnavailableRow label={label} reason={memory.unavailable} />;
   }
   if (memory.unlimited) {
     // A real reading, not a failure: there is no ceiling to be a fraction of,
@@ -185,7 +240,7 @@ function MemoryMeters({ memory }: { memory: UIRuntimeMemoryUsage }): React.React
     return (
       <div className="grid gap-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs leading-[1.35] text-muted-foreground">Memory</span>
+          <span className="text-xs leading-[1.35] text-muted-foreground">{label}</span>
           <span className="text-sm leading-[1.35] font-semibold tabular-nums text-foreground">
             {memory.current ?? '—'}
           </span>
@@ -198,7 +253,7 @@ function MemoryMeters({ memory }: { memory: UIRuntimeMemoryUsage }): React.React
   return (
     <div className="grid gap-1">
       <UsageMeter
-        label="Memory"
+        label={label}
         valueText={`${memory.current ?? '—'} of ${memory.limit ?? '—'}`}
         percent={memory.percentOfLimit}
         warnAt={MEMORY_WARN_PERCENT}

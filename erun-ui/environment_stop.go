@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -47,11 +48,12 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 	a.emitEnvStatus(selection, envStatusRuntimeStopped)
 	a.emitAppNotification("info", stopEnvironmentNotice(stopped))
 	return uiEnvironmentStopResult{
-		Tenant:         stopped.Tenant,
-		Environment:    stopped.Environment,
-		Release:        stopped.Release,
-		Namespace:      stopped.Namespace,
-		AlreadyStopped: stopped.AlreadyStopped,
+		Tenant:              stopped.Tenant,
+		Environment:         stopped.Environment,
+		Release:             stopped.Release,
+		Namespace:           stopped.Namespace,
+		AlreadyStopped:      stopped.AlreadyStopped,
+		RemainingComponents: stopped.RemainingComponents,
 	}, nil
 }
 
@@ -59,15 +61,33 @@ func (a *App) StopEnvironment(selection uiSelection) (uiEnvironmentStopResult, e
 // with a stopped environment and no idea how to get it back — and names the
 // sessions the stop ended, so the tabs going dark read as the command finishing
 // rather than the environment breaking.
+//
+// It also names the platform components the stop left running, on both
+// outcomes. Those are the pods still visible afterwards, and a pod that
+// outlives a stop with no explanation reads as the stop having failed — most of
+// all on the already-stopped outcome, where nothing else changed at all.
 func stopEnvironmentNotice(result eruncommon.StopEnvironmentResult) string {
+	kept := stopEnvironmentKeptComponents(result)
 	if result.AlreadyStopped {
-		return fmt.Sprintf("%s/%s was already stopped. Open it to start it again.", result.Tenant, result.Environment)
+		return fmt.Sprintf("%s/%s was already stopped.%s Open it to start it again.", result.Tenant, result.Environment, kept)
 	}
 	sessions := ""
 	if len(result.EndedSessions) > 0 {
 		sessions = fmt.Sprintf(" %d attached session(s) ended with the pod.", len(result.EndedSessions))
 	}
-	return fmt.Sprintf("Stopped %s/%s and returned its capacity to the node.%s Open it to start it again.", result.Tenant, result.Environment, sessions)
+	return fmt.Sprintf("Stopped %s/%s and returned its runtime's capacity to the node.%s%s Open it to start it again.",
+		result.Tenant, result.Environment, sessions, kept)
+}
+
+// stopEnvironmentKeptComponents renders the components the stop left holding
+// their capacity, or "" when the environment deploys none: a runtime-only
+// environment has nothing to explain and must not gain a sentence saying so.
+func stopEnvironmentKeptComponents(result eruncommon.StopEnvironmentResult) string {
+	if len(result.RemainingComponents) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" Its platform component(s) keep running and keep holding capacity: %s.",
+		strings.Join(result.RemainingComponents, ", "))
 }
 
 // markRuntimeStopped / clearRuntimeStopped latch a per-env stop the same way the
@@ -110,20 +130,7 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 	if a.isRuntimeStopped(selection) {
 		return true
 	}
-	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
-		return false
-	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      strings.TrimSpace(selection.Tenant),
-		Environment: strings.TrimSpace(selection.Environment),
-	})
-	if err != nil {
-		return false
-	}
-	state, err := a.deps.readRuntimeRunState(
-		eruncommon.Context{},
-		eruncommon.RuntimeScaleTargetForResult(result),
-	)
+	_, state, err := a.readRuntimeRunStateForSelection(selection)
 	if err != nil {
 		return false
 	}
@@ -136,4 +143,90 @@ func (a *App) runtimeStoppedForSelection(selection uiSelection) bool {
 	// second. "Pods exist but are not ready" with a non-zero desired count is an
 	// unhealthy environment and Stopped() already reports false for it.
 	return state.Stopped()
+}
+
+// readRuntimeRunStateForSelection resolves one selection to its runtime
+// Deployment and reads what the cluster reports about it. The reconnect gate
+// and the Runtime tab's own reading share this one resolution so the two can
+// never disagree about which Deployment "this environment's runtime" is.
+func (a *App) readRuntimeRunStateForSelection(selection uiSelection) (eruncommon.OpenResult, eruncommon.RuntimeRunState, error) {
+	if a.deps.store == nil || a.deps.readRuntimeRunState == nil {
+		return eruncommon.OpenResult{}, eruncommon.RuntimeRunState{}, errors.New("the Kubernetes reader is not wired")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      strings.TrimSpace(selection.Tenant),
+		Environment: strings.TrimSpace(selection.Environment),
+	})
+	if err != nil {
+		return eruncommon.OpenResult{}, eruncommon.RuntimeRunState{}, err
+	}
+	state, err := a.deps.readRuntimeRunState(
+		eruncommon.Context{},
+		eruncommon.RuntimeScaleTargetForResult(result),
+	)
+	return result, state, err
+}
+
+// LoadRuntimeRunState reports whether the environment's runtime is running,
+// stopped, or not deployed at all — the state the Runtime tab's Stop control
+// has to show before it offers the action.
+//
+// Stop is a real action only when the Deployment wants pods: `erun stop` reads
+// exactly these replica counts and reports "already stopped" when it finds
+// zero, so a control that never consults them offers a correct no-op as if it
+// were the action that frees the node's capacity. The same read also answers
+// the other shape of that defect — a runtime that was never deployed, which
+// `erun stop` refuses outright — which is why Present is carried separately
+// from Stopped rather than folded into a single "nothing to stop" flag.
+//
+// Fail-soft, like LoadRuntimeUsage: an unreachable cluster yields a Message
+// naming what could not be read, never an error that turns the Runtime tab into
+// a failure surface. Message is NOT Present=false: "the Deployment is absent"
+// and "the Deployment could not be read" are different facts, and the second
+// must not render as the first.
+func (a *App) LoadRuntimeRunState(selection uiSelection) (uiRuntimeRunState, error) {
+	selection = normalizeSelection(selection)
+	if err := errMissingTenantOrEnvironment("load runtime run state", selection.Tenant, selection.Environment); err != nil {
+		return uiRuntimeRunState{}, err
+	}
+	state := uiRuntimeRunState{Tenant: selection.Tenant, Environment: selection.Environment}
+	// The latch is checked first for the same reason the reconnect gate checks
+	// it: a stop this desktop just issued drops the pod, and the cluster read
+	// cannot see the new replica count until the scale lands — so without this
+	// the panel would flash "running" at the operator who just stopped it.
+	if a.isRuntimeStopped(selection) {
+		state.Present = true
+		state.Stopped = true
+		state.RemainingComponents = a.runtimeStopRemainingComponents(selection)
+		return state, nil
+	}
+	resolved, read, err := a.readRuntimeRunStateForSelection(selection)
+	if err != nil {
+		state.Message = "Cannot read this environment's runtime run state: " + err.Error()
+		return state, nil
+	}
+	state.Present = read.Present
+	state.DesiredReplicas = read.DesiredReplicas
+	state.ReadyReplicas = read.ReadyReplicas
+	state.Stopped = read.Stopped()
+	state.RemainingComponents = eruncommon.StopRemainingComponents(resolved)
+	return state, nil
+}
+
+// runtimeStopRemainingComponents answers the same question as the branch above
+// for an environment already latched stopped, where nothing was resolved. A
+// failed resolve answers with no names rather than an error: the components are
+// a qualifier on a stop, not the reason the panel is open.
+func (a *App) runtimeStopRemainingComponents(selection uiSelection) []string {
+	if a.deps.store == nil {
+		return nil
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      strings.TrimSpace(selection.Tenant),
+		Environment: strings.TrimSpace(selection.Environment),
+	})
+	if err != nil {
+		return nil
+	}
+	return eruncommon.StopRemainingComponents(result)
 }

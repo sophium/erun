@@ -12,6 +12,11 @@ export interface UIEnvironmentStopResult {
   release?: string;
   namespace?: string;
   alreadyStopped: boolean;
+  // remainingComponents names the platform components the stop deliberately
+  // left running. A stop scales the runtime Deployment, not the environment, so
+  // the outcome has to say which component pods it left holding capacity —
+  // otherwise the pods still standing afterwards read as a stop that failed.
+  remainingComponents?: string[];
 }
 
 export interface DeleteEnvironmentResult {

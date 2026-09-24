@@ -202,7 +202,173 @@ test.describe('manage dialog runtime usage panel', () => {
     const panel = app.manageDialog.runtimeUsagePanel();
     await expect(panel).toBeVisible();
     await expect(panel).toContainText("Cannot read this environment's resource usage");
+
     await expect(panel).not.toContainText('signal:');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // The reported defect in its live form: a build environment read "Busy —
+  // holding: release 1.0.302" beside a CPU of 0.2%. The figure was the runtime
+  // container's, and every image build runs in the erun-dind sidecar's own
+  // cgroup — a release lane spends its time waiting on bounded `erun exec job
+  // await` calls, so that container is near-idle by construction and the
+  // headline number cannot tell a healthy build from a wedged one. The reader
+  // already acquires the sidecar's reading; this pins that the panel shows it,
+  // and labels which domain each figure belongs to.
+  test('a build-capable environment shows the erun-dind sidecar, not just the near-idle runtime', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeUsage(app.page, {
+      tenant,
+      environment,
+      available: true,
+      message:
+        'This environment: CPU 0.2% of a 12.00 cores quota, memory 1.1 GiB of 23.0 GiB (5%), ' +
+        'excluding builds (they run in the erun-dind sidecar).',
+      excludesBuilds: true,
+      cpu: {
+        available: true,
+        quotaCores: 12,
+        quota: '12.00 cores',
+        utilizationPercent: 0.2,
+        utilization: '0.2%',
+      },
+      memory: {
+        available: true,
+        currentBytes: 1181116006,
+        current: '1.1 GiB',
+        limitBytes: 24696061952,
+        limit: '23.0 GiB',
+        percentOfLimit: 5,
+        oomKills: 0,
+      },
+      dind: {
+        cpu: {
+          available: true,
+          quotaCores: 8,
+          quota: '8.00 cores',
+          utilizationPercent: 91.5,
+          utilization: '91.5%',
+        },
+        memory: {
+          available: true,
+          currentBytes: 20830591385,
+          current: '19.4 GiB',
+          limitBytes: 21474836480,
+          limit: '20.0 GiB',
+          percentOfLimit: 97,
+          oomKills: 0,
+        },
+      },
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toBeVisible();
+    // The runtime container's own figure is still shown, and still small.
+    await expect(panel).toContainText('0.2%');
+
+    // The sidecar is the container the work is actually in, named so the two
+    // CPU figures cannot be confused for one another.
+    await expect(panel).toContainText('Builds — the erun-dind sidecar every image build runs in');
+    await expect(panel).toContainText('91.5%');
+    await expect(panel).toContainText('19.4 GiB of 20.0 GiB');
+
+    // Each figure keeps its own meter, under its own label.
+    await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveAttribute(
+      'aria-valuenow',
+      '92',
+    );
+    await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveAttribute(
+      'aria-valuenow',
+      '97',
+    );
+    await expect(panel.getByRole('meter')).toHaveCount(4);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // cpu.max declares no quota on many sidecars (a build is meant to be able to
+  // use the node), so no percentage can exist there — and "Unavailable" alone
+  // would leave a build environment's only visible CPU figure the runtime
+  // container's near-zero, which is where the operator started. The cumulative
+  // counter is a real measurement, stated as CPU-seconds because it is not a
+  // rate: it gets no bar, since there is no ceiling to be a fraction of.
+  test('a sidecar with no CPU quota reports cumulative CPU-seconds, not an idle zero', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeUsage(app.page, {
+      tenant,
+      environment,
+      available: true,
+      message:
+        'This environment: CPU 0.6% of a 12.00 cores quota, memory 1.1 GiB of 23.0 GiB (5%), ' +
+        'excluding builds (they run in the erun-dind sidecar).',
+      excludesBuilds: true,
+      cpu: {
+        available: true,
+        quotaCores: 12,
+        quota: '12.00 cores',
+        utilizationPercent: 0.6,
+        utilization: '0.6%',
+      },
+      memory: {
+        available: true,
+        currentBytes: 1181116006,
+        current: '1.1 GiB',
+        limitBytes: 24696061952,
+        limit: '23.0 GiB',
+        percentOfLimit: 5,
+        oomKills: 0,
+      },
+      dind: {
+        cpu: {
+          available: false,
+          unavailable:
+            'cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against',
+          usageUsec: 385919164,
+        },
+        memory: {
+          available: true,
+          unlimited: true,
+          currentBytes: 536870912,
+          current: '512 MiB',
+          oomKills: 0,
+        },
+      },
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('386 CPU-s');
+    await expect(panel).toContainText('cumulative, no CPU quota to measure a rate against');
+
+    // A sidecar memory reading with no ceiling is a real reading, stated
+    // without a limit rather than rendered as unknown.
+    await expect(panel).toContainText('Build memory');
+    await expect(panel).toContainText('512 MiB');
+    await expect(panel).toContainText('no limit set');
+
+    // Neither of the sidecar's figures had a ceiling, so neither draws a bar:
+    // the two meters are the runtime container's own. A zero-width bar here
+    // would read as "0%, idle" rather than "no ceiling to measure against".
+    await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveCount(0);
+    await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveCount(0);
+    await expect(panel.getByRole('meter')).toHaveCount(2);
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

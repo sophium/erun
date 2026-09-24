@@ -72,9 +72,19 @@ async function emitEnvUsage(
   environment: string,
   ageSeconds: number,
   staleAfterSeconds: number,
+  dind?: {
+    cpu: {
+      available: boolean;
+      unavailable?: string;
+      utilization?: string;
+      quota?: string;
+      usageUsec?: number;
+    };
+    memory: { available: boolean; current?: string; limit?: string; unlimited?: boolean };
+  },
 ): Promise<void> {
   await page.evaluate(
-    ({ tenant, environment, ageSeconds, staleAfterSeconds }) => {
+    ({ tenant, environment, ageSeconds, staleAfterSeconds, dind: sidecar }) => {
       const runtime = (
         window as unknown as {
           runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
@@ -95,12 +105,15 @@ async function emitEnvUsage(
             percentOfLimit: 25,
             oomKills: 0,
           },
+          // Absent unless a case asks for it: a runtime-only environment must
+          // keep rendering exactly the two rows it always did.
+          ...(sidecar === undefined ? {} : { excludesBuilds: true, dind: sidecar }),
         },
         observedAtUnix: Math.floor(Date.now() / 1000) - ageSeconds,
         staleAfterSeconds,
       });
     },
-    { tenant, environment, ageSeconds, staleAfterSeconds },
+    { tenant, environment, ageSeconds, staleAfterSeconds, dind },
   );
 }
 
@@ -363,7 +376,11 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       await page.mouse.move(0, 0);
       await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
       await expect(card).toBeVisible({ timeout: 1_000 });
-      await expect(card).toContainText('excludes builds', { timeout: 1_000 });
+      // The caption names the rows the caveat applies to rather than standing
+      // alone: a Builds row of the sidecar's own now sits under CPU and Memory,
+      // and a bare "excludes builds" beside it would read as qualifying that
+      // row instead of them.
+      await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
     }).toPass({ timeout: 20_000 });
   });
 
@@ -383,9 +400,85 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
         await expect(card).toBeVisible({ timeout: 1_000 });
         await expect(card).toContainText('As of', { timeout: 1_000 });
       }).toPass({ timeout: 20_000 });
-      await expect(card).not.toContainText('excludes builds');
+      await expect(card).not.toContainText('exclude builds');
+      await expect(card).not.toContainText('erun-dind sidecar');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
+  });
+
+  // The reported defect, on the surface it was reported against: the popover
+  // showed a build environment "Busy — holding: release 1.0.302" beside a CPU
+  // of 0.2%, because the figure was the runtime container's own cgroup. The
+  // work runs in the erun-dind sidecar, and the reader has always acquired that
+  // second reading — so a card that draws only the runtime container's number
+  // cannot tell a healthy build from a wedged one.
+  test('a build-capable environment renders the sidecar as its own Builds row', async ({
+    app,
+    page,
+  }) => {
+    // The toPass retry (20s) nests hoverEnvironmentRow's own retry inside it, so
+    // a single slow hover attempt under contention can consume most of the
+    // default 30s test budget before the outer retry gets a second chance —
+    // same reason sidebar-environment-usage.spec.ts's driven-hover cases widen
+    // theirs. Widen this test rather than shrinking either nested bound.
+    test.setTimeout(60_000);
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(async () => {
+      await emitEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA, 5, 90, {
+        cpu: { available: true, utilization: '91.5%', quota: '8.00 cores' },
+        memory: { available: true, current: '19.4Gi', limit: '20.0Gi' },
+      });
+      await page.mouse.move(0, 0);
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      // The number that answers "is my build working", labelled so it cannot be
+      // confused with the runtime container's 12.0% two rows above it.
+      await expect(card.getByText('Builds', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('91.5%', { timeout: 1_000 });
+      await expect(card).toContainText('erun-dind sidecar · 19.4Gi of 20.0Gi', {
+        timeout: 1_000,
+      });
+      // The caveat still applies to CPU and Memory, which is what it is for.
+      await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  // A sidecar with no cpu.max quota cannot report a percentage, and reporting
+  // nothing would put the operator back where they started — a build-capable
+  // environment whose only visible CPU figure is the runtime container's
+  // near-zero. The cumulative counter is a real measurement and is stated as
+  // CPU-seconds, with no decile strip: there is no ceiling to be a fraction of,
+  // and an empty strip would read as "measured 0%".
+  test('a sidecar with no CPU quota renders its cumulative CPU-seconds and no strip', async ({
+    app,
+    page,
+  }) => {
+    // The preceding case's comment applies here too: the nested hover retries
+    // need more than the default test budget under contention.
+    test.setTimeout(60_000);
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(async () => {
+      await emitEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA, 5, 90, {
+        cpu: {
+          available: false,
+          unavailable:
+            'cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against',
+          usageUsec: 385919164,
+        },
+        memory: { available: true, unlimited: true, current: '512Mi' },
+      });
+      await page.mouse.move(0, 0);
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('386 CPU-s', { timeout: 1_000 });
+      await expect(card).toContainText('no quota', { timeout: 1_000 });
+      await expect(card).toContainText('erun-dind sidecar · 512Mi (no limit)', {
+        timeout: 1_000,
+      });
+      // Two strips — CPU and Memory — and none for the sidecar, whose reading
+      // has no ceiling to be a fraction of.
+      await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
   });
 });

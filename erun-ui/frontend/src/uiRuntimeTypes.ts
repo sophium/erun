@@ -64,6 +64,23 @@ export interface UIRuntimeUsage {
   memory: UIRuntimeMemoryUsage;
   disk?: UIRuntimeDiskUsage[];
   warnings?: string[];
+  // excludesBuilds marks a runtime pod carrying the erun-dind sidecar builds
+  // actually run in: cpu and memory above are the runtime container's alone and
+  // can never see a build. Mirrors eruncommon.RuntimeUsage.ExcludesBuilds.
+  excludesBuilds?: boolean;
+  // dind is that sidecar's own reading, and is what makes a build-capable
+  // environment's CPU legible — see UIRuntimeDindUsage. Absent on every other
+  // environment, and absent (not zeroed) when the exec into the sidecar failed.
+  dind?: UIRuntimeDindUsage;
+}
+
+// UIRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading. It
+// carries no disk field deliberately: the sidecar mounts the same workspace
+// volume UIRuntimeUsage.disk already reports, and a second figure under its own
+// name invites reading it as an independent filesystem.
+export interface UIRuntimeDindUsage {
+  cpu: UIRuntimeCPUUsage;
+  memory: UIRuntimeMemoryUsage;
 }
 
 export interface UIRuntimeCPUUsage {
@@ -73,6 +90,33 @@ export interface UIRuntimeCPUUsage {
   quota?: string;
   utilizationPercent?: number;
   utilization?: string;
+  // usageUsec is cpu.stat's cumulative usage for the current container
+  // lifetime, and travels on an unavailable reading too: utilisation needs a
+  // ceiling to be a fraction of, and the sidecar is commonly declared with no
+  // cpu.max quota, so this is the only CPU figure a build environment can offer
+  // in that case.
+  usageUsec?: number;
+}
+
+// UIRuntimeRunState is what an environment's runtime Deployment currently
+// reports — the state the Runtime tab shows before Stop is pressed, because
+// Stop is only a real action when the Deployment wants pods. `present` is
+// deliberately separate from `stopped`: an environment that was never deployed
+// and one scaled to zero are different facts with different recoveries, and
+// neither is `message` — a failed read is a third state, and rendering it as
+// "not deployed" would state a fact nobody observed.
+export interface UIRuntimeRunState {
+  tenant: string;
+  environment: string;
+  present: boolean;
+  desiredReplicas: number;
+  readyReplicas: number;
+  stopped: boolean;
+  // remainingComponents names the platform components a stop of this
+  // environment would leave running, so the control can say what it will not
+  // touch before it is pressed. Empty for a runtime-only environment.
+  remainingComponents?: string[];
+  message?: string;
 }
 
 // `unlimited` is a real, available reading (no ceiling declared), distinct
