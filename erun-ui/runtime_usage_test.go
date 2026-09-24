@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -165,5 +166,107 @@ func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	}
 	if strings.Contains(usage.Message, "signal:") {
 		t.Fatalf("the memory panel must never say anything that reads as an OOM kill on a timeout, got %q", usage.Message)
+	}
+}
+
+// An environment actively building is the state the report described: its
+// popover read "Busy — holding: release 1.0.302" beside a CPU of 0.2%, because
+// the figure was the runtime container's and every image build actually runs in
+// the erun-dind sidecar's own cgroup. The desktop's reader has always acquired
+// that second reading — erun-common's RunRuntimeUsage execs the same script into
+// the sidecar and hangs it on RuntimeUsage.Dind — and the UI mapping dropped it
+// on the floor, so the number that would have answered "is my build working" was
+// read and then thrown away.
+//
+// Asserted over the JSON the popover is handed rather than over the Go field:
+// this mapping's whole job is to produce that payload, and the field a caller
+// reads is the JSON key.
+func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *testing.T) {
+	usage := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:      "erun",
+		Environment: "build",
+		// The runtime container during a release: near-idle by construction,
+		// because the lane spends its time waiting on bounded job awaits.
+		CPU:    eruncommon.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.2},
+		Memory: eruncommon.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
+		// What the same moment looks like in the container the build is in.
+		ExcludesBuilds: true,
+		Dind: &eruncommon.RuntimeDindUsage{
+			CPU:    eruncommon.RuntimeCPUUsage{QuotaCores: 8, UtilizationPercent: 91.5},
+			Memory: eruncommon.RuntimeMemoryUsage{CurrentBytes: 19 << 30, LimitBytes: 20 << 30, PercentOfLimit: 97},
+		},
+	})
+
+	payload, err := json.Marshal(usage)
+	if err != nil {
+		t.Fatalf("marshal uiRuntimeUsage: %v", err)
+	}
+	var wire struct {
+		ExcludesBuilds bool `json:"excludesBuilds"`
+		Dind           *struct {
+			CPU    uiRuntimeCPUUsage    `json:"cpu"`
+			Memory uiRuntimeMemoryUsage `json:"memory"`
+		} `json:"dind"`
+	}
+	if err := json.Unmarshal(payload, &wire); err != nil {
+		t.Fatalf("unmarshal uiRuntimeUsage payload: %v", err)
+	}
+	if !wire.ExcludesBuilds {
+		t.Fatalf("the payload must disclose that CPU/memory exclude builds, got %s", payload)
+	}
+	if wire.Dind == nil {
+		t.Fatalf("the sidecar reading was dropped from the payload the popover renders: %s", payload)
+	}
+	if wire.Dind.CPU.UtilizationPercent != 91.5 {
+		t.Fatalf("the sidecar CPU must survive the mapping, got %+v", wire.Dind.CPU)
+	}
+	if wire.Dind.Memory.PercentOfLimit != 97 {
+		t.Fatalf("the sidecar memory must survive the mapping, got %+v", wire.Dind.Memory)
+	}
+}
+
+// A sidecar with no cpu.max quota has no percentage to report, and the reader
+// carries its cumulative counter on the same unavailable reading precisely so a
+// caller can still state something. Losing it would leave a build environment
+// whose only CPU figure is the runtime container's near-zero — the reported
+// state — so the cumulative figure has to cross the mapping too.
+func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
+	const noQuota = "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"
+	usage := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:         "erun",
+		Environment:    "build",
+		CPU:            eruncommon.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
+		Memory:         eruncommon.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
+		ExcludesBuilds: true,
+		Dind: &eruncommon.RuntimeDindUsage{
+			CPU:    eruncommon.RuntimeCPUUsage{Unavailable: noQuota, UsageUsec: 385_919_164},
+			Memory: eruncommon.RuntimeMemoryUsage{CurrentBytes: 512 << 20, Unlimited: true},
+		},
+	})
+
+	if usage.Dind == nil {
+		t.Fatal("the sidecar reading must survive even when its CPU had no quota")
+	}
+	if usage.Dind.CPU.Available {
+		t.Fatalf("no cpu.max quota means no utilisation, got %+v", usage.Dind.CPU)
+	}
+	if usage.Dind.CPU.Unavailable != noQuota {
+		t.Fatalf("the reader's own reason must be carried, got %q", usage.Dind.CPU.Unavailable)
+	}
+	if usage.Dind.CPU.UsageUsec != 385_919_164 {
+		t.Fatalf("the cumulative counter is the only CPU figure this reading has, and it was dropped: %+v", usage.Dind.CPU)
+	}
+
+	// No sidecar read at all stays nil rather than becoming a zero reading: an
+	// older runtime image, a sidecar mid-restart, and a genuinely idle sidecar
+	// must not arrive looking the same.
+	withoutSidecar := uiRuntimeUsageFromReading(eruncommon.RuntimeUsage{
+		Tenant:      "erun",
+		Environment: "remote",
+		CPU:         eruncommon.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
+		Memory:      eruncommon.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30},
+	})
+	if withoutSidecar.Dind != nil {
+		t.Fatalf("an environment with no sidecar reading must not carry one, got %+v", withoutSidecar.Dind)
 	}
 }

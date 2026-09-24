@@ -2,6 +2,8 @@ Stop an environment's runtime and return its capacity to the node.
 
 Scales the environment's runtime Deployment to zero, so the runtime container's and its dind sidecar's resource limits and requests both go back to the cluster and the environments you are actually using can be given more. Running work in the pod is terminated. Persistent state is not touched — the home volume, the Docker/build caches, and a builds-here environment's worktree all survive — so waking is a pod start, not a rebuild. Desktop terminal sessions attached to the environment end with the pod; the stop names them so you can see what it took down.
 
+Platform components deployed into the environment (`erun deploy --components`: the API, its database, the ingress and DNS pieces) are NOT part of the runtime and are not stopped — they keep running and keep holding their capacity. That is deliberate: on an environment hosting the platform those components are the platform, and scaling them away would take it down. The stop names any it leaves running, so surviving pods are not mistaken for a stop that failed.
+
 The stop is durable: it is recorded on the environment, so a later `erun deploy` reconciles it rather than restarting the pod, and an automatic session reconnect leaves it stopped. `erun open` is what wakes the environment again. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 Usage:

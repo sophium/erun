@@ -145,6 +145,46 @@ type StopEnvironmentResult struct {
 	// the pod, so the outcome for attached tabs is stated rather than left for
 	// the operator to infer from tabs going dark.
 	EndedSessions []string `json:"endedSessions,omitempty"`
+	// RemainingComponents names the platform components this stop deliberately
+	// left running — see StopRemainingComponents. A stop scales one Deployment,
+	// so a caller that does not say which components it left holding their
+	// capacity leaves the operator to read the surviving pods as a stop that did
+	// not finish.
+	RemainingComponents []string `json:"remainingComponents,omitempty"`
+}
+
+// StopRemainingComponents names the platform components a stop leaves alone:
+// the environment's saved deploy selection (EnvConfig.Deploy.Components) minus
+// every runtime alias. `erun stop` scales the runtime Deployment and nothing
+// else — the component charts rolled out alongside it (`erun deploy
+// --components`: the platform's own API, its database, the ingress and DNS
+// pieces) keep running and keep holding their capacity.
+//
+// That is deliberate rather than an omission: on the environment that hosts a
+// platform those components ARE the platform, and scaling them away to free a
+// node's headroom would take it down. So the honest thing a stop can do is name
+// them, which is what this is for.
+//
+// It reads the config rather than listing pods. Stop's plan is already resolved
+// from the config and the runtime Deployment's replica count; a namespace-wide
+// pod query would put a second cluster read on every stop to answer a question
+// the operator configured here.
+//
+// Exported because the surfaces that warn before the click need the same
+// answer as the result that reports after it: the desktop's Stop control names
+// these components so the operator learns what is left holding capacity there,
+// rather than by reading the surviving pods afterwards and concluding the stop
+// failed.
+func StopRemainingComponents(result OpenResult) []string {
+	names := selectedPublishableComponents(result.EnvConfig.Deploy.Components, result.Tenant, ProjectK8sConfig{})
+	// Nil, not an empty slice: every caller branches on len() and none of them
+	// can tell the two apart, while an empty-but-present slice is what makes a
+	// struct comparison in a test fail for a reason that has nothing to say
+	// about the stop.
+	if len(names) == 0 {
+		return nil
+	}
+	return names
 }
 
 // RunStopEnvironment scales the environment's runtime Deployment to zero and
@@ -174,6 +214,14 @@ func RunStopEnvironment(ctx Context, params StopEnvironmentParams) (StopEnvironm
 	decision := DecideRuntimeStop(state, params.Result.EnvConfig.Stopped)
 	result.Stopped = true
 	result.AlreadyStopped = decision.AlreadyStopped
+	result.RemainingComponents = StopRemainingComponents(params.Result)
+	// Traced on both paths: the components left holding capacity are the reason
+	// an already-stopped environment still shows running pods, which is the
+	// state an operator pressing Stop on it is trying to make sense of.
+	if len(result.RemainingComponents) > 0 {
+		ctx.Trace(fmt.Sprintf("stop: platform component(s) in namespace %s are not touched and keep running: %s",
+			target.Namespace, strings.Join(result.RemainingComponents, ", ")))
+	}
 	if decision.AlreadyStopped {
 		ctx.Trace(fmt.Sprintf("stop: %s/%s is already stopped (deployment %s wants 0 replicas)", target.Tenant, target.Environment, target.ReleaseName))
 	} else {

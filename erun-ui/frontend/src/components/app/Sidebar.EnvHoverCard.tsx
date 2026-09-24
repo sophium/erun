@@ -4,16 +4,11 @@ import * as React from 'react';
 
 import { type EnvironmentNodeIndicator, environmentNodeLabel } from '@/app/environmentNodeState';
 import {
-  summarizeEnvironmentUsageMetrics,
-  type UsageMetricSummary,
-} from '@/app/environmentUsageSummary';
-import {
   type ErunVersionSummary,
   summarizeErunVersion,
   summarizeRuntimeVersionLine,
 } from '@/app/environmentVersionLines';
 import { useHoverCardOpenState } from '@/app/useHoverCardOpenState';
-import { DecileStrip } from '@/components/app/Sidebar.DecileStrip';
 import type { EnvironmentIndicator } from '@/components/app/Sidebar.helpers';
 import {
   HOVER_CARD_ALERT_CLASS,
@@ -26,6 +21,7 @@ import {
   HoverCardRow,
   HoverCardTitle,
 } from '@/components/app/Sidebar.HoverCardRow';
+import { UsageRows } from '@/components/app/Sidebar.UsageRows';
 import type { UISelection, UIWorkingIssue } from '@/types';
 import type { UIEnvironmentNodeSnapshot } from '@/uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
@@ -364,107 +360,6 @@ function nodeStateCaption(state: EnvironmentNodeIndicator['state']): string {
     case 'unknown':
       return 'State unknown — could not be checked';
   }
-}
-
-// UsageRows renders the environment-usage sweep's cached reading
-// (environment_usage.go) as separate CPU and memory rows, each with a decile
-// strip, so idle and loaded stop looking identical: one joined string
-// ("CPU 12% · Mem 68% of 2048Mi") gave the two metrics the same shape, weight
-// and wrap whatever they read, leaving state legible only by parsing digits.
-//
-// Three states, and they must not collapse into each other:
-//
-//   - A reading renders two rows. Each metric may carry a `percent`, and only
-//     then does it get a strip: a measured zero renders an EMPTY (outlined)
-//     strip, while a metric that could not be measured at all renders a dash
-//     and no strip, so "idle" and "unmeasured" stay distinguishable.
-//   - An unread environment (never sampled, unavailable, or neither figure
-//     readable) renders ONE row naming the reason. There are no metrics to
-//     give separate rows to, and the reason is the actionable part -- in
-//     particular a never-sampled environment must say `no reading yet` rather
-//     than borrow the empty strip that means "measured zero".
-//   - A stale reading keeps its figures and strips and says so on the caption
-//     row; the strip is a real measurement, just an old one.
-//
-// A stale or unmeasurable reading is rendered as degraded, never as an amber
-// warning: nothing the operator did caused either state and no action follows
-// from it, so it should recede rather than alarm (see the TYPE note in
-// Sidebar.HoverCardRow.tsx). Amber on this card is reserved for the strip's own
-// near-ceiling threshold, which is a different claim: the reading is fine, the
-// resource is nearly out.
-//
-// The reading itself is scoped to the runtime container's own cgroup, which
-// is never where a build runs -- every image build executes in the erun-dind
-// sidecar instead, so this figure can read idle while that sidecar saturates
-// the node. Reading the sidecar's own cgroup would not fix it either: its
-// build containers run as cgroup siblings, not descendants, so nothing this
-// card could read would ever account for them, and the one place that view
-// is reachable is a host-wide path shared by every build-capable pod on the
-// node -- not attributable to this environment alone. Qualifying the reading
-// is the only honest option left, so `excludesBuilds` (environmentUsesDindSidecar
-// in Sidebar.helpers.ts) makes the caption say so on every build-capable
-// environment, not just the ones currently building.
-function UsageRows({
-  usage,
-  excludesBuilds,
-}: {
-  usage: UIEnvironmentUsageSnapshot | undefined;
-  excludesBuilds: boolean;
-}): React.ReactElement {
-  const metrics = summarizeEnvironmentUsageMetrics(usage, Date.now());
-  if (metrics.kind === 'unread') {
-    return (
-      <HoverCardRow label="Usage">
-        <Muted>{metrics.detail}</Muted>
-      </HoverCardRow>
-    );
-  }
-  const scopeCaveat = excludesBuilds ? ' — excludes builds' : '';
-  return (
-    <>
-      <HoverCardRow label="CPU">
-        <UsageMetric metric={metrics.cpu} stale={metrics.stale} />
-      </HoverCardRow>
-      <HoverCardRow label="Memory">
-        <UsageMetric metric={metrics.memory} stale={metrics.stale} />
-      </HoverCardRow>
-      {/* The reading's age is its own row, under the metrics it qualifies --
-          a caption spanning both metrics must not sit under only one of them. */}
-      <HoverCardRow label="">
-        <Muted>
-          {metrics.stale ? 'Stale — as of' : 'As of'} {metrics.ageLabel} ago{scopeCaveat}
-        </Muted>
-      </HoverCardRow>
-    </>
-  );
-}
-
-// UsageMetric is one metric's value, its muted trailing suffix, and its decile
-// strip. The suffix is pushed to the right edge of the value column so the
-// figures themselves stack down one left edge and stay comparable.
-function UsageMetric({
-  metric,
-  stale,
-}: {
-  metric: UsageMetricSummary;
-  stale: boolean;
-}): React.ReactElement {
-  const figure = (
-    <span className={stale ? 'text-muted-foreground/70' : undefined}>{metric.value}</span>
-  );
-  return (
-    <div className={HOVER_CARD_VALUE_STACK_CLASS}>
-      {metric.suffix ? (
-        <span className="flex items-baseline justify-between gap-2">
-          {figure}
-          <span className={HOVER_CARD_CAPTION_CLASS}>{metric.suffix}</span>
-        </span>
-      ) : (
-        figure
-      )}
-      {metric.percent !== undefined && <DecileStrip percent={metric.percent} />}
-    </div>
-  );
 }
 
 function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement {

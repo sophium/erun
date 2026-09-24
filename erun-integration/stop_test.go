@@ -246,4 +246,39 @@ func TestStop(t *testing.T) {
 		}
 		golden.Equal(t, "stop/real_run_already_stopped_reports_the_no_op", normalize.Apply(result.Combined))
 	})
+
+	// The reported defect: an environment hosting platform components was
+	// stopped, its runtime scaled to zero, and the component pods were still
+	// running — which the operator read as the stop having failed. Stop scales
+	// one Deployment and never touches those components (they are the
+	// platform's own API and database), so the outcome has to say which ones it
+	// left holding capacity. The runtime is in the saved selection too, and must
+	// never be named among them: it is the thing that was just stopped.
+	t.Run("real_run_names_the_components_it_left_running", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnvDeployingComponents(t, setup, "team", "dev")
+		envVars := stubKubectlScalingStopTarget(t, setup, 1)
+		result := erun.Run(t, []string{"stop", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "stop/real_run_names_the_components_it_left_running", normalize.Apply(result.Combined))
+		if strings.Contains(result.Combined, "team-devops keep") {
+			t.Fatalf("the stopped runtime must not be named among the components left running:\n%s", result.Combined)
+		}
+	})
+
+	// The same scope on the no-op path, where it matters most: nothing else
+	// changed at all, so the components still standing are the entire
+	// explanation for why pressing Stop did nothing.
+	t.Run("dry_run_already_stopped_names_the_components_it_leaves_running", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedStoppedTenantEnvDeployingComponents(t, setup, "team", "dev")
+		envVars := stubKubectlStopRunState(t, setup, 0, 0)
+		result := erun.Run(t, []string{"stop", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "stop/dry_run_already_stopped_names_the_components_it_leaves_running", normalize.Apply(result.Combined))
+	})
 }

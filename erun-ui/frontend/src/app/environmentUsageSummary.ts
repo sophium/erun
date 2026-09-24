@@ -1,6 +1,7 @@
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
 import { formatElapsed } from './activityQueueState';
+import { cumulativeCPUSeconds } from './runtimeCPUSeconds';
 
 // EnvironmentUsageSummary reduces one environment's cached usage reading
 // (environment_usage.go) to what a hover card can render on one or two lines:
@@ -57,9 +58,41 @@ export type EnvironmentUsageMetrics =
       kind: 'reading';
       cpu: UsageMetricSummary;
       memory: UsageMetricSummary;
+      // builds is the erun-dind sidecar's own reading, present only when the
+      // environment carries that sidecar AND its cgroup could be read. Its
+      // absence is a real distinction — an older runtime image, a sidecar
+      // mid-restart — and must render as "not read", never as a zero: on a
+      // build-capable environment the runtime container's CPU is near zero by
+      // construction (a release lane spends its time waiting on bounded
+      // `erun exec job await` calls), so a fabricated 0 here would be
+      // indistinguishable from a build that is genuinely not running.
+      builds?: UsageBuildsSummary;
       ageLabel: string;
       stale: boolean;
     };
+
+// UsageBuildsSummary is the sidecar's CPU as the card can honestly state it,
+// with its memory and its scope as the lines beneath.
+export interface UsageBuildsSummary {
+  // value is the sidecar's CPU figure: a quota-relative percentage when the
+  // sidecar declares a cpu.max quota, and otherwise its cumulative
+  // CPU-seconds, which is the only CPU number a container without a ceiling can
+  // offer. '—' when neither was read.
+  value: string;
+  // utilization is present only when a percentage was really measured; its
+  // absence is what keeps an unmeasured or cumulative figure from borrowing a
+  // strip that means "measured".
+  utilization?: number;
+  // suffix is the short muted qualifier beside the value ('no quota'), '' when
+  // the value speaks for itself.
+  suffix: string;
+  // caption names the sidecar and its memory ('erun-dind sidecar · 267Mi of
+  // 20.0Gi'), with either part omitted when it could not be read.
+  caption: string;
+  // note is the reader's own reason, rendered only when the CPU could not be
+  // measured at all.
+  note: string;
+}
 
 // summarizeEnvironmentUsageMetrics reduces the same cached snapshot as
 // summarizeEnvironmentUsage, but per metric rather than to one headline: the
@@ -93,9 +126,72 @@ export function summarizeEnvironmentUsageMetrics(
     kind: 'reading',
     cpu: cpuMetric(usage.cpu),
     memory: memoryMetric(usage.memory),
+    builds: buildsMetric(usage.dind),
     ageLabel,
     stale,
   };
+}
+
+// buildsMetric reduces the erun-dind sidecar's reading to one row, or returns
+// undefined when there is no sidecar reading to show — which the card renders
+// as nothing at all, leaving the age caption's "excludes builds" caveat to do
+// its original job.
+//
+// The cumulative-CPU-seconds arm is not a fallback for a failure: cpu.max has
+// no quota on most sidecars (it declares no limit so a build can use the node),
+// so a percentage cannot exist there and utilisation alone would report
+// "Unavailable" on exactly the environments this row is for. `usageUsec` is a
+// real measurement, and stating it as CPU-seconds rather than as a percentage
+// keeps a cumulative counter from reading as a rate.
+function buildsMetric(
+  dind: UIEnvironmentUsageSnapshot['usage']['dind'],
+): UsageBuildsSummary | undefined {
+  if (!dind) {
+    return undefined;
+  }
+  const caption = dindCaption(dind.memory);
+  if (dind.cpu.available) {
+    const percent = measuredPercent(dind.cpu.utilizationPercent);
+    return {
+      value: dind.cpu.utilization ?? percentLabel(percent),
+      utilization: percent,
+      suffix: '',
+      caption,
+      note: '',
+    };
+  }
+  const seconds = cumulativeCPUSeconds(dind.cpu.usageUsec);
+  if (seconds !== null) {
+    return {
+      value: `${String(seconds)} CPU-s`,
+      suffix: 'no quota',
+      caption,
+      note: '',
+    };
+  }
+  return {
+    value: '—',
+    suffix: '',
+    caption,
+    note: dind.cpu.unavailable ?? 'the erun-dind CPU reading was not available',
+  };
+}
+
+// dindCaption names the domain the Builds row belongs to and, when it could be
+// read, the sidecar's memory: current against its own ceiling when it has one,
+// and the used figure alone when it declares none — the same distinction the
+// Memory row above makes, at caption length. The domain name is not optional:
+// the card's other rows are the runtime container, and "which of these two
+// numbers is my build" is the whole question this row exists to answer.
+function dindCaption(memory: UIEnvironmentUsageSnapshot['usage']['memory']): string {
+  const sidecar = 'erun-dind sidecar';
+  if (!memory.available) {
+    return sidecar;
+  }
+  const figure = memory.unlimited
+    ? `${memory.current ?? '—'} (no limit)`
+    : `${memory.current ?? '—'} of ${memory.limit ?? '—'}`;
+  return `${sidecar} · ${figure}`;
 }
 
 function cpuMetric(usage: UIEnvironmentUsageSnapshot['usage']['cpu']): UsageMetricSummary {

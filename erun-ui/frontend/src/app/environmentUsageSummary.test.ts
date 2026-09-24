@@ -362,3 +362,134 @@ test('a measured zero whose percentage the wire dropped still carries a percent'
   assert.equal(metrics.cpu.value, '0.0%');
   assert.equal(metrics.memory.value, '0%');
 });
+
+// The Builds row is the erun-dind sidecar's reading, and it exists because the
+// runtime container's own CPU cannot answer "is this build working": a release
+// lane spends its time waiting on bounded `erun exec job await` calls, so that
+// figure is near zero whether the build is healthy or wedged. The report was
+// exactly that -- an environment busy holding a release, reading 0.2% CPU.
+test('a build-capable environment actively building reports the sidecar, not just the near-idle runtime', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(
+      snapshotWith({
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        // The runtime container during an active build: near-idle by
+        // construction, and the only figure the card used to draw.
+        cpu: { available: true, utilizationPercent: 0.2, utilization: '0.2%' },
+        memory: {
+          available: true,
+          current: '1.1Gi',
+          limit: '23.0 GiB',
+          percentOfLimit: 2,
+          oomKills: 0,
+        },
+        excludesBuilds: true,
+        dind: {
+          cpu: { available: true, utilizationPercent: 91.5, utilization: '91.5%', quotaCores: 8 },
+          memory: {
+            available: true,
+            current: '19.4Gi',
+            limit: '20.0Gi',
+            percentOfLimit: 97,
+            oomKills: 0,
+          },
+        },
+      }),
+      Date.now(),
+    ),
+  );
+  assert.equal(metrics.cpu.value, '0.2%');
+  assert.ok(
+    metrics.builds,
+    'the sidecar reading must reach the card, not just the runtime container',
+  );
+  assert.equal(metrics.builds.value, '91.5%');
+  assert.equal(metrics.builds.utilization, 91.5);
+  assert.equal(metrics.builds.caption, 'erun-dind sidecar · 19.4Gi of 20.0Gi');
+});
+
+// A sidecar that declares no cpu.max quota cannot report a percentage, and
+// reporting nothing would put the operator back where they started: a
+// build-capable environment whose only visible CPU figure is the runtime
+// container's near-zero. It has done measurable work, and CPU-seconds is how a
+// container with no ceiling states it -- with no strip, because there is no
+// ceiling to be a fraction of.
+test('a sidecar with no CPU quota reports cumulative CPU-seconds and no strip', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(
+      snapshotWith({
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilizationPercent: 0.6, utilization: '0.6%' },
+        memory: {
+          available: true,
+          current: '267Mi',
+          limit: '20.0Gi',
+          percentOfLimit: 1,
+          oomKills: 0,
+        },
+        excludesBuilds: true,
+        dind: {
+          cpu: {
+            available: false,
+            unavailable:
+              'cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against',
+            usageUsec: 385_919_164,
+          },
+          memory: { available: true, unlimited: true, current: '512Mi', oomKills: 0 },
+        },
+      }),
+      Date.now(),
+    ),
+  );
+  assert.ok(metrics.builds);
+  assert.equal(metrics.builds.value, '386 CPU-s');
+  assert.equal(metrics.builds.suffix, 'no quota');
+  assert.equal(metrics.builds.utilization, undefined);
+  // Memory with no ceiling is still a real reading, stated without a limit.
+  assert.equal(metrics.builds.caption, 'erun-dind sidecar · 512Mi (no limit)');
+});
+
+// No sidecar reading at all is not a zero: the environment either carries no
+// sidecar or its cgroup could not be read, and the card renders no Builds row
+// rather than a row claiming the sidecar is idle. The age caption's
+// "excludes builds" caveat is the remaining disclosure for that case.
+test('an environment with no sidecar reading renders no Builds row', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(snapshotWith(readable(20)), Date.now()),
+  );
+  assert.equal(metrics.builds, undefined);
+});
+
+test('an unreadable sidecar CPU reports the reason instead of an idle zero', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(
+      snapshotWith({
+        tenant: 't',
+        environment: 'e',
+        available: true,
+        cpu: { available: true, utilizationPercent: 0.2, utilization: '0.2%' },
+        memory: {
+          available: true,
+          current: '1.1Gi',
+          limit: '23.0Gi',
+          percentOfLimit: 2,
+          oomKills: 0,
+        },
+        excludesBuilds: true,
+        dind: {
+          cpu: { available: false, unavailable: 'cpu.stat usage_usec was not readable' },
+          memory: { available: false, oomKills: 0 },
+        },
+      }),
+      Date.now(),
+    ),
+  );
+  assert.ok(metrics.builds);
+  assert.equal(metrics.builds.value, '—');
+  assert.equal(metrics.builds.utilization, undefined);
+  assert.equal(metrics.builds.note, 'cpu.stat usage_usec was not readable');
+});
