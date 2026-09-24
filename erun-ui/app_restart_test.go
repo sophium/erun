@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -262,6 +263,114 @@ func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
 	// shared, so "the note you wrote here" is satisfied by anyone's.
 	assertNamesOwnNote(t, "the resume prompt", id, target.ResumePrompt)
 	assertNoHandOffsLeftStaged(t, restoreDir)
+}
+
+// The reported failure, at its cause: a return note is contracted as a hand-off
+// that is read once and superseded, erun is what points every resumed session
+// at it, and nothing bounded it. One orchestrator's note reached 484,307 bytes
+// across 196 sections, carrying four headers from different dates that each
+// claimed to supersede the others, and the resume prompt handed that file to
+// the woken session without a word about its size.
+//
+// Staged by hand rather than through a helper so this case is also runnable
+// against the unfixed prompt: every symbol it uses predates the fix, and what
+// it asserts is exactly the behaviour that was missing.
+func TestRestartResumePromptNamesAnOversizedReturnNote(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	id := createAndStartOrchestrator(t, app)
+
+	// The size the report measured, written under this orchestrator's own id.
+	// HOME is this test's temp directory (restartTestApp), so this is never a
+	// real orchestrator's hand-off state.
+	if err := os.MkdirAll(orchestratorsRoot(), 0o755); err != nil {
+		t.Fatalf("create orchestrators root: %v", err)
+	}
+	note := filepath.Join(orchestratorsRoot(), orchestratorReturnNoteName(id))
+	if err := os.WriteFile(note, make([]byte, 484307), 0o644); err != nil {
+		t.Fatalf("write return note: %v", err)
+	}
+
+	if err := app.RestartApp(id); err != nil {
+		t.Fatalf("RestartApp failed: %v", err)
+	}
+
+	state := readRestoreState(t, restoreDir, id)
+	assertNamesOwnNote(t, "the resume prompt", id, state.ResumePrompt)
+	// The size, and what the size implies about what is inside: the session is
+	// about to open a file that may contradict itself, and it is told so
+	// instead of having to read 484 KB to find out.
+	if !strings.Contains(state.ResumePrompt, "484307") {
+		t.Fatalf("expected the resume prompt to state the note's size, got %q", state.ResumePrompt)
+	}
+	if !strings.Contains(state.ResumePrompt, "superseded") {
+		t.Fatalf("expected the resume prompt to say the note may hold superseded state, got %q", state.ResumePrompt)
+	}
+}
+
+// The other half of that contract: a note that is still a hand-off is handed
+// over in exactly the words it always was, and a note of exactly the bound is
+// still within it. Silence for a healthy note is as load-bearing as the warning
+// for a bloated one -- a prompt that reports a size on every restart is noise
+// the session learns to read past.
+func TestRestartResumePromptIsSilentForAHealthyReturnNote(t *testing.T) {
+	cases := []struct {
+		name  string
+		size  int
+		stage bool
+	}{
+		{name: "no note at all"},
+		{name: "a sibling-sized note", size: 2_931, stage: true},
+		{name: "exactly the bound", size: orchestratorReturnNoteBloatBytes, stage: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			app, restoreDir := restartTestApp(t)
+			id := createAndStartOrchestrator(t, app)
+			if tc.stage {
+				writeReturnNote(t, id, tc.size)
+			}
+
+			if err := app.RestartApp(id); err != nil {
+				t.Fatalf("RestartApp failed: %v", err)
+			}
+
+			state := readRestoreState(t, restoreDir, id)
+			if state.ResumePrompt != orchestratorRestartResumePrompt(id) {
+				t.Fatalf("expected the unchanged hand-off prompt, got %q", state.ResumePrompt)
+			}
+		})
+	}
+}
+
+// The bound's own edge, pinned where it is decided rather than only through a
+// note large enough to trip it.
+func TestReturnNoteBloatWarningStartsPastTheBound(t *testing.T) {
+	if warning := orchestratorReturnNoteBloatWarning(orchestratorReturnNoteBloatBytes); warning != "" {
+		t.Fatalf("a note of exactly the bound is still within it, got %q", warning)
+	}
+	warning := orchestratorReturnNoteBloatWarning(orchestratorReturnNoteBloatBytes + 1)
+	if !strings.Contains(warning, strconv.Itoa(orchestratorReturnNoteBloatBytes+1)) {
+		t.Fatalf("expected the warning to state the note's size, got %q", warning)
+	}
+	if !strings.Contains(warning, "superseded") {
+		t.Fatalf("expected the warning to say the note may hold superseded state, got %q", warning)
+	}
+	if orchestratorReturnNoteBloatWarning(484307) == "" {
+		t.Fatal("expected the reported note to be reported")
+	}
+}
+
+// writeReturnNote stages a return note of exactly size bytes for this
+// orchestrator. Tests never reach a real note: HOME is their own temp directory.
+func writeReturnNote(t *testing.T, orchestratorID string, size int) {
+	t.Helper()
+	if err := os.MkdirAll(orchestratorsRoot(), 0o755); err != nil {
+		t.Fatalf("create orchestrators root: %v", err)
+	}
+	note := filepath.Join(orchestratorsRoot(), orchestratorReturnNoteName(orchestratorID))
+	if err := os.WriteFile(note, make([]byte, size), 0o644); err != nil {
+		t.Fatalf("write return note: %v", err)
+	}
 }
 
 // A restart resumes the orchestrator's OWN conversation, derived from its id.
