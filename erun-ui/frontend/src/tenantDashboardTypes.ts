@@ -160,11 +160,25 @@ export const TENANT_ENROLLMENT_ENROLLED = 'enrolled';
 // "never requested" — it must render as its own state rather than collapse
 // into local-only's confident answer.
 export const TENANT_ENROLLMENT_UNKNOWN = 'unknown';
+// TENANT_ENROLLMENT_TENANT_MISMATCH is the platform answering this row's own
+// credential with a tenant that is not the row's. It is the same verdict — and
+// deliberately the same value — as TENANT_PLATFORM_STATE_TENANT_MISMATCH: the
+// sidebar row and the dashboard it opens describe one situation, and two
+// spellings of it would be two things to keep in step.
+export const TENANT_ENROLLMENT_TENANT_MISMATCH = TENANT_PLATFORM_STATE_TENANT_MISMATCH;
 
 export interface UITenantPlatformEnrollmentStatus {
   tenant: string;
   state: string;
   declineReason?: string;
+  // platformHost is the platform this row's credential actually reached,
+  // absent when it reached none — the icon's copy names whichever platform
+  // answered rather than a fixed hostname, which is only ever right for the
+  // one platform it names.
+  platformHost?: string;
+  // platformTenant is the tenant the platform resolved this row's credential
+  // to, set only on TENANT_ENROLLMENT_TENANT_MISMATCH.
+  platformTenant?: string;
 }
 
 export interface UIListTenantPlatformEnrollmentStatusesInput {
