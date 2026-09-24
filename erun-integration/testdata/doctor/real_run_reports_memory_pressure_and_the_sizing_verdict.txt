@@ -24,10 +24,13 @@ team-devops-pod-1   2/2     Running   0
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 == Resources ==
 CPU: 1.7% of a 6.00-core quota (sampled over 1.0s)
-Memory: 6.0GiB / 6.0GiB (100.0%), peak 6.0GiB, OOM kills 3
+Memory: 6.0GiB / 6.0GiB limit (100.0%), peak 6.0GiB, OOM kills 3
+Requests: 0.5 CPU / 2.0GiB for the pod
+  erun-devops: 0.25 CPU / 1.0GiB
+  erun-dind: 0.25 CPU / 1.0GiB
 erun-dind sidecar (where builds run):
   CPU: unavailable (cpu.stat usage_usec was not readable across the sample interval)
-  Memory: 1.0GiB / 16.0GiB (6.2%), peak 2.0GiB, OOM kills 0
+  Memory: 1.0GiB / 16.0GiB limit (6.2%), peak 2.0GiB, OOM kills 0
 Disk (node, shared): <HOME> 84.9GiB / 189.1GiB (44.9%)
   this environment's own usage: 42.0GiB
 Warnings (3):

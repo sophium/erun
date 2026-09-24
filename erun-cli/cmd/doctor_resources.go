@@ -38,7 +38,7 @@ func reportDoctorResources(ctx common.Context, req common.ShellLaunchParams, res
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
-	usage, err := common.RunRuntimeUsage(ctx, nil, req, common.RuntimeUsageParams{Interval: doctorResourceInterval})
+	usage, err := common.RunRuntimeUsage(ctx, nil, nil, req, common.RuntimeUsageParams{Interval: doctorResourceInterval})
 	if err != nil {
 		return reportPodUnreachable(ctx, "Resources", err)
 	}

@@ -65,7 +65,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
 
-	reading, err := eruncommon.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), req, eruncommon.RuntimeUsageParams{})
+	reading, err := eruncommon.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, eruncommon.RuntimeUsageParams{})
 	if err != nil {
 		return uiRuntimeUsage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
 	}
@@ -97,6 +97,25 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 	}
 }
 
+// runtimePodRequestsRunner is runtimeUsageRunner's sibling for the reservation
+// read: the same bounded ctx, so a `kubectl get pods` that hangs on an
+// unreachable API server cannot hold the Runtime tab open past the probe's own
+// deadline. The invocation itself is erun-common's (RuntimePodRequestsArgs) so
+// the desktop reads the identical pod spec the CLI and the MCP tool read.
+func runtimePodRequestsRunner(ctx context.Context) eruncommon.RuntimePodRequestsRunnerFunc {
+	return func(args []string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		eruncommon.HideConsoleWindow(cmd)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("kubectl get pods: %w", err)
+		}
+		return stdout.Bytes(), nil
+	}
+}
+
 // uiRuntimeUsageFromReading maps the shared reader's output onto the UI
 // model. Every field carries its own unavailability rather than collapsing to
 // zero, matching the reader's own fail-soft contract.
@@ -109,6 +128,7 @@ func uiRuntimeUsageFromReading(reading eruncommon.RuntimeUsage) uiRuntimeUsage {
 		Memory:         uiRuntimeMemoryUsageFromReading(reading.Memory),
 		Warnings:       reading.Warnings,
 		ExcludesBuilds: reading.ExcludesBuilds,
+		Requests:       uiRuntimeUsageRequestsFromReading(reading.Requests),
 	}
 	for _, disk := range reading.Disk {
 		usage.Disk = append(usage.Disk, uiRuntimeDiskUsageFromReading(disk))
@@ -164,6 +184,40 @@ func uiRuntimeMemoryUsageFromReading(memory eruncommon.RuntimeMemoryUsage) uiRun
 		result.PercentOfLimit = memory.PercentOfLimit
 	}
 	return result
+}
+
+// uiRuntimeUsageRequestsFromReading maps the reservation reading, keeping the
+// two failure shapes apart: no reading at all (a dry run, or a caller that
+// never asked) stays nil, while a pod spec that could not be read arrives as an
+// unavailable reading with its reason -- so the card renders "not read" and
+// never a reservation of nothing.
+func uiRuntimeUsageRequestsFromReading(requests *eruncommon.RuntimeUsageRequests) *uiRuntimeUsageRequests {
+	if requests == nil {
+		return nil
+	}
+	return &uiRuntimeUsageRequests{
+		Unavailable: requests.Unavailable,
+		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[eruncommon.DevopsComponentName]),
+	}
+}
+
+// uiRuntimeContainerRequestsFromReading carries a request pair in both the
+// numbers a renderer compares and the strings it shows: the millicores/bytes
+// are what the card sorts and labels against a limit, and the rendered CPU/
+// memory are formatted once here so the hover card, the Runtime tab and the
+// Manage dialog cannot spell the same reservation differently.
+func uiRuntimeContainerRequestsFromReading(requests eruncommon.KubernetesRequests) uiRuntimeContainerRequests {
+	rendered := uiRuntimeContainerRequests{
+		CPUMilli:    requests.CPUMilli,
+		MemoryBytes: requests.MemoryBytes,
+	}
+	if requests.CPUMilli > 0 {
+		rendered.CPU = eruncommon.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+	}
+	if requests.MemoryBytes > 0 {
+		rendered.Memory = formatRuntimeUsageBytes(requests.MemoryBytes)
+	}
+	return rendered
 }
 
 func uiRuntimeDiskUsageFromReading(disk eruncommon.RuntimeDiskUsage) uiRuntimeDiskUsage {

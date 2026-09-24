@@ -195,6 +195,19 @@ type RuntimeUsage struct {
 	// was read successfully -- it describes CPU/Memory above, which never
 	// change meaning regardless of what else this reading also carries.
 	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
+	// Requests is what the scheduler admits this environment's pod on -- the
+	// runtime container's and the erun-dind sidecar's declared
+	// resources.requests, and the pod's effective total (runtime_pod_requests.go)
+	// -- so a sizing judgement can tell a *reservation* from the cgroup ceiling
+	// CPU and Memory above divide against. A limit costs nothing while unused,
+	// so `Mem 0% of 27.0GiB` measured against a 1GiB reservation reads as an
+	// environment holding 27GiB when it holds none of it.
+	//
+	// Nil in dry-run (nothing was read, and a zero request would be a
+	// reservation of nothing) and never fabricated: a pod spec that could not
+	// be read arrives as a reading carrying Unavailable, so "could not read the
+	// reservation" stays distinguishable from "reserves nothing".
+	Requests *RuntimeUsageRequests `json:"requests,omitempty"`
 	// Dind is the erun-dind sidecar's own CPU/memory reading, populated only
 	// on an environment that carries the sidecar (ExcludesBuilds true) and
 	// only when its cgroup could actually be read -- nil on any other
@@ -317,7 +330,12 @@ type RuntimeDiskUsage struct {
 // a sidecar mid-restart) must still get a usable runtime-container reading
 // rather than losing the whole call over a container this reading has always
 // been unable to see anyway.
-func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
+//
+// It also reads the pod spec for the resources.requests the scheduler admits
+// the pod on (runtime_pod_requests.go) and attaches them as Requests. That is
+// a second source by necessity, not by preference: the numbers above are cgroup
+// readings, and no cgroup file records a request. It too fails soft.
+func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req ShellLaunchParams, params RuntimeUsageParams) (RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
@@ -330,10 +348,15 @@ func RunRuntimeUsage(ctx Context, runner RuntimeContainerCommandRunnerFunc, req 
 	if usesDind {
 		dindResult, dindErr = RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeDindContainerName, "usage-dind", script)
 	}
+	// Read after the execs so a dry run's trace lists the actions in the order
+	// they would run, and never fails the call: a pod spec that cannot be read
+	// costs the reservation figures, not the cgroup reading above them.
+	requests := readRuntimeUsageRequests(ctx, podRequests, req)
 	if ctx.DryRun {
 		return RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: usesDind}, nil
 	}
 	usage := parseRuntimeUsage(req, result.Stdout, interval)
+	usage.Requests = requests
 	if usesDind && dindErr == nil {
 		usage.Dind = parseRuntimeDindUsage(dindResult.Stdout, interval)
 		usage.Warnings = runtimeUsageWarnings(usage)

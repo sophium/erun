@@ -104,3 +104,56 @@ func TestUsageRenderingOmitsSizingWhenThereIsNone(t *testing.T) {
 		t.Errorf("a report with no recommendation rendered a sizing section:\n%s", out.String())
 	}
 }
+
+// TestUsageReportNamesTheLimitAndTheSchedulerRequest is the operator-visible
+// half of the reservation reading: the memory line has to say which of its two
+// figures is the ceiling -- unqualified, `394.4MiB / 2.0GiB (19.3%)` reads as
+// an environment holding 2.0GiB -- and the reservation the scheduler actually
+// admitted the pod on has to be stated beside it, per container and as the
+// pod's own total. An operator sizing a node against `of 27.0GiB` is reading a
+// ceiling as provisioning, which is the whole of the defect.
+func TestUsageReportNamesTheLimitAndTheSchedulerRequest(t *testing.T) {
+	usage := code3Reading()
+	usage.Requests = &common.RuntimeUsageRequests{
+		Containers: map[string]common.KubernetesRequests{
+			"erun-devops": {CPUMilli: 250, MemoryBytes: 1024 * renderMiB},
+			"erun-dind":   {CPUMilli: 250, MemoryBytes: 1024 * renderMiB},
+		},
+		Pod: common.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * renderMiB},
+	}
+	var out bytes.Buffer
+	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
+		t.Fatalf("writeUsageResult: %v", err)
+	}
+	rendered := out.String()
+	t.Logf("erun usage:\n%s", strings.TrimRight(rendered, "\n"))
+
+	if !strings.Contains(rendered, "6.0GiB limit (98.0%)") {
+		t.Errorf("expected the memory line to name its denominator a limit, got:\n%s", rendered)
+	}
+	for _, want := range []string{
+		"Requests: 0.5 CPU / 2.0GiB for the pod",
+		"  erun-devops: 0.25 CPU / 1.0GiB",
+		"  erun-dind: 0.25 CPU / 1.0GiB",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("rendered output is missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+// TestUsageReportStatesAnUnreadableReservationRatherThanZero covers the case a
+// silently-empty reading would get wrong: a pod spec that could not be read
+// must say so, because "no reservation figures" and "reserves nothing" are
+// different answers and only one of them is true here.
+func TestUsageReportStatesAnUnreadableReservationRatherThanZero(t *testing.T) {
+	usage := code3Reading()
+	usage.Requests = &common.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"}
+	var out bytes.Buffer
+	if err := writeUsageResult(common.Context{Stdout: &out, Stderr: &out}, common.RuntimeUsageReport{RuntimeUsage: usage}); err != nil {
+		t.Fatalf("writeUsageResult: %v", err)
+	}
+	if !strings.Contains(out.String(), "Requests: unavailable (kubectl get pods: connection refused)") {
+		t.Errorf("expected the unreadable reservation to be stated, got:\n%s", out.String())
+	}
+}

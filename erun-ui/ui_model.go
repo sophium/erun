@@ -1253,6 +1253,34 @@ type uiRuntimeUsage struct {
 	// into the sidecar failed, so "could not read it" never renders as "read as
 	// zero".
 	Dind *uiRuntimeDindUsage `json:"dind,omitempty"`
+	// Requests is what the scheduler admits this environment's pod on -- the
+	// declared resources.requests, which no cgroup file records. It is what the
+	// limits above must be read against: `Mem 0% of 27.0GiB` measures a ceiling
+	// that reserves nothing, so the card states the reservation beside it.
+	// Mirrors eruncommon.RuntimeUsage.Requests; nil when nothing was read, and
+	// carrying Unavailable (never a zero) when the pod spec could not be.
+	Requests *uiRuntimeUsageRequests `json:"requests,omitempty"`
+}
+
+// uiRuntimeUsageRequests mirrors the half of eruncommon.RuntimeUsageRequests
+// this surface renders: the runtime container's own request, which is the
+// reservation the CPU and Memory rows above are measured against, resolved here
+// rather than in the component so no frontend code has to know the chart's
+// container name.
+type uiRuntimeUsageRequests struct {
+	Runtime     uiRuntimeContainerRequests `json:"runtime"`
+	Unavailable string                     `json:"unavailable,omitempty"`
+}
+
+// uiRuntimeContainerRequests is one container's declared request in the units a
+// comparison needs (millicores, bytes) and in the strings a card shows. A
+// zero/empty pair is a container that declares nothing for that resource, which
+// reserves nothing -- it is rendered as absent, never as a measured zero.
+type uiRuntimeContainerRequests struct {
+	CPUMilli    int64  `json:"cpuMilli,omitempty"`
+	MemoryBytes int64  `json:"memoryBytes,omitempty"`
+	CPU         string `json:"cpu,omitempty"`
+	Memory      string `json:"memory,omitempty"`
 }
 
 // uiRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading.

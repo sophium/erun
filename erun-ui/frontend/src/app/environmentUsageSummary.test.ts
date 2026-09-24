@@ -68,7 +68,7 @@ test('an available reading with both cpu and memory renders a compact comparable
     },
     now,
   );
-  assert.equal(summary.headline, 'CPU 12.0% · Mem 25% of 2048Mi');
+  assert.equal(summary.headline, 'CPU 12.0% · Mem 25% of 2048Mi limit');
   assert.equal(summary.stale, false);
 });
 
@@ -248,7 +248,7 @@ test('each metric carries its own figures and percentage', () => {
   assert.equal(metrics.cpu.percent, 68.4);
   assert.equal(metrics.memory.label, 'Memory');
   assert.equal(metrics.memory.value, '82%');
-  assert.equal(metrics.memory.suffix, 'of 23.0 GiB');
+  assert.equal(metrics.memory.suffix, 'of 23.0 GiB limit');
   assert.equal(metrics.memory.percent, 82);
 });
 
@@ -492,4 +492,53 @@ test('an unreadable sidecar CPU reports the reason instead of an idle zero', () 
   assert.equal(metrics.builds.value, '—');
   assert.equal(metrics.builds.utilization, undefined);
   assert.equal(metrics.builds.note, 'cpu.stat usage_usec was not readable');
+});
+
+// requestReading is a reading whose pod spec was read: the runtime container
+// declares the chart's fixed 0.25 CPU / 1.0GiB against limits in the tens of
+// GiB, which is exactly the state the card used to render as provisioned.
+function requestReading(): UIEnvironmentUsageSnapshot['usage'] {
+  const usage = readable(82);
+  usage.requests = {
+    runtime: { cpuMilli: 250, memoryBytes: 1024 * 1024 * 1024, cpu: '0.25 CPU', memory: '1024Mi' },
+  };
+  return usage;
+}
+
+// TestEachMetricStatesItsCeilingAndItsReservation is the card half of the
+// reservation reading: `82% of 23.0 GiB` reads as an environment holding 23.0
+// GiB, when the container reserves 1.0GiB and the rest is only what it may
+// grow to under pressure. Naming the ceiling a limit and stating the request
+// beside it is what makes the two distinguishable without arithmetic.
+test('each metric states its ceiling and its reservation', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(snapshotWith(requestReading()), Date.now()),
+  );
+  assert.equal(metrics.memory.suffix, 'of 23.0 GiB limit · 1024Mi requested');
+  assert.equal(metrics.cpu.suffix, '0.25 CPU requested');
+});
+
+// TestAMissingReservationIsAbsentRatherThanZero covers the state a fabricated
+// zero would misstate: an unread pod spec (an older cluster, kubectl refusing
+// the read) leaves the reservation unstated, while the limits and the usage
+// figures beside it keep rendering. "Could not read the reservation" is not
+// "reserves nothing", and only one of them is true here.
+test('a missing reservation is absent rather than a requested zero', () => {
+  const unread = readingOf(
+    summarizeEnvironmentUsageMetrics(snapshotWith(readable(82)), Date.now()),
+  );
+  assert.equal(unread.memory.suffix, 'of 23.0 GiB limit');
+  assert.equal(unread.cpu.suffix, '');
+});
+
+// TestAnUnreadablePodSpecIsStatedRatherThanSilent is the other half of that
+// distinction: a read that was attempted and failed has a reason to give, and
+// the card's own honesty contract (never a number nobody measured) is what the
+// reason preserves.
+test('an unreadable pod spec is reported by the reader, never as zero', () => {
+  const usage = readable(82);
+  usage.requests = { runtime: {}, unavailable: 'kubectl get pods: connection refused' };
+  const metrics = readingOf(summarizeEnvironmentUsageMetrics(snapshotWith(usage), Date.now()));
+  assert.equal(metrics.memory.suffix, 'of 23.0 GiB limit');
+  assert.equal(metrics.cpu.suffix, '');
 });
