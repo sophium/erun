@@ -102,23 +102,38 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 // zero, matching the reader's own fail-soft contract.
 func uiRuntimeUsageFromReading(reading eruncommon.RuntimeUsage) uiRuntimeUsage {
 	usage := uiRuntimeUsage{
-		Tenant:      reading.Tenant,
-		Environment: reading.Environment,
-		Available:   true,
-		CPU:         uiRuntimeCPUUsageFromReading(reading.CPU),
-		Memory:      uiRuntimeMemoryUsageFromReading(reading.Memory),
-		Warnings:    reading.Warnings,
+		Tenant:         reading.Tenant,
+		Environment:    reading.Environment,
+		Available:      true,
+		CPU:            uiRuntimeCPUUsageFromReading(reading.CPU),
+		Memory:         uiRuntimeMemoryUsageFromReading(reading.Memory),
+		Warnings:       reading.Warnings,
+		ExcludesBuilds: reading.ExcludesBuilds,
 	}
 	for _, disk := range reading.Disk {
 		usage.Disk = append(usage.Disk, uiRuntimeDiskUsageFromReading(disk))
+	}
+	// The sidecar is carried through whole rather than folded into CPU/Memory
+	// above: those two describe the runtime container, and the whole point of
+	// the field is that on a build-capable environment they are not the
+	// environment's usage. A nil reading stays nil — an older runtime image
+	// without the sidecar-readable path must render as "not read", not as zero.
+	if reading.Dind != nil {
+		usage.Dind = &uiRuntimeDindUsage{
+			CPU:    uiRuntimeCPUUsageFromReading(reading.Dind.CPU),
+			Memory: uiRuntimeMemoryUsageFromReading(reading.Dind.Memory),
+		}
 	}
 	usage.Message = uiRuntimeUsageMessage(usage)
 	return usage
 }
 
 func uiRuntimeCPUUsageFromReading(cpu eruncommon.RuntimeCPUUsage) uiRuntimeCPUUsage {
+	// UsageUsec travels with both branches: it is read before the quota is
+	// resolved (erun-common's runtimeCPUUsageFromValues), so a container with no
+	// ceiling still reports the work it has done.
 	if cpu.Unavailable != "" {
-		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable}
+		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable, UsageUsec: cpu.UsageUsec}
 	}
 	return uiRuntimeCPUUsage{
 		Available:          true,
@@ -126,6 +141,7 @@ func uiRuntimeCPUUsageFromReading(cpu eruncommon.RuntimeCPUUsage) uiRuntimeCPUUs
 		Quota:              fmt.Sprintf("%.2f cores", cpu.QuotaCores),
 		UtilizationPercent: cpu.UtilizationPercent,
 		Utilization:        fmt.Sprintf("%.1f%%", cpu.UtilizationPercent),
+		UsageUsec:          cpu.UsageUsec,
 	}
 }
 
@@ -184,7 +200,15 @@ func uiRuntimeUsageMessage(usage uiRuntimeUsage) string {
 	if len(parts) == 0 {
 		return "This environment's own CPU and memory usage could not be read."
 	}
-	return "This environment: " + strings.Join(parts, ", ") + "."
+	// The runtime container's figures are the whole story on an environment
+	// with no sidecar and are never the whole story on one that has it: builds
+	// run in erun-dind, so this line must not be read as "this environment is
+	// idle". The sidecar's own reading is the panel's Builds block.
+	builds := ""
+	if usage.ExcludesBuilds {
+		builds = ", excluding builds (they run in the erun-dind sidecar)"
+	}
+	return "This environment: " + strings.Join(parts, ", ") + builds + "."
 }
 
 func formatRuntimeUsageBytes(bytes int64) string {

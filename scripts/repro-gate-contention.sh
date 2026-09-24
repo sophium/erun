@@ -316,12 +316,29 @@ exit \$suite_rc"
 	# silently, since only its own log says so -- and the "contended"
 	# attempt then measures an idle box. That failure mode looks exactly
 	# like a clean reproduction, so it is worth being explicit about.
+	#
+	# safe.directory=/src is the same hazard one layer down, and it is why
+	# the load dies early rather than merely slowly. The container runs as
+	# root against a worktree the environment owns (uid 1000), so git
+	# refuses to read it ("detected dubious ownership") and `go build`'s
+	# default VCS stamping fails with exit status 128. golangci-lint runs
+	# its typecheck with the module's own `go` invocation, so every module
+	# in the load reports `error obtaining VCS status` and `make lint`
+	# exits 1 within a few minutes -- leaving the suite to finish the rest
+	# of its ~20 minutes on an otherwise idle box. The attempt still prints
+	# a contended-looking spec list and a real cgroup throttle delta (the
+	# suite alone throttles), so nothing in the verdict distinguishes it
+	# from a load that ran the whole way. Allow the mount explicitly
+	# instead.
 	# shellcheck disable=SC2086
 	timeout "$timeout_s" docker run --rm --name "$name" \
 		--user "${container_user:-root}" \
 		--cpus="$cpus" \
 		-v "$repo_root:/src" \
 		-w /src \
+		-e GIT_CONFIG_COUNT=1 \
+		-e GIT_CONFIG_KEY_0=safe.directory \
+		-e GIT_CONFIG_VALUE_0=/src \
 		-v /home/erun/.cache/go-build:/root/.cache/go-build \
 		-v /home/erun/go/pkg/mod:/go/pkg/mod \
 		-v /home/erun/.cache/golangci-lint:/root/.cache/golangci-lint \

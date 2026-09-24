@@ -42,10 +42,32 @@ export const submitManageStop = (): AppThunk<Promise<void>> => async (dispatch, 
 
 // stopEnvironmentMessage always names the way back, so a stopped environment is
 // never a dead end the operator has to work out for themselves.
+//
+// It also names the platform components the stop left running, on both
+// outcomes. A stop scales the runtime Deployment and nothing else, so those
+// component pods are still standing afterwards — and a pod that outlives a stop
+// with no explanation reads as the stop having failed. On the already-stopped
+// outcome they are the entire explanation for why nothing changed.
 function stopEnvironmentMessage(result: UIEnvironmentStopResult): string {
   const name = `${result.tenant} / ${result.environment}`;
+  const kept = stopEnvironmentKeptComponents(result.remainingComponents);
+  const keptClause =
+    kept === '' ? '' : ` Platform component(s) keep running and keep holding capacity: ${kept}.`;
   if (result.alreadyStopped) {
-    return `${name} was already stopped. Click it in the sidebar to start it again.`;
+    return `${name} was already stopped.${keptClause} Click it in the sidebar to start it again.`;
   }
-  return `Stopped ${name} and returned its capacity to the node. Click it in the sidebar to start it again.`;
+  return `Stopped ${name} and returned its runtime's capacity to the node.${keptClause} Click it in the sidebar to start it again.`;
+}
+
+// stopEnvironmentKeptComponents names the platform components a stop leaves
+// holding their capacity, or '' when the environment deploys none: a
+// runtime-only environment has nothing to explain, and a sentence saying
+// "nothing else is left running" would spend the operator's attention on a fact
+// they never had to wonder about. Shared with the Runtime tab's Stop control,
+// which says the same thing before the click rather than after it.
+export function stopEnvironmentKeptComponents(components: string[] | undefined): string {
+  return (components ?? [])
+    .map((name) => name.trim())
+    .filter((name) => name !== '')
+    .join(', ');
 }

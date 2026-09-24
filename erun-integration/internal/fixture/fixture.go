@@ -89,6 +89,33 @@ func SeedStoppedTenantEnv(t testing.TB, setup env.Setup, tenant, environment str
 	appendEnvConfig(t, setup, tenant, environment, "stopped: true\n")
 }
 
+// SeedTenantEnvDeployingComponents seeds an env whose saved deploy selection
+// names platform components: the shape an operator meets whenever an
+// environment hosting the platform's own API and database is stopped, and the
+// pods those components keep running are read as a stop that did not finish.
+// The runtime's own name is in the selection on purpose — `erun deploy` accepts
+// it — so a scenario can pin that a stop reports the components and never
+// itself.
+func SeedTenantEnvDeployingComponents(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedTenantEnv(t, setup, tenant, environment)
+	appendEnvConfig(t, setup, tenant, environment,
+		"deploy:\n"+
+			"  components:\n"+
+			"    - "+tenant+"-devops\n"+
+			"    - "+tenant+"-backend-api\n"+
+			"    - "+tenant+"-backend-postgres\n")
+}
+
+// SeedStoppedTenantEnvDeployingComponents is that env already stopped — the
+// state a Stop press meets as a no-op, where the surviving components are the
+// whole explanation for why nothing changed.
+func SeedStoppedTenantEnvDeployingComponents(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedTenantEnvDeployingComponents(t, setup, tenant, environment)
+	appendEnvConfig(t, setup, tenant, environment, "stopped: true\n")
+}
+
 // appendEnvConfig adds extra keys to an already-seeded env config, so seed
 // variants stay one line instead of a copy of the whole tree.
 func appendEnvConfig(t testing.TB, setup env.Setup, tenant, environment, extra string) {

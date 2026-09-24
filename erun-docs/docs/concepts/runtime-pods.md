@@ -72,10 +72,19 @@ the agent config, the outputs directory, the image store and the build cache are
 What does not survive is whatever was running in the pod — stop an environment because nobody is
 using it, not to pause work in progress.
 
+The stop covers the runtime pod. The application services from § 2 above run in the same namespace
+but are not part of it, so they keep running and keep holding their capacity — deliberately, because
+on the environment hosting the platform those components *are* the platform. `erun stop` names the
+ones it left running, so the pods still standing afterwards do not read as a stop that failed. See
+[`erun stop` · What a stop does not touch](/cli/stop#what-a-stop-does-not-touch).
+
 The desktop shows a stopped environment as **stopped**, not as broken: a hollow indicator on the
 environment's row rather than the warning triangle a failed deploy gets. Stopping is also an action
 there, on the environment's Runtime tab beside Deploy — which is where you notice the problem,
 because the resource sliders on that tab are computed from what the node's pods currently reserve.
+That tab says whether the runtime is running, already stopped, or was never deployed before it
+offers the action, so a stop that would be a correct no-op is visibly one rather than a button that
+appears to do nothing.
 
 ## Reading the resource figures
 

@@ -311,6 +311,71 @@ test.describe('tenant dashboard — platform-readiness states (#1393)', () => {
     }
   });
 
+  // The reported state of #2565's second sub-claim: a local tenant whose
+  // erun-type alias reaches a *different* platform tenant. Resolution
+  // succeeds, whoami answers — for another tenant — and every panel under the
+  // heading would be that tenant's reviews, merge queue, users and audit,
+  // with this local tenant's name on the heading above them and live write
+  // controls (create a review, advance the merge queue, approve an
+  // invitation) acting on them. Nothing in either config links the two
+  // namespaces, so the platform's own name for the tenant behind the bearer
+  // is the only thing that can say whether the rows are this tenant's.
+  //
+  // The stub carries rows on purpose — a reviews/tabs payload alongside
+  // platformState is the disagreement the report describes, and the surface
+  // must render none of it. Rendering the rows *and* naming the platform
+  // tenant is the neighbouring state that already has coverage
+  // (tenant-dashboard-platform-tenant.spec.ts) and is not what makes the
+  // other tenant's work invisible to the operator who opened this dashboard.
+  test('tenant-mismatch names whose rows these are and renders none of them', async ({
+    app,
+    page,
+  }) => {
+    const environment = seedDashboardEnvironment('platform-tenant-mismatch');
+    try {
+      await waitForSeededRow(app, SEED_TENANT, environment);
+
+      stubRPC(page, {
+        LoadTenantDashboard: {
+          data: {
+            tenant: SEED_TENANT,
+            platformState: 'tenant-mismatch',
+            platformUrl: 'https://api.frs-prod.services.erunpaas.com',
+            user: {
+              tenantId: 'tenant-1',
+              tenantName: 'erun',
+              userId: 'user-1',
+              username: 'reader',
+            },
+            reviews: [{ reviewId: 'r1', name: 'another tenant review', status: 'OPEN' }],
+          },
+        },
+      });
+
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+
+      await expect(app.tenantDashboard.tenantMismatchHeading()).toBeVisible();
+      // Both names, so the operator can tell which tenant they are actually
+      // looking at and which one they meant.
+      await expect(app.tenantDashboard.tenantMismatchBody()).toContainText('erun');
+      await expect(app.tenantDashboard.tenantMismatchBody()).toContainText(SEED_TENANT);
+      // None of the other tenant's rows: the tab strip and every panel are
+      // replaced, exactly as for the other readiness states, so the refusal
+      // is not a disclosure sitting over a live table.
+      await expect(app.tenantDashboard.tabs()).toHaveCount(0);
+      await expect(page.getByText('another tenant review')).toHaveCount(0);
+      // The header above still names the platform tenant, so the mismatch is
+      // stated whichever state the body is in.
+      await expect(app.tenantDashboard.platformTenantLine()).toContainText('erun');
+      // Not a dead end: the card offers the route to the platform that
+      // serves this local tenant.
+      await expect(app.tenantDashboard.connectApiUrlInput()).toBeVisible();
+      await expect(app.tenantDashboard.connectButton()).toBeVisible();
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
   // Regression guard: the sidebar's own cloud-alias "Log in" control
   // (Sidebar.PrimaryCloudAliasControl.tsx, dispatching loginPrimaryCloudProvider
   // directly, no dashboard recovery attached) must render exactly as before

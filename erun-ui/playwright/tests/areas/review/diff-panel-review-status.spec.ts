@@ -233,7 +233,14 @@ test.describe('diff panel — review-status chip', () => {
     await app.reviewPanel.reviewActionButton(envKey, 'Advance queue').click();
     await app.reviewPanel.reviewActionButton(envKey, 'Confirm').click();
 
-    expect(advanceInput).toMatchObject({ tenant: seededEnv.tenant, targetBranch: 'main' });
+    // Polled, not read synchronously: `advanceInput` is written by the route
+    // handler, which runs when the request is intercepted — a click resolves
+    // once the event is dispatched, so a bare read here only ever passes
+    // because the handler usually wins that race. It loses one under the
+    // gate's parallelism, and the assertion reds on a call that did happen.
+    await expect
+      .poll(() => advanceInput)
+      .toMatchObject({ tenant: seededEnv.tenant, targetBranch: 'main' });
     await expect(app.reviewPanel.reviewStatusChip(envKey, 'Merging')).toBeVisible();
   });
 

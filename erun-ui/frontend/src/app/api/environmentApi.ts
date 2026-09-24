@@ -19,6 +19,7 @@ import type {
   UIRuntimeActivity,
   UIRuntimeReclaimInput,
   UIRuntimeReclaimResult,
+  UIRuntimeRunState,
   UIRuntimeSizingRecommendation,
   UIRuntimeUsage,
 } from '@/uiRuntimeTypes';
@@ -36,6 +37,7 @@ import {
   LoadHostedRegistry,
   LoadRuntimeActivity,
   LoadRuntimeResourceStatus,
+  LoadRuntimeRunState,
   LoadRuntimeSizing,
   LoadRuntimeUsage,
   LoadVersionSuggestions,
@@ -92,6 +94,18 @@ function runtimeTabEndpoints(builder: EnvironmentApiBuilder) {
         LoadClusterRegistry(args),
       ),
       providesTags: ['RuntimeResourceStatus'],
+    }),
+    // Whether the environment's runtime is running, stopped, or not deployed —
+    // the state Stop has to consult before it offers the action, since pressing
+    // it on an already-stopped runtime is a correct no-op that otherwise reads
+    // as a broken button. Separate from getRuntimeUsage: this is one kubectl
+    // get against the Deployment, not an exec into the pod, so it is cheap
+    // enough to answer before anything is asked of the environment.
+    getRuntimeRunState: builder.query<UIRuntimeRunState, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIRuntimeRunState>((selection) =>
+        LoadRuntimeRunState(selection),
+      ),
+      providesTags: ['RuntimeRunState'],
     }),
     // What the runtime pod is running right now: sessions and the processes
     // holding memory. Read-only — nothing here reclaims anything.
@@ -193,11 +207,20 @@ export const environmentApi = wailsApi.injectEndpoints({
     // Stopping frees the env's runtime and dind limits, so the node capacity
     // the Runtime tab offers every other env changes the moment it lands —
     // invalidate the resource status rather than leaving stale maxima on screen.
+    // The run state is invalidated with it: it is what the Stop control itself
+    // reads, so a stop that lands has to re-answer its own question rather than
+    // leave the panel showing the state the operator just acted on.
     stopEnvironment: builder.mutation<UIEnvironmentStopResult, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentStopResult>((selection) =>
         StopEnvironment(selection),
       ),
-      invalidatesTags: ['RuntimeResourceStatus', 'RuntimeActivity', 'RuntimeUsage', 'AppState'],
+      invalidatesTags: [
+        'RuntimeResourceStatus',
+        'RuntimeActivity',
+        'RuntimeUsage',
+        'RuntimeRunState',
+        'AppState',
+      ],
     }),
     checkEnvironmentHealth: builder.mutation<UIEnvironmentHealth, UISelection>({
       queryFn: wailsQueryFn<UISelection, UIEnvironmentHealth>((selection) =>
@@ -248,6 +271,7 @@ export const {
   useGetRuntimeActivityQuery,
   useReclaimRuntimeResourcesMutation,
   useGetRuntimeUsageQuery,
+  useGetRuntimeRunStateQuery,
   useGetRuntimeSizingQuery,
   useResizeRuntimeToRecommendationMutation,
 } = environmentApi;

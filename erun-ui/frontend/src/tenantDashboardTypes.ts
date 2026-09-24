@@ -37,6 +37,13 @@ export const TENANT_PLATFORM_STATE_CHOOSE_ALIAS = 'choose-alias';
 export const TENANT_PLATFORM_STATE_NOT_SIGNED_IN = 'not-signed-in';
 export const TENANT_PLATFORM_STATE_NOT_ENROLLED = 'not-enrolled';
 export const TENANT_PLATFORM_STATE_NO_PERMISSION = 'no-permission';
+// The identity resolved and the platform answered, with a tenant that is not
+// the local tenant the dashboard was opened from. The two namespaces are
+// joined only by the alias the credential belongs to, so the platform's own
+// name for the tenant behind the bearer is the only value that can establish
+// correspondence — and when it names a different one, the rows below would be
+// that tenant's, not this local tenant's.
+export const TENANT_PLATFORM_STATE_TENANT_MISMATCH = 'tenant-mismatch';
 
 export interface UITenantDashboard {
   tenant: string;

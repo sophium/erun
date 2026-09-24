@@ -21,6 +21,12 @@ func newStopCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			"and a builds-here environment's worktree all survive — so waking is a pod start, not a " +
 			"rebuild. Desktop terminal sessions attached to the environment end with the pod; the " +
 			"stop names them so you can see what it took down.\n\n" +
+			"Platform components deployed into the environment (`erun deploy --components`: the API, " +
+			"its database, the ingress and DNS pieces) are NOT part of the runtime and are not " +
+			"stopped — they keep running and keep holding their capacity. That is deliberate: on an " +
+			"environment hosting the platform those components are the platform, and scaling them " +
+			"away would take it down. The stop names any it leaves running, so surviving pods are " +
+			"not mistaken for a stop that failed.\n\n" +
 			"The stop is durable: it is recorded on the environment, so a later `erun deploy` " +
 			"reconciles it rather than restarting the pod, and an automatic session reconnect " +
 			"leaves it stopped. `erun open` is what wakes the environment again. Defaults to the " +
@@ -77,13 +83,31 @@ func runStopCommand(ctx common.Context, args []string, overrides common.OpenPara
 // stopCommandSummary names the ended sessions as well as the recovery: an
 // operator whose desktop tabs go dark a second after the stop should read that
 // as their own command doing what it said, not as the environment breaking.
+//
+// It also names the platform components the stop leaves running, on both
+// outcomes. Those pods are the ones still visible after a stop, and a leftover
+// pod with no explanation is read as a failed stop; on an already-stopped
+// environment they are the whole explanation for why pressing Stop changed
+// nothing.
 func stopCommandSummary(result common.StopEnvironmentResult) string {
+	kept := stopCommandKeptComponents(result)
 	if result.AlreadyStopped {
-		return fmt.Sprintf("%s/%s was already stopped", result.Tenant, result.Environment)
+		return fmt.Sprintf("%s/%s was already stopped%s", result.Tenant, result.Environment, kept)
 	}
 	sessions := ""
 	if len(result.EndedSessions) > 0 {
 		sessions = fmt.Sprintf(" and ended %d attached desktop session(s) (%s)", len(result.EndedSessions), strings.Join(result.EndedSessions, ", "))
 	}
-	return fmt.Sprintf("stopped %s/%s%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, sessions, result.Tenant, result.Environment)
+	return fmt.Sprintf("stopped %s/%s%s%s; run `erun open %s %s` to wake it", result.Tenant, result.Environment, sessions, kept, result.Tenant, result.Environment)
+}
+
+// stopCommandKeptComponents renders the components a stop left running, or an
+// empty string when the environment deploys none — a stop on a runtime-only
+// environment has nothing to explain and must not gain a line saying so.
+func stopCommandKeptComponents(result common.StopEnvironmentResult) string {
+	if len(result.RemainingComponents) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; its platform component(s) keep running and keep holding capacity (%s)",
+		strings.Join(result.RemainingComponents, ", "))
 }

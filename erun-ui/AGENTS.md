@@ -61,7 +61,9 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 
 ## Runtime Usage Accuracy
 
-- Runtime usage samples the runtime container's cgroup, not the dind sidecar doing builds. A low reading is not evidence of idle build capacity; inspect both resource domains.
+- Runtime usage reads two resource domains, and on a build-capable environment they disagree by design. CPU/memory are the runtime container's own cgroup; the erun-dind sidecar builds actually run in is read separately and carried as `RuntimeUsage.Dind` (mirrored as `dind` in the UI model). A release lane spends its time waiting on bounded `erun exec job await` calls, so the runtime container is near-idle by construction and its low reading is never evidence of idle build capacity — the sidecar's own figure is what answers "is my build working".
+- Every surface that shows an environment's usage shows the sidecar's reading for a build-capable environment, labelled as its own domain, and never renders a missing sidecar reading as a zero: `excludesBuilds` plus an absent `dind` is a real state (an older runtime image, a sidecar mid-restart), not an idle sidecar.
+- The sidecar commonly declares no `cpu.max` quota, so it has no utilisation percentage to report. Its cumulative `cpu.stat` counter travels on the same unavailable reading (`RuntimeCPUUsage.UsageUsec`) and is stated as CPU-seconds — a real measurement with no ceiling to be a fraction of, never a synthesised rate.
 
 ## Frontend Workflow
 

@@ -89,3 +89,8 @@ output "coredns_forward_installed" {
   description = "Whether this apply installed the CoreDNS custom forward zone for base_domain_name (the resolved value of install_coredns_forward). True means in-cluster resolution of the platform's own published names no longer depends on the node's resolver chain."
   value       = local.arg_install_coredns_forward
 }
+
+output "local_path_helper_pod_resilience_installed" {
+  description = "Whether this apply configured the local-path provisioner's helper pod to tolerate the disk-pressure taint (the resolved value of install_local_path_helper_pod_resilience). True means a node kubelet has tainted can still run the helper pod, so volumes can be provisioned and reclaimed while the node is under DiskPressure rather than only after it stops being."
+  value       = local.arg_local_path_helper_pod_resilience
+}

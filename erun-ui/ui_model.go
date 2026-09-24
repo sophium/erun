@@ -199,6 +199,38 @@ type uiEnvironmentStopResult struct {
 	Release        string `json:"release"`
 	Namespace      string `json:"namespace"`
 	AlreadyStopped bool   `json:"alreadyStopped"`
+	// RemainingComponents names the platform components the stop deliberately
+	// left running (eruncommon.StopEnvironmentResult.RemainingComponents): a
+	// stop scales the runtime Deployment alone, so an outcome that does not say
+	// which component pods it left holding capacity reads as a stop that did not
+	// finish.
+	RemainingComponents []string `json:"remainingComponents,omitempty"`
+}
+
+// uiRuntimeRunState is the Runtime tab's reading of the environment's runtime
+// Deployment, taken before anything is asked of it. Stop is only a real action
+// when the Deployment currently wants pods: erun stop reads exactly these
+// replica counts to decide its own no-op, so the control that offers the action
+// has to consult the same state rather than discover it by being pressed.
+//
+// Message is the failed-read case. An unreadable cluster leaves Present false,
+// which the tab must not render as "not deployed" — see LoadRuntimeRunState.
+type uiRuntimeRunState struct {
+	Tenant          string `json:"tenant"`
+	Environment     string `json:"environment"`
+	Present         bool   `json:"present"`
+	DesiredReplicas int    `json:"desiredReplicas"`
+	ReadyReplicas   int    `json:"readyReplicas"`
+	// Stopped is Present && DesiredReplicas == 0, mirroring
+	// eruncommon.RuntimeRunState.Stopped — deliberately distinct from "pods
+	// exist but are not ready", which is an unhealthy environment.
+	Stopped bool `json:"stopped"`
+	// RemainingComponents names the platform components a stop of this
+	// environment would leave running (eruncommon.StopRemainingComponents), so
+	// the control can say what it will not touch before it is pressed rather
+	// than leaving the surviving pods to be read afterwards as a failed stop.
+	RemainingComponents []string `json:"remainingComponents,omitempty"`
+	Message             string   `json:"message,omitempty"`
 }
 
 type uiSelection struct {
@@ -1206,6 +1238,30 @@ type uiRuntimeUsage struct {
 	Memory      uiRuntimeMemoryUsage `json:"memory"`
 	Disk        []uiRuntimeDiskUsage `json:"disk,omitempty"`
 	Warnings    []string             `json:"warnings,omitempty"`
+	// ExcludesBuilds marks an environment whose runtime pod carries the
+	// erun-dind sidecar builds actually run in: CPU and Memory above are the
+	// runtime container's alone and can never see a build. Mirrors
+	// eruncommon.RuntimeUsage.ExcludesBuilds.
+	ExcludesBuilds bool `json:"excludesBuilds,omitempty"`
+	// Dind is the sidecar's own reading, and is what makes a build-capable
+	// environment's CPU legible: a release lane waiting on bounded `erun exec
+	// job await` calls is near-idle in the runtime container by construction, so
+	// without this the one figure a build-capable env reports is always ~0 and a
+	// healthy build is indistinguishable from a wedged one.
+	//
+	// Nil on every other environment, and nil (not a zero value) when the exec
+	// into the sidecar failed, so "could not read it" never renders as "read as
+	// zero".
+	Dind *uiRuntimeDindUsage `json:"dind,omitempty"`
+}
+
+// uiRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading.
+// Deliberately carries no disk field: the sidecar mounts the same workspace
+// volume uiRuntimeUsage.Disk already reports, and a second figure under its own
+// name invites reading it as an independent filesystem.
+type uiRuntimeDindUsage struct {
+	CPU    uiRuntimeCPUUsage    `json:"cpu"`
+	Memory uiRuntimeMemoryUsage `json:"memory"`
 }
 
 // uiRuntimeCPUUsage carries Available=false with Unavailable set when the
@@ -1219,6 +1275,13 @@ type uiRuntimeCPUUsage struct {
 	Quota              string  `json:"quota,omitempty"`
 	UtilizationPercent float64 `json:"utilizationPercent,omitempty"`
 	Utilization        string  `json:"utilization,omitempty"`
+	// UsageUsec is cpu.stat's cumulative usage for the current container
+	// lifetime. It is carried on an unavailable reading as well as an available
+	// one, because it is the only CPU figure a container with no cpu.max quota
+	// can offer: utilisation needs a ceiling to be a fraction of, and the
+	// erun-dind sidecar is commonly declared without one, so without this a
+	// build-capable environment's real CPU work has no representation at all.
+	UsageUsec int64 `json:"usageUsec,omitempty"`
 }
 
 // uiRuntimeMemoryUsage mirrors the reader's own fail-soft shape: Unlimited is

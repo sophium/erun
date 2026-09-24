@@ -1155,13 +1155,19 @@ stopping over MCP would kill the caller mid-call. Lifecycle is host-side, as it 
 
 1. Resolve the target the same way `erun open` does (positional args, then `--tenant`/`--environment`, then the current scope). A missing Kubernetes context aborts.
 2. **No cloud-context preflight.** Unlike every other cluster-touching command, `stop` never starts a stopped [cloud context](/concepts/cloud-contexts) to reach the cluster.
-3. Read the runtime Deployment's `spec.replicas` / `status.readyReplicas`. An absent Deployment aborts with `RUNTIME_NOT_DEPLOYED`.
+3. Read the runtime Deployment's `spec.replicas` / `status.readyReplicas`. An absent Deployment aborts with `RUNTIME_NOT_DEPLOYED`. The components the stop will leave running are resolved from `EnvConfig.deploy.components` here and traced — see [Scope](#scope-the-runtime-only).
 4. If the Deployment is already at `0` replicas, skip to step 8 — steps 5–7 are the "this run actually reclaims capacity" path.
 5. **List the attached desktop sessions.** `kubectl exec deployment/<tenant>-devops` runs the same in-pod session heartbeat probe the desktop app polls, and the ids it reports are traced and returned as `endedSessions`. They live in the pod, so the stop ends them; naming them makes that a stated consequence rather than tabs mysteriously going dark. An unreadable probe is traced and the stop continues — it is reporting, not a precondition.
 6. `kubectl scale deployment/<tenant>-devops --replicas=0`.
 7. **Confirm the stop took effect.** Re-read `spec.replicas`. Anything other than `0` aborts with `STOP_NOT_APPLIED` *before* the config write, so `EnvConfig.stopped` never claims a stop the cluster did not keep and the command never reports success for a stop that did not happen. Skipped under `--dry-run`, which traces the check instead.
 8. If `EnvConfig.stopped` is not already `true`, set it. This is the durable half: a bare scale patch is drift that the next `helm upgrade` reverts, so `deploy` renders the chart's `stopped` value from this field and reconciles `replicas` declaratively.
 9. Emit `==> Stopped <tenant>/<env>` and exit `0`.
+
+### Scope: the runtime only
+
+A stop scales **the environment's runtime Deployment**, never the environment. The application services deployed into the same namespace — the components in `.erun/config.yaml`'s deploy plan, rolled out by [`erun deploy --components`](#erun-deploy) — keep running and keep holding their capacity. That is deliberate: on the environment that hosts the platform, those components *are* the platform, and a `stop` that scaled them away would take it down.
+
+The result carries them as `remainingComponents`, and they are traced and printed on **both** outcomes, including the already-stopped no-op — a component pod that outlives a stop with nothing explaining it is read as a stop that failed, and on the no-op outcome it is the entire explanation for why nothing changed. The list is read from `EnvConfig.deploy.components` with every runtime alias removed, not by listing pods: the runtime the stop just scaled to zero is never named among the survivors.
 
 ### Durability and the interaction with `deploy`
 
@@ -1190,17 +1196,22 @@ call runs or is skipped.
   "kubernetesContext": "my-cluster",
   "stopped": true,
   "alreadyStopped": false,
-  "endedSessions": ["open-0", "ai"]
+  "endedSessions": ["open-0", "ai"],
+  "remainingComponents": ["my-tenant-backend-api", "my-tenant-backend-postgres"]
 }
 ```
 
-`alreadyStopped` distinguishes the no-op from the run that actually reclaimed capacity. `endedSessions` lists the desktop terminal sessions that were living in the pod and went down with it, omitted when there were none or when the run was a no-op.
+`alreadyStopped` distinguishes the no-op from the run that actually reclaimed capacity. `endedSessions` lists the desktop terminal sessions that were living in the pod and went down with it, omitted when there were none or when the run was a no-op. `remainingComponents` names the platform components this stop left running and holding their capacity (see [Scope](#scope-the-runtime-only)), omitted when the environment deploys none; the runtime alias in `EnvConfig.deploy.components` is never among them.
 
 ### What survives
 
 The `/home/erun` PVC (workspace, agent config, outputs, credentials), the docker-state PVC (image
 store and build cache), and a `local-agent` env's hostPath worktree are all untouched, so waking is
 a pod start rather than a cold rebuild. In-pod processes are not: a stop ends whatever was running.
+
+The platform components from [Scope](#scope-the-runtime-only) also survive — not because the stop
+preserves them, but because it never touched them. Their pods are still in the namespace after the
+runtime pod is gone.
 
 ### Error codes
 

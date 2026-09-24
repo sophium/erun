@@ -144,6 +144,13 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-stop');
   }
 
+  // What the runtime Deployment currently reports, above the Stop button and
+  // part of that button's accessible description. It is what makes the control's
+  // outcome predictable before it is pressed rather than after.
+  runtimeRunStateLine(): Locator {
+    return this.locator().locator('#environment-config-run-state');
+  }
+
   stopHelperText(): Locator {
     return this.locator().locator('#environment-config-stop-help');
   }
