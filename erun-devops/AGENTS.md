@@ -161,6 +161,21 @@ composition and release invariants belong to root/shared logic, not chart policy
 
 ### Component-specific invariants
 
+- A node under DiskPressure must still be able to reclaim its own storage.
+  kubelet's eviction manager admits and evicts by `IsCriticalPod` — a static or
+  mirror pod, or one whose resolved `spec.priority` reaches
+  `scheduling.SystemCriticalPriority` — and the local-path provisioner pins its
+  helper pod onto the volume's own node by setting `spec.nodeName` itself, so
+  the scheduler never sees it and a helper pod with no `priorityClassName` is
+  refused while the node has conditions and evicted when it has any. Both
+  provisioning and reclamation run that pod, so neither a new PVC nor the
+  deletion of an existing one completes on the node that needs the space. A
+  toleration is not the fix — the provisioner appends the disk-pressure one
+  itself. The cluster-edge module's `install_local_path_helper_pod_resilience`
+  is the opt-in that merges the priority class in; it must also annotate the
+  provisioner Deployment, because k3s sets no `CONFIG_MOUNT_PATH` and the
+  provisioner's own 30s reload is therefore a no-op.
+  `terraform-erun-cluster-edge/tests/local_path_helper_pod.tftest.hcl` locks it.
 - Deploy component dependency order comes from the environment's deployment plan,
   with shared fallback ranking; preserve parallel steps only for independent
   components. Default deployment is runtime-only; components remain opt-in.

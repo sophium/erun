@@ -361,3 +361,60 @@ variable "hsts_preload" {
   type        = bool
   default     = null
 }
+
+variable "install_local_path_helper_pod_resilience" {
+  description = <<-EOT
+    Configure the cluster's local-path provisioner so its helper pod can still
+    run on a node kubelet has tainted with node.kubernetes.io/disk-pressure.
+    Off by default, so adding this module version to an already-applied cluster
+    changes nothing until an operator opts in.
+
+    The helper pod is how local-path does both provisioning and reclamation,
+    and it runs on the node holding the volume -- the node that is under
+    DiskPressure, and therefore tainted. The failure is not slow reclamation
+    but none at all: a new PVC with volumeBindingMode WaitForFirstConsumer can
+    never bind, and deleting an existing PVC frees no bytes because the delete
+    path runs the same helper, on the node that most needs the space back.
+
+    Note what the helper pod is NOT missing: the provisioner already tolerates
+    the disk-pressure taint on its behalf, and adding a toleration changes
+    nothing. The helper pod is rejected by kubelet's admission, which turns
+    away a pod under DiskPressure unless its priority is high enough. Without a
+    priorityClassName it is an ordinary zero-priority BestEffort pod, and
+    kubelet answers it with "Pod was rejected: The node had condition:
+    [DiskPressure]". So enabling this merges priorityClassName
+    system-node-critical into the template -- the class kubelet never rejects
+    and never evicts -- and states the disk-pressure toleration explicitly
+    beside it, because declaring tolerations at all suppresses the default the
+    provisioner would otherwise append.
+
+    The template's existing contents -- in particular its helper image -- are
+    preserved; only those two scheduling fields are added. Enabling this also
+    annotates the provisioner Deployment's pod template with a digest of the
+    helper pod spec, because the provisioner reads that template once at
+    startup: without a restart the corrected key applies cleanly and changes
+    nothing until the provisioner happens to restart on its own.
+
+    The helper pod template lives in the local-path-config ConfigMap in
+    kube-system, which the distribution owns and re-applies, and the rollout
+    annotation rides on the Deployment that same manifest owns. This module
+    takes ownership of that one key and that one annotation with its own field
+    manager, so a distribution upgrade that rewrites the manifest can revert
+    either. If storage reclamation on a pressured node stops working after a
+    distribution upgrade, re-apply this module.
+  EOT
+  type        = bool
+  default     = null
+}
+
+variable "local_path_configmap_name" {
+  description = "Name of the ConfigMap in kube-system holding the local-path provisioner's configuration, including the helperPod.yaml template read when install_local_path_helper_pod_resilience is on. Defaults to \"local-path-config\", which is what k3s and the upstream manifest both use; override only on a distribution that names it something else."
+  type        = string
+  default     = null
+}
+
+variable "local_path_provisioner_deployment_name" {
+  description = "Name of the Deployment in kube-system running the local-path provisioner. Its pod template is annotated with a digest of the helper pod spec when install_local_path_helper_pod_resilience is on, so the provisioner restarts exactly when that spec changes -- it reads the template once at startup. Defaults to \"local-path-provisioner\", which is what k3s and the upstream manifest both use; override only on a distribution that names it something else."
+  type        = string
+  default     = null
+}

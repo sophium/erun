@@ -12,42 +12,45 @@
 # input with the default -- and coalesce("", "") is a hard error, which would
 # abort every apply where an optional string is genuinely unset.
 locals {
-  arg_cloudflare_api_token             = var.cloudflare_api_token == null ? "" : var.cloudflare_api_token
-  arg_acme_server                      = var.acme_server == null ? "https://acme-v02.api.letsencrypt.org/directory" : var.acme_server
-  arg_install_ingress_controller       = var.install_ingress_controller == null ? true : var.install_ingress_controller
-  arg_install_cert_manager             = var.install_cert_manager == null ? true : var.install_cert_manager
-  arg_wildcard_certificate_enabled     = var.wildcard_certificate_enabled == null ? true : var.wildcard_certificate_enabled
-  arg_namespace                        = var.namespace == null ? "cert-manager" : var.namespace
-  arg_ingress_namespace                = var.ingress_namespace == null ? "traefik" : var.ingress_namespace
-  arg_issuer_name                      = var.issuer_name == null ? "erun-cloudflare" : var.issuer_name
-  arg_cert_manager_chart_version       = var.cert_manager_chart_version == null ? "v1.20.3" : var.cert_manager_chart_version
-  arg_traefik_chart_version            = var.traefik_chart_version == null ? "33.2.1" : var.traefik_chart_version
-  arg_dns01_provider                   = var.dns01_provider == null ? "cloudflare" : var.dns01_provider
-  arg_dns01_webhook_image_pull_secrets = var.dns01_webhook_image_pull_secrets == null ? [] : var.dns01_webhook_image_pull_secrets
-  arg_broker_url                       = var.broker_url == null ? "" : var.broker_url
-  arg_dns01_token_secret_name          = var.dns01_token_secret_name == null ? "" : var.dns01_token_secret_name
-  arg_dns01_webhook_group_name         = var.dns01_webhook_group_name == null ? "acme.erun.io" : var.dns01_webhook_group_name
-  arg_dns01_webhook_image              = var.dns01_webhook_image == null ? "" : var.dns01_webhook_image
-  arg_powerdns_nameserver              = var.powerdns_nameserver == null ? "" : var.powerdns_nameserver
-  arg_rfc2136_tsig_key_name            = var.rfc2136_tsig_key_name == null ? "" : var.rfc2136_tsig_key_name
-  arg_rfc2136_tsig_algorithm           = var.rfc2136_tsig_algorithm == null ? "HMACSHA256" : var.rfc2136_tsig_algorithm
-  arg_rfc2136_tsig_secret              = var.rfc2136_tsig_secret == null ? "" : var.rfc2136_tsig_secret
-  arg_per_env_certificate_enabled      = var.per_env_certificate_enabled == null ? false : var.per_env_certificate_enabled
-  arg_env_label                        = var.env_label == null ? "" : var.env_label
-  arg_env_namespace                    = var.env_namespace == null ? "" : var.env_namespace
-  arg_install_coredns_forward          = var.install_coredns_forward == null ? false : var.install_coredns_forward
-  arg_coredns_configmap_name           = var.coredns_configmap_name == null ? "coredns" : var.coredns_configmap_name
-  arg_manage_coredns_custom_configmap  = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
-  arg_base_domain_name                 = var.base_domain_name == null ? "" : var.base_domain_name
-  arg_coredns_forward_upstreams        = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
-  arg_manage_transport_policy          = var.manage_transport_policy == null ? true : var.manage_transport_policy
-  arg_http_redirect_enabled            = var.http_redirect_enabled == null ? true : var.http_redirect_enabled
-  arg_http01_acme_challenges_present   = var.http01_acme_challenges_present == null ? false : var.http01_acme_challenges_present
-  arg_acme_challenge_path_exempt       = var.acme_challenge_path_exempt == null ? false : var.acme_challenge_path_exempt
-  arg_hsts_enabled                     = var.hsts_enabled == null ? true : var.hsts_enabled
-  arg_hsts_max_age_seconds             = var.hsts_max_age_seconds == null ? 86400 : var.hsts_max_age_seconds
-  arg_hsts_include_subdomains          = var.hsts_include_subdomains == null ? false : var.hsts_include_subdomains
-  arg_hsts_preload                     = var.hsts_preload == null ? false : var.hsts_preload
+  arg_cloudflare_api_token                   = var.cloudflare_api_token == null ? "" : var.cloudflare_api_token
+  arg_acme_server                            = var.acme_server == null ? "https://acme-v02.api.letsencrypt.org/directory" : var.acme_server
+  arg_install_ingress_controller             = var.install_ingress_controller == null ? true : var.install_ingress_controller
+  arg_install_cert_manager                   = var.install_cert_manager == null ? true : var.install_cert_manager
+  arg_wildcard_certificate_enabled           = var.wildcard_certificate_enabled == null ? true : var.wildcard_certificate_enabled
+  arg_namespace                              = var.namespace == null ? "cert-manager" : var.namespace
+  arg_ingress_namespace                      = var.ingress_namespace == null ? "traefik" : var.ingress_namespace
+  arg_issuer_name                            = var.issuer_name == null ? "erun-cloudflare" : var.issuer_name
+  arg_cert_manager_chart_version             = var.cert_manager_chart_version == null ? "v1.20.3" : var.cert_manager_chart_version
+  arg_traefik_chart_version                  = var.traefik_chart_version == null ? "33.2.1" : var.traefik_chart_version
+  arg_dns01_provider                         = var.dns01_provider == null ? "cloudflare" : var.dns01_provider
+  arg_dns01_webhook_image_pull_secrets       = var.dns01_webhook_image_pull_secrets == null ? [] : var.dns01_webhook_image_pull_secrets
+  arg_broker_url                             = var.broker_url == null ? "" : var.broker_url
+  arg_dns01_token_secret_name                = var.dns01_token_secret_name == null ? "" : var.dns01_token_secret_name
+  arg_dns01_webhook_group_name               = var.dns01_webhook_group_name == null ? "acme.erun.io" : var.dns01_webhook_group_name
+  arg_dns01_webhook_image                    = var.dns01_webhook_image == null ? "" : var.dns01_webhook_image
+  arg_powerdns_nameserver                    = var.powerdns_nameserver == null ? "" : var.powerdns_nameserver
+  arg_rfc2136_tsig_key_name                  = var.rfc2136_tsig_key_name == null ? "" : var.rfc2136_tsig_key_name
+  arg_rfc2136_tsig_algorithm                 = var.rfc2136_tsig_algorithm == null ? "HMACSHA256" : var.rfc2136_tsig_algorithm
+  arg_rfc2136_tsig_secret                    = var.rfc2136_tsig_secret == null ? "" : var.rfc2136_tsig_secret
+  arg_per_env_certificate_enabled            = var.per_env_certificate_enabled == null ? false : var.per_env_certificate_enabled
+  arg_env_label                              = var.env_label == null ? "" : var.env_label
+  arg_env_namespace                          = var.env_namespace == null ? "" : var.env_namespace
+  arg_install_coredns_forward                = var.install_coredns_forward == null ? false : var.install_coredns_forward
+  arg_coredns_configmap_name                 = var.coredns_configmap_name == null ? "coredns" : var.coredns_configmap_name
+  arg_manage_coredns_custom_configmap        = var.manage_coredns_custom_configmap == null ? true : var.manage_coredns_custom_configmap
+  arg_base_domain_name                       = var.base_domain_name == null ? "" : var.base_domain_name
+  arg_coredns_forward_upstreams              = var.coredns_forward_upstreams == null ? ["1.1.1.1", "1.0.0.1", "8.8.8.8"] : var.coredns_forward_upstreams
+  arg_manage_transport_policy                = var.manage_transport_policy == null ? true : var.manage_transport_policy
+  arg_http_redirect_enabled                  = var.http_redirect_enabled == null ? true : var.http_redirect_enabled
+  arg_http01_acme_challenges_present         = var.http01_acme_challenges_present == null ? false : var.http01_acme_challenges_present
+  arg_acme_challenge_path_exempt             = var.acme_challenge_path_exempt == null ? false : var.acme_challenge_path_exempt
+  arg_hsts_enabled                           = var.hsts_enabled == null ? true : var.hsts_enabled
+  arg_hsts_max_age_seconds                   = var.hsts_max_age_seconds == null ? 86400 : var.hsts_max_age_seconds
+  arg_hsts_include_subdomains                = var.hsts_include_subdomains == null ? false : var.hsts_include_subdomains
+  arg_hsts_preload                           = var.hsts_preload == null ? false : var.hsts_preload
+  arg_local_path_helper_pod_resilience       = var.install_local_path_helper_pod_resilience == null ? false : var.install_local_path_helper_pod_resilience
+  arg_local_path_configmap_name              = var.local_path_configmap_name == null ? "local-path-config" : var.local_path_configmap_name
+  arg_local_path_provisioner_deployment_name = var.local_path_provisioner_deployment_name == null ? "local-path-provisioner" : var.local_path_provisioner_deployment_name
 }
 
 # Transport policy for the public edge, declared once at the only layer that
@@ -370,6 +373,162 @@ resource "kubernetes_config_map_v1_data" "coredns_forward" {
 moved {
   from = kubernetes_config_map.coredns_forward
   to   = kubernetes_config_map.coredns_custom
+}
+
+# The local-path provisioner is the only storage class this platform's clusters
+# ship, and it does BOTH provisioning and reclamation through a short-lived
+# helper pod that it runs on the node holding the volume -- the node that is by
+# definition under DiskPressure, and therefore tainted
+# node.kubernetes.io/disk-pressure:NoSchedule.
+#
+# A TOLERATION IS NOT WHAT THE HELPER POD IS MISSING, and adding one fixes
+# nothing. The provisioner appends that toleration itself -- `lpvTolerations`,
+# `{Key: node.kubernetes.io/disk-pressure, Operator: Exists, Effect:
+# NoSchedule}`, appended when the template declares none (v0.0.32 and later) or
+# a blanket `{Operator: Exists}` appended unconditionally (v0.0.31 and
+# earlier). So the helper pod has always tolerated the taint, and it is still
+# rejected -- because the rejection is not the scheduler's. The provisioner
+# pins the helper pod with `helperPod.Spec.NodeName = o.Node`, bypassing the
+# scheduler entirely, so the only admission that applies is kubelet's, and
+# kubelet's eviction manager turns away a pod whose node conditions are
+# non-empty unless the pod is critical: `Admit` returns early on
+# `kubelettypes.IsCriticalPod(attrs.Pod)`, and otherwise rejects with "The node
+# had condition: [DiskPressure]". `IsCriticalPod` is true only for a static or
+# mirror pod, or one whose resolved `spec.priority` is at least
+# `scheduling.SystemCriticalPriority` (2e9). A template with no
+# priorityClassName yields an ordinary zero-priority BestEffort pod, so the
+# provisioner waits out its 120s create timeout and retries forever -- and
+# `evictPod` refuses a critical pod the same way, so the class is what also
+# stops the pod being evicted once it is running. Either way the volume is never
+# provisioned and a deleted PVC frees no bytes, because reclamation runs the
+# same helper: the node cannot free the space causing the pressure it would
+# have to relieve to run the thing that frees the space.
+#
+# system-node-critical is what carries the pod past that admission and past
+# eviction. (system-cluster-critical clears the same `>= SystemCriticalPriority`
+# bar; the node-scoped class is the right one for a workload that exists only on
+# one node.) The toleration is written out alongside it not because it is doing
+# the work but because on v0.0.32 and later setting `tolerations` at all
+# suppresses the provisioner's own default appending -- so once this template
+# declares the disk-pressure toleration explicitly, that line is what keeps it,
+# and a template whose own tolerations this module preserves must not lose it.
+# On v0.0.31 and earlier the blanket default is still appended unconditionally,
+# which makes the explicit entry redundant there rather than wrong.
+#
+# This is configuration rather than a patch to a workload this module does not
+# own: the provisioner reads its helper pod spec from the helperPod.yaml key of
+# its own ConfigMap. That key is MERGED, never replaced -- the image and every
+# other field come from whatever the distribution shipped, so a mirrored or
+# air-gapped cluster keeps the helper image its own manifest chose. Replacing
+# the key outright would mean naming the helper image here, and a wrong one
+# breaks provisioning cluster-wide, a strictly worse failure than this one.
+data "kubernetes_config_map" "local_path" {
+  count = local.arg_local_path_helper_pod_resilience ? 1 : 0
+
+  metadata {
+    name      = local.arg_local_path_configmap_name
+    namespace = "kube-system"
+  }
+}
+
+locals {
+  # The distribution's own helper pod template, parsed. Empty when the feature
+  # is off or the key is absent, so every expression below stays total.
+  local_path_helper_pod_template = try(yamldecode(data.kubernetes_config_map.local_path[0].data["helperPod.yaml"]), {})
+
+  # The template with the priority class and the toleration merged in. The
+  # provisioner rejects a template that defines its own securityContext,
+  # volumes, volumeMounts or serviceAccountName, so this adds nothing but the
+  # two scheduling fields it is documented to accept.
+  local_path_helper_pod = merge(local.local_path_helper_pod_template, {
+    spec = merge(try(local.local_path_helper_pod_template.spec, {}), {
+      priorityClassName = "system-node-critical"
+      tolerations = concat(
+        [for t in try(local.local_path_helper_pod_template.spec.tolerations, []) : t],
+        [{
+          key      = "node.kubernetes.io/disk-pressure"
+          operator = "Exists"
+          effect   = "NoSchedule"
+        }],
+      )
+    })
+  })
+}
+
+# The one key this module owns inside the provisioner's ConfigMap. Server-side
+# apply with an explicit field manager for the same reason as the CoreDNS
+# forward above: the object is the distribution's, not this module's, so a key
+# it manages for its own purposes must survive this apply untouched, and
+# destroying the edge must remove this key rather than the whole object.
+resource "kubernetes_config_map_v1_data" "local_path_helper_pod" {
+  count = local.arg_local_path_helper_pod_resilience ? 1 : 0
+
+  metadata {
+    name      = local.arg_local_path_configmap_name
+    namespace = "kube-system"
+  }
+
+  data = {
+    "helperPod.yaml" = yamlencode(local.local_path_helper_pod)
+  }
+
+  field_manager = "erun-cluster-edge"
+  force         = true
+
+  lifecycle {
+    # Refuse to write a key the provisioner will never read. A distribution
+    # whose manifest predates helperPod.yaml support ships no such key, and the
+    # provisioner then ignores whatever is written here: the apply succeeds,
+    # this module reports success, and the helper pod is exactly as
+    # inadmissible as before. The presence of the key in the distribution's own
+    # template is the one signal available at plan time that this version reads
+    # it, which is what makes it the precondition rather than a guess.
+    precondition {
+      condition     = contains(keys(data.kubernetes_config_map.local_path[0].data), "helperPod.yaml")
+      error_message = "The ${local.arg_local_path_configmap_name} ConfigMap in kube-system carries no helperPod.yaml key, so this cluster's local-path provisioner does not read a helper pod template: writing one here would apply cleanly, report success, and leave the helper pod just as inadmissible under pressure as it is now. This is a provisioner older than helperPod.yaml support; upgrade the distribution's local-path provisioner, or set install_local_path_helper_pod_resilience = false and treat storage reclamation on a pressured node as the manual step it remains."
+    }
+  }
+}
+
+# Writing the key is not enough on its own: the provisioner reads its helper pod
+# template once, when it starts, and holds it for the life of the process, so a
+# module that wrote only the ConfigMap would apply cleanly, report success, and
+# change nothing until the provisioner happened to restart -- the false success
+# this module refuses elsewhere.
+#
+# The provisioner does have a 30s reload loop, `watchAndRefreshConfig` calling
+# `refreshHelperPod`, and on the upstream manifest it would pick the corrected
+# key up on its own. It is a no-op on k3s, which is the distribution this
+# platform's clusters run: `refreshHelperPod` returns immediately unless
+# CONFIG_MOUNT_PATH is set, and k3s's Deployment at
+# /var/lib/rancher/k3s/server/manifests/local-storage.yaml declares only
+# POD_NAMESPACE. So on k3s the template read at startup is the one that sticks,
+# and the restart has to come from here. That is also why this annotates the
+# Deployment rather than relying on a ConfigMap-mounted path: the startup read
+# goes through the API (`findConfigFileFromConfigMap`), not the mount.
+#
+# Annotating the provisioner's pod template with a digest of the template makes
+# the rollout a consequence of the configuration it depends on: the annotation
+# changes only when the helper pod spec changes, so an unchanged apply is a
+# no-op and a changed one restarts exactly the component that caches it.
+resource "kubernetes_annotations" "local_path_provisioner_rollout" {
+  count = local.arg_local_path_helper_pod_resilience ? 1 : 0
+
+  api_version = "apps/v1"
+  kind        = "Deployment"
+
+  metadata {
+    name      = local.arg_local_path_provisioner_deployment_name
+    namespace = "kube-system"
+  }
+
+  template_annotations = {
+    "erun.io/helper-pod-template-digest" = sha256(yamlencode(local.local_path_helper_pod))
+  }
+
+  field_manager = "erun-cluster-edge"
+
+  depends_on = [kubernetes_config_map_v1_data.local_path_helper_pod]
 }
 
 # Namespace cert-manager itself runs in. The Issuer, its DNS-01 credential
