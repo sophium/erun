@@ -120,6 +120,24 @@ composition and release invariants belong to root/shared logic, not chart policy
   A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
   ceiling hits throughout lint) against 78% of 16384Mi with no ceiling hits, and
   a warm one at about a quarter of it.
+- **The sizing warning above runs one way only, and a bigger limit is not the safe
+  direction.** A limit is containment for the container holding it, not a claim the
+  node can back it. Every environment pod is Burstable at priority 0: requests are
+  a small fixed value (the chart's 0.25 CPU / 1 GiB per container) and a limit is
+  never set equal to one, so no container satisfies the `requests == limits` rule
+  `Guaranteed` requires, and no environment pod carries a `PriorityClass` (the
+  repo's only one is the cluster-edge local-path helper). Node-pressure eviction
+  sheds pods whose usage exceeds their requests first, ranked by priority — every
+  environment is 0 — so raising a limit buys burst headroom and widens what the
+  environment can be holding when a node-level killer looks; it buys no safety.
+  Container OOM scores do not come from the limit: kubelet derives a Burstable
+  container's `oom_score_adj` from its *request* and the node's own capacity
+  (`1000 - 1000 × request / nodeCapacity`), so it is identical for every
+  environment on a node however each is sized. A container that reaches its own
+  `memory.max` is killed on an otherwise idle node regardless. What bounds the sum
+  is the namespace `ResourceQuota` (`MinimumRuntimeNamespaceQuota`), not any
+  container's limit, and `erun init` sets none. The operator-facing prose is
+  `erun-docs/docs/desktop/resources-and-usage.md`; keep the two in step.
 - Do not write limits to a node-shared `docker/buildkit` cgroup. Standalone
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate
