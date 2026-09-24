@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -32,6 +33,13 @@ const (
 	// "never requested"), so it must never collapse into the confident
 	// local-only answer — the sidebar icon renders it as its own state.
 	tenantEnrollmentUnknown = "unknown"
+	// tenantEnrollmentTenantMismatch is the platform answering the row's own
+	// credential with a tenant that is not the row's: the credential
+	// authenticated and resolved, just somewhere else. It is deliberately the
+	// same verdict, and the same value, the dashboard's own load reaches
+	// (tenantPlatformStateTenantMismatch) — the row and the dashboard it opens
+	// describe one situation and must not be able to drift apart.
+	tenantEnrollmentTenantMismatch = tenantPlatformStateTenantMismatch
 )
 
 // uiInviteRequest is the JSON-safe mirror of eruncommon.PlatformInviteRequest
@@ -272,6 +280,17 @@ type uiTenantPlatformEnrollmentStatus struct {
 	Tenant        string `json:"tenant"`
 	State         string `json:"state"`
 	DeclineReason string `json:"declineReason,omitempty"`
+	// PlatformHost names the platform this row's credential actually reached,
+	// empty when it reached none. The icon's copy speaks of whichever platform
+	// answered rather than a fixed hostname: a machine can be configured
+	// against more than one, and the one that did not answer is not the one to
+	// name.
+	PlatformHost string `json:"platformHost,omitempty"`
+	// PlatformTenant names the tenant the platform resolved this row's
+	// credential to, set only on tenantEnrollmentTenantMismatch. "This row is
+	// not the tenant your credential reaches" is a dead end without it; the
+	// name is what makes the state actionable.
+	PlatformTenant string `json:"platformTenant,omitempty"`
 }
 
 // uiListTenantPlatformEnrollmentStatusesInput names which local tenants to
@@ -289,7 +308,9 @@ type uiListTenantPlatformEnrollmentStatusesInput struct {
 // anything, reports tenantEnrollmentLocalOnly; a tenant whose platform round
 // trip genuinely failed reports tenantEnrollmentUnknown instead — the two
 // must never be conflated, or a real outage silently reads as "not on the
-// platform yet".
+// platform yet". A tenant whose credential resolves on the platform to a
+// *different* tenant reports tenantEnrollmentTenantMismatch: every answer the
+// platform can give about this row would be that other tenant's.
 func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnrollmentStatusesInput) []uiTenantPlatformEnrollmentStatus {
 	statuses := make([]uiTenantPlatformEnrollmentStatus, 0, len(input.Tenants))
 	for _, tenant := range input.Tenants {
@@ -302,6 +323,19 @@ func (a *App) ListTenantPlatformEnrollmentStatuses(input uiListTenantPlatformEnr
 	return statuses
 }
 
+// tenantPlatformHost names the host of a platform resolution's API URL, or ""
+// when there is none to name. It exists so the enrollment copy can say which
+// platform actually answered instead of asserting one: the fixed hostname it
+// used to carry is only ever right on a machine talking to that platform, and
+// a machine can be configured against several.
+func tenantPlatformHost(apiURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
+}
+
 func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnrollmentStatus {
 	status := uiTenantPlatformEnrollmentStatus{Tenant: tenant, State: tenantEnrollmentLocalOnly}
 	resolution, err := a.resolveTenantPlatform(tenant, "")
@@ -311,6 +345,8 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 		return status
 	}
 
+	status.PlatformHost = tenantPlatformHost(resolution.apiURL)
+
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -318,8 +354,21 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	requestCtx, cancel := context.WithTimeout(ctx, tenantDashboardTimeout)
 	defer cancel()
 
-	_, whoamiErr := resolution.client.Whoami(requestCtx)
+	whoami, whoamiErr := resolution.client.Whoami(requestCtx)
 	if whoamiErr == nil {
+		// The answer is the point, not the call's success: whoami carries the
+		// platform's own statement of *which* tenant this credential resolved
+		// to, and a credential that authenticates and resolves elsewhere
+		// satisfies a nil error exactly as one resolving here does. Reading
+		// only the error is how this row came to claim enrolment for a tenant
+		// the platform was never asked about — the same correspondence check
+		// the dashboard makes (tenantDashboardTenantMismatch), on the same
+		// value, so the row and the dashboard it opens agree.
+		if mismatched := tenantDashboardTenantMismatch(tenant, whoami.TenantName); mismatched != "" {
+			status.State = tenantEnrollmentTenantMismatch
+			status.PlatformTenant = mismatched
+			return status
+		}
 		status.State = tenantEnrollmentEnrolled
 		return status
 	}
@@ -329,6 +378,18 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	// permissions, which is enrolled, not "not yet" — collapsing it into the
 	// invite-request check below would render the not-enrolled glyph for an
 	// identity the platform already recognizes.
+	//
+	// It stays enrolled here, and not because the mismatch check above does
+	// not apply to it: that check compares the name whoami answered with, and
+	// a 403 answers with none. The 403 body is a bare status string --
+	// PlatformAuthErrorCode decodes 401 envelopes only -- so while the platform
+	// did resolve *a* tenant for this credential, it declines to say which,
+	// and there is nothing to hold against this row. Refusing it would render
+	// "not enrolled" for an identity the platform already recognizes, the
+	// regression TestListTenantPlatformEnrollmentStatusesEnrolledOnWhoamiForbidden
+	// pins. This branch is therefore a "no answer to compare", not a skipped
+	// comparison; a platform that learns to name the tenant on 403 gets the
+	// mismatch check for free by answering here instead of failing.
 	if errors.Is(whoamiErr, eruncommon.ErrPlatformForbidden) {
 		status.State = tenantEnrollmentEnrolled
 		return status

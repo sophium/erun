@@ -29,6 +29,13 @@ test('enrolled stops polling permanently', () => {
   assert.equal(nextEnrollmentPollingInterval('enrolled'), 0);
 });
 
+// A mismatch is moved by the operator's own connect action, which ends in the
+// same sign-in that invalidates the TenantEnrollment tag -- a timer would only
+// re-ask a question whose answer changes when someone clicks something.
+test('tenant-mismatch is never polled, like local-only', () => {
+  assert.equal(nextEnrollmentPollingInterval('tenant-mismatch'), 0);
+});
+
 test('no status yet observed (undefined) is not polled', () => {
   assert.equal(nextEnrollmentPollingInterval(undefined), 0);
 });

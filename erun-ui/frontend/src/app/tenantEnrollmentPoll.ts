@@ -22,8 +22,12 @@
 // tenantDialogThunks does the same after the tenant dashboard's own load
 // resolves a whoami -- both cheaper and more immediate than a per-row timer
 // for a state most tenants in a large sidebar are legitimately local-only
-// forever. 'pending'/'declined' ARE polled (both can change via an operator
-// action elsewhere); 'enrolled' stops polling for that tenant permanently --
+// forever. 'tenant-mismatch' is not polled for that same reason -- what moves
+// it is the operator connecting this local tenant to the platform that serves
+// it, and that path (tenantPlatformConnectThunks' Connect) ends in the same
+// sign-in invalidation above rather than in a timer. 'pending'/'declined' ARE
+// polled (both can change via an operator action elsewhere); 'enrolled' stops
+// polling for that tenant permanently --
 // this state changes at most a few times in a tenant's life and then never
 // again. 'unknown' is also polled: it means the platform round trip itself
 // failed (not "nothing pending"), so the only way to recover is to keep

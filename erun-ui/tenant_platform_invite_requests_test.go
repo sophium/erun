@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -219,6 +220,64 @@ func TestListTenantPlatformEnrollmentStatusesEnrolled(t *testing.T) {
 	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
 	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
 		t.Fatalf("expected enrolled once whoami succeeds, got %+v", statuses)
+	}
+}
+
+// TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne
+// is the reproduction of the sidebar glyph claiming enrolment for a tenant the
+// platform never resolved this credential to. whoami answers 200 here, so the
+// pre-fix code read the call's success as the enrolment answer and never
+// looked at the value it discarded -- whose TenantName is the platform's own
+// statement of *whose* identity the bearer resolved to, and it names "erun"
+// for a row decorating "frs". The credential authenticates and resolves; it
+// just resolves somewhere else, which is enough for whoamiErr == nil.
+func TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v1/whoami" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tenantId":"tenant-1","tenantName":"erun","userId":"user-1"}`))
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentTenantMismatch {
+		t.Fatalf("expected no enrolment claim for a platform tenant that is not the local one, got %+v", statuses)
+	}
+	// The row must be able to say which tenant the platform answered for --
+	// "not this one" without naming the one it is is the same dead end as no
+	// state at all.
+	if statuses[0].PlatformTenant != "erun" {
+		t.Fatalf("expected the status to name the platform tenant the credential resolved to, got %q", statuses[0].PlatformTenant)
+	}
+	// And which platform answered, so the copy stops asserting a hostname this
+	// machine may not have talked to (the operator's own machine is configured
+	// against two).
+	if want := strings.TrimPrefix(server.URL, "http://"); statuses[0].PlatformHost != want {
+		t.Fatalf("expected the status to name the platform host that answered (%q), got %q", want, statuses[0].PlatformHost)
+	}
+}
+
+// TestListTenantPlatformEnrollmentStatusesEnrolledForTheMatchingPlatformTenant
+// is the agreeing control for the refusal above: the same call, with the
+// platform naming the local tenant back, still reads enrolled -- the new check
+// must refuse a mismatch, not a successful whoami.
+func TestListTenantPlatformEnrollmentStatusesEnrolledForTheMatchingPlatformTenant(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"tenantId":"tenant-1","tenantName":"FRS","userId":"user-1"}`))
+	}))
+	defer server.Close()
+
+	app := testERunPlatformAliasApp(t, server.URL)
+	statuses := app.ListTenantPlatformEnrollmentStatuses(uiListTenantPlatformEnrollmentStatusesInput{Tenants: []string{"frs"}})
+	if len(statuses) != 1 || statuses[0].State != tenantEnrollmentEnrolled {
+		t.Fatalf("expected enrolled when the platform names the local tenant back, got %+v", statuses)
+	}
+	if statuses[0].PlatformTenant != "" {
+		t.Fatalf("expected no mismatched tenant on an agreeing answer, got %q", statuses[0].PlatformTenant)
 	}
 }
 
