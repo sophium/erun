@@ -133,6 +133,34 @@ type createReviewRequest struct {
 	SourceBranch string `json:"sourceBranch"`
 }
 
+// canonicalRepositoryParam canonicalizes a repository a caller named for this
+// call -- the `?repository=` filter on both listings, the body's repository on
+// the two queue advances -- into the identity the rows it is matched against
+// were recorded under.
+//
+// It is the same canonicalization `PrepareCreate` applies to a new review's
+// repository, and the same function: a review records its repository through
+// eruncommon.RepositoryIdentity, so a filter compared verbatim against that
+// column only ever finds the rows a caller happened to spell exactly as this
+// one did. An SSH remote and its HTTPS form name one repository, so a filter
+// holding either has to reach both -- otherwise the caller is handed a silent
+// subset of the repository they named, which is what `--repository owner/repo`
+// and `--repository git@host:owner/repo` each did. A value that names no
+// repository is refused here rather than passed through, for the same reason
+// an unrecognised `?status=` is: an unusable filter must not answer as an
+// empty one. An absent or blank one still narrows nothing, which is what a
+// target branch alone has always meant.
+func canonicalRepositoryParam(repository string) (string, error) {
+	if strings.TrimSpace(repository) == "" {
+		return "", nil
+	}
+	identity, err := eruncommon.RepositoryIdentity(repository)
+	if err != nil {
+		return "", err
+	}
+	return identity, nil
+}
+
 // listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
 // then validated before it reaches the repository: an unrecognised value
 // matches no row, so passing one through answered `200` with an empty list a
@@ -148,8 +176,13 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
 		return
 	}
+	repository, err := canonicalRepositoryParam(query.Get("repository"))
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
 	filter := apirepository.ReviewFilter{
-		Repository:     query.Get("repository"),
+		Repository:     repository,
 		TargetBranch:   query.Get("targetBranch"),
 		SourceBranch:   query.Get("sourceBranch"),
 		Status:         status,
@@ -226,7 +259,13 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
-	reviews, err := r.reviews.ListMergeQueue(req.Context(), req.URL.Query().Get("repository"), req.URL.Query().Get("targetBranch"))
+	query := req.URL.Query()
+	repository, err := canonicalRepositoryParam(query.Get("repository"))
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	reviews, err := r.reviews.ListMergeQueue(req.Context(), repository, query.Get("targetBranch"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -240,7 +279,12 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.AdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch)
+	repository, err := canonicalRepositoryParam(input.Repository)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	review, err := r.service.AdvanceMergeQueue(req.Context(), repository, input.TargetBranch)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return
@@ -254,7 +298,12 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch, input.Reason)
+	repository, err := canonicalRepositoryParam(input.Repository)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), repository, input.TargetBranch, input.Reason)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return

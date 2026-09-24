@@ -524,6 +524,47 @@ func TestReview(t *testing.T) {
 		}
 	})
 
+	// The reported failure: `--repository sophium/erun` names a repository on
+	// whichever forge the caller had in mind, so the platform answered it with
+	// the subset of rows a caller had once recorded under that same shorthand
+	// -- a silently short listing for a repository holding many reviews. It is
+	// refused as a bad argument, like a mistyped --status, and equally before
+	// the alias lookup: no alias is configured here on purpose.
+	t.Run("list_refuses_a_repository_that_names_no_repository", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"review", "list", "--repository", "sophium/erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("a --repository that names no repository must not list, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "no reviews") {
+			t.Fatalf("a --repository that names no repository must not be reported as an empty listing, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "git remote get-url origin") {
+			t.Fatalf("expected the refusal to name the form to pass instead, not an alias-resolution failure, got:\n%s", result.Combined)
+		}
+	})
+
+	// The other half: whichever spelling of the repository's own remote the
+	// caller holds reaches the rows the other spelling recorded. The stub
+	// matches the filter exactly, so a client that stopped canonicalizing
+	// would answer empty here.
+	t.Run("list_finds_a_repository_by_any_spelling_of_its_remote", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		for _, spelling := range []string{"git@github.com:sophium/erun.git", "https://github.com/sophium/erun"} {
+			result := erun.Run(t, []string{"review", "list", "--repository", spelling}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if result.ExitCode != 0 {
+				t.Fatalf("review list --repository %s exit %d:\n%s", spelling, result.ExitCode, result.Combined)
+			}
+			if !strings.Contains(result.Combined, "Add widget") {
+				t.Fatalf("review list --repository %s did not find the review recorded under the same repository's other remote:\n%s", spelling, result.Combined)
+			}
+		}
+	})
+
 	// The refusal is a bad-argument error, so it must not depend on the platform
 	// being configured at all: a caller with no alias still learns their filter
 	// was wrong rather than being sent to set up an alias that would not help.
