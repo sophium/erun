@@ -39,18 +39,100 @@ const orchestratorRestoreMaxAge = 10 * time.Minute
 // orchestratorRestartResumePrompt is what a rebuild+restart hands the resumed
 // conversation. It carries no task of its own on purpose: the task lives in the
 // return note the orchestrator wrote before triggering the restart, because a
-// conversation does not survive the restart and a file does.
+// conversation does not survive the restart and a file does. The note's own
+// size is not knowable from the id, so it is reported by
+// orchestratorRestartResumePromptFor, which every resume path uses.
+func orchestratorRestartResumePrompt(orchestratorID string) string {
+	return orchestratorRestartResumeHandoff(orchestratorID) + " " + orchestratorRestartResumeObjective
+}
+
+// orchestratorRestartResumeHandoff is the prompt's opening: what happened, and
+// which file carries the task. Split out because the note's size is said
+// between it and the objective below.
 //
 // It names that note exactly. Orchestrators share one working directory, so
 // "the note you wrote here" resolves to whichever note is there — and a session
 // following it faithfully can pick up another orchestrator's agenda and carry it
 // to a confident, wrong end.
-func orchestratorRestartResumePrompt(orchestratorID string) string {
+func orchestratorRestartResumeHandoff(orchestratorID string) string {
 	return "The desktop just restarted to pick up a rebuild. " +
 		"Read " + orchestratorReturnNoteName(orchestratorID) + " in this working directory — that one is yours, " +
-		"and any other return note beside it belongs to a different orchestrator. " +
-		"Confirm the rebuilt code is live in the running process, " +
-		"and carry that task through to its verified end without waiting to be asked."
+		"and any other return note beside it belongs to a different orchestrator."
+}
+
+// orchestratorRestartResumeObjective is what the prompt closes with, and it
+// stays last: the task is stated after whatever the session needs to know about
+// the note, never buried behind it.
+const orchestratorRestartResumeObjective = "Confirm the rebuilt code is live in the running process, " +
+	"and carry that task through to its verified end without waiting to be asked."
+
+// orchestratorRestartResumePromptFor is orchestratorRestartResumePrompt with the
+// one thing the id alone cannot answer: how large the note it names has grown.
+//
+// erun is what points every resume at that file, so the size belongs in the
+// prompt that points at it. The note is contracted as a task hand-off — written
+// for one restart, read once, superseded by the next — but nothing bounds it,
+// so an orchestrator that appends across cycles produces a file whose sections
+// claim to supersede each other with nothing on its surface saying which ones
+// still hold (a measured one: 484 KB, 196 sections, already compacted twice).
+// The size is the whole of what is said here: no section of the note is
+// validated, required, or refused, and whether the content still holds is the
+// reader's to judge.
+//
+// Both resume paths compose through this one function, so a live session and a
+// hand-off answered from the open set announce the same note the same way. An
+// absent or unreadable note is silent: the prompt already handles a hand-off
+// that is not there, and a guessed size would be worse than none.
+func orchestratorRestartResumePromptFor(dir, orchestratorID string) string {
+	handoff := orchestratorRestartResumeHandoff(orchestratorID)
+	if size, ok := orchestratorReturnNoteSize(dir, orchestratorID); ok {
+		if warning := orchestratorReturnNoteBloatWarning(size); warning != "" {
+			handoff += " " + warning
+		}
+	}
+	return handoff + " " + orchestratorRestartResumeObjective
+}
+
+// orchestratorReturnNoteBloatBytes is the size past which a return note is no
+// longer the one-cycle hand-off it is meant to be. Generous on purpose: a note
+// carrying the task, the work delivered, in-flight job ids and first checks is
+// a handful of KB — the sibling notes on the machine that reported this measure
+// 2,931 / 4,477 / 9,140 bytes — so 32 KB leaves room for an unusually detailed
+// cycle while still catching the failure the bound exists for, a note that grew
+// by append across cycles. A note of exactly the bound is still within it.
+const orchestratorReturnNoteBloatBytes = 32 * 1024
+
+// orchestratorReturnNoteSize reports how large this orchestrator's return note
+// is, and whether it could be measured at all.
+func orchestratorReturnNoteSize(dir, orchestratorID string) (int64, bool) {
+	info, err := os.Stat(filepath.Join(dir, orchestratorReturnNoteName(orchestratorID)))
+	if err != nil || !info.Mode().IsRegular() {
+		return 0, false
+	}
+	return info.Size(), true
+}
+
+// orchestratorReturnNoteBloatWarning is the sentence appended to the resume
+// prompt when the note it names has outgrown a hand-off, and "" when it has
+// not.
+func orchestratorReturnNoteBloatWarning(size int64) string {
+	if size <= orchestratorReturnNoteBloatBytes {
+		return ""
+	}
+	return "That note is now " + describeNoteSize(size) +
+		", far past the one-cycle hand-off it is meant to be, so it may carry state that has since been superseded: " +
+		"read its newest section first, and treat the older ones as history rather than as instructions."
+}
+
+// describeNoteSize renders a note's size the way its reader needs it: the exact
+// count, so nothing is lost to rounding, and the scale, so a note measured in
+// hundreds of KB reads as the anomaly it is rather than as a number.
+func describeNoteSize(size int64) string {
+	const kb = 1024
+	if size >= kb*kb {
+		return fmt.Sprintf("%d bytes (%.1f MB)", size, float64(size)/(kb*kb))
+	}
+	return fmt.Sprintf("%d bytes (%.0f KB)", size, float64(size)/kb)
 }
 
 type orchestratorRestoreState struct {
@@ -644,7 +726,7 @@ func (a *App) restartHandoff(orchestratorID string) orchestratorRestoreState {
 	}
 	state.ConversationID = orchestratorLiveConversationForLaunch(state.OrchestratorID, launchID, conversationID)
 	state.Environments = scope
-	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
+	state.ResumePrompt = orchestratorRestartResumePromptFor(orchestratorsRoot(), state.OrchestratorID)
 	return state
 }
 
@@ -676,7 +758,7 @@ func (a *App) restartHandoffFromOpenState(state orchestratorRestoreState) orches
 	}
 	state.ConversationID = conversationID
 	state.Environments = entry.Environments
-	state.ResumePrompt = orchestratorRestartResumePrompt(state.OrchestratorID)
+	state.ResumePrompt = orchestratorRestartResumePromptFor(orchestratorsRoot(), state.OrchestratorID)
 	return state
 }
 

@@ -135,6 +135,8 @@ Resolution is: attachment if usable → tracked record if confirmed → anchor. 
 
 The restart hand-off (`orchestrator-restore/<id>.json`) records the conversation the running session reports being on under its launch, not the id it was spawned with — a restart is the one path that must reach the session that asked for it. The crash respawn keeps the same nonce, since it is the same launch continuing.
 
+**The hand-off prompt reports the size of the note it points at.** `RESUME-NOTE.<id>.md` is a task hand-off — written for one restart, read once, superseded by the next — but nothing bounds it, and an orchestrator that appends across cycles grows a file whose sections contradict each other with nothing on its surface saying which ones still hold; one such note reached 484 KB across 196 sections, having already been compacted twice. Past 32 KB the prompt names the note's size, says the note may carry state that has since been superseded, and says to read its newest section first, so a resumed session that opens it does so deliberately rather than whole. The size is the only claim made: erun does not validate, require, or refuse any section of the note, and a note within the bound is handed over in exactly the words it always was. Both resume paths compose this same prompt, so a hand-off answered from the live session and one answered from the durable open-set entry say the same thing.
+
 **Listing and attaching.** `ListOrchestratorConversations(<id>)` reports what one orchestrator could resume, and is the surface that makes a wrong resume correctable rather than terminal:
 
 | Field | Meaning |
