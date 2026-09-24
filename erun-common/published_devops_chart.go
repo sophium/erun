@@ -98,6 +98,16 @@ type resolvedRuntimeChart struct {
 	version    string
 	registry   string
 	candidates []string
+	// searched is true when the candidate ladder produced this coordinate, and
+	// false when it is the coordinate the env states outright. The distinction
+	// is what makes the coordinate the operator's own: a chart the env states is
+	// the operator saying so, in config, and erun installs it as given (see
+	// resolveRuntimeChartCoordinate) -- including a tenant that deliberately
+	// states the stock erun-devops chart on erun's line while running its own
+	// image line, which is a legitimate configuration and not an inference
+	// erun made. Only a searched coordinate is erun's own conclusion, and so
+	// only a searched one is checked against the line the environment runs.
+	searched bool
 	// movedPin is true when the env's own stated chart version was a lagging
 	// pin on the deploy's line and version -- rather than the coordinate the
 	// env states -- so the caller records the chart it actually installs back
@@ -143,7 +153,7 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 		}
 		if found {
 			ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " found in " + candidate.registry + " (" + candidate.why + ")")
-			return resolvedRuntimeChart{reference: candidate.reference(), name: candidate.chart, registry: candidate.registry, candidates: candidates}, nil
+			return resolvedRuntimeChart{reference: candidate.reference(), name: candidate.chart, registry: candidate.registry, candidates: candidates, searched: true}, nil
 		}
 		ctx.Trace("deploy: runtime chart " + candidate.chart + " " + version + " not found in " + candidate.registry + " (" + candidate.why + ")")
 		outcomes = append(outcomes, candidate.describe()+": confirmed absent")
@@ -151,7 +161,7 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 	if deferToOverride {
 		fallback := runtimeChartCandidate{strings.TrimSpace(chartRegistry), DevopsComponentName, "the shared platform chart"}
 		ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; --runtime-chart names the coordinate to install instead")
-		return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates}, nil
+		return resolvedRuntimeChart{reference: fallback.reference(), name: fallback.chart, registry: fallback.registry, candidates: candidates, searched: true}, nil
 	}
 	ctx.Trace("deploy: no runtime chart candidate confirmed at " + version + "; refusing to guess")
 	return resolvedRuntimeChart{}, &RuntimeChartConfirmationError{Version: version, Candidates: outcomes, Inconclusive: inconclusive}
@@ -633,7 +643,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	}
 	deployInput.PersistRuntimeImage = persistImage
 	explicitLineChange := runtimeImageExplicit || strings.TrimSpace(runtimeChartOverride) != ""
-	if err := guardRuntimeImageLineSwitch(ctx, target, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
+	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
 		return DeploySpec{}, err
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo

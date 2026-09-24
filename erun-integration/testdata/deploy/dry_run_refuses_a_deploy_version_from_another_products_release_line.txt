@@ -1,0 +1,11 @@
+audit: erun deploy --dry-run --version <VERSION> frs build
+trace-log: would append the full trace to <TMP>
+deploy: tenant=frs environment=build version-override=<VERSION> components=[] force=false current=false
+deploy: component selection source default (runtime only); deploying the runtime chart alone
+deploy: runtime chart frs-devops <VERSION> not found in ghcr.io/sophium (the tenant's own umbrella)
+deploy: runtime chart erun-devops <VERSION> found in ghcr.io/sophium (the shared platform chart)
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: runtime image override ghcr.io/sophium/frs-devops:<VERSION> (imageOverrides.erun-devops)
+deploy: spec resolution failed: deploy: frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION>, so this environment is on the frs release line, but this deploy resolved the erun-devops chart, which is versioned on erun's own release line -- a version from erun's line does not name anything frs publishes, so the pod would wait on an image tag that does not exist; pass --version from frs's line, or --runtime-chart to install this chart on purpose
+==> Deploy failed frs/build: deploy: frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION>, so this environment is on the frs release line, but this deploy resolved the erun-devops chart, which is versioned on erun's own release line -- a version from erun's line does not name anything frs publishes, so the pod would wait on an image tag that does not exist; pass --version from frs's line, or --runtime-chart to install this chart on purpose
+deploy: frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:<VERSION>, so this environment is on the frs release line, but this deploy resolved the erun-devops chart, which is versioned on erun's own release line -- a version from erun's line does not name anything frs publishes, so the pod would wait on an image tag that does not exist; pass --version from frs's line, or --runtime-chart to install this chart on purpose
