@@ -2,10 +2,13 @@ package eruncommon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -191,4 +194,88 @@ func waitForLocalPortReachable(t *testing.T, port int) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("server on port %d never became reachable", port)
+}
+
+// mcpEdgeForgettingItsSession stands in for the edge after it has dropped a
+// caller's session: it handshakes normally and hands out a session id, then
+// answers the next tool call the second way a lost session appears on the
+// wire -- HTTP 200 with the SDK's session-initialization guard as the
+// JSON-RPC error, rather than a 404. Only a fresh handshake clears it, which
+// is exactly what the client's recovery has to do about it.
+//
+// A stand-in rather than a real edge because the state being reproduced is one
+// the edge reaches on a timer: the session it was holding has gone, and the
+// caller has no way to tell that from the response alone.
+type mcpEdgeForgettingItsSession struct {
+	handshakes int
+	calls      int
+}
+
+func (e *mcpEdgeForgettingItsSession) serve(w http.ResponseWriter, req *http.Request) {
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	method := ""
+	var decoded struct {
+		ID     int    `json:"id"`
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(body, &decoded); err == nil {
+		method = decoded.Method
+	}
+	switch method {
+	case "initialize":
+		e.handshakes++
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", fmt.Sprintf("session-%d", e.handshakes))
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"erun","version":"1.2.3"}}}`, decoded.ID)
+	case "notifications/initialized":
+		w.WriteHeader(http.StatusAccepted)
+	case "tools/list":
+		// The first call after the handshake is the one the edge no longer
+		// has a session for; once the caller has handshaked again, the same
+		// call is answered normally.
+		if e.handshakes < 2 {
+			e.calls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32603,"message":"method \"tools/list\" is invalid during session initialization"}}`, decoded.ID)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"tools":[{"name":"version","description":"Return build metadata","inputSchema":{"type":"object"}}]}}`, decoded.ID)
+	default:
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+// TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard is the
+// reported failure: a caller whose session the edge has dropped gets HTTP 200
+// with a JSON-RPC guard error, and the client -- which only ever re-handshaked
+// on a 404 -- surfaced that as the tool failing, permanently, for a session a
+// re-handshake would have replaced in one round trip.
+func TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard(t *testing.T) {
+	edge := &mcpEdgeForgettingItsSession{}
+	server := httptest.NewServer(http.HandlerFunc(edge.serve))
+	t.Cleanup(server.Close)
+
+	params := MCPToolListParams{
+		Endpoint:      server.URL,
+		MintToken:     func() (string, error) { return "test-token", nil },
+		ClientVersion: "test",
+	}
+	listed, err := ListMCPTools(context.Background(), params)
+	if err != nil {
+		t.Fatalf("a session the edge no longer holds must be re-handshaked and retried, not reported as a tool failure: %v", err)
+	}
+	if len(listed.Tools) != 1 || listed.Tools[0].Name != "version" {
+		t.Fatalf("expected the retried call to return the edge's tools, got %+v", listed.Tools)
+	}
+	if edge.handshakes != 2 {
+		t.Fatalf("expected exactly one recovery handshake, saw %d", edge.handshakes)
+	}
+	if edge.calls != 1 {
+		t.Fatalf("expected the guard to be answered once, saw it %d times", edge.calls)
+	}
 }

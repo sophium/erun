@@ -203,3 +203,87 @@ func TestExecJobStatusRoundTripsAJobResult(t *testing.T) {
 		}
 	})
 }
+
+// publishedOutputSchemaProperties reads one tool's output schema as the
+// generic JSON a client actually receives, so the assertion below is about the
+// wire shape rather than about how jsonschema-go happens to model a schema in
+// Go -- which is exactly the gap the defect fell through: the Go tree looked
+// fine and the bytes on the wire did not.
+func publishedOutputSchemaProperties(t *testing.T, tool *mcp.Tool) map[string]json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(tool.OutputSchema)
+	if err != nil {
+		t.Fatalf("%s: marshal output schema: %v", tool.Name, err)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("%s: output schema is not an object schema: %v", tool.Name, err)
+	}
+	return schema.Properties
+}
+
+// propertyIsJSONObject reports whether a published property's schema is a JSON
+// object, which is the shape every client has to be able to read: the empty
+// schema's other spelling, the boolean `true`, is refused outright by a client
+// that validates the tool list.
+func propertyIsJSONObject(t *testing.T, property json.RawMessage) bool {
+	t.Helper()
+	var decoded any
+	if err := json.Unmarshal(property, &decoded); err != nil {
+		t.Fatalf("published property schema is not JSON: %v", err)
+	}
+	_, ok := decoded.(map[string]any)
+	return ok
+}
+
+// TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans pins that every
+// property of every published output schema is a JSON object.
+//
+// A property whose schema must accept any JSON value -- a json.RawMessage
+// field, widened by rawJSONSchemaOverrides -- used to be emitted as the
+// boolean `true`, because an empty jsonschema.Schema marshals to exactly that.
+// `true` is a legal JSON Schema, so nothing here noticed; a client's tool-list
+// validator that does not accept boolean subschemas refused the whole
+// tools/list over it. build_profile carries one such field (Record, a raw
+// TimingRecord), and one refusal of that list is the entire erun surface gone
+// for the session's callers -- the in-pod agent included.
+//
+// The surface is swept, and `record` is then asserted by name so the case the
+// report described is the one that has to pass, not just some property that
+// happened to be checked.
+func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
+	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	tools := listTools(t, session)
+	if len(tools) == 0 {
+		t.Fatal("no tools listed; the rest of this test would pass vacuously")
+	}
+
+	properties, rawValueProperties := 0, 0
+	for _, tool := range tools {
+		if tool.OutputSchema == nil {
+			continue
+		}
+		for name, property := range publishedOutputSchemaProperties(t, tool) {
+			properties++
+			if name == "record" {
+				// Named explicitly below, so the property the report
+				// described is one this test cannot pass without.
+				rawValueProperties++
+			}
+			if !propertyIsJSONObject(t, property) {
+				t.Errorf("%s.outputSchema.properties.%s is %s, not a JSON object: a boolean subschema makes a client that validates the tool list refuse the whole tools/list, taking every erun tool with it",
+					tool.Name, name, property)
+			}
+		}
+	}
+
+	t.Logf("output schema properties checked: %d, json.RawMessage-backed: %d", properties, rawValueProperties)
+	if properties == 0 {
+		t.Fatal("no output schema property was checked, so the loop above proves nothing")
+	}
+	if rawValueProperties == 0 {
+		t.Fatal("no json.RawMessage-backed property was found, so the case the report described was never exercised")
+	}
+}
