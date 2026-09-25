@@ -7,6 +7,7 @@ import {
   KeyRound,
   LayoutDashboard,
   ListChecks,
+  ListTree,
   Mail,
   Server,
   Settings,
@@ -28,6 +29,7 @@ export type ConsoleSectionId =
   | 'requests'
   | 'gate-runs'
   | 'jobs'
+  | 'pipeline'
   | 'tenants'
   | 'users'
   | 'org-settings'
@@ -66,6 +68,10 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // in SCOPE_AWARE_SECTIONS below: the scope selector would otherwise claim
   // a reach this panel does not have.
   { id: 'jobs', label: 'Jobs', icon: Activity },
+  // Pipeline is every tenant's own view spanning both of the above and the
+  // review lifecycle (GET /v1/pipeline is TenantUserClass, and it reads only
+  // the caller's own tenant -- the same reason Jobs is not scope-aware).
+  { id: 'pipeline', label: 'Pipeline', icon: ListTree },
 ];
 
 const OPERATIONS_SECTIONS: ConsoleSection[] = [

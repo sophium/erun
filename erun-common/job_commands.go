@@ -17,9 +17,13 @@ import (
 // missing alias or an unreachable plane is a hard, propagated error instead
 // of a trace.
 
-// The job status vocabulary the platform stores. RUNNING is the only open
-// state; every other value closes the job.
+// The job status vocabulary the platform stores. PLANNED and RUNNING are the
+// open states; every other value closes the job.
 const (
+	// JobStatusPlanned is work recorded before it starts: a triage or plan
+	// item parked against its issue, moved to RUNNING when coding begins. It
+	// is not swept to ABANDONED, because there is no actor yet to go quiet.
+	JobStatusPlanned    = "PLANNED"
 	JobStatusRunning    = "RUNNING"
 	JobStatusSucceeded  = "SUCCEEDED"
 	JobStatusFailed     = "FAILED"
@@ -73,11 +77,11 @@ func NormalizeJobStatus(status string) (string, error) {
 	switch normalized := strings.ToUpper(trimmed); normalized {
 	case "":
 		return "", nil
-	case JobStatusRunning, JobStatusSucceeded, JobStatusFailed, JobStatusAbandoned, JobStatusSuperseded:
+	case JobStatusPlanned, JobStatusRunning, JobStatusSucceeded, JobStatusFailed, JobStatusAbandoned, JobStatusSuperseded:
 		return normalized, nil
 	default:
-		return "", fmt.Errorf("unsupported job status %q: expected one of %s, %s, %s, %s, %s",
-			trimmed, JobStatusRunning, JobStatusSucceeded, JobStatusFailed, JobStatusAbandoned, JobStatusSuperseded)
+		return "", fmt.Errorf("unsupported job status %q: expected one of %s, %s, %s, %s, %s, %s",
+			trimmed, JobStatusPlanned, JobStatusRunning, JobStatusSucceeded, JobStatusFailed, JobStatusAbandoned, JobStatusSuperseded)
 	}
 }
 
@@ -138,10 +142,13 @@ type JobClaimParams struct {
 	JobType     string
 	IssueRef    string
 	Summary     string
-	ActorKind   string
-	ActorID     string
-	Scope       string
-	LocalJobID  string
+	// Status is optional. Empty is RUNNING, which is what every caller before
+	// PLANNED existed meant; PLANNED records work that has not begun.
+	Status     string
+	ActorKind  string
+	ActorID    string
+	Scope      string
+	LocalJobID string
 }
 
 // RunJobClaim records a job starting. With Scope set it is a claim on that
@@ -167,6 +174,7 @@ func RunJobClaim(ctx Context, store CloudReadStore, alias string, params JobClai
 	created, err := client.ClaimJob(context.Background(), PlatformClaimJobParams{
 		EnvironmentID: environmentID,
 		JobType:       params.JobType,
+		Status:        params.Status,
 		IssueRef:      params.IssueRef,
 		Summary:       params.Summary,
 		ActorKind:     params.ActorKind,
@@ -201,7 +209,12 @@ func normalizeJobClaim(params JobClaimParams) (JobClaimParams, error) {
 	if strings.TrimSpace(params.ActorID) == "" {
 		return JobClaimParams{}, fmt.Errorf("actor id is required: it is who a refused claimant is told to ask")
 	}
+	status, err := NormalizeJobStatus(params.Status)
+	if err != nil {
+		return JobClaimParams{}, err
+	}
 	params.JobType = jobType
+	params.Status = status
 	params.ActorKind = actorKind
 	params.Summary = strings.TrimSpace(params.Summary)
 	params.ActorID = strings.TrimSpace(params.ActorID)
@@ -214,6 +227,9 @@ func normalizeJobClaim(params JobClaimParams) (JobClaimParams, error) {
 
 func jobClaimTraceDetails(params JobClaimParams) []string {
 	details := []string{"jobType=" + params.JobType, "actorId=" + params.ActorID}
+	if params.Status != "" {
+		details = append(details, "status="+params.Status)
+	}
 	for _, field := range []struct{ name, value string }{
 		{"environment", params.Environment},
 		{"issueRef", params.IssueRef},
@@ -244,11 +260,11 @@ func RunJobUpdate(ctx Context, store CloudReadStore, alias string, params JobUpd
 	if err != nil {
 		return PlatformJob{}, err
 	}
-	if status == JobStatusRunning {
-		// RUNNING is only ever the status a claim assigns. Accepting it here
-		// would read as "reopen this job", which the platform refuses.
-		return PlatformJob{}, fmt.Errorf("RUNNING is the status a claim assigns; report SUCCEEDED, FAILED, ABANDONED or SUPERSEDED to close a job")
-	}
+	// RUNNING is accepted here and means exactly one thing: the planned job
+	// this names has begun. The platform refuses it for any job that is
+	// already running (a no-op) or already finished, so the transition table
+	// stays in one place rather than being restated as a local guess about a
+	// status this layer cannot read.
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformJob{}, err

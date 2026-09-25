@@ -31,7 +31,7 @@ type PlatformJobListResult struct {
 
 type JobsListInput struct {
 	platformAliasInput
-	Status        string `json:"status,omitempty" jsonschema:"filter by status: RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"`
+	Status        string `json:"status,omitempty" jsonschema:"filter by status: PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"`
 	EnvironmentID string `json:"environmentId,omitempty" jsonschema:"filter by the platform's environment id"`
 	IssueRef      string `json:"issueRef,omitempty" jsonschema:"filter by the issue the work belongs to, in owner/repo#number form"`
 	Scope         string `json:"scope,omitempty" jsonschema:"filter by the scope a job claims"`
@@ -88,6 +88,9 @@ type JobsStartInput struct {
 	IssueRef    string `json:"issueRef,omitempty" jsonschema:"the issue this work belongs to, in owner/repo#number form"`
 	Scope       string `json:"scope,omitempty" jsonschema:"what this job claims, so a second actor asking for the same scope is told who holds it"`
 	LocalJobID  string `json:"localJobId,omitempty" jsonschema:"the in-pod job id this mirrors, when there is one"`
+	// Status is optional: empty is RUNNING, the default every caller before
+	// PLANNED meant.
+	Status string `json:"status,omitempty" jsonschema:"PLANNED records work that has not started, RUNNING (the default) records work already underway"`
 }
 
 func jobsStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobsStartInput) (*mcp.CallToolResult, PlatformJobResult, error) {
@@ -110,6 +113,7 @@ func jobsStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			ActorID:     input.ActorID,
 			Scope:       input.Scope,
 			LocalJobID:  input.LocalJobID,
+			Status:      input.Status,
 		}, cloudDependencies())
 		if err != nil {
 			return nil, PlatformJobResult{}, err
@@ -121,7 +125,7 @@ func jobsStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 type JobsFinishInput struct {
 	platformAliasInput
 	JobID      string `json:"jobId" jsonschema:"job id to update"`
-	Status     string `json:"status,omitempty" jsonschema:"close the job as SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"`
+	Status     string `json:"status,omitempty" jsonschema:"move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it"`
 	Summary    string `json:"summary,omitempty" jsonschema:"refresh what the job is doing, in prose"`
 	LocalJobID string `json:"localJobId,omitempty" jsonschema:"record the in-pod job id this mirrors"`
 }

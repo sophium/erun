@@ -637,3 +637,164 @@ func TestJobServiceSweepOfNothingIsAnEmptyList(t *testing.T) {
 		t.Fatalf("abandoned = %+v, want none", abandoned)
 	}
 }
+
+// plannedFor builds a valid claim for work that has not started, so the tests
+// below vary only what they are about.
+func plannedFor(actorID, scope, summary string) model.Job {
+	job := claimFor(actorID, scope, summary)
+	job.JobType = model.JobTypePlan
+	job.Status = model.JobStatusPlanned
+	return job
+}
+
+// TestJobServiceSweepLeavesAPlannedJobAlone: ABANDONED is what the sweep does
+// to a job whose actor stopped updating it, and a parked plan has no actor yet
+// to stop. Sweeping one would turn the pipeline's first rung into "dropped"
+// inside the TTL, on a schedule, with nothing an operator did to cause it --
+// and would do it to every plan in the backlog at once.
+//
+// The job is backdated far past the TTL so the only thing keeping it out of
+// the sweep's result is the exemption itself, not the clock.
+func TestJobServiceSweepLeavesAPlannedJobAlone(t *testing.T) {
+	repo := newFakeJobRepo()
+	svc := NewJobService(repo)
+	ctx := context.Background()
+
+	created, err := svc.Claim(ctx, plannedFor("erun/code4", "sophium/erun#2683", "plan the pipeline view"))
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	repo.backdate(t, created.JobID, 30*DefaultJobAbandonTTL)
+
+	abandoned, err := svc.SweepAbandoned(ctx, DefaultJobAbandonTTL)
+	if err != nil {
+		t.Fatalf("SweepAbandoned() error = %v", err)
+	}
+	if len(abandoned) != 0 {
+		t.Fatalf("abandoned = %+v, want none; a PLANNED job is parked, not stale", abandoned)
+	}
+
+	job, err := svc.jobs.Get(ctx, created.TenantID, created.JobID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if job.Status != model.JobStatusPlanned {
+		t.Errorf("status = %q, want PLANNED to be preserved", job.Status)
+	}
+	if job.EndedAt != nil {
+		t.Errorf("endedAt = %v, want none; a planned job has not stopped", job.EndedAt)
+	}
+}
+
+// TestJobServiceClaimAcceptsAPlannedJob: the status the whole ladder rests on.
+// A claim naming it is recorded as PLANNED, and -- matching the table's own
+// CHECK -- carries no ended_at, so a planned job is not made to look finished
+// in order to be storable.
+func TestJobServiceClaimAcceptsAPlannedJob(t *testing.T) {
+	svc := NewJobService(newFakeJobRepo())
+
+	job, err := svc.Claim(context.Background(), plannedFor("erun/ideas", "sophium/erun#2683", "plan the pipeline view"))
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if job.Status != model.JobStatusPlanned {
+		t.Errorf("status = %q, want PLANNED", job.Status)
+	}
+	if job.EndedAt != nil {
+		t.Errorf("endedAt = %v, want none", job.EndedAt)
+	}
+	if !job.IsOpen() {
+		t.Error("IsOpen() = false for a PLANNED job; a plan holds its scope")
+	}
+}
+
+// TestJobServiceClaimRefusesASecondClaimOfAPlannedScope: planning work is a
+// claim on it. Two actors recording an intent to do the same issue would
+// otherwise both show up in the pipeline as the thing being done.
+func TestJobServiceClaimRefusesASecondClaimOfAPlannedScope(t *testing.T) {
+	svc := NewJobService(newFakeJobRepo())
+	ctx := context.Background()
+
+	if _, err := svc.Claim(ctx, plannedFor("erun/ideas", "sophium/erun#2683", "plan the pipeline view")); err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+
+	_, err := svc.Claim(ctx, claimFor("erun/code3", "sophium/erun#2683", "start coding the pipeline view"))
+	var held *JobScopeHeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("Claim() error = %v, want the planned holder named", err)
+	}
+	if held.Holder.Status != model.JobStatusPlanned {
+		t.Errorf("holder status = %q, want the PLANNED job that holds the scope", held.Holder.Status)
+	}
+}
+
+// TestJobServiceUpdateOpensAPlannedJob: the transition the status exists for.
+// Moving to RUNNING clears the ended_at the plan was recorded without, which
+// is what the table's CHECK pairs with the status.
+func TestJobServiceUpdateOpensAPlannedJob(t *testing.T) {
+	svc := NewJobService(newFakeJobRepo())
+	ctx := context.Background()
+
+	created, err := svc.Claim(ctx, plannedFor("erun/code3", "sophium/erun#2683", "plan the pipeline view"))
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+
+	updated, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusRunning, "coding the pipeline view", "")
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Status != model.JobStatusRunning {
+		t.Errorf("status = %q, want RUNNING", updated.Status)
+	}
+	if updated.EndedAt != nil {
+		t.Errorf("endedAt = %v, want none; the job has not stopped", updated.EndedAt)
+	}
+}
+
+// TestJobServiceUpdateRefusesToReopenARunningJob: the move is one-way. A
+// running job cannot be walked back to PLANNED, which would say its actor had
+// not started work that is plainly underway.
+func TestJobServiceUpdateRefusesToReopenARunningJob(t *testing.T) {
+	svc := NewJobService(newFakeJobRepo())
+	ctx := context.Background()
+
+	created, err := svc.Claim(ctx, claimFor("erun/code3", "", "coding the pipeline view"))
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+
+	_, err = svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusPlanned, "", "")
+	var invalid *InvalidJobInputError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("Update() error = %v, want a refusal naming the accepted moves", err)
+	}
+	if invalid.Field != "status" {
+		t.Errorf("refused field = %q, want status", invalid.Field)
+	}
+}
+
+// TestJobServiceUpdateClosesAPlannedJobWithoutEverRunningIt: a plan can be
+// dropped before any code exists, and the closing write still records when,
+// so the row never looks like it is waiting on somebody.
+func TestJobServiceUpdateClosesAPlannedJobWithoutEverRunningIt(t *testing.T) {
+	svc := NewJobService(newFakeJobRepo())
+	ctx := context.Background()
+
+	created, err := svc.Claim(ctx, plannedFor("erun/ideas", "", "plan the pipeline view"))
+	if err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+
+	updated, err := svc.Update(ctx, created.TenantID, created.JobID, model.JobStatusSuperseded, "", "")
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Status != model.JobStatusSuperseded {
+		t.Errorf("status = %q, want SUPERSEDED", updated.Status)
+	}
+	if updated.EndedAt == nil {
+		t.Error("endedAt = nil; closing a job must record when it stopped")
+	}
+}

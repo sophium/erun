@@ -44,7 +44,7 @@ test('a tab the user may not open does not render', () => {
   ]);
   assert.deepEqual(
     visibleTenantDashboardTabs(data).map((descriptor) => descriptor.tab),
-    ['users', 'reviews', 'gates', 'builds', 'registration', 'requests', 'api-log'],
+    ['users', 'reviews', 'gates', 'pipeline', 'builds', 'registration', 'requests', 'api-log'],
   );
 });
 
@@ -56,7 +56,7 @@ test('a panel that failed still renders its tab, so the failure is visible', () 
 test('a dashboard that reported no panels keeps every tab', () => {
   // An unknown permission is not a denied one: before the load answers, nothing
   // may be hidden.
-  assert.equal(visibleTenantDashboardTabs(null).length, 9);
+  assert.equal(visibleTenantDashboardTabs(null).length, 10);
   assert.equal(
     visibleTenantDashboardTabs({
       tenant: 'frs',
@@ -71,7 +71,7 @@ test('a dashboard that reported no panels keeps every tab', () => {
       canApproveInviteRequests: false,
       canDeclineInviteRequests: false,
     }).length,
-    9,
+    10,
   );
 });
 

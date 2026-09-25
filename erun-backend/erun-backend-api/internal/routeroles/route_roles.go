@@ -173,6 +173,12 @@ var Routes = map[string]Class{
 	"PATCH /v1/jobs/{job_id}":                    TenantUserClass,
 	"GET /v1/environments/{environment_id}/jobs": TenantUserClass,
 
+	// pipeline.go — reading the pipeline is reading the tenant's own jobs and
+	// reviews together, one read of what the two routes above and the review
+	// listings already expose separately. It grants reach over no data
+	// TenantUser cannot already read, and it writes nothing at all.
+	"GET /v1/pipeline": TenantUserClass,
+
 	// contexts.go — reading registered contexts is TenantUser; registering a
 	// new one is tenant administration (explicitly named in the issue this
 	// classification implements).

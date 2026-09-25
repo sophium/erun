@@ -276,12 +276,32 @@ func (e *InvalidRepositoryError) Error() string { return e.Reason }
 
 func (e *InvalidRepositoryError) Unwrap() error { return repository.ErrInvalidInput }
 
-// PrepareCreate normalizes a new review's status and repository identity. The
-// repository is canonicalized here rather than trusted as sent: two clients
-// holding SSH and HTTPS remotes for one repository must produce one identity,
-// or each would find only its own reviews. An absent repository is left
-// absent — a review of a repository with no nameable remote still records
-// that honestly, and the queue reports it as unrecorded rather than guessing.
+// InvalidIssueRefError refuses an issue reference the platform cannot spell
+// canonically — prose, a branch slug, a bare number the recorded repository
+// cannot be joined to — rather than storing a reference no other pipeline
+// could ever match it against.
+type InvalidIssueRefError struct {
+	Reason string
+}
+
+func (e *InvalidIssueRefError) Error() string { return e.Reason }
+
+func (e *InvalidIssueRefError) Unwrap() error { return repository.ErrInvalidInput }
+
+// PrepareCreate normalizes a new review's status, repository identity, and
+// declared issue reference. The repository is canonicalized here rather than
+// trusted as sent: two clients holding SSH and HTTPS remotes for one
+// repository must produce one identity, or each would find only its own
+// reviews. An absent repository is left absent — a review of a repository
+// with no nameable remote still records that honestly, and the queue reports
+// it as unrecorded rather than guessing.
+//
+// The issue reference is normalized against the repository this same call
+// just canonicalized, so a caller may state either the canonical
+// owner/repo#number or the bare number the branch convention already teaches.
+// Normalizing here rather than in the route keeps the stored column's
+// contract in one place: what lands in reviews.issue_ref is always the
+// canonical spelling, whichever transport wrote it.
 func (s *ReviewService) PrepareCreate(review model.Review) (model.Review, error) {
 	if review.Status == "" {
 		review.Status = model.ReviewStatusOpen
@@ -291,6 +311,11 @@ func (s *ReviewService) PrepareCreate(review model.Review) (model.Review, error)
 		return model.Review{}, err
 	}
 	review.Repository = repositoryIdentity
+	issueRef, err := eruncommon.NormalizeIssueRef(review.DeclaredIssueRef, repositoryIdentity)
+	if err != nil {
+		return model.Review{}, &InvalidIssueRefError{Reason: err.Error()}
+	}
+	review.DeclaredIssueRef = issueRef
 	return review, nil
 }
 

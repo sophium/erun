@@ -3,6 +3,7 @@ package backendapi
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -239,5 +240,114 @@ func TestJobsSweepIsCrossTenant(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the cross-tenant sweep did not close job %s (closed %d jobs)", job.JobID, len(abandoned))
+	}
+}
+
+// plannedJobsTestJob records work that has not started, through the service,
+// so the row under test is the one the API would actually have written.
+func plannedJobsTestJob(t *testing.T, svc *service.JobService, ctx context.Context, scope, issueRef, actorID, summary string) model.Job {
+	t.Helper()
+	job, err := svc.Claim(ctx, model.Job{
+		JobType:   model.JobTypeTriage,
+		IssueRef:  issueRef,
+		Summary:   summary,
+		Status:    model.JobStatusPlanned,
+		ActorKind: model.ActorKindOrchestrator,
+		ActorID:   actorID,
+		Scope:     scope,
+	})
+	mustNoErr(t, err, "claim planned job")
+	return job
+}
+
+// TestJobsSweepNeverAbandonsAPlannedJob is the regression the PLANNED status
+// would otherwise ship with, and the reason the sweep's exemption is asserted
+// against real SQL rather than left to a predicate nobody runs.
+//
+// The sweep closes a RUNNING job whose last update predates its threshold, on
+// a five-minute schedule and a thirty-minute TTL. A parked plan is by
+// definition never updated -- that is what parked means -- so if PLANNED were
+// inside the predicate, every prospective backlog entry would turn into
+// "ABANDONED -- read it as dropped, not as failed" within about thirty-five
+// minutes of being recorded, silently, with nothing an operator did to cause
+// it. The ladder's first rung would self-destruct on a timer.
+//
+// The threshold is moved past every stamp rather than the row being aged,
+// because jobs_set_timestamps refreshes updated_at on every write (see
+// sweepPastEveryStamp). That makes this the strongest form of the question:
+// every RUNNING row in the tenant is stale, and the planned one has been
+// sitting longer than any of them.
+func TestJobsSweepNeverAbandonsAPlannedJob(t *testing.T) {
+	repo, _, tenantID := jobsDatabase(t)
+	ctx := jobsTenantContext(tenantID)
+	svc := service.NewJobService(repo)
+
+	planned := plannedJobsTestJob(t, svc, ctx, "sophium/erun#2683", "sophium/erun#2683", "erun/ideas", "plan the pipeline view")
+	if planned.Status != model.JobStatusPlanned {
+		t.Fatalf("claimed status = %q, want %q", planned.Status, model.JobStatusPlanned)
+	}
+	// The table's own CHECK pairs a non-open status with an ended_at, so a
+	// PLANNED row that came back without one is the migration having worked.
+	if planned.EndedAt != nil {
+		t.Errorf("endedAt = %v on a PLANNED job, want none: a plan has not stopped", planned.EndedAt)
+	}
+
+	running := claimJobsTestJob(t, svc, ctx, "scope:underway", "erun/code3", "work that is actually underway")
+
+	closed := map[string]model.Job{}
+	for _, job := range sweepPastEveryStamp(t, repo, ctx) {
+		closed[job.JobID] = job
+	}
+	if job, ok := closed[planned.JobID]; ok {
+		t.Fatalf("the sweep closed a PLANNED job: %+v -- a parked plan has no actor to give up on", job)
+	}
+	assertAbandoned(t, closed, running.JobID)
+
+	stillPlanned, err := repo.Get(ctx, tenantID, planned.JobID)
+	mustNoErr(t, err, "get planned job after the sweep")
+	if stillPlanned.Status != model.JobStatusPlanned {
+		t.Errorf("status after the sweep = %q, want PLANNED preserved", stillPlanned.Status)
+	}
+	if stillPlanned.EndedAt != nil {
+		t.Errorf("endedAt after the sweep = %v, want none", stillPlanned.EndedAt)
+	}
+}
+
+// TestJobsPlannedJobHoldsItsScopeAndOpensAgainstRealSQL covers the two moves
+// the status exists for, both of which are SQL contracts: a plan claims its
+// scope no less than a running job does, and the move to RUNNING has to clear
+// nothing while still satisfying the ended_at CHECK.
+func TestJobsPlannedJobHoldsItsScopeAndOpensAgainstRealSQL(t *testing.T) {
+	repo, _, tenantID := jobsDatabase(t)
+	ctx := jobsTenantContext(tenantID)
+	svc := service.NewJobService(repo)
+
+	planned := plannedJobsTestJob(t, svc, ctx, "scope:planned", "sophium/erun#2683", "erun/ideas", "plan the pipeline view")
+
+	// A second actor asking for the same scope is told who holds it, and the
+	// holder it names is the plan -- already the case through the service
+	// layer's fake, and now through FindOpenByScope's real predicate.
+	_, err := svc.Claim(ctx, model.Job{
+		JobType:   model.JobTypeFix,
+		Summary:   "start coding the pipeline view",
+		ActorKind: model.ActorKindAgent,
+		ActorID:   "erun/code3",
+		Scope:     "scope:planned",
+	})
+	var held *service.JobScopeHeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("Claim() error = %v, want the planned holder named", err)
+	}
+	if held.Holder.JobID != planned.JobID {
+		t.Errorf("holder = %s, want the planned job %s", held.Holder.JobID, planned.JobID)
+	}
+
+	opened, err := svc.Update(ctx, tenantID, planned.JobID, model.JobStatusRunning, "coding the pipeline view", "")
+	mustNoErr(t, err, "open the plan")
+	if opened.Status != model.JobStatusRunning {
+		t.Errorf("status = %q, want RUNNING", opened.Status)
+	}
+	if opened.EndedAt != nil {
+		t.Errorf("endedAt = %v, want none after opening a plan", opened.EndedAt)
 	}
 }

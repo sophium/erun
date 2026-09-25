@@ -10,7 +10,7 @@ import {
   uniqueEnvironmentName,
 } from '../fixtures/seedRoot.js';
 
-// Regression coverage for the tenant dashboard's nine-tab strip overlapping
+// Regression coverage for the tenant dashboard's tab strip overlapping
 // itself between ~700px and ~1000px (#2145). The strip is deliberately
 // wrapping — the desktop overrides the primitive's single-row layout so a
 // narrow <main> gets a second line rather than tabs pushed off-screen — but
@@ -40,12 +40,18 @@ import {
 //
 // Staging mirrors tenant-dashboard-reviews.spec.ts: a throwaway env with an
 // apiUrl plus a stubbed LoadTenantDashboard, since the inert harness
-// deliberately has no collaboration API to read. All nine panels are
+// deliberately has no collaboration API to read. Every panel is
 // unrestricted, because the defect is a property of the full-length strip.
+//
+// The strip was nine tabs when #2145 was reported and is ten now that the
+// Pipeline tab has joined it. Every width below is re-measured against the
+// longer strip: a tab added later is exactly the change that can push a
+// wrapped second row back over the panel controls, which is the defect
+// this spec exists to catch.
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 1200 };
 
-const REPORTED_TAB_COUNT = 9;
+const REPORTED_TAB_COUNT = 10;
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -239,7 +245,7 @@ for (const { width, note } of [
   test.describe(`tenant dashboard tab strip at ${String(width)}px`, () => {
     test.use({ viewport: { width, height: 900 } });
 
-    test(`the nine-tab strip does not overlap itself or the panel at ${String(width)}px (${note})`, async ({
+    test(`the ten-tab strip does not overlap itself or the panel at ${String(width)}px (${note})`, async ({
       app,
       page,
     }) => {

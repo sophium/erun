@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
 
 // listedReview is one row of GET /v1/reviews, as a caller reads it.
 type listedReview struct {
-	ReviewID     string `json:"reviewId"`
-	Repository   string `json:"repository"`
-	SourceBranch string `json:"sourceBranch"`
-	Status       string `json:"status"`
+	ReviewID       string `json:"reviewId"`
+	Repository     string `json:"repository"`
+	SourceBranch   string `json:"sourceBranch"`
+	Status         string `json:"status"`
+	IssueRef       string `json:"issueRef"`
+	IssueRefSource string `json:"issueRefSource"`
 }
 
 // e2eOpenReviewForRepository opens a review naming repository, which is
@@ -102,5 +105,92 @@ func TestReviewListFindsOneRepositoryAcrossEverySpellingOfItsRemote(t *testing.T
 	}
 	if !containsAll(body, "INVALID_REPOSITORY", "git remote get-url origin") {
 		t.Fatalf("refusal body = %q, want the INVALID_REPOSITORY code and the form to pass instead", body)
+	}
+}
+
+// TestReviewIssueRefRoundTripsThroughTheStoredColumn is the stored half of the
+// declared issue link, driven through the real API against a real migrated
+// PostgreSQL. The declaration is only worth anything if it survives the write:
+// the column, bun's mapping of it, and `Returning("*")` are three places a
+// value can silently go missing while every in-memory test still passes,
+// because an in-memory stub returns whatever it was handed.
+//
+// Both accepted spellings are covered, and the branch each review proposes
+// names a *different* issue than the one declared, so a review that came back
+// with the branch's number would be visibly wrong rather than accidentally
+// right.
+func TestReviewIssueRefRoundTripsThroughTheStoredColumn(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+
+	unique := fmt.Sprintf("%d", time.Now().UnixNano())
+	repository := "https://github.com/issue-ref-" + unique + "/erun"
+	cases := []struct {
+		branch   string
+		issueRef string
+		want     string
+	}{
+		// The branch carries a number the declared reference disagrees with,
+		// so a review that came back with the branch's number would be
+		// visibly wrong rather than accidentally right. Both names carry the
+		// run's own suffix: a scratch database is reused across runs, and a
+		// fixed branch name would list the previous run's rows too.
+		{branch: "bug/2212-declared-" + unique, issueRef: "issue-ref-" + unique + "/erun#2683", want: "issue-ref-" + unique + "/erun#2683"},
+		{branch: "feature/2213-bare-" + unique, issueRef: "2684", want: "issue-ref-" + unique + "/erun#2684"},
+	}
+	for _, tc := range cases {
+		code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/reviews", map[string]any{
+			"repository":   repository,
+			"name":         "declared " + tc.branch,
+			"targetBranch": "main",
+			"sourceBranch": tc.branch,
+			"issueRef":     tc.issueRef,
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("create %s: HTTP %d: %s", tc.branch, code, body)
+		}
+		var created listedReview
+		mustNoErr(t, json.Unmarshal([]byte(body), &created), "parse created review")
+
+		// Read back through the listing, which is a fresh row read rather than
+		// the insert's own RETURNING.
+		_, listed, listBody := e2eListReviews(t, srv.URL, "?sourceBranch="+url.QueryEscape(tc.branch))
+		if len(listed) != 1 {
+			t.Fatalf("list %s = %s, want the review that was just created", tc.branch, listBody)
+		}
+		for name, got := range map[string]string{"created": created.IssueRef, "listed": listed[0].IssueRef} {
+			if got != tc.want {
+				t.Errorf("%s issueRef = %q, want %q: the declared link is stored canonically, not re-derived from the branch", name, got, tc.want)
+			}
+		}
+		for name, source := range map[string]string{"created": created.IssueRefSource, "listed": listed[0].IssueRefSource} {
+			if source != "DECLARED" {
+				t.Errorf("%s issueRefSource = %q, want DECLARED", name, source)
+			}
+		}
+	}
+}
+
+// TestReviewIssueRefRefusesAnUnspellableDeclaration is the trust boundary at
+// the same layer: a value that names no issue in either accepted spelling is
+// refused by the real handler, naming the field, rather than stored as a link
+// nothing else on the platform could ever match.
+func TestReviewIssueRefRefusesAnUnspellableDeclaration(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+
+	unique := fmt.Sprintf("%d", time.Now().UnixNano())
+	code, body := e2eRequest(t, srv.URL, http.MethodPost, "/v1/reviews", map[string]any{
+		"repository":   "https://github.com/issue-ref-" + unique + "/erun",
+		"name":         "bad issue ref " + unique,
+		"targetBranch": "main",
+		"sourceBranch": "feature/2683-bad-issue-ref-" + unique,
+		"issueRef":     "the jobs issue",
+	})
+	if code != http.StatusBadRequest {
+		t.Fatalf("create with an unspellable issueRef: HTTP %d, want 400: %s", code, body)
+	}
+	if !strings.Contains(body, "INVALID_ISSUE_REF") {
+		t.Fatalf("body = %q, want the INVALID_ISSUE_REF code", body)
 	}
 }

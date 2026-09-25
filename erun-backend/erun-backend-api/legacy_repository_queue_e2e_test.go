@@ -181,23 +181,36 @@ func TestMergeQueueStillRefusesGenuinelyDifferentRepositories(t *testing.T) {
 	// A third row recording no repository, which genuinely belongs to neither
 	// of the named repositories as far as the platform can tell.
 	legacyID := e2eOpenReviewInRepository(t, srv.URL, "two-repositories-e2e", "", remote.main, legacyBranch)
-	for label, reviewID := range map[string]string{"first": firstID, "second": secondID, "legacy": legacyID} {
-		code, buildBody := e2eRequest(t, srv.URL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
+	// Every build is reported before any review is read back, and the read-back
+	// sweeps all three rather than only the one just reported. A build reported
+	// for one review can promote a *different* one to MERGE, and the legacy row
+	// here promotes across every repository at once (an empty repository filter
+	// means "every repository's queue"), so a report can leave a review this
+	// loop already looked at holding MERGE. Interleaving the two — report,
+	// read back the same review, move on — missed exactly that, and left a
+	// review at MERGE for the advance below to refuse as OCCUPIED instead of
+	// AMBIGUOUS: a test that passed or failed on the map iteration order.
+	toRequeue := []struct{ label, reviewID string }{
+		{"first", firstID}, {"second", secondID}, {"legacy", legacyID},
+	}
+	for _, review := range toRequeue {
+		code, buildBody := e2eRequest(t, srv.URL, http.MethodPost, "/v1/reviews/"+review.reviewID+"/builds", map[string]any{
 			"successful": true,
 			"commitId":   fmt.Sprintf("%040x", time.Now().UnixNano()),
 			"version":    "0.0.1",
 		})
 		if code != http.StatusCreated {
-			t.Fatalf("report green build for the %s review %s: HTTP %d: %s", label, reviewID, code, buildBody)
+			t.Fatalf("report green build for the %s review %s: HTTP %d: %s", review.label, review.reviewID, code, buildBody)
 		}
-		// A review promoted to MERGE goes back to READY; one whose promotion
-		// was blocked by a slot already held elsewhere in the queue is
-		// already waiting where it belongs.
-		if readMergeReview(t, srv.URL, reviewID).Status == model.ReviewStatusMerge {
-			if code, body := e2eRequest(t, srv.URL, http.MethodPatch, "/v1/reviews/"+reviewID+"/status", map[string]any{"status": "READY"}); code != http.StatusOK {
-				t.Fatalf("requeue the %s review %s to READY: HTTP %d: %s", label, reviewID, code, body)
-			}
+	}
+	// A review promoted to MERGE goes back to READY; one whose promotion was
+	// blocked by a slot already held elsewhere in the queue is already waiting
+	// where it belongs.
+	for _, review := range toRequeue {
+		if readMergeReview(t, srv.URL, review.reviewID).Status != model.ReviewStatusMerge {
+			continue
 		}
+		e2eRequeueToReady(t, srv.URL, review.reviewID)
 	}
 
 	code, body := e2eAdvanceMergeQueue(t, srv.URL, "", remote.main)
