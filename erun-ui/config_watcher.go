@@ -110,52 +110,121 @@ func (a *App) stopConfigWatcher() {
 		cw.cancel()
 	}
 	_ = cw.watcher.Close()
+	// runConfigWatcher does not close done until its debounce timer is stopped
+	// and any flush already running has finished, so once this returns no
+	// goroutine the watcher started is still reading config.
 	<-cw.done
+}
+
+// configDebouncer coalesces a burst of config-tree events into one flush of
+// the environments they touched, and owns the work that flush starts.
+//
+// Owning that work is the whole reason this is a type rather than a handful of
+// locals. A flush reads an environment's config, so a debounce callback still
+// running after the watcher was stopped reads process-global config state
+// whose lifetime its caller owns — `stop` is the contract that prevents it, and
+// it has to outlive any single closure to be one: once `stop` returns, no
+// flush is running and no further one can start.
+type configDebouncer struct {
+	root  string
+	flush func([]definitionWatchTarget)
+
+	// mu guards the debounce state. The callback claims its slot under this
+	// lock, the same one `stop` sets stopped under, so a callback either
+	// claims before teardown — and is waited for — or sees stopped set and
+	// returns without reading. Stopping the timer alone cannot say which of
+	// those happened: Stop reports false both for a callback that has not been
+	// scheduled yet and for one that has already finished.
+	mu      sync.Mutex
+	stopped bool
+	timer   *time.Timer
+	running sync.WaitGroup
+	pending map[definitionWatchTarget]struct{}
+
+	// flushMu keeps two debounce windows from overlapping. A flush performs a
+	// platform round trip, and two concurrent flushes for one environment
+	// would each decide their own upload from a pre-write read of the same
+	// config — two revisions written for one change.
+	flushMu sync.Mutex
+}
+
+func newConfigDebouncer(root string, flush func([]definitionWatchTarget)) *configDebouncer {
+	return &configDebouncer{
+		root:    root,
+		flush:   flush,
+		pending: map[definitionWatchTarget]struct{}{},
+	}
+}
+
+// observe records one config-tree event. It (re)arms the debounce window
+// whether or not the path attributes to an environment, because a flush
+// carrying no targets still refreshes the state every change implies.
+func (d *configDebouncer) observe(path string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopped {
+		return
+	}
+	if target, ok := definitionWatchTargetFor(d.root, path); ok {
+		d.pending[target] = struct{}{}
+	}
+	if d.timer != nil {
+		d.timer.Reset(configWatcherDebounce)
+		return
+	}
+	d.timer = time.AfterFunc(configWatcherDebounce, d.run)
+}
+
+// run is the debounce callback: it claims its slot, drains what was queued, and
+// flushes it.
+func (d *configDebouncer) run() {
+	d.mu.Lock()
+	d.timer = nil
+	if d.stopped {
+		d.mu.Unlock()
+		return
+	}
+	d.running.Add(1)
+	d.mu.Unlock()
+	defer d.running.Done()
+
+	d.flushMu.Lock()
+	defer d.flushMu.Unlock()
+	d.flush(d.take())
+}
+
+// take drains the queued targets, so one change is reported once.
+func (d *configDebouncer) take() []definitionWatchTarget {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	targets := make([]definitionWatchTarget, 0, len(d.pending))
+	for target := range d.pending {
+		targets = append(targets, target)
+	}
+	d.pending = map[definitionWatchTarget]struct{}{}
+	return targets
+}
+
+// stop ends the debounce: it stops the pending timer, refuses any later
+// callback, and waits out a flush already in flight.
+func (d *configDebouncer) stop() {
+	d.mu.Lock()
+	d.stopped = true
+	if d.timer != nil {
+		d.timer.Stop()
+		d.timer = nil
+	}
+	d.mu.Unlock()
+	d.running.Wait()
 }
 
 func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root string) {
 	defer close(cw.done)
 
-	var emitTimer *time.Timer
-	var emitMu sync.Mutex
-	// flushMu keeps two debounce windows from overlapping. A flush performs a
-	// platform round trip, and two concurrent flushes for one environment
-	// would each decide their own upload from a pre-write read of the same
-	// config — two revisions written for one change.
-	var flushMu sync.Mutex
-	pending := map[definitionWatchTarget]struct{}{}
-
-	flush := func() {
-		flushMu.Lock()
-		defer flushMu.Unlock()
-		emitMu.Lock()
-		targets := make([]definitionWatchTarget, 0, len(pending))
-		for target := range pending {
-			targets = append(targets, target)
-		}
-		pending = map[definitionWatchTarget]struct{}{}
-		emitMu.Unlock()
-
-		a.reactToConfigWatchTargets(targets)
-	}
-
-	queueEmit := func(path string) {
-		emitMu.Lock()
-		defer emitMu.Unlock()
-		if target, ok := definitionWatchTargetFor(root, path); ok {
-			pending[target] = struct{}{}
-		}
-		if emitTimer != nil {
-			emitTimer.Reset(configWatcherDebounce)
-			return
-		}
-		emitTimer = time.AfterFunc(configWatcherDebounce, func() {
-			emitMu.Lock()
-			emitTimer = nil
-			emitMu.Unlock()
-			flush()
-		})
-	}
+	// Stopped before done closes, so the caller waiting on done knows no flush
+	// is still reading.
+	debounce := newConfigDebouncer(root, a.reactToConfigWatchTargets)
+	defer debounce.stop()
 
 	for {
 		select {
@@ -165,7 +234,7 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 			if !ok {
 				return
 			}
-			handleConfigWatchEvent(cw.watcher, event, queueEmit)
+			handleConfigWatchEvent(cw.watcher, event, debounce.observe)
 		case watchErr, ok := <-cw.watcher.Errors:
 			if !ok {
 				return
