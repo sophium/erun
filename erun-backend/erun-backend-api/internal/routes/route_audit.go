@@ -52,6 +52,15 @@ var InternalAPIRoutes = map[string]bool{
 	// never something an operator clicks, the same self-report shape as the
 	// ai-session route above.
 	"POST /v1/environments/{environment_id}/events": true,
+	// Provisions an environment's own platform identity. Driven by the same
+	// client-side moment the platform credential itself is delivered in: the
+	// provisioning client (`erun init`, and the deploy retrofit) calls this
+	// with the operator's own session, then writes what it returns into the
+	// environment's Kubernetes Secret -- the channel the runtime chart already
+	// mounts. It is not an operator-clicked action, and there is nothing for a
+	// dialog to decide: the identity is a function of the environment, and
+	// calling it twice returns the same one.
+	"POST /v1/environments/{environment_id}/machine-identity": true,
 	// The read half of that log is a resume position, not a report: a client
 	// reconnecting to a stream hands back the cursor it last reached and gets
 	// the backlog it missed. Its operator-facing form is a live-updating view

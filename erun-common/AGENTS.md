@@ -30,6 +30,31 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
+### Platform identity: one per environment, and its form says which grant
+
+- An environment carries **one** platform identity, delivered as the single
+  `<tenant>-devops-platform-alias` Secret the runtime chart mounts. Which kind
+  it is lives in the alias entry inside: a `refreshtokenref` is a signed-in
+  person's delegated session, a `clientsecretref` is a machine identity erun
+  provisioned for that environment, and `resolveERunAccessToken` picks the
+  grant the reference implies. Never set both on one entry
+  (`ERunProviderConfig.IsMachineIdentity`), and never read a credential down
+  the other kind's path — a machine identity that acts as its operator, or a
+  pod holding a person's session, is the failure this split exists to prevent.
+- `platform_machine_identity.go` mints the machine form and
+  `platform_alias_secret.go` the delegated one, over the same channel and at
+  the same point in `erun init`; the machine form is asked for first and every
+  way it can fail falls back to the delegated one, traced rather than silent.
+  A credential is exchanged for a token **before** anything is written: a
+  machine identity nothing accepts is worse than none, and provisioning is the
+  only moment erun can tell the two apart.
+- `EnvConfig.PlatformAliasSecretName` is a single scalar, so an environment is
+  on one identity or the other and never both through a transition. Switching
+  is a re-provision (re-run `erun init`), not a merge — roll-forward design is
+  erun#2684's, and this shape is a constraint it has to work within.
+- The platform machine identity and the GitHub queue identity are two trust
+  domains. Name them coherently for attribution; never share the literal secret.
+
 ### Process, job, and deployment contracts
 
 - Paths passed to other processes must not contain the desktop executable's name:

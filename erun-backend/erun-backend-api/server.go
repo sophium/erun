@@ -349,7 +349,33 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	registerCredentialRoutes(register, options, txManager, repos, contextCredentials)
 	registerTenantAdminRoutes(register, options, txManager, repos)
 	registerIdentityAdminRoutes(register, options, txManager)
+	registerMachineIdentityRoutes(register, options, txManager, repos)
 	return repos.tenants
+}
+
+// registerMachineIdentityRoutes wires provisioning an environment's own
+// platform identity. It is registered unconditionally: an unconfigured
+// identity provider is answered with an actionable 501 at the route, not by
+// leaving the route absent, so a caller can tell a deployment gap from a typo.
+func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) {
+	// The interface check is explicit rather than `options.IdentityAdmin !=
+	// nil` at the call site: a typed nil *zitadel.Client stored in the
+	// interface is not nil, and would reach the service as a configured admin.
+	var machineIdentityAdmin service.MachineIdentityAdmin
+	if options.IdentityAdmin != nil {
+		machineIdentityAdmin = options.IdentityAdmin
+	}
+	// User and role repositories are constructed here rather than added to
+	// databaseRepositories: that bundle exists so registerDatabaseRoutes does
+	// not repeat one constructor twelve times, and identity administration
+	// already constructs its own alongside this.
+	routes.RegisterMachineIdentityRoutes(register, service.NewMachineIdentityService(
+		repos.environments,
+		repository.NewUserRepository(txManager),
+		repository.NewRoleRepository(txManager),
+		repos.tenantIssuers,
+		machineIdentityAdmin,
+	))
 }
 
 // registerWorkflowRoutes wires the routes describing a change in flight:

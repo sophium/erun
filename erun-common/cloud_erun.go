@@ -9,13 +9,29 @@ import (
 )
 
 // ERunProviderConfig is the erun-hosted-platform identity for a cloud alias:
-// the API this alias authenticates against, the CLI OIDC client it signs in
-// with, and a reference to the stored refresh token (never the token itself,
+// the API this alias authenticates against, the OIDC client it authenticates
+// as, and a reference to the stored credential (never the credential itself,
 // which lives only in the secret store).
+//
+// Exactly one of RefreshTokenRef and ClientSecretRef is set, and which one
+// says what kind of identity the alias is. A refresh-token reference is a
+// signed-in person's session, delegated to an environment by `erun init` on
+// the host they signed in on; a client-secret reference is a machine identity
+// erun provisioned for one environment, which presents itself through the
+// client_credentials grant and belongs to no person at all. The two are not
+// interchangeable in either direction: a machine identity can never act as its
+// operator, and a signed-in session is not something a pod should be holding.
 type ERunProviderConfig struct {
 	APIURL          string `json:"apiUrl,omitempty" yaml:"apiurl,omitempty"`
 	ClientID        string `json:"clientId,omitempty" yaml:"clientid,omitempty"`
 	RefreshTokenRef string `json:"refreshTokenRef,omitempty" yaml:"refreshtokenref,omitempty"`
+	ClientSecretRef string `json:"clientSecretRef,omitempty" yaml:"clientsecretref,omitempty"`
+}
+
+// IsMachineIdentity reports whether this alias authenticates as a provisioned
+// machine identity rather than a delegated operator session.
+func (c ERunProviderConfig) IsMachineIdentity() bool {
+	return strings.TrimSpace(c.RefreshTokenRef) == "" && strings.TrimSpace(c.ClientSecretRef) != ""
 }
 
 // InitERunCloudProviderParams is the explicit input for attaching a hosted
@@ -322,7 +338,7 @@ func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDepend
 	}
 	if _, err := resolveERunAccessToken(stderrOnlyContext(), provider, deps); err != nil {
 		status := CloudTokenStatusNotConfigured
-		if provider.ERun.RefreshTokenRef != "" {
+		if provider.ERun.RefreshTokenRef != "" || provider.ERun.IsMachineIdentity() {
 			status = CloudTokenStatusExpired
 		}
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: err.Error()}
@@ -345,10 +361,48 @@ func resolveERunAccessToken(ctx Context, provider CloudProviderConfig, deps Clou
 	if token, ok := loadCachedERunAccessToken(deps.CloudSecretStore, provider.Alias); ok {
 		return token, nil
 	}
+	if provider.ERun.IsMachineIdentity() {
+		return clientCredentialsERunAccessToken(ctx, provider, deps)
+	}
 	if provider.ERun.RefreshTokenRef == "" {
 		return "", fmt.Errorf("not signed in; run `erun cloud login %s`", provider.Alias)
 	}
 	return refreshERunAccessToken(ctx, provider, deps)
+}
+
+// clientCredentialsERunAccessToken mints an access token for a provisioned
+// machine identity, and is the whole of what an environment does to
+// authenticate once it has one: no stored session, no human, and nothing to
+// refresh — a fresh token per call, cached only for as long as it is valid.
+//
+// There is no rotation to reconcile here, unlike the refresh-token path: the
+// client secret is long-lived and reusable, so a call either mints a token or
+// reports why it could not. The report names re-provisioning rather than
+// `cloud login`, because there is no sign-in that would fix a machine
+// identity whose credential has been removed.
+func clientCredentialsERunAccessToken(ctx Context, provider CloudProviderConfig, deps CloudDependencies) (string, error) {
+	if deps.CloudSecretStore == nil {
+		return "", fmt.Errorf("cloud secret store is not configured")
+	}
+	clientSecret, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.ClientSecretRef)
+	if err != nil || strings.TrimSpace(clientSecret) == "" {
+		return "", fmt.Errorf("this environment's machine identity credential is not available; re-provision the environment's identity")
+	}
+	discovery, err := deps.FetchOIDCDiscovery(ctx, provider.OIDCIssuerURL)
+	if err != nil {
+		return "", err
+	}
+	tokens, err := deps.ClientCredentialsERunTokens(ctx, discovery, provider.ERun.ClientID, clientSecret)
+	if err != nil {
+		return "", fmt.Errorf("mint machine identity token: %w", err)
+	}
+	if tokens.AccessToken == "" {
+		return "", fmt.Errorf("mint machine identity token: response is missing an access token")
+	}
+	if err := saveCachedERunAccessToken(deps.CloudSecretStore, provider.Alias, tokens); err != nil {
+		return "", err
+	}
+	return tokens.AccessToken, nil
 }
 
 // refreshERunAccessToken mints a fresh access token via the refresh_token

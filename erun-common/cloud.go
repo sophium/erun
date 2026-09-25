@@ -183,6 +183,7 @@ type CloudDependencies struct {
 	PollERunDeviceToken          func(Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
 	RunERunAuthCodeLogin         func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 	RefreshERunTokens            func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
+	ClientCredentialsERunTokens  func(Context, OIDCDiscovery, string, string) (ERunTokens, error)
 
 	// FetchVersionJSON resolves a deployed version surface's own build version
 	// (GET <surfaceURL>/version.json, unauthenticated) -- a control plane's
@@ -978,6 +979,9 @@ func normalizeERunCloudDependencies(deps CloudDependencies) CloudDependencies {
 	}
 	if deps.RefreshERunTokens == nil {
 		deps.RefreshERunTokens = defaultRefreshERunTokens
+	}
+	if deps.ClientCredentialsERunTokens == nil {
+		deps.ClientCredentialsERunTokens = defaultClientCredentialsERunTokens
 	}
 	if deps.FetchVersionJSON == nil {
 		deps.FetchVersionJSON = defaultFetchVersionJSON

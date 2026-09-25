@@ -8,20 +8,26 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// tenantUserRoleName, tenantAdminRoleName and tenantAgentRoleName are the
-// narrower predefined roles that ship alongside the wildcard
-// ReadAll/WriteAll: TenantUser uses erun without administering it, TenantAdmin
-// administers the tenant without the platform-operator reach ReadAll/WriteAll
-// carry inside an OPERATIONS tenant, and TenantAgent is the machine role an
-// environment's own identity holds — a strict subset of TenantUser's reach,
-// because an unattended environment drives the merge-queue gate and reports
-// its own build and nothing else. Their permissions are exact (method, path)
-// grants taken directly from routeroles, never a hand-authored regex.
+// tenantUserRoleName and tenantAdminRoleName are the narrower predefined roles
+// that ship alongside the wildcard ReadAll/WriteAll: TenantUser uses erun
+// without administering it, and TenantAdmin administers the tenant without the
+// platform-operator reach ReadAll/WriteAll carry inside an OPERATIONS tenant.
+// Their permissions are exact (method, path) grants taken directly from
+// routeroles, never a hand-authored regex.
 const (
 	tenantUserRoleName  = "TenantUser"
 	tenantAdminRoleName = "TenantAdmin"
-	tenantAgentRoleName = "TenantAgent"
 )
+
+// TenantAgentRoleName is the machine role an environment's own identity holds —
+// a strict subset of TenantUser's reach, because an unattended environment
+// drives the merge-queue gate and reports its own build and nothing else.
+//
+// It is exported because something outside this package has to name it:
+// provisioning an environment's machine identity grants the identity this
+// role, and that caller resolves it by name from the roles this repository
+// seeds.
+const TenantAgentRoleName = "TenantAgent"
 
 // derivedRoles is every narrower predefined role this repository owns,
 // paired with the routeroles set its grants are derived from. The order is
@@ -34,7 +40,7 @@ var derivedRoles = []struct {
 }{
 	{tenantUserRoleName, routeroles.TenantUserPermissions},
 	{tenantAdminRoleName, routeroles.TenantAdminPermissions},
-	{tenantAgentRoleName, routeroles.TenantAgentPermissions},
+	{TenantAgentRoleName, routeroles.TenantAgentPermissions},
 }
 
 // ensureNarrowerRolesExist creates every role in derivedRoles for the tenant
