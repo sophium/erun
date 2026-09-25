@@ -38,7 +38,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 
 func createAndStartOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestPlainLaunchReopensTheOrchestratorThatWasOpen(t *testing.T) {
 // ones without colliding ids.
 func createAndStartNamedOrchestrator(t *testing.T, app *App, name, environment string) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: environment}}, nil)
+	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: environment}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestPlainReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 	id := createAndStartOrchestrator(t, app)
 	liveConversation := orchestratorSessionID(id)
 	stageOrchestratorConversation(t, liveConversation)
-	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
+	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -360,7 +360,7 @@ func TestAlsoReopenSurfacesANoticeWhenScopeChanged(t *testing.T) {
 	staleConversation := orchestratorSessionID(stale)
 	stageOrchestratorConversation(t, staleConversation)
 	current := createAndStartNamedOrchestrator(t, app, "other", "laptop")
-	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
+	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 

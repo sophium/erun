@@ -9,6 +9,7 @@ import {
 } from 'erun-kit';
 import { Input } from 'erun-kit';
 import { Label } from 'erun-kit';
+import { SelectField } from 'erun-kit';
 import { AlertTriangle, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -21,11 +22,19 @@ import {
 } from '@/app/orchestratorThunks';
 import {
   closeOrchestratorDialog,
+  type OrchestratorAlias,
   type OrchestratorEnvRef,
   type OrchestratorEnvRole,
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
 import { InlineAlert } from '@/components/app/InlineAlert';
+import {
+  ORCHESTRATOR_ALIAS_FIELD_ID,
+  ORCHESTRATOR_ALIAS_NONE,
+  orchestratorAliasHelper,
+  orchestratorAliasOptions,
+  orchestratorAliasValue,
+} from '@/components/app/OrchestratorDialog.Alias.helpers';
 import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
 import { DirectoriesField } from '@/components/app/OrchestratorDialog.Directories';
 import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
@@ -35,7 +44,10 @@ import {
 } from '@/components/app/OrchestratorDialog.Environments.helpers';
 import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog.Guidance';
 
-import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
+import {
+  ListOrchestratorAliasChoices,
+  ListOrchestratorEnvCandidates,
+} from '../../../wailsjs/go/main/App';
 
 // OrchestratorDialog creates or edits a persisted orchestrator: a name, the agent
 // environments it links — each with a directory on this machine, either a
@@ -51,6 +63,13 @@ interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
   setName: (name: string) => void;
+  // aliasChoices are the erun aliases configured on this machine, and alias is
+  // the form's own value (' none' represented as '' in the model, 'none' in the
+  // picker). Both are here because the picker offers the resolved list rather
+  // than free text: the writer refuses an alias this host cannot resolve.
+  aliasChoices: string[];
+  alias: OrchestratorAlias;
+  setAlias: (alias: OrchestratorAlias) => void;
   selected: OrchestratorEnvRef[];
   toggle: (candidate: EnvCandidate, checked: boolean) => void;
   setDirectory: (ref: OrchestratorEnvRef, directory: string) => void;
@@ -65,6 +84,8 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   const dispatch = useAppDispatch();
   const [candidates, setCandidates] = React.useState<EnvCandidate[]>([]);
   const [name, setName] = React.useState('');
+  const [alias, setAlias] = React.useState<OrchestratorAlias>('');
+  const [aliasChoices, setAliasChoices] = React.useState<string[]>([]);
   const [selected, setSelected] = React.useState<OrchestratorEnvRef[]>([]);
   const [directories, setDirectories] = React.useState<string[]>([]);
 
@@ -73,6 +94,11 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
       return;
     }
     setName(editing?.name ?? '');
+    // Seed the picker from the stored value, not from the resolved list: an
+    // alias this host can no longer resolve still has to be shown, or the
+    // operator would see "none" where a value is stored and the panel would
+    // quietly disagree with config.yaml.
+    setAlias(editing?.alias ?? '');
     setSelected(editing ? editing.environments.map((env) => ({ ...env })) : []);
     setDirectories(editing ? [...editing.directories] : []);
     void ListOrchestratorEnvCandidates().then((list) => {
@@ -80,6 +106,9 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
       // OrchestratorEnvRole erases to that on the wire); loadOrchestrators
       // takes the same widen-then-narrow approach for OrchestratorInfo below.
       setCandidates(list as EnvCandidate[]);
+    });
+    void ListOrchestratorAliasChoices().then((list) => {
+      setAliasChoices(list);
     });
   }, [open, editing]);
 
@@ -143,9 +172,9 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   // a new field from being rendered but never sent.
   const submit = (): void => {
     if (editing) {
-      void dispatch(updateOrchestrator(editing.id, name, selected, directories));
+      void dispatch(updateOrchestrator(editing.id, name, selected, directories, alias));
     } else {
-      void dispatch(createOrchestrator(name, selected, directories));
+      void dispatch(createOrchestrator(name, selected, directories, alias));
     }
   };
 
@@ -153,6 +182,9 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     candidates,
     name,
     setName,
+    aliasChoices,
+    alias,
+    setAlias,
     selected,
     toggle,
     setDirectory,
@@ -262,17 +294,12 @@ function OrchestratorForm({
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
-        <div className="space-y-1.5">
-          <Label htmlFor="orchestrator-name">Name</Label>
-          <Input
-            id="orchestrator-name"
-            value={name}
-            placeholder="Optional — defaults from the tenants"
-            onChange={(event) => {
-              form.setName(event.target.value);
-            }}
-          />
-        </div>
+        <OrchestratorNameField name={name} onChange={form.setName} />
+        <OrchestratorAliasField
+          choices={form.aliasChoices}
+          alias={form.alias}
+          onChange={form.setAlias}
+        />
         <RestartRequiredNotice editing={editing} />
         <EnvironmentsField
           candidates={candidates}
@@ -329,6 +356,66 @@ function OrchestratorForm({
         </DialogFooter>
       </div>
     </>
+  );
+}
+
+// OrchestratorNameField is the orchestrator's display name. Optional, and
+// derived from the linked tenants when left blank. Split out alongside the
+// alias field to keep OrchestratorForm inside its line budget.
+function OrchestratorNameField({
+  name,
+  onChange,
+}: {
+  name: string;
+  onChange: (name: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="orchestrator-name">Name</Label>
+      <Input
+        id="orchestrator-name"
+        value={name}
+        placeholder="Optional — defaults from the tenants"
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+    </div>
+  );
+}
+
+// OrchestratorAliasField renders the Platform alias picker: which erun platform
+// alias this orchestrator declares as its own. Split out of OrchestratorForm for
+// the same reason OrchestratorManageActions is -- the form sits at its
+// size/complexity budget -- and because the sentinel round trip belongs in one
+// place rather than inline among the other fields.
+//
+// The choices come from the backend rather than from free text: the writer
+// refuses an alias this host cannot resolve, so a picker over the resolved list
+// is what keeps the dialog from offering a value whose save is guaranteed to
+// fail. An empty list is a real state (no erun alias is configured on this
+// machine), and SelectField renders it as one.
+function OrchestratorAliasField({
+  choices,
+  alias,
+  onChange,
+}: {
+  choices: string[];
+  alias: OrchestratorAlias;
+  onChange: (alias: OrchestratorAlias) => void;
+}): React.ReactElement {
+  return (
+    <SelectField
+      id={ORCHESTRATOR_ALIAS_FIELD_ID}
+      label="Platform alias"
+      value={alias === '' ? ORCHESTRATOR_ALIAS_NONE : alias}
+      options={orchestratorAliasOptions(choices, alias)}
+      emptyLabel="No erun alias on this machine"
+      helper={orchestratorAliasHelper(alias)}
+      onChange={(value) => {
+        onChange(orchestratorAliasValue(value));
+      }}
+    />
   );
 }
 

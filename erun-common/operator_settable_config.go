@@ -56,4 +56,14 @@ var OperatorSettableConfigFields = []OperatorSettableConfigField{
 		Name:  "EnvConfig.Hosted",
 		Token: "hostedenvironment",
 	},
+	{
+		// Set by the desktop's Edit orchestrator dialog (OrchestratorDialog's
+		// Platform alias control) and by `erun orchestrator set-alias`. The
+		// frontend type mirroring this field (orchestratorsSlice.ts) is what
+		// this token matches. Unlike Role this is a *selection* among aliases
+		// the host already has, which is why the control is a picker over the
+		// resolved erun alias list rather than a free-text field.
+		Name:  "OrchestratorConfig.Alias",
+		Token: "orchestratoralias",
+	},
 }

@@ -36,6 +36,12 @@ type ListOrchestratorResult struct {
 	ID           string                      `json:"id"`
 	Name         string                      `json:"name"`
 	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+	// Alias is the erun platform alias this orchestrator declares as its own,
+	// empty when it declares none. Reported so the value is readable from the
+	// terminal, and not only from the dialog that writes it: a field an
+	// operator can set and cannot read back is the gap the operator-settable
+	// registry exists to catch.
+	Alias string `json:"alias,omitempty"`
 	// Directories are the orchestrator's own: paths it works in that belong to
 	// no environment at all. Reported so an orchestrator pointed only at
 	// directories does not read as having no scope.
@@ -512,6 +518,7 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 			Name:         orchestrator.Name,
 			Environments: envs,
 			Directories:  directories,
+			Alias:        strings.TrimSpace(orchestrator.Alias),
 		})
 	}
 	return results, nil

@@ -57,6 +57,22 @@ type OrchestratorConfig struct {
 	Name         string                        `yaml:"name" json:"name"`
 	Environments []OrchestratorEnvConfig       `yaml:"environments,omitempty" json:"environments,omitempty"`
 	Directories  []OrchestratorDirectoryConfig `yaml:"directories,omitempty" json:"directories,omitempty"`
+	// Alias names the erun platform alias this orchestrator declares as its
+	// own: which configured erun-type cloud alias it acts as. Empty -- the
+	// default -- declares none of its own and leaves it following this
+	// machine's own alias.
+	//
+	// It is the orchestrator-scoped counterpart of
+	// TenantConfig.PrimaryCloudProviderAlias, and a *selection* among aliases
+	// this host already has, never a credential: an orchestrator session has no
+	// pod and inherits the host's own config and secret store through its PTY,
+	// so naming an alias here changes whose identity that is not at all.
+	//
+	// Nothing resolves through it yet. An orchestrator's platform calls still
+	// resolve this machine's alias the way they always have; this field is the
+	// mapping that work needs in place first, and giving an orchestrator a
+	// credential of its own remains a separate decision.
+	Alias string `yaml:"alias,omitempty" json:"alias,omitempty"`
 }
 
 // OrchestratorDirectoryConfig is one directory the orchestrator operates in,

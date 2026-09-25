@@ -104,6 +104,38 @@ export class OrchestratorDialog {
     return this.page.locator(`#orchestrator-env-role-${tenant}-${environment}`);
   }
 
+  // The orchestrator's own platform alias, which is one field of the dialog
+  // rather than one per linked environment. The trigger is behind the
+  // menu button inside the Shadcn field markup, so clicking it is what opens
+  // the list -- the same interaction envRoleTrigger's callers use.
+  aliasTrigger(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).locator('#orchestrator-alias');
+  }
+
+  async setAlias(
+    alias: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<void> {
+    await this.aliasTrigger(mode).click();
+    await this.page.getByRole('option', { name: alias, exact: true }).click();
+  }
+
+  // The aliases the trigger offers, by their visible words, in render order.
+  // Opened and dismissed in one call, read as a list rather than probed one at
+  // a time, for the same reason envRoleOptionNames is: the property under test
+  // is which aliases are absent (a stored alias this machine no longer
+  // resolves, or another provider's) alongside which are present.
+  async aliasOptionNames(
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<string[]> {
+    await this.aliasTrigger(mode).click();
+    const options = this.page.getByRole('option');
+    await options.first().waitFor({ state: 'visible' });
+    const names = await options.allInnerTexts();
+    await this.page.keyboard.press('Escape');
+    return names.map((name) => name.trim());
+  }
+
   async setEnvRole(
     tenant: string,
     environment: string,
@@ -174,8 +206,8 @@ export class OrchestratorDialog {
     await this.locator(mode).getByRole('button', { name: 'Cancel' }).click();
   }
 
-  nameInput(): Locator {
-    return this.locator().getByLabel('Name');
+  nameInput(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByLabel('Name');
   }
 
   createButton(): Locator {

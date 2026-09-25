@@ -44,6 +44,18 @@ The full per-env field set (local port allocations, API URL, SSH details, …) p
 
 Each orchestrator lists its linked environments beside what that orchestrator uses each one for: `role=code`, `role=build`, `role=runtime`, or `role=undeclared` when nothing has been set. `role` and an environment's own `type` are independent fields shown in different places — a runtime-*type* environment linked with the runtime *role* shows `type: runtime` under its tenant entry and `role=runtime` under the orchestrator entry, and the two mean different things even though they share a spelling.
 
+An orchestrator that declares a platform alias of its own shows it as a `platform alias:` line directly under its name:
+
+```
+Orchestrators:
+  - my-orchestrator "My Orchestrator"
+    platform alias: erun+erunpaas.com@erun
+    environments:
+      - my-tenant/prod role=build directory=/Users/you/code/my-project
+```
+
+The line is absent when the orchestrator declares none, which is the default and means it follows this machine's own alias. [`erun orchestrator set-alias`](/cli/orchestrator) writes it, and the desktop's Edit orchestrator dialog has the same control.
+
 ## Stale ssh aliases {#stale-ssh-aliases}
 
 [`erun sshd init`](/cli/sshd) writes a `Host erun-<tenant>-<env>` block into `~/.ssh/config`, and `erun delete` removes the one it wrote. Nothing covers the other ways a block goes stale: an environment renamed rather than deleted, or its `sshd` turned off. The block survives, still pointing at `127.0.0.1:<its old local port>` — and local ports are reissued, so the stale alias starts resolving into whichever environment inherited that port:

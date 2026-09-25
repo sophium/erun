@@ -9,6 +9,13 @@ import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 // a default of either 'code', 'build', or 'runtime'.
 export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
 
+// OrchestratorAlias is the erun platform alias a host-side orchestrator
+// declares as its own: which configured erun-type cloud alias it acts as.
+// Mirrors the Go eruncommon.OrchestratorConfig.Alias. '' declares none of its
+// own, which is the default and leaves the orchestrator following this
+// machine's own alias.
+export type OrchestratorAlias = string;
+
 export interface OrchestratorEnvRef {
   tenant: string;
   environment: string;
@@ -114,6 +121,14 @@ export interface OrchestratorInfo {
   // holds, so this exists to offer the same Restart affordance without the
   // "tools missing" wording that would not apply here.
   roleChanged: boolean;
+  // alias is the erun platform alias this orchestrator declares as its own,
+  // absent when it declares none. It is a *selection* among aliases this host
+  // already has, never a credential: a host-side orchestrator has no pod and
+  // inherits the host's own config and secret store through its PTY. The
+  // dialog seeds its control from here and sends it straight back on save, so
+  // a value written by `erun orchestrator set-alias` survives an unrelated
+  // edit made in the desktop.
+  alias?: OrchestratorAlias;
 }
 
 export interface OrchestratorsState {

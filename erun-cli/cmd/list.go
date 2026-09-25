@@ -624,6 +624,9 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
 		return err
 	}
+	if err := writeOrchestratorAlias(ctx, orchestrator.Alias); err != nil {
+		return err
+	}
 	if len(orchestrator.Environments) == 0 {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    environments: none"); err != nil {
 			return err
@@ -639,6 +642,19 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 		}
 	}
 	return writeOrchestratorDirectories(ctx, orchestrator.Directories)
+}
+
+// writeOrchestratorAlias prints the erun platform alias this orchestrator
+// declares as its own, and nothing at all when it declares none: the default is
+// this machine's own alias, so an empty line would report a setting the
+// operator never made. Same rule as writeOrchestratorDirectories below.
+func writeOrchestratorAlias(ctx common.Context, alias string) error {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "    platform alias: %s\n", alias)
+	return err
 }
 
 // writeOrchestratorDirectories prints the orchestrator's own directories, and

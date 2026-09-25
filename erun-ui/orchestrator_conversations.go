@@ -258,6 +258,7 @@ func (a *App) restartOrchestratorOnConversation(def eruncommon.OrchestratorConfi
 	return a.spawnOrchestratorSession(orchestratorSpawn{
 		id:             def.ID,
 		name:           def.Name,
+		alias:          def.Alias,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
 		dirs:           def.Directories,
 		conversationID: conversationID,

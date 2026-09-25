@@ -16,7 +16,7 @@ func TestCreateOrchestratorAcceptsDirectoriesWithoutEnvironments(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	dir := t.TempDir()
-	info, err := app.CreateOrchestrator("scratch", nil, []string{dir})
+	info, err := app.CreateOrchestrator("scratch", nil, []string{dir}, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -41,12 +41,12 @@ func TestCreateOrchestratorRefusesAMissingOrRelativeDirectory(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	missing := filepath.Join(t.TempDir(), "not-there")
-	if _, err := app.CreateOrchestrator("missing", nil, []string{missing}); err == nil {
+	if _, err := app.CreateOrchestrator("missing", nil, []string{missing}, ""); err == nil {
 		t.Fatal("expected a directory that does not exist to be refused")
 	} else if !strings.Contains(err.Error(), missing) {
 		t.Fatalf("refusal should name the path the operator picked, got %q", err)
 	}
-	if _, err := app.CreateOrchestrator("relative", nil, []string{"relative/path"}); err == nil {
+	if _, err := app.CreateOrchestrator("relative", nil, []string{"relative/path"}, ""); err == nil {
 		t.Fatal("expected a relative directory to be refused")
 	}
 }
@@ -57,10 +57,10 @@ func TestOrchestratorScopeNeedsAnEnvironmentOrADirectory(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.CreateOrchestrator("empty", nil, nil); err == nil {
+	if _, err := app.CreateOrchestrator("empty", nil, nil, ""); err == nil {
 		t.Fatal("expected an orchestrator with no scope at all to be refused")
 	}
-	if _, err := app.CreateOrchestrator("blank", nil, []string{"  "}); err == nil {
+	if _, err := app.CreateOrchestrator("blank", nil, []string{"  "}, ""); err == nil {
 		t.Fatal("expected a blank directory entry to leave no scope, and be refused")
 	}
 }
@@ -73,7 +73,7 @@ func TestCreateOrchestratorCollapsesDuplicateDirectories(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	dir := t.TempDir()
-	info, err := app.CreateOrchestrator("dupe", nil, []string{dir, dir, ""})
+	info, err := app.CreateOrchestrator("dupe", nil, []string{dir, dir, ""}, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -89,12 +89,12 @@ func TestUpdateOrchestratorReplacesDirectories(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	first, second := t.TempDir(), t.TempDir()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{first})
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{first}, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
 	updated, err := app.UpdateOrchestrator(
-		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{second})
+		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{second}, "")
 	if err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestARunningOrchestratorStillReportsItsOwnDirectories(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	dir := t.TempDir()
-	created, err := app.CreateOrchestrator("scratch", nil, []string{dir})
+	created, err := app.CreateOrchestrator("scratch", nil, []string{dir}, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestUpdateOrchestratorAddsADirectoryWhileRunning(t *testing.T) {
 	}
 	dir := t.TempDir()
 	updated, err := app.UpdateOrchestrator(
-		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir})
+		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir}, "")
 	if err != nil {
 		t.Fatalf("UpdateOrchestrator while running failed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestAJustSavedDirectoryIsReportedByARunningOrchestrator(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAJustSavedDirectoryIsReportedByARunningOrchestrator(t *testing.T) {
 	}
 	dir := t.TempDir()
 	if _, err := app.UpdateOrchestrator(
-		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir}); err != nil {
+		created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, []string{dir}, ""); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
