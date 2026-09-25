@@ -230,8 +230,8 @@ surfaces need designed workflows, not bare fetches that satisfy the matcher.
 ## Role-classification gate
 
 Every protected route must be classified in `internal/routeroles.Routes`; there
-is no baseline. The API derives actual TenantUser/TenantAdmin grants from that
-same map. Parse the separate module's route source rather than importing it;
+is no baseline. The API derives actual TenantUser/TenantAdmin/TenantAgent grants
+from that same map. Parse the separate module's route source rather than importing it;
 exclude intentionally unauthenticated mux routes. Test classification logic
 with synthetic inputs independently of the repository wiring.
 

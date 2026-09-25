@@ -8,55 +8,66 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// tenantUserRoleName and tenantAdminRoleName are the two narrower predefined
-// roles that ship alongside the wildcard ReadAll/WriteAll: TenantUser uses
-// erun without administering it, TenantAdmin administers the tenant without
-// the platform-operator reach ReadAll/WriteAll carry inside an OPERATIONS
-// tenant. Their permissions are exact (method, path) grants taken directly
-// from routeroles, never a hand-authored regex.
+// tenantUserRoleName, tenantAdminRoleName and tenantAgentRoleName are the
+// narrower predefined roles that ship alongside the wildcard
+// ReadAll/WriteAll: TenantUser uses erun without administering it, TenantAdmin
+// administers the tenant without the platform-operator reach ReadAll/WriteAll
+// carry inside an OPERATIONS tenant, and TenantAgent is the machine role an
+// environment's own identity holds — a strict subset of TenantUser's reach,
+// because an unattended environment drives the merge-queue gate and reports
+// its own build and nothing else. Their permissions are exact (method, path)
+// grants taken directly from routeroles, never a hand-authored regex.
 const (
 	tenantUserRoleName  = "TenantUser"
 	tenantAdminRoleName = "TenantAdmin"
+	tenantAgentRoleName = "TenantAgent"
 )
 
-// ensureNarrowerRolesExist creates TenantUser/TenantAdmin for the tenant if
-// they do not already exist, and reconciles each one's exact-route permission
-// set to the current routeroles set. It runs on every call, even when the role
-// rows already exist, and the reconciliation replaces the set rather than
-// adding to it: inserts alone (ON CONFLICT DO NOTHING) already let an
-// already-bootstrapped tenant pick up a route reclassified *into* one of these
-// roles, but nothing ever removed a route reclassified back *out* of it, so
-// the narrowing a reclassification is for never reached a tenant that had
-// already been seeded — which is every tenant that exists. These two roles are
+// derivedRoles is every narrower predefined role this repository owns,
+// paired with the routeroles set its grants are derived from. The order is
+// the order they are created in, and nothing outside this list is ever
+// reconciled — a role an operator authored by hand keeps whatever it was
+// given.
+var derivedRoles = []struct {
+	name        string
+	permissions func() []routeroles.RoutePermission
+}{
+	{tenantUserRoleName, routeroles.TenantUserPermissions},
+	{tenantAdminRoleName, routeroles.TenantAdminPermissions},
+	{tenantAgentRoleName, routeroles.TenantAgentPermissions},
+}
+
+// ensureNarrowerRolesExist creates every role in derivedRoles for the tenant
+// if it does not already exist, and reconciles each one's exact-route
+// permission set to the current routeroles set. It runs on every call, even
+// when the role rows already exist, and the reconciliation replaces the set
+// rather than adding to it: inserts alone (ON CONFLICT DO NOTHING) already let
+// an already-bootstrapped tenant pick up a route reclassified *into* one of
+// these roles, but nothing ever removed a route reclassified back *out* of it,
+// so the narrowing a reclassification is for never reached a tenant that had
+// already been seeded — which is every tenant that exists. These roles are
 // derived from routeroles and never hand-authored, so replacing their grants
 // outright is their whole contract. Never backfilled by a migration; the same
 // lazy, idempotent pattern grantPredefinedRoles uses for ReadAll/WriteAll.
+//
+// TenantAgent is created here rather than by whatever provisions a machine
+// user: the role is a property of the tenant's authorization model, and an
+// operator can grant it to an identity they enrolled themselves today, before
+// anything mints one automatically.
 func ensureNarrowerRolesExist(ctx context.Context, tx bun.Tx, tenantID string) error {
-	userRoleID, err := findOrCreateRole(ctx, tx, tenantID, tenantUserRoleName)
-	if err != nil {
-		return err
-	}
-	userPermissions := routeroles.TenantUserPermissions()
-	if err := reconcileRolePermissions(ctx, tx, tenantID, userRoleID, userPermissions); err != nil {
-		return err
-	}
-	for _, permission := range userPermissions {
-		if err := grantRolePermissionExact(ctx, tx, tenantID, userRoleID, permission.Method, permission.Path); err != nil {
+	for _, derived := range derivedRoles {
+		roleID, err := findOrCreateRole(ctx, tx, tenantID, derived.name)
+		if err != nil {
 			return err
 		}
-	}
-
-	adminRoleID, err := findOrCreateRole(ctx, tx, tenantID, tenantAdminRoleName)
-	if err != nil {
-		return err
-	}
-	adminPermissions := routeroles.TenantAdminPermissions()
-	if err := reconcileRolePermissions(ctx, tx, tenantID, adminRoleID, adminPermissions); err != nil {
-		return err
-	}
-	for _, permission := range adminPermissions {
-		if err := grantRolePermissionExact(ctx, tx, tenantID, adminRoleID, permission.Method, permission.Path); err != nil {
+		permissions := derived.permissions()
+		if err := reconcileRolePermissions(ctx, tx, tenantID, roleID, permissions); err != nil {
 			return err
+		}
+		for _, permission := range permissions {
+			if err := grantRolePermissionExact(ctx, tx, tenantID, roleID, permission.Method, permission.Path); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
