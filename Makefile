@@ -264,6 +264,18 @@ INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota)
 # red the gate -- so it is read off the report, and the deadline stays as it
 # is: a bound on a lint that never finishes, or never loads its packages,
 # which has no report to read and still fails.
+#
+# What this target does not leave implicit: the budget it ran under. The
+# timeout above is scaled by the environment's own CPU quota, so two pods run
+# the same commit's lint against different deadlines -- and a red produced by
+# the shorter one reads, in the log, exactly like a red produced by a finding.
+# The recipe therefore prints the numbers it passes (the timeout, the fan-out
+# width, the per-lint GOMAXPROCS) beside the cpu quota they were derived from,
+# once before the fan-out and again beside the aggregated failure line. It
+# prints its own expanded variables rather than recomputing them, so an
+# operator's LINT_TIMEOUT/LINT_PARALLELISM/LINT_GOMAXPROCS override is what
+# shows up here: the numbers worth printing are the ones the modules got, not a
+# second resolution of the formula that produced them.
 lint:
 	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
 	pin_num=$${pin#v}; \
@@ -274,9 +286,15 @@ lint:
 		   echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$pin" >&2; \
 		   exit 1 ;; \
 	esac
-	@for m in $(LINT_MODULES); do \
+	@cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	budget="LINT_TIMEOUT=$(LINT_TIMEOUT) LINT_PARALLELISM=$(LINT_PARALLELISM) LINT_GOMAXPROCS=$(LINT_GOMAXPROCS), resolved from a cpu quota of $$cpu"; \
+	echo ">> lint budget: $$budget"; \
+	for m in $(LINT_MODULES); do \
 		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "$(CURDIR)/scripts/lint-module.sh $(LINT_GOMAXPROCS) $(LINT_TIMEOUT) $$m"; \
-	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint
+	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint; \
+	status=$$?; \
+	[ "$$status" -eq 1 ] && echo ">> lint budget: $$budget (the failure above ran under this)" >&2; \
+	exit $$status
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
 # a separate step rather than folded into integration-test or a contributor's

@@ -141,7 +141,11 @@ func TestLintTargetReadsGolangciLintsReportNotItsDeadline(t *testing.T) {
 // host resolves it and fails loudly rather than skipping when it is missing:
 // the image test stage runs `make check` itself, so make is never absent where
 // this is gated.
-func runLintTarget(t testing.TB, root, stubDir, moduleDir string) (string, error) {
+//
+// extraEnv is appended after the inherited environment, so a caller can pin a
+// resolved budget (PARALLEL_GATE_CPU_LIMIT) and assert against a known one
+// instead of against whatever this machine happens to be.
+func runLintTarget(t testing.TB, root, stubDir, moduleDir string, extraEnv ...string) (string, error) {
 	t.Helper()
 	makeBin, err := osexec.LookPath("make")
 	if err != nil {
@@ -154,6 +158,7 @@ func runLintTarget(t testing.TB, root, stubDir, moduleDir string) (string, error
 	// install; the rest of PATH is the real toolchain the recipe itself needs
 	// (sh, bash, tr, grep).
 	cmd.Env = append(lintMakeEnv(t), "PATH="+stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(cmd.Env, extraEnv...)
 
 	out, err := cmd.CombinedOutput()
 	return string(out), err
