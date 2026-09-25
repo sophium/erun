@@ -52,6 +52,23 @@ case "$1 $2 $3" in
 			exit 0
 		fi
 	done
+	# A case that sets STUB_STATUS_LINE_FILE gets the job's recorded line
+	# written out the way a real store records it -- the name this start was
+	# given, which is where agent-gate.sh's environment marker rides. A case
+	# that needs a record it can trust as *this* environment's derives it from
+	# a real invocation rather than reproducing the key by hand. It is written
+	# to a file rather than handed back through the environment on purpose: the
+	# key covers the whole environment, so anything a case exports between two
+	# invocations would read as a different run to the very check under test.
+	if [ -n "${STUB_STATUS_LINE_FILE:-}" ]; then
+		prev=""
+		for a in "$@"; do
+			if [ "$prev" = "--name" ]; then
+				printf 'exited %s: %s' "${STUB_START_EXIT_CODE:-0}" "$a" >"$STUB_STATUS_LINE_FILE"
+			fi
+			prev="$a"
+		done
+	fi
 	if [ -n "${STUB_START_STDERR:-}" ]; then
 		printf '%s' "$STUB_START_STDERR" >&2
 	fi
@@ -77,6 +94,14 @@ case "$1 $2 $3" in
 	exit "${STUB_OUTPUT_STATUS:-0}"
 	;;
 "exec job status")
+	# A record this same stub wrote out from a real start (see
+	# STUB_STATUS_LINE_FILE) is reported back verbatim, exactly as a real store
+	# would report the job it recorded.
+	if [ -n "${STUB_STATUS_LINE_FILE:-}" ] && [ -s "$STUB_STATUS_LINE_FILE" ]; then
+		cat "$STUB_STATUS_LINE_FILE"
+		printf '\n'
+		exit 0
+	fi
 	# A test that sets STUB_STATUS_QUEUE (one "<exitstatus>|<line>" per line)
 	# gets a different answer on each successive status call, popped in order.
 	# The wrapper probes the record once before deciding whether to replay or
@@ -125,10 +150,14 @@ printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
 mkdir -p "$STUB_STORE_DIR"
 
 job_id=""
+job_name=""
 prev=""
 for a in "$@"; do
 	if [ "$prev" = "--id" ]; then
 		job_id="$a"
+	fi
+	if [ "$prev" = "--name" ]; then
+		job_name="$a"
 	fi
 	prev="$a"
 done
@@ -165,7 +194,10 @@ if [ "$verb" = "exec job start" ]; then
 	set -e
 	printf '%s' "$out" >"${STUB_STORE_DIR}/${job_id}.output"
 	printf '%s' "$code" >"${STUB_STORE_DIR}/${job_id}.exitcode"
-	printf 'exited %s: stateful job' "$code" >"${STUB_STORE_DIR}/${job_id}.status"
+	# The recorded name, reported back exactly as a real store reports it: the
+	# name is where agent-gate.sh's environment marker rides, so a stub that
+	# dropped it would answer every replay probe with an unattributable record.
+	printf 'exited %s: %s' "$code" "$job_name" >"${STUB_STORE_DIR}/${job_id}.status"
 	exit 0
 fi
 
@@ -398,10 +430,25 @@ stub_erun "${case_dir}/bin"
 	export STUB_ARGV_FILE
 	export ERUN_ENV_TYPE=local-agent
 	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
-	export STUB_STATUS_STATUS=0
-	export STUB_STATUS_LINE='exited 0: make check'
 	export STUB_AWAIT_STATUS=0
 	export STUB_JOB_OUTPUT='earlier passing output'
+	export STUB_STATUS_LINE_FILE="${case_dir}/recorded-line"
+
+	# A replayed pass has to be one this environment could have produced, so the
+	# record this case replays is written by a real invocation -- the name it
+	# records is what carries the environment marker -- rather than a literal
+	# this case would have to keep in step with the key by hand. Nothing else is
+	# exported between the two invocations below: the key covers the whole
+	# environment, so an environment change here would read as a different run
+	# to the very check under test. AGENT_GATE_RERUN is the one exception, and
+	# only because it is this wrapper's own control -- it decides whether a
+	# replay is considered at all, never what the gated command does.
+	export AGENT_GATE_RERUN=1
+	run_gate check "make check" -- make check-gate >/dev/null
+	unset AGENT_GATE_RERUN
+	[ -s "$STUB_STATUS_LINE_FILE" ] || fail "status finished pass: could not learn the line a real invocation records"
+	: >"$STUB_ARGV_FILE"
+
 	run_gate check "make check" -- make check-gate
 	[ "$STATUS" -eq 0 ] || fail "status finished pass: expected exit 0, got $STATUS ($OUT)"
 	case "$OUT" in
@@ -426,6 +473,43 @@ stub_erun "${case_dir}/bin"
 		fail "status finished pass: must never start a new run over a finished record"
 	fi
 	grep -q -- '--timeout 1s' "$STUB_ARGV_FILE" || fail "status finished pass: must await the finished job to learn its real exit status"
+)
+
+# --- a recorded pass carrying no environment marker is not attributable to any
+# environment, so it is not replayed either. Records written before the marker
+# existed stay readable for the store's own retention window, and a pass no one
+# can attribute is exactly the case where treating it as this environment's
+# would be a guess about the one input the record cannot vouch for. Refusing
+# costs one fresh run; replaying it costs a verdict nobody produced.
+case_dir="${work_root}/status-finished-pass-unattributable"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 0: make check'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='fresh output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "status finished pass unattributable: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"fresh output"*) ;;
+	*) fail "status finished pass unattributable: expected a fresh run's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"replaying a cached PASS"*) fail "status finished pass unattributable: must never replay a pass it cannot attribute to this environment, got: $OUT" ;;
+	*) ;;
+	esac
+	case "$OUT" in
+	*"no environment marker"*) ;;
+	*) fail "status finished pass unattributable: expected the refusal to say the record carries no marker, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "status finished pass unattributable: must start a genuinely fresh run instead of replaying"
 )
 
 # --- a FAILING finished job is never replayed: a stale failure has no value
@@ -1288,6 +1372,99 @@ runs_file="${case_dir}/runs"
 
 	runs=$(wc -l <"$runs_file" | tr -d ' ')
 	[ "$runs" -eq 2 ] || fail "gate scope replay: a request under a different selection must actually run rather than replaying the other selection's recorded pass, ran $runs of 2"
+)
+
+# --- the environment a run executes under is part of what its recorded result
+# is a result *of*: a cached pass recorded under one environment must never
+# stand in for a request under another, or the second configuration is
+# reported green without ever having executed.
+#
+# This is the reported failure, in the shape it actually happened: a lane
+# proved a fix under three starvation delays set by an environment variable,
+# with an identical command and tree each iteration, so iterations 2 and 3
+# replayed iteration 1 and only one job ever ran -- reported as "15/15 green
+# across 200/750/2000 ms" when two of those three numbers never executed.
+#
+# The two requests below are identical in argv and tree and differ only in
+# ERUN_2696_KNOB, and execution is observed through a side effect rather than
+# through the command's own output. Argv is already part of the job id and the
+# tree is already part of it, so a case whose two runs differed in either would
+# separate them whether or not the environment is ever consulted, and would
+# pass against a key that ignores it. Same argv, same tree, one channel of
+# difference: only the environment can tell them apart.
+case_dir="${work_root}/env-state-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	ERUN_2696_KNOB=200 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: first environment expected exit 0, got $STATUS ($OUT)"
+
+	ERUN_2696_KNOB=750 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: second environment expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "env state replay: a run under a different environment must actually execute rather than replaying the other environment's recorded pass, ran $runs of 2"
+	case "$OUT" in
+	*"refusing to replay"*) ;;
+	*) fail "env state replay: a refused replay must say so on stderr rather than silently re-running, got: $OUT" ;;
+	esac
+
+	# Same tree and command, and now the same environment too: that one is a
+	# genuine replay, and losing it would defeat the whole point of the cache.
+	ERUN_2696_KNOB=750 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: identical re-run expected exit 0, got $STATUS ($OUT)"
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "env state replay: an identical command, tree and environment must still replay rather than re-execute, ran $runs of 2"
+	case "$OUT" in
+	*"replaying a cached PASS"*) ;;
+	*) fail "env state replay: expected the replay notice for a fully identical run, got: $OUT" ;;
+	esac
+)
+
+# --- a job already RUNNING under a different environment is the same hole on
+# the live path: this invocation has nothing to do but attach to it (starting a
+# second gate beside it is what the exclusive claim refuses), so the outcome it
+# reports is that run's -- and saying nothing would let a caller record a
+# verdict produced for a configuration it never asked about.
+case_dir="${work_root}/env-state-running"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='running: make check [env 0000000000000000], pid 123'
+	export STUB_START_STATUS=1
+	export STUB_START_STDERR='job "check" is already running (pid 123); pass a different id or cancel it first'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='resumed output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "env state running: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"resumed output"*) ;;
+	*) fail "env state running: the running job must still be attached to, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"WARNING"*"started under environment"*) ;;
+	*) fail "env state running: attaching to a run started under a different environment must say so, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"0000000000000000"*) ;;
+	*) fail "env state running: the warning must name the environment that run actually ran under, got: $OUT" ;;
+	esac
 )
 
 echo "ok: agent-gate.sh"

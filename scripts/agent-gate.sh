@@ -46,6 +46,23 @@
 # AGENT_GATE_RERUN=1 still skips the check and forces a new run regardless of
 # tree state.
 #
+# The environment a run executes under is the third input that decides what
+# its result means, and it is deliberately *not* one of the terms in the id
+# above. Moving the id with the environment would move it out from under the
+# bounded wait's own re-attach path -- a caller re-invoking after an expired
+# wait computes the id from its current environment, and if that moved it
+# would find no job to re-attach to and try to start a second gate beside the
+# first, which the exclusive claim below can only refuse. The id stays stable
+# and the *record* carries the environment instead: the name this leaves in
+# the job store ends with a marker derived from the environment of the
+# invocation that started it, and a recorded pass is replayed only when that
+# marker matches the environment asking for it. A differing environment is
+# never replayed -- it is named loudly and run fresh, because a pass recorded
+# somewhere else answers a question the caller did not ask. A record with no
+# marker at all (one written before this existed, still readable for the
+# store's retention window) is treated the same way: unattributable, so not
+# replayed.
+#
 # A replayed result is never silently indistinguishable from a fresh one: it
 # is always announced on stderr, naming the job id it came from (queryable
 # again with `erun exec job status`) and the exact recorded outcome. And a
@@ -201,7 +218,52 @@ cmd_state_key() {
 	} | hash_stdin | cut -c1-16
 }
 
+# gate_control_env names the variables *this wrapper itself* consumes to decide
+# how it waits and whether it replays at all -- never anything the gated
+# command can read to change what it does. They are held out of the
+# environment key below so that a caller turning one on for a retry (adding
+# AGENT_GATE_AWAIT_VERDICT=1 to its second invocation, say) does not read as a
+# different run and cost it the record it came back to collect.
+gate_control_env="AGENT_GATE_RERUN AGENT_GATE_AWAIT_VERDICT ERUN_AGENT_GATE_AWAIT_TIMEOUT"
+
+# env_state_key prints a key over the environment a gated run will execute
+# under: the *whole* environment, minus exactly the wrapper controls above --
+# not a list of variables known to matter. Which variables a gate reads is not
+# knowable from here (a starvation knob, a timeout, a feature flag, a database
+# URL -- whatever the suite being gated happens to consult), and a list of the
+# ones known today silently omits the next one, which is precisely the failure
+# this key exists to prevent, arriving as an omission instead of a mistake. So
+# a difference is the default and the exclusion is the narrow, reviewable
+# part. Like the scope key above, it reads the process environment rather than
+# the shell's own variables, so a value that never reached this process
+# cannot describe a run it is not in.
+env_state_key() {
+	pattern=""
+	sep=""
+	for name in $gate_control_env; do
+		pattern="${pattern}${sep}^${name}="
+		sep="|"
+	done
+	env | grep -v -E "$pattern" | LC_ALL=C sort | hash_stdin | cut -c1-16
+}
+
+# recorded_env_key prints the environment marker a recorded job's own status
+# line carries, and nothing when it carries none -- a record written before
+# this existed, or a line this version cannot read. The last match wins: the
+# marker is appended after whatever name the caller supplied, so a name that
+# happened to contain one cannot displace the real one.
+recorded_env_key() {
+	printf '%s\n' "$1" | sed -n 's/.*\[env \([0-9a-f]\{16\}\)\].*/\1/p'
+}
+
 resolved_job_id="${job_id}-$(tree_state_key)-$(cmd_state_key "$@")"
+
+# The environment this invocation runs under, and the name the job store will
+# record for it. The marker rides in the name because the name is the one
+# field `erun exec job status` reports back on its own line; the id cannot
+# carry it without moving the re-attach path the header describes.
+env_key=$(env_state_key)
+record_name="$job_name [env $env_key]"
 
 await_timeout="${ERUN_AGENT_GATE_AWAIT_TIMEOUT:-8m}"
 
@@ -216,18 +278,43 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 		running:*)
 			# Still running: the start/await/output flow below already attaches to
 			# it correctly (start reports "already running" and falls through), so
-			# no special-casing is needed here.
+			# no special-casing is needed here. There is also nothing else this
+			# invocation could usefully do -- starting a second gate beside this one
+			# is what the exclusive claim below refuses -- so a run started under a
+			# different environment is attached to and reported, but never silently:
+			# its verdict is that environment's, and a caller that takes it for this
+			# one's would be recording a result it never produced.
+			running_env=$(recorded_env_key "$status_line")
+			if [ -n "$running_env" ] && [ "$running_env" != "$env_key" ]; then
+				printf 'agent-gate: WARNING -- %s is already running as job %s, started under environment %s, not the environment this invocation is under (%s). The verdict reported below will be that run'\''s, for that environment -- not one this invocation asked for. Wait for it to finish, then run this command again to get a verdict for this environment.\n' "$job_name" "$resolved_job_id" "$running_env" "$env_key" >&2
+			fi
 			;;
 		"exited 0:"*)
-			printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree and command unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
-			replay_status=0
-			erun exec job await \
-				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$resolved_job_id" --timeout 1s >&2 || replay_status=$?
-			erun exec job output \
-				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$resolved_job_id" --max-bytes 16777216
-			exit "$replay_status"
+			replayed_env=$(recorded_env_key "$status_line")
+			if [ "$replayed_env" != "$env_key" ]; then
+				# A pass is only ever evidence for the run that produced it, and the
+				# environment is part of what that run was. Replaying it here would
+				# assert this configuration passed without ever executing it -- the
+				# caller is told a run happened that did not. So fall through and
+				# actually run it, which is also the only honest answer available:
+				# the recorded pass is real, it is simply not this run's.
+				if [ -z "$replayed_env" ]; then
+					env_mismatch="its record carries no environment marker (it predates this check), so it cannot be attributed to any environment"
+				else
+					env_mismatch="it ran under environment $replayed_env, and this invocation is under $env_key"
+				fi
+				printf 'agent-gate: refusing to replay the cached PASS for %s from job %s -- %s. A pass recorded under one environment is not a pass under another, so %s runs fresh instead.\n' "$job_name" "$resolved_job_id" "$env_mismatch" "$job_name" >&2
+			else
+				printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree, command and environment unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
+				replay_status=0
+				erun exec job await \
+					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+					--id "$resolved_job_id" --timeout 1s >&2 || replay_status=$?
+				erun exec job output \
+					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+					--id "$resolved_job_id" --max-bytes 16777216
+				exit "$replay_status"
+			fi
 			;;
 		*)
 			# A recorded outcome exists but is not a clean pass (a failure, an
@@ -268,7 +355,7 @@ fi
 start_status=0
 start_output=$(erun exec job start \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$resolved_job_id" --name "$job_name" \
+	--id "$resolved_job_id" --name "$record_name" \
 	${exclusive_flag:+"$exclusive_flag"} \
 	--env AGENT_GATE_DETACHED=1 \
 	-- "$@" 2>&1) || start_status=$?
