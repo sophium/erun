@@ -57,10 +57,38 @@ func TestRepositoryIdentityAgreesAcrossTheFormsAClientMayHold(t *testing.T) {
 }
 
 func TestRepositoryIdentityRefusesARemoteThatNamesNoRepository(t *testing.T) {
-	for _, given := range []string{"", "   ", "/", "https://github.com/", "https://github.com"} {
+	for _, given := range []string{
+		"", "   ", "/", "https://github.com/", "https://github.com",
+		// A shorthand names a repository on whichever forge the caller had in
+		// mind, and a relative path names a place in the caller's own working
+		// tree: each is a second identity for a repository the platform
+		// already records under its remote, so a filter naming one answered a
+		// silent subset of that repository's reviews rather than refusing.
+		"sophium/erun", "sophium/erun.git", "github.com/sophium/erun",
+		"../erun", "./erun", "erun",
+	} {
 		t.Run(given, func(t *testing.T) {
 			if got, err := RepositoryIdentity(given); err == nil {
 				t.Fatalf("RepositoryIdentity(%q) = %q with no error; a review cannot record an identity that names no repository", given, got)
+			}
+		})
+	}
+}
+
+// The forms that do name one repository are the ones erun's own clients hold:
+// `git remote get-url origin` answers an SSH remote, an HTTPS one, a file URL,
+// or (for a repository on local disk) an absolute path.
+func TestRepositoryIdentityAcceptsEveryFormARemoteIsHeldIn(t *testing.T) {
+	for _, given := range []string{
+		"git@github.com:sophium/erun.git",
+		"https://github.com/sophium/erun",
+		"file:///srv/git/erun.git",
+		"/srv/git/erun.git",
+		`C:\src\erun.git`,
+	} {
+		t.Run(given, func(t *testing.T) {
+			if _, err := RepositoryIdentity(given); err != nil {
+				t.Fatalf("RepositoryIdentity(%q): %v", given, err)
 			}
 		})
 	}
