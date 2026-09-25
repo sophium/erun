@@ -1,5 +1,12 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { injectTestStylesheet } from './testStylesheet';
+
+// The rule hoverOrchestratorBusySpinner freezes the spinner with, and the
+// attribute that keys it so a repeat is a no-op.
+const SPINNER_ANIMATION_OFF_ATTR = 'data-erun-test-spinner-animation-off';
+const SPINNER_ANIMATION_OFF = '.animate-spin { animation: none !important; }';
+
 export class Sidebar {
   constructor(public readonly page: Page) {}
 
@@ -454,10 +461,16 @@ export class Sidebar {
   // satisfies Playwright's hover "stable" actionability check — so the
   // animation is frozen first. That is a test-only workaround for the
   // Chromium/Playwright interaction, not a product concern.
+  //
+  // The freeze goes through the shared injectTestStylesheet
+  // (pages/testStylesheet.ts) rather than page.addStyleTag: a stalled
+  // addStyleTag round trip issues no timeout of its own and spends the whole
+  // test budget, then reports the stall as if the test had been slow. The
+  // helper's own comment carries the full reasoning.
   async hoverOrchestratorBusySpinner(name: string): Promise<void> {
     const spinner = this.orchestratorBusySpinner(name);
     await spinner.waitFor({ state: 'visible' });
-    await this.page.addStyleTag({ content: '.animate-spin { animation: none !important; }' });
+    await injectTestStylesheet(this.page, SPINNER_ANIMATION_OFF_ATTR, SPINNER_ANIMATION_OFF);
     await spinner.hover();
   }
 

@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { AppShell } from '../pages/index.js';
+import { injectTestStylesheet } from '../pages/testStylesheet.js';
 import { test as base } from './workerBackend.js';
 import { reapStubProcesses } from './stubProcesses.js';
 import {
@@ -221,18 +222,9 @@ export function withTestBudget(): { timeout: number } {
 // indistinguishable from a real difference between two cards. The animation
 // has to be off before the first measurement, not waited out.
 //
-// Injected with `page.evaluate`, not `page.addStyleTag`. addStyleTag appends
-// the element and then awaits the element's `load` event, which HTML does not
-// define for an inline <style>; it also issues that call with no timeout of
-// its own, so a round trip that stalls does not give up -- it silently
-// consumes whatever budget the calling test had left, and the spec reports a
-// bare test timeout naming addStyleTag rather than the measurement it was
-// about to make. One evaluate is a single bounded round trip with nothing to
-// wait on but the document itself.
-//
-// One copy, in the module every one of these specs already imports, rather
-// than the three that had drifted apart. Its contract -- the popover really is
-// at rest afterwards -- is pinned by
+// Injected through the shared pages/testStylesheet.ts, whose own comment
+// records why that is an evaluate rather than page.addStyleTag. Its contract
+// -- the popover really is at rest afterwards -- is pinned by
 // tests/areas/sidebar/sidebar-hovercard-animation-off.spec.ts.
 const POPOVER_ENTRANCE_ANIMATION_OFF = [
   '[role="dialog"][data-state] {',
@@ -242,26 +234,6 @@ const POPOVER_ENTRANCE_ANIMATION_OFF = [
 ].join('\n');
 
 const POPOVER_ANIMATION_OFF_ATTR = 'data-erun-test-popover-animation-off';
-
-// injectTestStylesheet is the mechanism every caller below shares: one
-// stylesheet appended to the live document, keyed by its own attribute so a
-// repeated call is a no-op and a re-navigation ("reboot()") gets the rule
-// back. See the block comment above for why this is an evaluate rather than
-// page.addStyleTag.
-async function injectTestStylesheet(page: Page, attr: string, css: string): Promise<void> {
-  await page.evaluate(
-    ({ css, attr }) => {
-      if (document.head.querySelector(`style[${attr}]`)) {
-        return;
-      }
-      const style = document.createElement('style');
-      style.setAttribute(attr, '');
-      style.textContent = css;
-      document.head.append(style);
-    },
-    { css, attr },
-  );
-}
 
 export async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
   await injectTestStylesheet(page, POPOVER_ANIMATION_OFF_ATTR, POPOVER_ENTRANCE_ANIMATION_OFF);
