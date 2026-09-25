@@ -60,6 +60,12 @@
 # observed to take in erun#2266 before failing. LINT_TIMEOUT's `?=` keeps the
 # existing manual override: an explicit `LINT_TIMEOUT=<duration> make check`
 # (or an env var of the same name) still wins over this computed default.
+#
+# The floor above is a floor on the budget, not a guarantee that the budget
+# fits: at the 22-core reference this resolves to the floor, and the lint has
+# outlived it while reporting "0 issues.". See the `lint` target's comment for
+# why the verdict is read from golangci-lint's report rather than from the
+# deadline this number sizes.
 LINT_TIMEOUT_REFERENCE_CPU := 22
 LINT_TIMEOUT_BASE_MINUTES := 15
 LINT_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
@@ -227,6 +233,37 @@ INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota)
 # golangci-lint is running"); the flag opts into golangci-lint's own supported
 # concurrent-runner mode, which is safe against the shared cache because cache
 # entries are keyed by file content hash, not writer identity.
+#
+# Each module's fan-out job is scripts/lint-module.sh, not `golangci-lint`
+# directly, so the verdict is read from golangci-lint's own report instead of
+# its exit status. The two disagree in exactly the case that reds this target
+# for no finding: golangci-lint prints its whole report -- the findings, or
+# "0 issues." -- and then overrides the code it decided from that report with
+# the run's own deadline, so a clean analysis that outlived --timeout exits as
+# a timeout and reads as a lint failure to anything watching the status,
+# including `erun review record-build --gate --failed`.
+#
+# The lineage, because the constant above reads as though this were solved:
+# the timeout used to be a flat 15m, calibrated on a build container that took
+# 22 of a 24-core node; once the container's declared cpu= was actually
+# enforced every module reported "0 issues" and then hit the deadline anyway,
+# so the timeout was scaled inversely with the resolved quota and floored at
+# that original 15m. That corrected the starved-environment end of the range
+# and left the floor calibrated for a lint that owns the whole quota -- which
+# is not what this target hands it. check-gate fans 13 targets out at -j13 and
+# this target runs all six LINT_MODULES at LINT_PARALLELISM=6, so at
+# PARALLEL_GATE_CPU_LIMIT=22 each lint gets LINT_GOMAXPROCS = 22/6 = 3 cores
+# while twelve other targets run beside it. At exactly the 22-core reference
+# the scaling term is inert (15m * 22 / 22) and the run takes the floor -- the
+# *least* budget the formula can hand out, asked to cover the most work in the
+# gate. erun-backend-api's analysis completed with "0 issues." and was
+# reported as a lint failure at 912s and at 1296s against that 900s floor.
+# Raising the floor is not the fix: it clears a red by moving a threshold and
+# trades a short false red for a long one. The invariant is narrower than the
+# timeout -- a lint that reported its whole result and found nothing must not
+# red the gate -- so it is read off the report, and the deadline stays as it
+# is: a bound on a lint that never finishes, or never loads its packages,
+# which has no report to read and still fails.
 lint:
 	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
 	pin_num=$${pin#v}; \
@@ -238,7 +275,7 @@ lint:
 		   exit 1 ;; \
 	esac
 	@for m in $(LINT_MODULES); do \
-		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "cd $$m && GOMAXPROCS=$(LINT_GOMAXPROCS) golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
+		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "$(CURDIR)/scripts/lint-module.sh $(LINT_GOMAXPROCS) $(LINT_TIMEOUT) $$m"; \
 	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
