@@ -96,13 +96,7 @@ func TestParseOrchestratorAliasFlag(t *testing.T) {
 func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
 	store := newOrchestratorAliasStubStore()
 
-	orchestrator, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "erun+erunpaas.com@erun",
-	})
-	if err != nil {
-		t.Fatalf("SetOrchestratorAlias() error = %v", err)
-	}
+	orchestrator := mustSetOrchestratorAlias(t, store, "orch-1", "erun+erunpaas.com@erun")
 	if orchestrator.Alias != "erun+erunpaas.com@erun" {
 		t.Fatalf("returned alias = %q", orchestrator.Alias)
 	}
@@ -114,6 +108,18 @@ func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
 	// orchestrator, not a replacement for it.
 	if len(store.config.Orchestrators[0].Environments) != 1 || store.config.Orchestrators[0].Name != "Orchestrator One" {
 		t.Fatalf("write dropped the rest of the orchestrator: %+v", store.config.Orchestrators[0])
+	}
+
+	// Running the same write twice converges rather than accumulating: the
+	// alias is a field of an existing entry, so a repeated set must leave one
+	// orchestrator carrying one alias, never a second entry or a duplicate
+	// mapping.
+	mustSetOrchestratorAlias(t, store, "orch-1", "erun+erunpaas.com@erun")
+	if len(store.config.Orchestrators) != 1 {
+		t.Fatalf("a repeated write changed the orchestrator count: %+v", store.config.Orchestrators)
+	}
+	if got := store.config.Orchestrators[0].Alias; got != "erun+erunpaas.com@erun" {
+		t.Fatalf("a repeated write changed the alias: %q", got)
 	}
 
 	if _, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
@@ -235,6 +241,18 @@ func TestSetOrchestratorAliasDryRunValidatesAndWritesNothing(t *testing.T) {
 	}); err == nil {
 		t.Fatal("dry run accepted an alias a real run refuses")
 	}
+}
+
+func mustSetOrchestratorAlias(t *testing.T, store *orchestratorAliasStubStore, id, alias string) OrchestratorConfig {
+	t.Helper()
+	orchestrator, err := SetOrchestratorAlias(Context{}, store, SetOrchestratorAliasParams{
+		OrchestratorID: id,
+		Alias:          alias,
+	})
+	if err != nil {
+		t.Fatalf("SetOrchestratorAlias(%q, %q) error = %v", id, alias, err)
+	}
+	return orchestrator
 }
 
 // orchestratorAliasStubStore is the minimal OrchestratorAliasStore the
