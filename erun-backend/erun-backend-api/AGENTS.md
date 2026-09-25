@@ -340,6 +340,28 @@ a substitute for GitHub-side enforcement.
     fake), `internal/routes/machine_identity_test.go`, and
     `machine_identity_e2e_test.go` (`ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL`:
     two provisioning calls leave one user row, one mapping and one grant).
+  - **The issuer-generic token half is the verified go/no-go, and its artifact
+    is `machine_identity_token_e2e_test.go`** (same
+    `ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL`, against a real migrated
+    PostgreSQL). It drives a token minted by the real `client_credentials`
+    grant (`CloudProviderBearerToken` asks for
+    `urn:zitadel:iam:user:resourceowner`, the claim the shipped Zitadel
+    org-scoped mapping names) through the real bearer verifier and the real
+    `IdentityRepository.ResolveTenantByIssuer`, and pins both directions of the
+    one question source cannot settle: honoured, the token resolves its tenant;
+    refused by the issuer (the BYO case, and what a Zitadel that stopped
+    honouring the scope for machine users would produce), the scope is dropped
+    on one retry and the token is refused with the named
+    `security.ErrTenantUnresolved` rather than resolving to a wrong tenant. The
+    same file drives the environment's own routine `POST /v1/builds`
+    self-report through the real handler as the identity an environment now
+    holds, with its `GET /v1/builds` refusal as the negative control; the
+    integration suite's `TestMachineIdentityBuildSelfReport`
+    (`erun-integration/machine_identity_test.go`) covers the client half with a
+    real `erun build` and a stub platform that refuses that route to any bearer
+    but the machine token. What a stub cannot establish is whether Zitadel's own
+    token endpoint honours that scope on a `client_credentials` grant — that
+    remains a live-instance question.
   - **Two things remain open, both tracked in #2684.** Revocation and the
     migration of an environment already carrying the operator's credential are
     separate work — `EnvConfig.PlatformAliasSecretName` is a single scalar, so

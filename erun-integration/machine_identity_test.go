@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,6 +89,7 @@ type machineIdentityStub struct {
 	mu            sync.Mutex
 	mints         int
 	tokenRequests []machineIdentityTokenRequest
+	buildReports  []string
 }
 
 // machineIdentityServer runs the double. Every platform route authenticates with
@@ -98,8 +100,16 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 	t.Helper()
 	mux := http.NewServeMux()
 
+	// GET /v1/environments answers two different callers with two different
+	// credentials: `erun init` provisioning an environment asks as the host's
+	// signed-in alias, and the environment's own build asks as itself. Both are
+	// legitimate reads of the same row, so the route accepts either rather than
+	// forcing one caller to present a credential it does not hold.
 	mux.HandleFunc("GET /v1/environments", func(w http.ResponseWriter, r *http.Request) {
-		if !requireBearer(w, r) {
+		switch r.Header.Get("Authorization") {
+		case "Bearer " + hostPlatformAccessToken, "Bearer " + machineIdentityAccessToken:
+		default:
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		environments := stub.Environments
@@ -199,6 +209,28 @@ func machineIdentityServer(t testing.TB, stub *machineIdentityStub) *httptest.Se
 		})
 	})
 
+	// POST /v1/builds is `erun build`'s own unattached self-report. It requires
+	// the *machine* credential specifically, not either: an environment that
+	// fell back to its operator's delegated session would answer here exactly
+	// as it does at the real API, where the two identities are two users and
+	// the environment holds the machine one's role.
+	mux.HandleFunc("POST /v1/builds", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+machineIdentityAccessToken {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read body", http.StatusBadRequest)
+			return
+		}
+		stub.mu.Lock()
+		stub.buildReports = append(stub.buildReports, string(body))
+		stub.mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"buildId": "build-1", "successful": true})
+	})
+
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
@@ -216,6 +248,14 @@ func (s *machineIdentityStub) mintCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mints
+}
+
+// buildReportLog returns the bodies of the build self-reports the platform
+// received, in order.
+func (s *machineIdentityStub) buildReportLog() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.buildReports...)
 }
 
 // removeCloudSecret deletes the file a secret ref resolves to, leaving any alias
@@ -343,5 +383,81 @@ func TestMachineIdentityPlatformAlias(t *testing.T) {
 			t.Fatalf("want the org-claim scope dropped on the retry, got %+v", requests)
 		}
 		golden.Equal(t, "platform/machine_identity_org_scope_retry_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
+	})
+}
+
+// TestMachineIdentityBuildSelfReport covers the other half of what an
+// environment does with a machine identity: the routine self-report `erun
+// build` makes after every run. Where the scenarios above assert the identity
+// authenticates, this asserts the environment's own unattached build report
+// (POST /v1/builds) is made *as* that identity -- the call the merge-queue
+// split depends on and the one an environment would otherwise have to hand to
+// a credentialed host.
+func TestMachineIdentityBuildSelfReport(t *testing.T) {
+	t.Parallel()
+
+	t.Run("real_run_reports_its_build_through_the_machine_identity", func(t *testing.T) {
+		// The stub platform refuses POST /v1/builds to any bearer other than the
+		// one its token endpoint minted, so a build that reported under the
+		// operator's delegated session -- or not at all -- fails here rather
+		// than passing on a green build with no report behind it. The build
+		// itself runs against the docker stub, so this is a real `erun build`
+		// end to end, not a preview.
+		// The platform knows the environment the build resolves locally, so the
+		// self-report has an environment id to name rather than failing before
+		// it posts anything.
+		stub := &machineIdentityStub{Environments: []map[string]any{
+			{"environmentId": "env-local", "name": "local", "status": "running"},
+		}}
+		server := machineIdentityServer(t, stub)
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedTenantEnv(t, setup, "team", "local")
+		fixture.SeedMachineIdentityAlias(t, setup, "team", "erun+test@erun", server.URL, machineIdentityClientID, machineIdentityClientSecret)
+
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in`,
+			`      inspect) exit 1 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
+			`  buildx)`,
+			`    case "$2" in`,
+			`      inspect) echo "Platforms: linux/arm64*, linux/amd64" ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		envVars = append(envVars, stubHelmSilent(t, setup)...)
+
+		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		reports := stub.buildReportLog()
+		if len(reports) != 1 {
+			t.Fatalf("want exactly one build self-report as the machine identity, got %d: %+v", len(reports), reports)
+		}
+		// The report names the environment the run resolved and the commit it
+		// ran against; both come from the run's own state, so a report that
+		// arrived at all but described nothing would still fail here.
+		var report map[string]any
+		if err := json.Unmarshal([]byte(reports[0]), &report); err != nil {
+			t.Fatalf("decode build report %q: %v", reports[0], err)
+		}
+		if report["environmentId"] == "" || report["commitId"] == "" {
+			t.Fatalf("the build report names no environment or commit: %s", reports[0])
+		}
+		if report["successful"] != true {
+			t.Fatalf("the build succeeded but reported otherwise: %s", reports[0])
+		}
+		golden.Equal(t, "platform/machine_identity_build_self_report_real_run", normalize.Apply(result.Combined, stubServerRule(server, "<IDENTITY_API>")))
 	})
 }
