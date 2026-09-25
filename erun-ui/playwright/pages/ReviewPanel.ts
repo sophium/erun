@@ -133,6 +133,58 @@ export class ReviewPanel {
     return this.changedFilesTree().locator('[aria-current="true"]');
   }
 
+  // diffScrollSelectionSettled reports whether the diff->tree scrollspy has
+  // applied the selection the diff panel's current scroll position implies:
+  // the diff region has actually scrolled, and the file the tree marks
+  // `aria-current` is one the region is showing.
+  //
+  // It exists because the scrollspy's update is coalesced onto the next
+  // animation frame (TerminalController.queueVisibleDiffSelectionUpdate), so
+  // the tree's active node does not name the file the scroll landed on the
+  // instant the scroll returns -- until that frame runs it still names the
+  // pre-scroll file. A spec that reads the active file there and then asserts
+  // it survives a reload is racing the frame, and loses whenever the renderer
+  // is starved enough to run it after the read: the frame's update then lands
+  // inside the reload wait and the reload correctly preserves a file the spec
+  // has already, wrongly, treated as settled.
+  //
+  // Both halves are needed. The scroll half is the premise -- without it the
+  // tree marking its initial files[0] would satisfy the visibility half on its
+  // own, so a fixture that stopped overflowing would quietly weaken the
+  // assertion instead of failing it. The visibility half is the witness a
+  // stale selection cannot satisfy, because the scroll moved its section out
+  // of the viewport.
+  //
+  // The two selectors are the ones this class's own locators use, read in one
+  // page evaluation so both boxes come from the same layout rather than from
+  // two round trips with a re-render between them.
+  async diffScrollSelectionSettled(): Promise<boolean> {
+    return this.page.evaluate(() => {
+      const region = document.querySelector<HTMLElement>(
+        '[role="region"][aria-label="Diff content"]',
+      );
+      const tree = document.querySelector<HTMLElement>('[aria-label="Changed files tree"]');
+      if (!region || !tree || region.scrollTop <= 0) {
+        return false;
+      }
+      const path = tree
+        .querySelector<HTMLElement>('[aria-current="true"]')
+        ?.getAttribute('data-path');
+      if (!path) {
+        return false;
+      }
+      const section = region.querySelector<HTMLElement>(
+        `.diff-file[data-path="${CSS.escape(path)}"]`,
+      );
+      if (!section) {
+        return false;
+      }
+      const regionBox = region.getBoundingClientRect();
+      const sectionBox = section.getBoundingClientRect();
+      return sectionBox.top < regionBox.bottom && sectionBox.bottom > regionBox.top;
+    });
+  }
+
   // envSectionHeader locates the sticky per-environment header the diff panel
   // renders above each linked environment's section once more than one target
   // is shown (#1178). Scoped to DiffList's sticky header class combination

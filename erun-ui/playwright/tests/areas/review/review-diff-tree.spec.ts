@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // ParseGitDiff already orders the diff files to match the changed-files tree;
 // these specs lock that the desktop panels agree — same files, same order,
@@ -326,6 +326,19 @@ test.describe('review diff/tree consistency', () => {
     await expect(async () => {
       await scrollDiffToLastFile(page);
     }).toPass({ timeout: 30_000 });
+
+    // The scrollspy's own update is coalesced onto the next animation frame
+    // (TerminalController.queueVisibleDiffSelectionUpdate), so the tree does
+    // not mark the file the scroll landed on the instant the scroll returns --
+    // until that frame runs it still marks the pre-scroll file, files[0].
+    // Reading the active file there is the race this spec used to lose, in
+    // exactly the reported shape: expected pkg/f00.ts, received pkg/f21.ts,
+    // with the frame's update arriving during the reload wait below and the
+    // reload then correctly preserving the file the diff is actually showing.
+    // Converge on the scrollspy having caught up before reading, so what the
+    // reload is asked to preserve is a settled selection rather than one the
+    // app has not finished making. See diffScrollSelectionSettled.
+    await expect.poll(() => review.diffScrollSelectionSettled(), withTestBudget()).toBe(true);
 
     // What the scrollspy picked, read off the tree rather than assumed: which
     // file spans the diff viewport's anchor depends on the rendered heights.
