@@ -582,7 +582,7 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_create",
-		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. issueRef records the issue the work belongs to, as owner/repo#number or as a bare number joined to the recorded repository; a recorded issue is declared, and outranks the number the source branch names. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewCreateTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_comment",
@@ -638,7 +638,7 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, gateShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_list",
-		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
+		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight, and so is PLANNED — work recorded before it starts, which the abandonment sweep deliberately leaves alone; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
 	}, jobsListTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_show",
@@ -646,11 +646,11 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, jobsShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_start",
-		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. A PLANNED job holds its scope too. status PLANNED records work that has not started — a triage or plan item parked against its issue, visible in the pipeline view before any code exists, and deliberately never swept to ABANDONED. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
 	}, jobsStartTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_finish",
-		Description: "Report how a job ended, or refresh what it is doing, on the erun platform. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Report how a job ended, refresh what it is doing, or open a planned job, on the erun platform. status RUNNING on a PLANNED job is the one move that begins work; every other status closes the job. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
 	}, jobsFinishTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",

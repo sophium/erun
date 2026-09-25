@@ -35,6 +35,9 @@ import { useJobsController } from './controller';
 //     grouped by job type, because that is the grouping an operator scans for
 //     "is anyone gating?" or "is anyone fixing that issue?".
 const STATUS_TONES: Record<JobStatus, StatusBadgeTone> = {
+  // PLANNED is work recorded before it starts -- the rung above RUNNING, and
+  // deliberately not toned as progress: nothing is running yet.
+  PLANNED: 'muted',
   RUNNING: 'in-progress',
   SUCCEEDED: 'success',
   FAILED: 'destructive',

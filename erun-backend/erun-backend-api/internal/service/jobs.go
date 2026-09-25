@@ -96,14 +96,39 @@ var validActorKinds = map[model.ActorKind]bool{
 	model.ActorKindHuman:        true,
 }
 
-// terminalJobStatuses are the states a job can end in; RUNNING is only ever
-// the status a claim assigns.
+// terminalJobStatuses are the states a job can end in; PLANNED and RUNNING
+// are the open ones -- PLANNED only ever by a claim that asks for it, RUNNING
+// by a claim that does not.
 var terminalJobStatuses = map[model.JobStatus]bool{
 	model.JobStatusSucceeded:  true,
 	model.JobStatusFailed:     true,
 	model.JobStatusAbandoned:  true,
 	model.JobStatusSuperseded: true,
 }
+
+// jobStatusTransitions is the closed set of moves Update may make from an
+// open job. A plan may open (RUNNING, the whole point of the status) or close
+// like any other; a running job may only close, since nothing reopens work
+// whose outcome is already recorded.
+var jobStatusTransitions = map[model.JobStatus]map[model.JobStatus]bool{
+	model.JobStatusPlanned: {
+		model.JobStatusRunning:    true,
+		model.JobStatusSucceeded:  true,
+		model.JobStatusFailed:     true,
+		model.JobStatusAbandoned:  true,
+		model.JobStatusSuperseded: true,
+	},
+	model.JobStatusRunning: {
+		model.JobStatusSucceeded:  true,
+		model.JobStatusFailed:     true,
+		model.JobStatusAbandoned:  true,
+		model.JobStatusSuperseded: true,
+	},
+}
+
+// jobStatusTransitionReason names the moves Update accepts, for the refusal
+// that names only the field otherwise.
+const jobStatusTransitionReason = "must move a PLANNED job to RUNNING or close it, and a RUNNING job to SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"
 
 // jobCommandWords are the shell commands a summary must never be only. A row
 // reading "git -C /home/erun/git/erun rebase --onto main~1" describes nothing
@@ -145,6 +170,11 @@ var jobProseWords = map[string]bool{
 // disappeared without closing its job, which is the orphaned-running-record
 // failure this design exists to avoid. The queue makes the overlap visible
 // rather than pretending it cannot happen.
+//
+// A claim that names no status is RUNNING, which is what every caller before
+// PLANNED existed meant. A claim that asks for PLANNED records work that has
+// not started: it holds the same scope, and it is deliberately outside the
+// abandonment sweep's reach (see SweepAbandoned).
 func (s *JobService) Claim(ctx context.Context, job model.Job) (model.Job, error) {
 	if job.Status == "" {
 		job.Status = model.JobStatusRunning
@@ -190,12 +220,18 @@ func (s *JobService) Update(ctx context.Context, tenantID, jobID string, status 
 
 	updated := existing
 	if status != "" && status != existing.Status {
-		if !terminalJobStatuses[status] {
-			return model.Job{}, &InvalidJobInputError{Field: "status", Reason: "must be SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED when changing a running job"}
+		if !jobStatusTransitions[existing.Status][status] {
+			return model.Job{}, &InvalidJobInputError{Field: "status", Reason: jobStatusTransitionReason}
 		}
-		ended := time.Now().UTC()
 		updated.Status = status
-		updated.EndedAt = &ended
+		// The ended_at the database's own CHECK pairs with the status: a
+		// closed job carries the time it closed, an open one carries none.
+		if terminalJobStatuses[status] {
+			ended := time.Now().UTC()
+			updated.EndedAt = &ended
+		} else {
+			updated.EndedAt = nil
+		}
 	}
 	if strings.TrimSpace(summary) != "" {
 		updated.Summary = strings.TrimSpace(summary)
@@ -230,6 +266,13 @@ const DefaultJobAbandonTTL = 30 * time.Minute
 // something a read infers about a row it happens to look at. A claim never
 // steals a scope on the grounds that its holder looks stale; only this does,
 // and it leaves the row saying what happened.
+//
+// PLANNED is exempt, and the exemption belongs to the repository's predicate
+// rather than to a filter here — see JobRepository.AbandonStale. ABANDONED
+// is what the sweep does to a job whose actor stopped updating it, and a
+// parked plan has no actor yet to stop: sweeping one would turn the pipeline
+// view's first rung into "dropped" within the TTL, on a schedule, with
+// nothing an operator did to cause it.
 func (s *JobService) SweepAbandoned(ctx context.Context, ttl time.Duration) ([]model.Job, error) {
 	if ttl <= 0 {
 		ttl = DefaultJobAbandonTTL
@@ -250,8 +293,8 @@ func validateJobWrite(job model.Job) error {
 	if strings.TrimSpace(job.ActorID) == "" {
 		return &InvalidJobInputError{Field: "actorId", Reason: "is required"}
 	}
-	if job.Status != model.JobStatusRunning && !terminalJobStatuses[job.Status] {
-		return &InvalidJobInputError{Field: "status", Reason: "must be RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"}
+	if job.Status != model.JobStatusRunning && job.Status != model.JobStatusPlanned && !terminalJobStatuses[job.Status] {
+		return &InvalidJobInputError{Field: "status", Reason: "must be PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED"}
 	}
 	return validateJobSummary(job.Summary)
 }

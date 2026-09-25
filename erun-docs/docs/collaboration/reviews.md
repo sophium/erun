@@ -22,8 +22,8 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
   "lastFailedBuildId": "bld_...",
   "lastReadyBuildId": "bld_...",
   "lastMergedBuildId": "bld_...",
-  "issueRef": "2212",                     // derived on read, never stored; absent when the branch names no issue
-  "issueRefSource": "INFERRED",           // always INFERRED today; present exactly when issueRef is
+  "issueRef": "sophium/erun#2212",        // the issue this work belongs to; absent when the review names none
+  "issueRefSource": "DECLARED",           // DECLARED | INFERRED; present exactly when issueRef is
   "createdAt": "2026-05-24T10:42:00Z",
   "updatedAt": "2026-05-24T11:13:00Z"
 }
@@ -36,7 +36,7 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?repository=<remote>`, `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. `repository` is canonicalized exactly as it is on create, so an SSH remote and its HTTPS form both name the one repository the rows were recorded under; a value that names none is refused with `400`/`INVALID_REPOSITORY` rather than matched literally, which would answer a silent subset of the repository the caller meant. |
-| `POST` | `/v1/reviews` | Create a review. Body: `repository`, `name`, `sourceBranch`, `targetBranch`. `repository` is canonicalized (an SSH remote and its HTTPS form are one repository); an absent one is recorded as none. Refused with `400`/`INVALID_REPOSITORY` for a value that names no repository — an empty value, a bare host, or a bare `owner/repo` shorthand, which names a repository on whichever forge the caller had in mind; SSH/HTTPS spellings of one remote are the accepted forms — and with `409 Conflict` if another review in the same repository already holds the name (unless it is `CLOSED`) or already proposes the same `sourceBranch` onto the same `targetBranch` while non-`MERGED`/`CLOSED`. |
+| `POST` | `/v1/reviews` | Create a review. Body: `repository`, `name`, `sourceBranch`, `targetBranch`, optional `issueRef` (the issue the work belongs to, as `owner/repo#number` or a bare number joined to the recorded repository; refused with `400`/`INVALID_ISSUE_REF` for anything else). `repository` is canonicalized (an SSH remote and its HTTPS form are one repository); an absent one is recorded as none. Refused with `400`/`INVALID_REPOSITORY` for a value that names no repository — an empty value, a bare host, or a bare `owner/repo` shorthand, which names a repository on whichever forge the caller had in mind; SSH/HTTPS spellings of one remote are the accepted forms — and with `409 Conflict` if another review in the same repository already holds the name (unless it is `CLOSED`) or already proposes the same `sourceBranch` onto the same `targetBranch` while non-`MERGED`/`CLOSED`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
 | `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the merge was pushed to, fetched to verify the report against the real repository. `buildId` is required for a review at `MERGE` and for `READY`/`FAILED`; a `MERGED` report for a review at any other status omits it, since there is no gate build for work that landed without the queue. |
 | `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge into a target branch (status `READY`, not yet promoted). Optional `?repository=<remote>`, `?targetBranch=<name>`; an absent `repository` lists every repository's queue, which is what a target branch alone has always meant. |
@@ -81,19 +81,33 @@ Carrying none is not holding a second identity: such a review is grouped with no
 
 ## Issue links
 
-A review answers which issue its work belongs to through `issueRef`, and where that answer came from through `issueRefSource`. Neither is stored: the link is resolved every time a review is read, so a review is never bound to a stale guess.
+A review answers which issue its work belongs to through `issueRef`, and where that answer came from through `issueRefSource`.
 
-A review carries no issue of its own yet, so the source branch is the only link there is. Branches are named `feature/<issue-number>-<description>` or `bug/<issue-number>-<description>`, and `issueRef` is the number that name carries:
+There are two sources, and the answer says which one it used. A review may **declare** its issue when it is created, and that declaration is stored on the review itself, in the same canonical `owner/repo#number` spelling a job's `issueRef` uses. With nothing declared, the **source branch** is the link: branches are named `feature/<issue-number>-<description>` or `bug/<issue-number>-<description>`, and `issueRef` is the number that name carries.
 
 ```jsonc
+// declared, recorded on the review
+{ "issueRef": "sophium/erun#2212", "issueRefSource": "DECLARED" }
+// nothing declared; the branch is the whole link
 { "sourceBranch": "bug/2212-issue-ref-from-branch", "issueRef": "2212", "issueRefSource": "INFERRED" }
 ```
 
-The derivation is **best-effort and clearly marked as such**. `issueRefSource` is `INFERRED` for a reference parsed out of a branch name — a guess that the branch was named honestly — and `DECLARED` for one a review states itself. A client that renders an inferred link as though the author had declared it claims a provenance erun does not have, which is why the two fields always travel together.
+The derivation is **best-effort and clearly marked as such**. `issueRefSource` is `INFERRED` for a reference parsed out of a branch name — a guess that the branch was named honestly — and `DECLARED` for one the review states. A client that renders an inferred link as though the author had declared it claims a provenance erun does not have, which is why the two fields always travel together, and why the platform never derives a link that then reports itself as declared.
 
-`DECLARED` is the vocabulary's other value, not a state this API returns yet: a review records no issue of its own, so there is nothing to declare and every `issueRef` in a response is `INFERRED`. It becomes reachable when a review can carry its own `issueRef` — a stored column, an `erun review create --issue` flag, and the resolution preferring that over the branch ([#2212](https://github.com/sophium/erun/issues/2212)). A client should still handle the value: the field is a provenance, and one that could only ever hold a single value would not need stating. A `POST /v1/reviews` body cannot produce it either way — `issueRef` and `issueRefSource` are not request fields, and a body carrying them is ignored the same way a body carrying `authorUserId` is.
+`issueRef` is a request field on `POST /v1/reviews`; `issueRefSource` is not, and never will be. A caller states *which* issue, never *that they stated it* — a body carrying `issueRefSource` has the field ignored, exactly as one carrying `authorUserId` does, because the source is the platform's answer about where the link came from.
 
-A branch that follows no convention leaves the review unlinked rather than guessed at: `feature/widget` — or any branch that merely contains a number — produces a review with no `issueRef` and no `issueRefSource` at all. An empty link is an answer; a wrong link sends someone to an issue nobody named.
+A branch that follows no convention and a review that declares nothing leaves the review unlinked rather than guessed at: `feature/widget` — or any branch that merely contains a number — produces a review with no `issueRef` and no `issueRefSource` at all. An empty link is an answer; a wrong link sends someone to an issue nobody named.
+
+### Recording the issue
+
+```console
+erun review create --name "Add widget" --issue sophium/erun#2212 \
+                   --source-branch feature/add-widget --target-branch main
+```
+
+`--issue` takes either the canonical `owner/repo#number` or a bare number, which the platform joins to the review's own recorded repository. A value that is neither — prose, a branch slug, or a bare number with no repository to join it to — is refused with `400 INVALID_ISSUE_REF` rather than stored as a reference nothing else could match.
+
+A declared reference wins over the branch outright. The two disagreeing is exactly the case worth stating a rule for: a review whose branch looks like one issue's while its author recorded another's is a renamed branch or a deliberate reassignment, and neither is resolved by overruling the caller.
 
 ## Name uniqueness
 
@@ -190,6 +204,7 @@ The codes below are the ones this API's review/merge-queue routes can actually d
 | `MERGE_QUEUE_OCCUPIED` | `POST /merge-queue/advance` (or `override-advance`) while another review already holds that target branch's single `MERGE` slot. `details` names the `targetBranch` and the occupying review's `reviewId`, `name`, and `sourceBranch`; the message names the `review requeue` remedy. Overriding the unresolved-thread gate does not bypass this. | `409` |
 | `REVIEW_NOT_MERGING` | `PATCH /status` to `READY` with no `buildId` — the missed-merge-window requeue — on a review that is not at `MERGE`. `details` names the `reviewId` and the `status` it actually holds. | `409` |
 | `INVALID_BODY` | Request body missing required field or fails type validation (malformed JSON), or `PATCH /status` to `READY`/`FAILED`/`MERGED` with no `buildId` (`details.field` names it: `buildId`). | `400` |
+| `INVALID_ISSUE_REF` | An `issueRef` on `POST /reviews` that is neither `owner/repo#number` nor a bare number with a repository to join it to. Prose, a branch slug, and a bare number on a review whose repository could not be read all land here. Pass the issue in one of the two accepted spellings. | `400` |
 | `INVALID_TARGET_BRANCH` | `targetBranch` is empty on `merge-queue/advance` or `override-advance`. | `400` |
 | `MERGE_QUEUE_AMBIGUOUS` | `POST /merge-queue/advance` (or `override-advance`) naming no repository while the target branch's queue holds `READY` reviews naming more than one repository. `details` names the `targetBranch`, the `repositories`, and `unrecordedRepositoryReviewIds` — the waiting rows that record no repository, always present and empty when there are none; the message says to name a repository. A review carrying no repository is not one: a queue holding one named repository beside any number of such rows — the queue a tenant predating repository identity has — advances normally. | `409` |
 | `INVALID_REPOSITORY` | A `repository` that names no repository: on `POST /reviews`, or on the `?repository=` filter of `GET /reviews` / `GET /reviews/merge-queue`, or in the body of `POST /merge-queue/advance` and its `override-advance`. That is an empty value, a bare host (`https://github.com`), or a bare `owner/repo` shorthand, which names a repository on whichever forge the caller had in mind rather than the one repository its reviews were recorded under. Pass the repository's own git remote — an SSH remote and its HTTPS form name one repository. | `400` |

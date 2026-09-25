@@ -425,7 +425,13 @@ type uiTenantDashboard struct {
 	// and what recent gates decided, independent of whether the change
 	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
 	// "Gate Runs".
-	GateRuns    []uiGateRun              `json:"gateRuns,omitempty"`
+	GateRuns []uiGateRun `json:"gateRuns,omitempty"`
+	// Pipeline is the Pipeline tab's own view: every job and review the
+	// platform holds for this tenant, unioned on the issue each belongs to
+	// and labelled by the rung it stands on. It spans the Reviews and Gates
+	// tabs rather than repeating either — planned work with no branch and no
+	// review is only visible here.
+	Pipeline    []uiPipelineIssue        `json:"pipeline,omitempty"`
 	AuditEvents []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
 	Panels      []uiTenantDashboardPanel `json:"panels,omitempty"`
 	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
@@ -716,6 +722,62 @@ type uiTenantDashboardAudit struct {
 	Actor     string `json:"actor,omitempty"`
 	Action    string `json:"action"`
 	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+// uiPipelineIssue is one issue's own group of pipeline work, with every item
+// keyed on it. IssueKey is empty for the single group that names no issue,
+// which the platform orders last -- the view shows work without an issue
+// rather than guessing an issue for it.
+type uiPipelineIssue struct {
+	IssueKey string           `json:"issueKey"`
+	Items    []uiPipelineItem `json:"items"`
+}
+
+// uiPipelineItem is one piece of work on one rung, with the record it came
+// from. Exactly one of Job or Review is set: a row that could not say which
+// it was would send an operator looking for a branch that does not exist (a
+// job) or a job that does (a review).
+//
+// Rung is the platform's own label (PLANNED, IN_PROGRESS, REVIEW_OPEN,
+// READY, MERGING, MERGED, or an outcome such as FAILED), never re-derived
+// here: the desktop renders whatever the platform said, under the shared
+// vocabulary in erun-kit's pipelineRungs.
+type uiPipelineItem struct {
+	IssueKey string `json:"issueKey"`
+	// IssueRef/IssueRefSource are the item's own link and where it came from,
+	// so a branch-derived one renders as inferred. Empty IssueRefSource is
+	// "the platform stated no link", never "the author declared this".
+	IssueRef       string            `json:"issueRef,omitempty"`
+	IssueRefSource string            `json:"issueRefSource,omitempty"`
+	Rung           string            `json:"rung"`
+	Job            *uiPipelineJob    `json:"job,omitempty"`
+	Review         *uiPipelineReview `json:"review,omitempty"`
+}
+
+// uiPipelineJob is the job half: work that exists as a record and carries its
+// own issue reference and owning actor. It has no branch, and nothing derives
+// one for it.
+type uiPipelineJob struct {
+	JobID     string `json:"jobId"`
+	JobType   string `json:"jobType"`
+	IssueRef  string `json:"issueRef,omitempty"`
+	Summary   string `json:"summary"`
+	Status    string `json:"status"`
+	ActorKind string `json:"actorKind"`
+	ActorID   string `json:"actorId"`
+	StartedAt string `json:"startedAt,omitempty"`
+	EndedAt   string `json:"endedAt,omitempty"`
+}
+
+// uiPipelineReview is the review half: work proposed for merge, with the
+// branches it moves between.
+type uiPipelineReview struct {
+	ReviewID     string `json:"reviewId"`
+	Repository   string `json:"repository,omitempty"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+	Status       string `json:"status"`
 }
 
 type uiReviewDetailInput struct {

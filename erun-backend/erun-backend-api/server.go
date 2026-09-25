@@ -367,6 +367,11 @@ func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos datab
 	routes.RegisterBuildRoutes(register, repos.builds, repos.environments, service.NewBuildService(repos.builds, reviewService))
 	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
 	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
+	// The pipeline view spans both halves above -- the jobs recording planned
+	// and in-flight work, and the reviews moving through the queue -- which is
+	// why it is registered here rather than with either of them alone. It
+	// reads both and writes neither.
+	routes.RegisterPipelineRoutes(register, service.NewPipelineService(repos.jobs, repos.reviews))
 }
 
 // registerEnvironmentRoutes wires the environment lifecycle: what a placement

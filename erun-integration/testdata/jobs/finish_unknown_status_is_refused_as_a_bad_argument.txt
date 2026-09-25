@@ -1,2 +1,2 @@
 audit: erun jobs finish --status bogus job_01HQ
-unsupported job status "bogus": expected one of RUNNING, SUCCEEDED, FAILED, ABANDONED, SUPERSEDED
+unsupported job status "bogus": expected one of PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, SUPERSEDED

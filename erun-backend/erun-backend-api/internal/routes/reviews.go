@@ -111,16 +111,18 @@ type addReviewerRequest struct {
 // review, and deliberately not model.Review, which also carries fields the
 // platform owns.
 //
-// IssueRef and IssueRefSource are the reason the two are separate. They are
-// derived on read and nothing persists them, so `Returning("*")` cannot
-// overwrite a caller-supplied value the way it does for a stored column: a
-// body carrying `issueRefSource: "DECLARED"` was echoed back verbatim as
-// though the platform had established it, and on a branch outside the
-// convention nothing even overwrote it. That is precisely the claim the whole
-// derivation is built to keep honest -- an inferred link is marked inferred,
-// and never written back as if it were declared. A request struct cannot hold
-// either field, so a forged one has nowhere on the wire to arrive from at all,
-// rather than merely nowhere to be read from after decoding.
+// IssueRef is a declaration, not a derivation: `issueRef` is the issue the
+// review's work belongs to, and stating it is exactly what makes the link
+// authoritative. The other half of that pair, IssueRefSource, stays absent
+// deliberately. It is derived on read — a reference parsed out of a branch
+// name is marked inferred, and never written back as if it were declared —
+// so a body carrying `issueRefSource: "DECLARED"` would be echoed back
+// verbatim as though the platform had established it, including on a branch
+// outside the convention where nothing would otherwise have produced a
+// source at all. That is precisely the claim the whole derivation exists to
+// keep honest. A request struct cannot hold the field, so a forged one has
+// nowhere on the wire to arrive from, rather than merely nowhere to be read
+// from after decoding.
 //
 // Status is absent for the same reason one step removed: it belongs to the
 // platform (PrepareCreate opens a review OPEN), and accepting it let a caller
@@ -131,6 +133,10 @@ type createReviewRequest struct {
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
+	// IssueRef is the issue this work belongs to: the canonical
+	// owner/repo#number, or the bare number the branch convention already
+	// teaches, which PrepareCreate joins to the review's own repository.
+	IssueRef string `json:"issueRef"`
 }
 
 // canonicalRepositoryParam canonicalizes a repository a caller named for this
@@ -231,23 +237,37 @@ func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// writeReviewPrepareError names which part of a new review the platform could
+// not accept. The two refusals share a status and a shape but not a field: a
+// caller told only INVALID_REPOSITORY for a mistyped --issue would go and
+// change a repository that was never the problem.
+func writeReviewPrepareError(w http.ResponseWriter, err error) {
+	var invalidIssueRef *service.InvalidIssueRefError
+	if errors.As(err, &invalidIssueRef) {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_ISSUE_REF", invalidIssueRef.Error())
+		return
+	}
+	writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+}
+
 func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 	var input createReviewRequest
 	if err := decodeJSON(req, &input); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	// Assembled field by field from createReviewRequest: these four are the
+	// Assembled field by field from createReviewRequest: these five are the
 	// only values a caller can put into a review, and the fields it has no
 	// request-side counterpart for start zeroed rather than caller-set.
 	prepared, err := r.service.PrepareCreate(model.Review{
-		Repository:   input.Repository,
-		Name:         input.Name,
-		TargetBranch: input.TargetBranch,
-		SourceBranch: input.SourceBranch,
+		Repository:       input.Repository,
+		Name:             input.Name,
+		TargetBranch:     input.TargetBranch,
+		SourceBranch:     input.SourceBranch,
+		DeclaredIssueRef: input.IssueRef,
 	})
 	if err != nil {
-		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		writeReviewPrepareError(w, err)
 		return
 	}
 	review, err := r.reviews.Create(req.Context(), prepared)

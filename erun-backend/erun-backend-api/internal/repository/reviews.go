@@ -14,8 +14,8 @@ type ReviewRepository struct {
 }
 
 const (
-	reviewColumns          = `review_id, tenant_id, author_user_id, repository, name, target_branch, source_branch, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
-	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.author_user_id, r.repository, r.name, r.target_branch, r.source_branch, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
+	reviewColumns          = `review_id, tenant_id, author_user_id, repository, name, target_branch, source_branch, issue_ref, status, last_failed_build_id, last_ready_build_id, last_merged_build_id, created_at, updated_at`
+	qualifiedReviewColumns = `r.review_id, r.tenant_id, r.author_user_id, r.repository, r.name, r.target_branch, r.source_branch, r.issue_ref, r.status, r.last_failed_build_id, r.last_ready_build_id, r.last_merged_build_id, r.created_at, r.updated_at`
 )
 
 // ReviewFilter composes GET /v1/reviews discovery filters. Every field is
@@ -55,7 +55,7 @@ func (r *ReviewRepository) Create(ctx context.Context, review model.Review) (mod
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
 		err := tx.NewInsert().
 			Model(&created).
-			Column("repository", "name", "target_branch", "source_branch", "status").
+			Column("repository", "name", "target_branch", "source_branch", "issue_ref", "status").
 			Returning("*").
 			Scan(ctx)
 		// Catches both the tenant/name uniqueness contract and the one-live-
