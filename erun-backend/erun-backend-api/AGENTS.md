@@ -135,7 +135,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Permissions are stored in `role_permissions` as either exact API method/path pairs or regex method/path patterns.
 - Permission matching must use the canonical API path template set by route registration, such as `/v1/reviews/{review_id}`, not the concrete request URL.
 - Keep broad predefined roles pattern-based: `ReadAll` covers all read-style methods across all API paths, and `WriteAll` covers all write-style methods across all API paths.
-- **`TenantUser`/`TenantAdmin` are the narrower predefined roles, built from exact routes, never a hand-authored pattern.** `internal/routeroles` (`Routes`, a `map["METHOD /path"]Class`) is the single source of truth for which registered route each grants: `TenantUserClass` (both `TenantUser` and `TenantAdmin` grant it — reading the tenant, driving reviews/comments/builds/the merge queue, operating environments that already exist), `TenantAdminOnly` (only `TenantAdmin` — creating/deleting environments, registering contexts, managing users/invites/roles/org-adjacent settings), or `OperationsOnly` (neither — reachable only through `ReadAll`/`WriteAll`, even from inside an `OPERATIONS` tenant, so `TenantAdmin` stays a genuinely lesser position than the platform operator there). `routeroles.TenantUserPermissions()`/`TenantAdminPermissions()` derive each role's exact `role_permissions` grants directly from that map. `internal/repository/predefined_roles.go`'s `ensureNarrowerRolesExist` creates/re-grants both roles for a tenant lazily and idempotently — at every first-user bootstrap and every `RoleRepository.List` read — so an already-bootstrapped tenant (or one that predates a later route reclassification) picks up the current grant set the next time anything calls it, with no migration backfill.
+- **`TenantUser`/`TenantAdmin`/`TenantAgent` are the narrower predefined roles, built from exact routes, never a hand-authored pattern.** `internal/routeroles` (`Routes`, a `map["METHOD /path"]Roles`) is the single source of truth for which registered route each grants. `Roles` is a **membership set**, one bit per role, not one class per route: `TenantAgent` is a strict subset of TenantUser's reach, which no single-valued constant can express without over-granting the machine role or narrowing TenantUser for every tenant already holding it. Composed values name the sets that matter: `TenantUserClass` (TenantUser and TenantAdmin, not TenantAgent — reading the tenant, driving reviews/comments/builds/the merge queue, operating environments that already exist), `TenantAdminOnly` (TenantAdmin alone — creating/deleting environments, registering contexts, managing users/invites/roles/org-adjacent settings), `TenantAgentClass` (all three — the environment-run gate and self-report flow), and `OperationsOnly` (no narrower role at all — reachable only through `ReadAll`/`WriteAll`, even from inside an `OPERATIONS` tenant, so `TenantAdmin` stays a genuinely lesser position than the platform operator there). `routeroles.TenantUserPermissions()`/`TenantAdminPermissions()`/`TenantAgentPermissions()` derive each role's exact `role_permissions` grants directly from that map. `internal/repository/predefined_roles.go`'s `ensureNarrowerRolesExist` creates and reconciles all three roles for a tenant lazily and idempotently — at every first-user bootstrap and every `RoleRepository.List` read, in both directions — so an already-bootstrapped tenant (or one that predates a later route reclassification) picks up the current grant set the next time anything calls it, with no migration backfill.
 - **Every registered route must be classified.** `erun-integration`'s role-classification gate (`erun-integration/AGENTS.md` § "Role-classification gate") fails when a route registered in `internal/routes` has no entry in `routeroles.Routes` — the same "classify every route or fail" discipline as its desktop-surface gate, so a route added later cannot silently land inside or outside `TenantUser`/`TenantAdmin`.
 - Route handlers should not check role names directly. Authorization middleware should compute access from the authenticated user's assigned roles and permissions before the route handler runs.
 - **The caller's effective permission set is reported, not left to be guessed.** `GET /v1/whoami` carries `capabilities`: every registered route this caller would be let through to. It is resolved by the same authorizer that enforces access (`PermissionAuthorizer.PermittedRoutes`, one query and one matcher shared with `Authorize`), over the handler's own route catalog. A second implementation of the decision is a second place for it to be wrong — a client rendering from a capability set that disagrees with enforcement is worse than one with no set at all, because it teaches an operator to expect the wrong thing.
@@ -277,16 +277,39 @@ a substitute for GitHub-side enforcement.
   are attributed to whoever ran `init`, and two environments provisioned from one
   host are indistinguishable in the audit trail. Say so rather than letting it read
   as a per-environment credential.
-- **Still design, not implemented: a tenant Zitadel machine user with
-  client_credentials** through existing issuer-generic OIDC verification (no new
-  signing trust anchor), provisioned idempotently server-side with the first
-  agent-capable environment, delivered through the existing Kubernetes Secret
-  channel, and scoped by a purpose-built role rather than broad TenantUser —
-  review read, nested build report, gate-run create/update, review status update
-  only, extended only after identifying a real additional caller. Common's
-  login/token resolution must mint refreshable short-lived tokens through the new
-  grant. That is what makes queue participation attributable to the queue rather
-  than to an operator, and it is the thing to build next here.
+- **Implemented: the machine role's authorization model.** `routeroles.Routes`
+  classifies a route by a *membership set* (`Roles`, one bit per narrower role),
+  not one class per route, because the machine role is a strict subset of
+  `TenantUserClass` and no single-valued class can express that — a fourth
+  constant could only have made it a peer, or narrowed TenantUser for every
+  tenant already holding it. `TenantAgentPermissions()` derives the subset:
+  `GET /v1/whoami` and the review reads (`erun review show`'s review, comments
+  and builds fetches), the review-nested `GATE` build report, gate-run
+  create/update, the `MERGED` status report, and `POST /v1/builds` — the
+  unattached self-report `erun build` actually makes, which the original
+  subset missed and which would otherwise 403 the environment's own call. It
+  deliberately excludes `GET /v1/builds` (the tenant-wide history has no
+  environment caller), opening or promoting reviews, comment/reviewer writes,
+  and every release route. `ensureNarrowerRolesExist` seeds `TenantAgent` for
+  every tenant alongside TenantUser/TenantAdmin, lazily and reconciled in both
+  directions, so an operator can grant it today. Coverage:
+  `internal/routeroles/route_roles_test.go` (the subset invariant and the
+  closed route list), `internal/repository/roles_e2e_test.go` and
+  `role_policy_e2e_test.go` (`ERUN_E2E_ROLES_DATABASE_URL`,
+  `ERUN_E2E_PERMISSIONS_DATABASE_URL`: the seeded grants, and a TenantAgent
+  holder permitted exactly its set against every real registered route).
+- **Still design, not implemented: the machine user itself** — a tenant IdP
+  machine user with client_credentials through existing issuer-generic OIDC
+  verification (no new signing trust anchor), minted idempotently server-side
+  with the first agent-capable environment, delivered through the existing
+  Kubernetes Secret channel, and granted `TenantAgent`. Doing so still needs
+  the answer to who may grant it: the enrolment and grant routes are
+  TenantAdminOnly, while the alias `erun init` delegates is an ordinary
+  operator's session, so a provisioning path of its own (or an operations
+  caller) is required. Common's login/token resolution must mint refreshable
+  short-lived tokens through the new grant. That is what makes queue
+  participation attributable to the queue rather than to an operator, and it
+  is the thing to build next here.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.
