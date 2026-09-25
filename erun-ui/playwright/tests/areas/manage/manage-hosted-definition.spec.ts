@@ -1,4 +1,4 @@
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
 import {
   SEED_ENV_ALPHA,
   SEED_ENV_DELTA,
@@ -7,6 +7,8 @@ import {
   SEED_HOSTED_REVISION,
   SEED_HOSTED_TENANT_ID,
   SEED_TENANT,
+  removeEnvironment,
+  seedHostedEnvironment,
 } from '../../../fixtures/seedRoot.js';
 
 // The Hosted environment panel is the desktop's whole surface for a hosted
@@ -38,6 +40,21 @@ function hostedDrift(behind: boolean): Record<string, unknown> {
 }
 
 test.describe('manage dialog hosted environment panel', () => {
+  // The hosted environment belongs to this spec, not to the suite's baseline.
+  // The seeded environment population is itself an assertion other specs make
+  // (the titlebar's select-all shortcuts count it), so a fourth baseline
+  // environment would change the subject under test for every spec that never
+  // asked for one. Stage it here, for the length of one test, and take it away
+  // again — the same lifecycle the seededEnv fixture applies to its own env.
+  test.beforeEach(async ({ app }) => {
+    seedHostedEnvironment(SEED_TENANT, SEED_ENV_DELTA);
+    await waitForSeededRow(app, SEED_TENANT, SEED_ENV_DELTA);
+  });
+
+  test.afterEach(() => {
+    removeEnvironment(SEED_TENANT, SEED_ENV_DELTA);
+  });
+
   test('names the platform row, and checks for updates only when asked', async ({ app, page }) => {
     const calls: string[] = [];
     await page.route('**/__erun_invoke', async (route, request) => {
@@ -78,6 +95,10 @@ test.describe('manage dialog hosted environment panel', () => {
     await app.manageDialog.waitForClosed();
   });
 
+  // The beforeEach stages delta for this test too, deliberately: alpha is
+  // unmarked while a marked sibling sits in the same tenant, so the absence
+  // below reads as "this environment is not hosted" rather than the weaker
+  // "nothing here is".
   test('is absent for an environment that carries no hosted marker', async ({ app }) => {
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
