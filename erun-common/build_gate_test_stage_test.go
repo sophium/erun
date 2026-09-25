@@ -45,6 +45,25 @@ func TestDockerfileHasGateTestStageIgnoresOrdinaryDockerfiles(t *testing.T) {
 	}
 }
 
+// The convention names a stage `test`, and a stage merely *prefixed* with it is
+// a different stage. Both patterns are read as "this build is the gate" by
+// promotion, and `dockerfileDeclaresTestStage` also hands the resulting build
+// the host-network entitlement, so a `test-toolchain` stage and a copy from it
+// satisfy a word-boundary match on both while the Dockerfile runs nothing. That
+// is not hypothetical: the erun-backend-api Dockerfile carries exactly such a
+// stage beside its real gate stage.
+func TestDockerfileHasGateTestStageIgnoresATestPrefixedStageName(t *testing.T) {
+	dir := t.TempDir()
+	path := writeTestDockerfile(t, dir, "FROM alpine:3.20 AS test-toolchain\nRUN apk add curl\n\n"+
+		"FROM golang:1.26.0 AS builder\nCOPY --from=test-toolchain /usr/bin/curl /usr/bin/curl\n")
+	if dockerfileHasGateTestStage(path) {
+		t.Error("a `test-toolchain` stage and a `COPY --from=test-toolchain` were read as the gate convention, exempting this Dockerfile from fingerprint promotion although it runs no gate")
+	}
+	if dockerfileDeclaresTestStage(path) {
+		t.Error("a `test-toolchain` stage was read as declaring a test stage, which would grant this build the host-network entitlement")
+	}
+}
+
 func TestDockerfileHasGateTestStageRequiresBothTheStageAndTheDependency(t *testing.T) {
 	dir := t.TempDir()
 	// A `test` stage nobody depends on is not a gate: nothing in the real build
