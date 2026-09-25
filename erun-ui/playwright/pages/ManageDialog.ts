@@ -535,9 +535,23 @@ export class ManageDialog {
 
   // Mirrors the Go-side EnvConfig.RemoteWorktree() predicate: true for any env
   // type other than the local-agent variant.
+  //
+  // Reads an answer or fails; it never answers from a field that is not there.
+  // The Environment type control lives in the dialog's loaded body, and
+  // `ManageDialogContent` replaces that whole body with a "Loading config..."
+  // placeholder for as long as `configLoading` is set -- so the control is
+  // genuinely absent during the load. Folding "absent" into "not remote" made
+  // the negative assertions about it green without the field ever having been
+  // read, and left a caller unable to tell "this env is a local agent" from
+  // "nothing has rendered yet".
   async hasRemoteWorktree(): Promise<boolean> {
     const label = await this.envTypeFieldValue();
-    return label !== '' && !/local agent/i.test(label);
+    if (label === '') {
+      throw new Error(
+        'The Environment type field is not readable (the manage dialog body is still loading); refusing to answer whether this environment has a remote worktree.',
+      );
+    }
+    return !/local agent/i.test(label);
   }
 
   // Only renders for remote envs (autoStart is meaningless for local shells),

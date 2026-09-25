@@ -1,4 +1,4 @@
-import { boundingBoxOf } from '../fixtures/boundingBox.js';
+import { boundingBoxOf, type ElementBox } from '../fixtures/boundingBox.js';
 import { expect, test } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/AppShell.js';
 
@@ -26,6 +26,8 @@ import type { AppShell } from '../pages/AppShell.js';
 // reachable until `Titlebar.toggleSidebar()` opens it back up first.
 const SIDEBAR_COLLAPSE_BREAKPOINT = 758;
 
+const LONG_PROVIDER_VALUE = 'Rihards.Freimanis+0203626script06330@aws-eu-west-2-production-account';
+
 async function openSettingsAtWidth(app: AppShell, width: number): Promise<void> {
   if (width < SIDEBAR_COLLAPSE_BREAKPOINT) {
     await app.titlebar.toggleSidebar();
@@ -36,13 +38,40 @@ async function openSettingsAtWidth(app: AppShell, width: number): Promise<void> 
 async function setLongProviderValue(page: import('@playwright/test').Page): Promise<void> {
   const trigger = page.locator('#global-config-cloudcontext-provider');
   await trigger.waitFor({ state: 'visible' });
-  await trigger.evaluate((btn) => {
+  await trigger.evaluate((btn, value) => {
     const span = btn.querySelector('[data-slot="select-value"]');
     if (!(span instanceof HTMLElement)) {
       throw new Error('select-value span not found on Cloud provider trigger');
     }
-    span.textContent = 'Rihards.Freimanis+0203626script06330@aws-eu-west-2-production-account';
-  });
+    span.textContent = value;
+  }, LONG_PROVIDER_VALUE);
+}
+
+// The one path every width case measures through -- the shared case below and
+// each of the four width cases.
+//
+// The long value this assertion is about is written straight into a
+// React-owned span, so it is the render, not the write, that decides what the
+// trigger carries: a remount of the draft form puts React's own (short) alias
+// back. Geometry read after such a revert describes a trigger with nothing
+// long in it, and "no overlap" would be reported while the condition the
+// report described -- a long alias bleeding into the Region field -- never
+// existed. Asserting the value is still rendered in the same step that takes
+// the geometry is what keeps the measurements about the reported condition:
+// a reverted trigger fails here rather than being measured as if it were short.
+async function measureProviderAgainstRegion(
+  app: AppShell,
+  label: string,
+): Promise<{ providerBox: ElementBox; regionBox: ElementBox }> {
+  const provider = app.globalConfigDialog.cloudContextProviderTrigger();
+  const region = app.globalConfigDialog.cloudContextRegionTrigger();
+  await expect(region).toBeVisible();
+  await expect(provider).toContainText(LONG_PROVIDER_VALUE);
+
+  return {
+    providerBox: await boundingBoxOf(provider, `${label} Cloud provider trigger`),
+    regionBox: await boundingBoxOf(region, `${label} Region trigger`),
+  };
 }
 
 for (const width of [630]) {
@@ -57,12 +86,7 @@ for (const width of [630]) {
       await app.globalConfigDialog.waitForOpen();
       await setLongProviderValue(page);
 
-      const provider = app.globalConfigDialog.cloudContextProviderTrigger();
-      const region = app.globalConfigDialog.cloudContextRegionTrigger();
-      await expect(region).toBeVisible();
-
-      const providerBox = await boundingBoxOf(provider, `Cloud provider trigger at ${width}px`);
-      const regionBox = await boundingBoxOf(region, `Region trigger at ${width}px`);
+      const { providerBox, regionBox } = await measureProviderAgainstRegion(app, `at ${width}px`);
 
       // Below the breakpoint the section is a single column: the fields
       // stack instead of sitting side by side, so there is no shared row
@@ -87,12 +111,7 @@ for (const width of [640, 700, 1440]) {
       await app.globalConfigDialog.waitForOpen();
       await setLongProviderValue(page);
 
-      const provider = app.globalConfigDialog.cloudContextProviderTrigger();
-      const region = app.globalConfigDialog.cloudContextRegionTrigger();
-      await expect(region).toBeVisible();
-
-      const providerBox = await boundingBoxOf(provider, `Cloud provider trigger at ${width}px`);
-      const regionBox = await boundingBoxOf(region, `Region trigger at ${width}px`);
+      const { providerBox, regionBox } = await measureProviderAgainstRegion(app, `at ${width}px`);
 
       // Side by side: the provider trigger's own right edge must not reach
       // past the region trigger's left edge. This is the literal reported
@@ -113,3 +132,36 @@ for (const width of [640, 700, 1440]) {
     });
   });
 }
+
+// A provider value put back by a render -- which is what a remount of the draft
+// form does -- leaves the trigger carrying the short seeded alias, and every
+// geometry assertion above is then true for a reason the report never
+// described: there is no long value to bleed. The measurement refuses that
+// state, and this pins the refusal: without it the four width cases above go
+// green on a trigger that has already reverted.
+test('a reverted Cloud provider value is refused rather than measured as short', async ({
+  app,
+  page,
+}) => {
+  await openSettingsAtWidth(app, 1440);
+  await app.globalConfigDialog.waitForOpen();
+  await app.globalConfigDialog.waitForLoadedFrame();
+  await setLongProviderValue(page);
+
+  const trigger = app.globalConfigDialog.cloudContextProviderTrigger();
+  await expect(trigger).toContainText(LONG_PROVIDER_VALUE);
+
+  // React's own value back, exactly as a remount of the draft form leaves it.
+  await trigger.evaluate((btn) => {
+    const span = btn.querySelector('[data-slot="select-value"]');
+    if (span instanceof HTMLElement) {
+      span.textContent = 'pw-aws';
+    }
+  });
+  await expect(trigger).not.toContainText(LONG_PROVIDER_VALUE);
+
+  await expect(measureProviderAgainstRegion(app, 'at 1440px')).rejects.toThrow(LONG_PROVIDER_VALUE);
+
+  await app.globalConfigDialog.cancel();
+  await app.globalConfigDialog.waitForClosed();
+});

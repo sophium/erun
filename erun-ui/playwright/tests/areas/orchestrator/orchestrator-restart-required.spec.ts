@@ -161,6 +161,21 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
     await expect(card).not.toContainText('Its environments changed while it was running');
   });
 
+  // The restart-required light's accessible name opens with the plain running
+  // light's ("... is running but needs a restart ..."), and a role-name query
+  // matches substrings unless told otherwise. A locator for the plain running
+  // dot therefore resolves to the restart-required one whenever the plain one
+  // is absent, and "this row shows a plain running dot" would hold for a row
+  // showing the restart one -- the state the test above exists to rule out.
+  // Pinned here so the two lights cannot collapse into one assertion again.
+  test('a restart-required row does not read as a plain running dot', async ({ app, page }) => {
+    await stubOrchestratorList(page, runningStaleSnapshot());
+    await app.reboot();
+
+    await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeVisible();
+    await expect(app.sidebar.orchestratorStatusDot(SEED_ORCHESTRATOR, 'running')).toBeHidden();
+  });
+
   test('the manage dialog carries the restart control that resolves it', async ({ app, page }) => {
     await stubOrchestratorList(page, runningStaleSnapshot());
     await app.reboot();
