@@ -31,6 +31,23 @@ export const SEED_ENV_BETA = 'beta';
 // two independent selectors, one per provider type, each pre-selected to the
 // env's attachment.
 export const SEED_ENV_GAMMA = 'gamma';
+// An environment marked as hosted on a platform row, so the Manage dialog's
+// Hosted environment panel is stageable without a live platform: the marker is
+// a purely local config fact, and the drift comparison is stubbed over
+// /__erun_invoke by the spec that needs it. The api host is deliberately a
+// host the harness never contacts.
+//
+// Deliberately NOT part of seedBaseline: the seeded environment population is
+// itself an assertion several specs make (the titlebar's group-select
+// shortcuts count it), so a fourth baseline environment changes the subject
+// under test for every spec that never asked for one. The spec that needs a
+// hosted environment stages this one for the length of its own test — see
+// seedHostedEnvironment below.
+export const SEED_ENV_DELTA = 'delta';
+export const SEED_HOSTED_API_HOST = 'api.example.test';
+export const SEED_HOSTED_TENANT_ID = 'seeded-platform-tenant';
+export const SEED_HOSTED_ENVIRONMENT_ID = 'seeded-platform-env';
+export const SEED_HOSTED_REVISION = 4;
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
@@ -584,6 +601,27 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
       'type: local-agent\n' +
       'aitool: sh\n' +
       extraYaml,
+  );
+}
+
+// seedHostedEnvironment writes an inert local-agent env like seedEnvironment
+// plus the hosted marker, so the Manage dialog's Hosted environment panel has
+// a row to render without a live platform. The marker is the only difference
+// between this env and alpha, which is what lets a spec read the panel's
+// absence for an unmarked env as "not hosted" rather than as "nothing is".
+//
+// Staged per-test by the spec that needs one (see SEED_ENV_DELTA) rather than
+// seeded in seedBaseline, so the default environment population every other
+// spec asserts against is unchanged.
+export function seedHostedEnvironment(tenant: string, environment: string): void {
+  seedEnvironment(
+    tenant,
+    environment,
+    'hosted:\n' +
+      `  apihost: ${SEED_HOSTED_API_HOST}\n` +
+      `  tenantid: ${SEED_HOSTED_TENANT_ID}\n` +
+      `  environmentid: ${SEED_HOSTED_ENVIRONMENT_ID}\n` +
+      `  definitionrevision: ${SEED_HOSTED_REVISION}\n`,
   );
 }
 

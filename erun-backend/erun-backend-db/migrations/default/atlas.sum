@@ -1,4 +1,4 @@
-h1:Op8v0EOGsULNiXiWY3DjbUi5utk6vyqvxj2LxlWx/PM=
+h1:XqpXhQ3hiFI+B+zzgraL8oPl3Kn6gYWJS3E1bba3POg=
 20260501120000_initial_tenant_identity.sql h1:RpS03/4sFjbCggwYgcGNn6k3jNZCNTNl0BD/afOKFzo=
 20260503143000_tenant_issuer_names.sql h1:VEZjICG3/jU2YtEx0XX05l9Q8lJyWKeiRY8f4dXOkvE=
 20260503170000_audit_events.sql h1:OLjiGP/FhLTWvkx1bxS2xCcJK6tExdufnEC8R6LsKWA=
@@ -35,3 +35,4 @@ h1:Op8v0EOGsULNiXiWY3DjbUi5utk6vyqvxj2LxlWx/PM=
 20260922120000_review_repository_identity.sql h1:7MqYwgqsc/J1iLoSisWC5oTxwl1g2rJuUtbQBjQ/7Dk=
 20260923120000_builds_tenant_environment_fk.sql h1:bd5r4Uw9HxWkNn4OX0gMWs7hKBrWbdNXyYtP2cJsoSA=
 20260923130000_reviews_merged_without_build.sql h1:QDQySfJtLMo24oiglnzqlUUrQ2HV7nYYSHkyuDx2eQQ=
+20260925120000_environment_definitions.sql h1:O3xc9fxwyohzzSZemRsMP6jfbEcf4wWEvp/wAaZkCEg=

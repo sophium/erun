@@ -40,6 +40,7 @@ Tenants:
           runtime-version: <VERSION> (line undetermined — no resolved runtime image recorded; redeploy to record it)
           runtime-pod: none
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none

@@ -5,6 +5,7 @@ import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type { UIHostedEnvironment } from './uiHostedDefinitionTypes';
 import type { UIHostGatewayDefaults, UIOpenRouterConfig } from './uiOpenRouterTypes';
 import type {
   UIErunVersion,
@@ -494,6 +495,11 @@ export interface UIEnvironmentConfig {
   repoURL: string;
   // The per-machine saved deploy selection; empty means "no saved selection".
   deployComponents?: string[];
+  // hosted is the platform row this environment corresponds to, when it has
+  // one. Absent means the environment is not marked as hosted, which is the
+  // normal state. See uiHostedEnvironment on the Go side
+  // (erun-ui/hosted_definition.go, erun-common/hosted_environment.go).
+  hosted?: UIHostedEnvironment;
 }
 
 export interface UIEnvironmentClaudeConfig {
