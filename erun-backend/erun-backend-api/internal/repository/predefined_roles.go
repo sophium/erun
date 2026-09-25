@@ -84,6 +84,16 @@ func ensureNarrowerRolesExist(ctx context.Context, tx bun.Tx, tenantID string) e
 // and re-inserting it whole — keeps every surviving row's created_at stable,
 // which matters because this runs on every RoleRepository.List read and not
 // only on a role's first creation.
+//
+// A pattern-form row is removed unconditionally, never by the pair comparison
+// below. The derived set is exact-only, so no pattern row can ever be one of
+// its members — but a pattern row stores its method and path as NULL
+// (role_permissions_exact_or_pattern_check), and a NULL row comparison makes
+// `(api_method, api_path) NOT IN (...)` evaluate to NULL rather than TRUE, so
+// the row comparison alone silently leaves every pattern grant in place. That
+// is the same "the narrowing never reaches a seeded role" failure this whole
+// function exists to prevent, one form over, and it is why this predicate
+// cannot be a bare NOT IN.
 func reconcileRolePermissions(ctx context.Context, tx bun.Tx, tenantID string, roleID string, derived []routeroles.RoutePermission) error {
 	tenantPredicate := "tenant_id IS NULL"
 	args := []any{}
@@ -107,7 +117,7 @@ func reconcileRolePermissions(ctx context.Context, tx bun.Tx, tenantID string, r
 		args = append(args, permission.Method, permission.Path)
 	}
 	_, err := tx.NewRaw(
-		`DELETE FROM role_permissions WHERE `+tenantPredicate+` AND role_id = ? AND (api_method, api_path) NOT IN (VALUES `+strings.Join(pairs, ", ")+`)`,
+		`DELETE FROM role_permissions WHERE `+tenantPredicate+` AND role_id = ? AND (api_method IS NULL OR (api_method, api_path) NOT IN (VALUES `+strings.Join(pairs, ", ")+`))`,
 		args...,
 	).Exec(ctx)
 	return err
