@@ -431,10 +431,20 @@ func markerFor(row PlatformEnvironment, apiHost string, revision int) HostedEnvi
 	}
 }
 
+// stampHostedMarker records the row a transfer landed on, and fingerprints the
+// portable settings as of that transfer.
+//
+// The digest is taken from the config passed in, and both callers pass the
+// post-transfer config: an upload passes the settings it just sent, a pull
+// passes the ones it just merged. That makes "the digest records what this
+// copy and the platform last agreed on" true on both paths without either one
+// re-deriving it, which is the same reason the marker is stamped here rather
+// than at each call site.
 func stampHostedMarker(config EnvConfig, marker HostedEnvironment) (EnvConfig, error) {
 	if err := validateStatePathSegment("environment", config.Name); err != nil {
 		return EnvConfig{}, err
 	}
+	marker.DefinitionDigest = DefinitionDigest(BuildPlatformEnvDefinition(config))
 	config.Hosted = marker
 	return config, nil
 }

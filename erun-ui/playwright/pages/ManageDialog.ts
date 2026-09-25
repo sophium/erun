@@ -86,12 +86,17 @@ export class ManageDialog {
   }
 
   // The Hosted environment panel on the General tab: which platform row this
-  // local environment corresponds to, and the read-only drift comparison behind
-  // its "Check for updates" button. It renders only for an environment that
+  // local environment corresponds to, whether this machine's own settings have
+  // moved since they were last sent, and the drift comparison behind its
+  // "Check for updates" button. It renders only for an environment that
   // carries a hosted marker, so an unhosted env has no panel here at all.
   // Scoped to the panel itself (a named region), not the dialog: the dialog
   // carries other role=status elements -- the cloud-context "Not linked"
   // empty state, for one -- so an unscoped status query is ambiguous.
+  //
+  // The panel's two status lines carry their own accessible names for the same
+  // reason: they are both live regions about this environment, and only their
+  // names tell them apart.
   hostedPanel(): Locator {
     return this.locator().getByRole('region', { name: 'Hosted environment' });
   }
@@ -100,10 +105,24 @@ export class ManageDialog {
     return this.hostedPanel().getByRole('button', { name: /Check whether the platform's copy/ });
   }
 
-  hostedDriftLine(): Locator {
-    return this.hostedPanel().getByRole('status');
+  // This machine's own settings: the standing divergence, and the sentence an
+  // upload that just answered it reports.
+  hostedLocalChangeLine(): Locator {
+    return this.hostedPanel().getByRole('status', { name: "This machine's settings" });
   }
 
+  hostedUploadButton(): Locator {
+    return this.hostedPanel().getByRole('button', {
+      name: "Upload this environment's settings to the platform",
+    });
+  }
+
+  hostedDriftLine(): Locator {
+    return this.hostedPanel().getByRole('status', { name: "The platform's definition" });
+  }
+
+  // Either line's failure state. Both are attempted failures, so both are
+  // alerts rather than statuses, per the shared design-language record.
   hostedDriftError(): Locator {
     return this.hostedPanel().getByRole('alert');
   }

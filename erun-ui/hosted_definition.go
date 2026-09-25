@@ -13,15 +13,14 @@ import (
 const hostedDefinitionDriftTimeout = tenantDashboardTimeout
 
 // hostedDefinitionDriftFor reads the environment's own hosted marker and
-// compares it against the revision the platform holds. It is the read-only
-// half of the drift hint: it says how far behind the local copy is and offers
-// the pull, and it writes nothing.
+// compares it against the revision the platform holds. It says how far behind
+// the local copy is and names the command that brings it down, and it writes
+// nothing.
 //
-// It answers a question the operator asked — the marker panel's own refresh —
-// or that the desktop asks on start, never a poll that could loop back into a
-// write. Auto-upload driven by the config watcher is deliberately not here;
-// see erun-ui/AGENTS.md on the write→event→write loop this repository has
-// already shipped once.
+// It answers a question the operator asked — the marker panel's own refresh.
+// The other half of the panel, the local divergence, needs no platform read
+// and so is resolved in the read model rather than here; and the upload half
+// is `uploadHostedDefinition`, which the config watcher drives.
 func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment string) uiHostedDefinitionDrift {
 	config, _, err := eruncommon.LoadEnvConfig(tenant, environment)
 	if err != nil {
@@ -102,5 +101,17 @@ func hostedEnvironmentToUI(config eruncommon.EnvConfig) *uiHostedEnvironment {
 		TenantID:           marker.TenantID,
 		EnvironmentID:      marker.EnvironmentID,
 		DefinitionRevision: marker.DefinitionRevision,
+		LocalChange:        hostedDefinitionLocalChangeToUI(eruncommon.HostedDefinitionLocalChangeFor(config)),
+	}
+}
+
+// hostedDefinitionLocalChangeToUI mirrors the shared type. The sentence is
+// carried across rather than re-worded here, so the panel and the CLI cannot
+// describe one state two ways.
+func hostedDefinitionLocalChangeToUI(change eruncommon.HostedDefinitionLocalChange) uiHostedDefinitionLocalChange {
+	return uiHostedDefinitionLocalChange{
+		Available: change.Available,
+		Changed:   change.Changed,
+		Describe:  change.Describe(),
 	}
 }

@@ -71,16 +71,15 @@ var InternalAPIRoutes = map[string]bool{
 	// has no tenant-scoped job ids to filter by, not by giving an operator a
 	// capability the flat route does not already have.
 	"GET /v1/environments/{environment_id}/jobs": true,
-	// The definition upload is performed by the machine that authored the
-	// settings, through `erun platform env push` (and `erun platform env
-	// register --definition`, which writes revision 1 as part of adopting the
-	// row). Nothing an operator clicks triggers it: the desktop's hosted-marker
-	// panel is deliberately read-only, because driving an upload from the
-	// config watcher is the write->event->write loop this repository has
-	// already shipped once (erun-ui/AGENTS.md). The matching GET is not listed
-	// here -- it has a real desktop surface, bound through
-	// apiRouteWailsBindings below.
-	"PUT /v1/environments/{environment_id}/definition": true,
+	// The definition upload used to be CLI-only, listed here on the grounds
+	// that nothing an operator clicks triggers it. The desktop now owns it
+	// from both ends -- the config watcher uploads an environment whose
+	// settings moved, and the hosted-marker panel's own control is the
+	// recovery action when that could not reach the platform -- so it is
+	// classified normally and bound through apiRouteWailsBindings below. The
+	// write->event->write loop that kept it off the desktop is closed by an
+	// origin filter and a definition digest (erun-ui/AGENTS.md
+	// § "Hosted definition transfer"), not by withholding the route.
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's

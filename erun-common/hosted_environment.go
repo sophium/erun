@@ -38,6 +38,24 @@ type HostedEnvironment struct {
 	// environment was registered with a definition (revision 1) but its local
 	// config has not been pulled since, or the marker predates this field.
 	DefinitionRevision int `yaml:"definitionrevision,omitempty" json:"definitionRevision,omitempty"`
+	// DefinitionDigest fingerprints the portable settings as of the last
+	// transfer in either direction — see DefinitionDigest.
+	//
+	// It is the dirty flag's whole substance. The revision alone cannot say
+	// whether the local copy has moved since it was last transferred: it
+	// records which revision arrived, not what was in it, so a change made
+	// while the desktop was closed (`erun init`, `erun cloud set`, a deploy)
+	// is invisible until something brings the platform's copy down. The digest
+	// is what makes that change observable offline and without a platform
+	// read.
+	//
+	// Empty means no digest is recorded — a marker written before this field
+	// existed, or a config hand-edited to add one. That is "cannot tell", and
+	// it is deliberately not the same as "matches": treating an unknown digest
+	// as a match would leave every pre-existing hosted environment permanently
+	// untracked, and treating it as a difference would announce a change that
+	// nothing observed. See HostedDefinitionLocalChange.
+	DefinitionDigest string `yaml:"definitiondigest,omitempty" json:"definitionDigest,omitempty"`
 }
 
 // IsZero reports whether no marker is recorded, so a config that has never been
@@ -177,6 +195,61 @@ func (d HostedDefinitionDrift) IsBehind() bool { return d.PlatformRevision > d.L
 // local copy also moved is the case a pull must ask about rather than decide.
 func (d HostedDefinitionDrift) HasLocalEdits() bool {
 	return d.LocalRevision > 0 && d.LocalRevision < d.PlatformRevision
+}
+
+// HostedDefinitionLocalChange is the offline half of the local-versus-platform
+// question: have this machine's portable settings moved since the marker
+// recorded a transfer? It answers from the marker's digest alone, so it needs
+// no platform read and works on a machine that is offline — which is what
+// makes a change made while the desktop was closed observable at all.
+//
+// It is deliberately not folded into HostedDefinitionDrift: drift is a fact
+// about the platform that only the platform can report, while this is a fact
+// about the local file that the local file always knows.
+type HostedDefinitionLocalChange struct {
+	// Available is false when the marker records no digest, so nothing can be
+	// said either way.
+	Available bool
+	// Changed is true when the settings an upload would carry differ from the
+	// digest the marker records. Always false when Available is false.
+	Changed bool
+}
+
+// HostedDefinitionLocalChangeFor reports whether config's portable settings
+// have moved since the last recorded transfer.
+func HostedDefinitionLocalChangeFor(config EnvConfig) HostedDefinitionLocalChange {
+	marker, ok := HostedEnvironmentFromConfig(config)
+	if !ok || marker.DefinitionDigest == "" {
+		return HostedDefinitionLocalChange{}
+	}
+	return HostedDefinitionLocalChange{
+		Available: true,
+		Changed:   DefinitionDigest(BuildPlatformEnvDefinition(config)) != marker.DefinitionDigest,
+	}
+}
+
+// HasUnsentChange reports whether an upload is warranted: the settings have
+// moved since the recorded transfer, or no transfer is recorded at all.
+//
+// The second case is why this is not simply Changed. A marker with no digest
+// is a hosted environment this machine cannot yet track, and uploading once is
+// what starts tracking it; skipping on "not Changed" would leave it untracked
+// forever. The upload is still not speculative — it carries the same portable
+// subset a push always carries, to the row the marker already names.
+func (c HostedDefinitionLocalChange) HasUnsentChange() bool { return !c.Available || c.Changed }
+
+// Describe renders the change for an operator. The wording lives here rather
+// than in each transport for the same reason HostedDefinitionDrift.Describe
+// does: the CLI and the desktop must not phrase one state two ways.
+func (c HostedDefinitionLocalChange) Describe() string {
+	switch {
+	case !c.Available:
+		return "this machine has no record of what it last sent, so it cannot tell whether its settings have moved"
+	case c.Changed:
+		return "this machine's settings have changed since they were last sent to the platform"
+	default:
+		return "this machine's settings match what was last sent to the platform"
+	}
 }
 
 // Describe renders the drift for an operator.

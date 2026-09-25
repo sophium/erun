@@ -48,6 +48,13 @@ export const SEED_HOSTED_API_HOST = 'api.example.test';
 export const SEED_HOSTED_TENANT_ID = 'seeded-platform-tenant';
 export const SEED_HOSTED_ENVIRONMENT_ID = 'seeded-platform-env';
 export const SEED_HOSTED_REVISION = 4;
+// A fingerprint of a definition revision this machine is no longer carrying.
+// Any value that is not the digest of the seeded environment's own portable
+// settings reads as "this copy has moved since its last transfer", which is
+// the state the hand-authored marker cannot otherwise express: the real digest
+// is a sha256 of that projection, so a fixture that reproduced it by hand would
+// be a second implementation of the thing under test.
+export const SEED_HOSTED_STALE_DIGEST = 'digest-of-an-earlier-revision';
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
@@ -613,7 +620,18 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
 // Staged per-test by the spec that needs one (see SEED_ENV_DELTA) rather than
 // seeded in seedBaseline, so the default environment population every other
 // spec asserts against is unchanged.
-export function seedHostedEnvironment(tenant: string, environment: string): void {
+//
+// definitionDigest is written only when the caller supplies one, which stages
+// the two divergence states a marker can be in: omitted (the default, and what
+// every marker written before the desktop tracked a digest looks like) reads as
+// "cannot tell", and SEED_HOSTED_STALE_DIGEST reads as "this copy has moved".
+// definitionRevision defaults to the seeded marker's own revision, and is how a
+// spec stages a marker that has moved without rewriting the YAML by hand.
+export function seedHostedEnvironment(
+  tenant: string,
+  environment: string,
+  options: { definitionDigest?: string; definitionRevision?: number } = {},
+): void {
   seedEnvironment(
     tenant,
     environment,
@@ -621,7 +639,8 @@ export function seedHostedEnvironment(tenant: string, environment: string): void
       `  apihost: ${SEED_HOSTED_API_HOST}\n` +
       `  tenantid: ${SEED_HOSTED_TENANT_ID}\n` +
       `  environmentid: ${SEED_HOSTED_ENVIRONMENT_ID}\n` +
-      `  definitionrevision: ${SEED_HOSTED_REVISION}\n`,
+      `  definitionrevision: ${options.definitionRevision ?? SEED_HOSTED_REVISION}\n` +
+      (options.definitionDigest ? `  definitiondigest: ${options.definitionDigest}\n` : ''),
   );
 }
 

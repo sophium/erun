@@ -60,6 +60,55 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - The shared runtime "ensure" (`ensureEnvRuntimeOnce`) is now a thin reconnect, not a deploy preflight: it rebinds the MCP/API forwarders against the already-deployed runtime. A failed ensure must be **surfaced**, not swallowed — set env-status failed + post an actionable notification — and must **not** stamp the dedup TTL on failure (so the next tab open retries). Discarding the error and TTL-stamping on failure (the pre-#644 behaviour) masks an undeployed env behind a downstream port-forward timeout.
 - **An orchestrator spawn opens the edge before it writes the MCP client config naming it.** `wireOrchestratorMCP` repairs every linked environment whose edge does not answer (`repairOrchestratorMCPEdges`) before `writeOrchestratorMCPConfig` runs, because the config is read once by a client that connects as it launches and does not ask again: a rebind kicked off afterwards lands too late, and the session comes back wired to a dead port with every tool for that environment unavailable — the operator told to run `erun open` by hand. Two properties must survive any refactor of that path. The repair is **scoped to an edge a probe found dead**, never armed unconditionally: reconnecting a healthy environment would put a real `erun open` on the launch path of every orchestrator and race the forward its own tabs use. And it **waits on the shared ensure** (`ensureEnvRuntimeWithin`, `envEnsureForBrokenForward`) rather than opening a second forward — it joins an in-flight rebind, bypasses the completed window because a probed-dead edge is evidence that outranks a recent success, and keeps the failed-ensure contract above. The wait is bounded (`orchestratorEdgeRepairBudget`, the same window an MCP client gives its own first connect) and exhausting it is not a failure verdict: the launch proceeds and anything still dead is reported by the existing `unreachable` notice. An environment that cannot be reached must never block the orchestrator from spawning.
 
+### Hosted definition transfer
+
+- The desktop uploads a hosted environment's portable settings when its config
+  changes, three ways to one transaction (`eruncommon.PushEnvironmentDefinition`,
+  reached through `uploadHostedDefinition`): the config watcher's reaction
+  (`reactToConfigWatchTargets`), the launch catch-up
+  (`catchUpHostedDefinitions`), and the marker panel's own control
+  (`UploadHostedDefinition`). Do not add a fourth path.
+- **The origin filter is consulted only by the watcher's reaction, never by the
+  upload decision.** `definitionWriteOrigin` (`hosted_definition_origin.go`)
+  records a config write this desktop is about to make, and
+  `reactToConfigWatchTargets` consumes it at most once per environment with an
+  explicit clear on a transfer that ends without writing. It is not a
+  comparison of file contents and must not become one: a writer converging on
+  the same bytes is indistinguishable from one writing twice, so a genuine
+  outside change would be swallowed by the guess. `autoUploadHostedDefinition`
+  stays reusable and unmarked — the catch-up and the panel's button ask whether
+  an environment needs an upload, which is a different question from whether the
+  watcher is looking at its own write.
+- **The origin filter gates the upload, never the state refresh.**
+  `reactToConfigWatchTargets` emits `environments-changed` for every event
+  unconditionally; a transfer rewrites an environment's config, and the surfaces
+  built from it still have to be told.
+- **The definition digest is the second guard and the dirty flag's substance.**
+  `HostedEnvironment.DefinitionDigest` fingerprints the portable subset, stamped
+  by `stampHostedMarker` on both a push and a pull. `HostedDefinitionLocalChangeFor`
+  answers "has this copy moved since the last transfer?" from the marker alone,
+  which is what makes a change made while the desktop was closed visible — and
+  the digest is also what stops a transfer's own stamp from being read as a
+  change, so the loop is closed twice over. A marker carrying no digest reads as
+  "cannot tell", never as "in step".
+- The digest covers the **portable subset only**, so an edit to a host-owned
+  setting must never read as divergence or spend an upload. Widening the
+  portable allowlist is not a UI decision — see `erun-common/env_definition.go`,
+  which is default-deny and whose `TestEveryEnvConfigFieldIsClassified` fails
+  until a new `EnvConfig` field is classified.
+- The watcher attributes an event to an environment by resolving the path back
+  through `eruncommon.EnvConfigPath`, never by pattern-matching a suffix: the
+  root `config.yaml` holds `CloudContextConfig.AdminToken` in plaintext, and
+  every live config sits beside its own dated backup.
+- `hosted_definition_upload_test.go` pins the behaviour. Change the filter and
+  these change with it: `TestADesktopDefinitionWriteDoesNotReFireTheUpload` (the
+  loop), `TestTheOriginMarkIsClearedWhenTheUploadWritesNothing` (a failed
+  transfer must not swallow the next outside change),
+  `TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded` (the dirty
+  flag), `TestAHostOwnedChangeIsNotUploaded` (the allowlist's edge),
+  `TestAnUnhostedEnvironmentIsNeverUploaded`, and
+  `TestTheWatcherUploadsAnOutsideChangeEndToEnd` (the real fsnotify plumbing).
+
 ## Runtime Usage Accuracy
 
 - Runtime usage reads two resource domains, and on a build-capable environment they disagree by design. CPU/memory are the runtime container's own cgroup; the erun-dind sidecar builds actually run in is read separately and carried as `RuntimeUsage.Dind` (mirrored as `dind` in the UI model). A release lane spends its time waiting on bounded `erun exec job await` calls, so the runtime container is near-idle by construction and its low reading is never evidence of idle build capacity — the sidecar's own figure is what answers "is my build working".
