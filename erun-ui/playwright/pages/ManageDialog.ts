@@ -85,6 +85,29 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-platformaccount');
   }
 
+  // The Hosted environment panel on the General tab: which platform row this
+  // local environment corresponds to, and the read-only drift comparison behind
+  // its "Check for updates" button. It renders only for an environment that
+  // carries a hosted marker, so an unhosted env has no panel here at all.
+  // Scoped to the panel itself (a named region), not the dialog: the dialog
+  // carries other role=status elements -- the cloud-context "Not linked"
+  // empty state, for one -- so an unscoped status query is ambiguous.
+  hostedPanel(): Locator {
+    return this.locator().getByRole('region', { name: 'Hosted environment' });
+  }
+
+  hostedCheckButton(): Locator {
+    return this.hostedPanel().getByRole('button', { name: /Check whether the platform's copy/ });
+  }
+
+  hostedDriftLine(): Locator {
+    return this.hostedPanel().getByRole('status');
+  }
+
+  hostedDriftError(): Locator {
+    return this.hostedPanel().getByRole('alert');
+  }
+
   // The runtime-only "Mount source code" toggle and the git remote it reveals.
   // The URL field is rendered only while the toggle is on.
   mountSourceCheckbox(): Locator {

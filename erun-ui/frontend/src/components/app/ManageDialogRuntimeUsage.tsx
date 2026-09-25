@@ -98,27 +98,55 @@ function RuntimeUsageDetails({
           <DiskMeter key={disk.mount} disk={disk} />
         ))}
       </div>
-      {data.dind && <BuildsBlock dind={data.dind} />}
+      <BuildsZone dind={data.dind} excludesBuilds={data.excludesBuilds === true} />
       <RuntimeUsageWarnings warnings={data.warnings} />
     </>
   );
 }
 
-// BuildsBlock is the erun-dind sidecar's own reading, in its own zone under the
+const BUILDS_ZONE_CLASS = 'grid gap-2.5 border-t border-border/60 pt-2.5';
+
+// BuildsZone is the erun-dind sidecar's own reading, in its own zone under the
 // runtime container's. On a build-capable environment the figures above are
 // near-idle by construction — a release lane spends its time waiting on bounded
 // `erun exec job await` calls, so the CPU is near zero whether the build is
 // healthy or wedged — and this is the container the work is actually in. The
 // heading is not decoration: without it the operator has two CPU figures and no
 // way to tell which domain each belongs to, which is the whole defect.
-function BuildsBlock({ dind }: { dind: UIRuntimeDindUsage }): React.ReactElement {
+//
+// An absent reading is likewise two states, and only one of them is no zone.
+// An environment that carries no sidecar has nothing to show here; an
+// environment that carries one and whose reading failed gets the heading and
+// says so, because the alternative is the near-idle figures above qualified
+// only by the reader's own "excluding builds" prose — a statement that reads as
+// "idle" rather than as "unknown", which is the opposite of what it means.
+// `excludesBuilds` is what separates the two, and the reader sets it from the
+// environment's own type rather than from whether the sidecar answered.
+function BuildsZone({
+  dind,
+  excludesBuilds,
+}: {
+  dind: UIRuntimeDindUsage | undefined;
+  excludesBuilds: boolean;
+}): React.ReactElement | null {
+  if (!dind && !excludesBuilds) {
+    return null;
+  }
   return (
-    <div className="grid gap-2.5 border-t border-border/60 pt-2.5">
+    <div className={BUILDS_ZONE_CLASS}>
       <span className="text-xs leading-[1.35] text-muted-foreground">
         Builds — the erun-dind sidecar every image build runs in
       </span>
-      <CPUMeter cpu={dind.cpu} label="Build CPU" />
-      <MemoryMeters memory={dind.memory} label="Build memory" />
+      {dind ? (
+        <>
+          <CPUMeter cpu={dind.cpu} label="Build CPU" />
+          <MemoryMeters memory={dind.memory} label="Build memory" />
+        </>
+      ) : (
+        <p className="text-xs leading-[1.35] text-muted-foreground" role="status">
+          Not read — the sidecar did not answer, so the figures above exclude its work.
+        </p>
+      )}
     </div>
   );
 }

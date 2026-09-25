@@ -62,8 +62,10 @@ import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 // inside this pod attributes their usage to this environment. What the sidecar
 // reading does establish is whether the environment is doing work at all, which
 // is the question the near-zero runtime figure cannot answer. The `excludesBuilds`
-// caption stays beside the age for the environment where the sidecar could not
-// be read at all (environmentUsesDindSidecar in Sidebar.helpers.ts).
+// caption stays beside the age because it qualifies the CPU and Memory rows
+// above whatever else this card also shows — including a Builds row stating
+// that the sidecar could not be read, which is why the caveat alone was never
+// enough (environmentUsesDindSidecar in Sidebar.helpers.ts).
 export function UsageRows({
   usage,
   excludesBuilds,

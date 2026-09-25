@@ -118,15 +118,15 @@ func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []eruncommon.PlatformCa
 // with expectAllowed(routeroles' classification of that route) -- proof
 // against the actual routes and the actual enforcement code, not by
 // inspecting routeroles.Routes' patterns.
-func assertEffectiveAccessMatches(t *testing.T, authorizer *repository.PermissionAuthorizer, ctx context.Context, candidates []eruncommon.PlatformCapability, expectAllowed func(routeroles.Class) bool) {
+func assertEffectiveAccessMatches(t *testing.T, authorizer *repository.PermissionAuthorizer, ctx context.Context, candidates []eruncommon.PlatformCapability, expectAllowed func(routeroles.Roles) bool) {
 	t.Helper()
 	for _, route := range candidates {
-		class, ok := routeroles.Routes[route.Method+" "+route.Path]
+		granted, ok := routeroles.Routes[route.Method+" "+route.Path]
 		if !ok {
 			t.Fatalf("%s %s has no routeroles classification -- fix routeroles.Routes before trusting this assertion", route.Method, route.Path)
 		}
 		err := authorizer.Authorize(ctx, route.Method, route.Path)
-		switch wantAllowed := expectAllowed(class); {
+		switch wantAllowed := expectAllowed(granted); {
 		case wantAllowed && err != nil:
 			t.Errorf("%s %s: expected to be permitted, was refused: %v", route.Method, route.Path, err)
 		case !wantAllowed && err == nil:
@@ -162,8 +162,8 @@ func TestTenantUserCannotAdministerTheTenant(t *testing.T) {
 	ctx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, member.UserID))
 	candidates := realProtectedRouteCatalog(t, db)
 
-	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, func(class routeroles.Class) bool {
-		return class == routeroles.TenantUserClass
+	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, func(granted routeroles.Roles) bool {
+		return granted&routeroles.TenantUserRole != 0
 	})
 
 	// admin exists only to make member a non-first enrollment; silence unused warnings if reordered.
@@ -212,9 +212,58 @@ func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *tes
 	ctx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeOperations, tenantAdminUser.UserID))
 	candidates := realProtectedRouteCatalog(t, db)
 
-	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, func(class routeroles.Class) bool {
-		return class == routeroles.TenantUserClass || class == routeroles.TenantAdminOnly
+	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, func(granted routeroles.Roles) bool {
+		return granted&routeroles.TenantAdminRole != 0
 	})
+}
+
+// TestTenantAgentDrivesTheGateAndNothingElse is the machine role's mandatory
+// test: a user holding exactly TenantAgent -- the role an environment's own
+// identity holds -- is permitted every route the environment's build/gate/
+// report flow performs and refused every other registered route, driven
+// through the real database-backed authorizer rather than by inspecting
+// routeroles' masks. The boundaries it crosses on both sides are the ones the
+// design turns on: the environment's own unattached `erun build` self-report
+// (POST /v1/builds) is permitted while the tenant-wide build history is not,
+// and reporting the merge is permitted while promoting or overriding the
+// merge queue is not.
+func TestTenantAgentDrivesTheGateAndNothingElse(t *testing.T) {
+	db := rolePolicyDatabase(t)
+	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "tenant-agent")
+	admin := bootstrapTenantFirstUser(t, db, issuer, "admin-subject")
+
+	txManager := repository.NewTxManager(db, repository.DialectPostgres)
+	roles := repository.NewRoleRepository(txManager)
+	adminCtx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, admin.UserID))
+	// RoleRepository.List's own ensureNarrowerRolesExist call is what creates
+	// TenantAgent for this tenant; the role id is read back with an explicit
+	// tenant_id filter so this test cannot borrow another tenant's row.
+	_, err := roles.List(adminCtx)
+	mustNoErr(t, err, "list roles (ensures TenantAgent exists)")
+	var agentRoleID string
+	mustNoErr(t, db.QueryRow(`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = 'TenantAgent'`, tenantID).Scan(&agentRoleID), "read this tenant's TenantAgent role id")
+
+	agent := enrollUser(t, txManager, tenantID, model.TenantTypeCompany, repository.CreateUserParams{
+		Username: "env-identity", Issuer: issuer, Subject: "env-machine-subject", RoleIDs: []string{agentRoleID},
+	})
+
+	authorizer := repository.NewPermissionAuthorizerForDialect(db, repository.DialectPostgres)
+	ctx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, agent.UserID))
+	candidates := realProtectedRouteCatalog(t, db)
+
+	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, func(granted routeroles.Roles) bool {
+		return granted&routeroles.TenantAgentRole != 0
+	})
+
+	// The property is only meaningful if the machine role is really narrower
+	// than TenantUser: assert one concrete refusal the derivation alone would
+	// not have caught had the two roles been conflated.
+	if err := authorizer.Authorize(ctx, "GET", "/v1/builds"); !errors.Is(err, repository.ErrForbidden) {
+		t.Fatalf("expected the machine role to be refused the tenant-wide build history, got %v", err)
+	}
+	if err := authorizer.Authorize(ctx, "POST", "/v1/builds"); err != nil {
+		t.Fatalf("expected the machine role to be permitted its own build self-report, got %v", err)
+	}
 }
 
 // TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles is erun#1684's
@@ -249,7 +298,7 @@ func TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles(t *testing.T) {
 	authorizer := repository.NewPermissionAuthorizerForDialect(db, repository.DialectPostgres)
 	ctx := security.WithContext(context.Background(), securityContextFor(tenantID, model.TenantTypeCompany, userID))
 	candidates := realProtectedRouteCatalog(t, db)
-	allowEverything := func(routeroles.Class) bool { return true }
+	allowEverything := func(routeroles.Roles) bool { return true }
 
 	assertEffectiveAccessMatches(t, authorizer, ctx, candidates, allowEverything)
 
@@ -290,8 +339,8 @@ func TestNewlyEnrolledUserDefaultsToTenantUserAndTenantStaysUsable(t *testing.T)
 
 	authorizer := repository.NewPermissionAuthorizerForDialect(db, repository.DialectPostgres)
 	candidates := realProtectedRouteCatalog(t, db)
-	assertEffectiveAccessMatches(t, authorizer, memberCtx, candidates, func(class routeroles.Class) bool {
-		return class == routeroles.TenantUserClass
+	assertEffectiveAccessMatches(t, authorizer, memberCtx, candidates, func(granted routeroles.Roles) bool {
+		return granted&routeroles.TenantUserRole != 0
 	})
 
 	// The tenant must still never be left unable to grant roles: admin is the

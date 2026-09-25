@@ -61,6 +61,26 @@ var dryRunPurityCases = []struct {
 			"--dry-run",
 		},
 	},
+	{
+		// Both definition verbs resolve the local environment before they
+		// decide anything, and a pull-as-new is the one path that would create
+		// a config tree. A dry run must resolve and stop, never create the
+		// directory it would have written into.
+		name: "platform_env_push_nonexistent_environment",
+		args: []string{
+			"platform", "env", "push", "purity-tenant", "purity-env",
+			"--dry-run",
+		},
+	},
+	{
+		name: "platform_env_pull_nonexistent_environment",
+		args: []string{
+			"platform", "env", "pull", "purity-tenant", "purity-env",
+			"--environment-id", "018f0000-0000-7000-8000-000000000000",
+			"--repo-path", "/tmp",
+			"--dry-run",
+		},
+	},
 }
 
 func TestDryRunNeverTouchesTheConfigDirectory(t *testing.T) {

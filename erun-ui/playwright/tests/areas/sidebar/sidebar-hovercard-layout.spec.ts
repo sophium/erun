@@ -82,9 +82,23 @@ async function emitEnvUsage(
     };
     memory: { available: boolean; current?: string; limit?: string; unlimited?: boolean };
   },
+  // carriesSidecar distinguishes the two states an absent `dind` covers, and
+  // they are not the same reading: an environment that carries no erun-dind
+  // sidecar at all (the default, matching the runtime envs the baseline seeds)
+  // and an environment that carries one whose exec into it failed. The second
+  // is what `excludesBuilds` marks, and it is absent from the payload entirely
+  // for the first.
+  carriesSidecar = dind !== undefined,
 ): Promise<void> {
   await page.evaluate(
-    ({ tenant, environment, ageSeconds, staleAfterSeconds, dind: sidecar }) => {
+    ({
+      tenant,
+      environment,
+      ageSeconds,
+      staleAfterSeconds,
+      dind: sidecar,
+      carriesSidecar: hasSidecar,
+    }) => {
       const runtime = (
         window as unknown as {
           runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
@@ -106,14 +120,19 @@ async function emitEnvUsage(
             oomKills: 0,
           },
           // Absent unless a case asks for it: a runtime-only environment must
-          // keep rendering exactly the two rows it always did.
-          ...(sidecar === undefined ? {} : { excludesBuilds: true, dind: sidecar }),
+          // keep rendering exactly the two rows it always did. A case that
+          // carries the sidecar but supplies no reading emits it with no
+          // `dind` at all, which is the state the reader produces when its
+          // exec into the sidecar fails.
+          ...(hasSidecar
+            ? { excludesBuilds: true, ...(sidecar === undefined ? {} : { dind: sidecar }) }
+            : {}),
         },
         observedAtUnix: Math.floor(Date.now() / 1000) - ageSeconds,
         staleAfterSeconds,
       });
     },
-    { tenant, environment, ageSeconds, staleAfterSeconds, dind },
+    { tenant, environment, ageSeconds, staleAfterSeconds, dind, carriesSidecar },
   );
 }
 
@@ -478,6 +497,36 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       });
       // Two strips — CPU and Memory — and none for the sidecar, whose reading
       // has no ceiling to be a fraction of.
+      await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
+    }).toPass({ timeout: 20_000 });
+  });
+
+  // The reported defect. An absent sidecar reading is a real state — an older
+  // runtime image, a sidecar mid-restart — and not the same as an environment
+  // that carries no sidecar. Both used to render as nothing, which left the
+  // card showing the runtime container's near-idle CPU and memory qualified
+  // only by the "excludes builds" caveat: a figure that reads as idle beside an
+  // Activity line saying a build is running. The not-read state gets the row,
+  // naming the container it could not reach.
+  test('a build-capable environment whose sidecar could not be read says so instead of showing no Builds row', async ({
+    app,
+    page,
+  }) => {
+    // The same nested-hover budget the cases above widen for.
+    test.setTimeout(60_000);
+    const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await expect(async () => {
+      // No reading supplied, but the environment carries the sidecar: exactly
+      // what the reader emits when its exec into the sidecar fails.
+      await emitEnvUsage(page, SEED_TENANT, SEED_ENV_ALPHA, 5, 90, undefined, true);
+      await page.mouse.move(0, 0);
+      await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+      await expect(card).toBeVisible({ timeout: 1_000 });
+      await expect(card.getByText('Builds', { exact: true })).toBeVisible({ timeout: 1_000 });
+      await expect(card).toContainText('erun-dind sidecar', { timeout: 1_000 });
+      await expect(card).toContainText('the sidecar could not be read', { timeout: 1_000 });
+      // Not-read is not a reading: no strip for it, unlike the measured CPU and
+      // memory above — and still not the zero the card must never fabricate.
       await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     }).toPass({ timeout: 20_000 });
   });

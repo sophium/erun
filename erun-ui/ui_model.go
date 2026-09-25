@@ -1161,6 +1161,49 @@ type uiEnvironmentConfig struct {
 	// alone. Editing it raises the pending-redeploy banner, since it changes what
 	// a redeploy rolls out.
 	DeployComponents []string `json:"deployComponents,omitempty"`
+	// Hosted is the platform row this environment corresponds to, when it has
+	// one. Nil means the environment is not marked as hosted. See
+	// eruncommon.HostedEnvironment.
+	Hosted *uiHostedEnvironment `json:"hosted,omitempty"`
+}
+
+// uiHostedEnvironment is the desktop's view of eruncommon.HostedEnvironment:
+// which platform row this local environment corresponds to, and how far the
+// local copy has fallen behind the definition that row holds.
+type uiHostedEnvironment struct {
+	// Describe renders the row for the operator: host, tenant, environment.
+	Describe string `json:"describe"`
+	APIHost  string `json:"apiHost"`
+	TenantID string `json:"tenantId"`
+	// EnvironmentID is the platform row's environment_id, shown so the
+	// operator can match the local environment against `erun platform env
+	// list` without guessing.
+	EnvironmentID string `json:"environmentId"`
+	// DefinitionRevision is the revision this local copy was last synced
+	// from; zero means it has never been synced.
+	DefinitionRevision int `json:"definitionRevision"`
+	// Drift is the read-only "the platform has moved" hint, resolved on the
+	// desktop's own poll. Nil when no comparison has been made yet, which
+	// reads as "nothing to say" rather than as "up to date".
+	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
+}
+
+// uiHostedDefinitionDrift is the read-only half of the drift hint: what the
+// platform holds against what this machine last pulled. Auto-upload is
+// deliberately not here — see erun-ui/AGENTS.md on the write→event→write loop
+// this repository has already shipped once.
+type uiHostedDefinitionDrift struct {
+	LocalRevision    int  `json:"localRevision"`
+	PlatformRevision int  `json:"platformRevision"`
+	Behind           bool `json:"behind"`
+	// Describe is the operator-facing sentence, worded once in
+	// eruncommon.HostedDefinitionDrift.Describe so the CLI and the desktop
+	// cannot phrase the same state two ways.
+	Describe string `json:"describe"`
+	// Error is set when the comparison could not be made; it states what could
+	// not be read before the cause, per the Diagnostic Decision Record in
+	// erun-common/AGENTS.md.
+	Error string `json:"error,omitempty"`
 }
 
 type uiClaudeConfig struct {

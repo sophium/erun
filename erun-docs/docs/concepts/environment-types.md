@@ -127,6 +127,12 @@ erun init team desktop-build --type host --project-root ~/code/erun
 
 `--remote` is preserved as a deprecated alias for `--type=remote-agent`; passing both flags with conflicting values is an error.
 
+## The local model has four types; the hosted platform admits three
+
+`local-agent`, `remote-agent` and `runtime` environments can be registered on a hosted erun platform — see [Managing hosted environments](/collaboration/hosted-environments). A **host** environment cannot, and the reason is structural rather than a gap to be filled: a host env is a plain directory on your machine with no pod and no cluster, while a platform environment record exists to manage a pod's lifecycle and its adopt path requires a Kubernetes context to record. There is no context to name for a type that has none, and nothing for the platform to manage.
+
+The four types are otherwise unaffected: everything below about how the types differ, and `erun init --type`, applies to all of them whether or not the environment is also registered on a platform.
+
 The desktop app's **New environment** dialog exposes the same choice as an **Environment type** field, including `Host`. Picking `Local agent` or `Host` reveals a **Local repo path** input (with a native folder picker) — for local-agent that's the host directory mounted into the agent pod as the worktree; for host it's the directory the env *is*, with no pod to mount it into. Either way it's equivalent to the CLI's `--project-root`. Picking `Host` also hides the kubernetes-context, runtime-pod, and container-registry fields — none of them apply to a type with no pod.
 
 The type is editable after creation from either surface. In the desktop, the **Environment type** field on an existing env's **Manage → General** tab is a selector. From the CLI, re-run `init` with the type you want (`erun init team dev --type remote-agent`) — it moves the env between any two types and does the work the new type implies, and omitting `--type` leaves the env's type alone (see [`erun init` · Re-running on an existing environment](/cli/init#re-running-init-on-an-existing-environment)). Changing the type alters build and deploy behaviour and reconfigures the worktree, so reach for it to fix a wrong type, not as a routine toggle.

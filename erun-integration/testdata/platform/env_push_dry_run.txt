@@ -1,0 +1,5 @@
+Dry run: erun platform environment definition push planned.
+audit: erun platform env push --dry-run acme prod
+definition: acme/prod is hosted at https://api.example.test (tenant tenant-1, environment env-1), definition revision 1
+platform: GET https://api.example.test/v1/environments/env-1
+platform: PUT https://api.example.test/v1/environments/env-1/definition (revision=2, fields=Deploy.Timeout,RuntimeVersion)

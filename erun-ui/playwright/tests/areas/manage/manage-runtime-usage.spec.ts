@@ -373,4 +373,63 @@ test.describe('manage dialog runtime usage panel', () => {
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });
+
+  // The sidecar reading failing is a state the panel has to state, not one it
+  // can render as an environment without a sidecar. `dind` is absent either
+  // way, and the figures above are the runtime container's alone: without this
+  // the operator reads near-idle CPU and memory beside the reader's own
+  // "excluding builds" prose with nothing saying the sidecar was never read.
+  test('a build-capable environment whose sidecar could not be read says so in the Builds zone', async ({
+    app,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeUsage(app.page, {
+      tenant,
+      environment,
+      available: true,
+      message:
+        'This environment: CPU 1.3% of a 12.00 cores quota, memory 1% of 23.0 GiB, ' +
+        'excluding builds (they run in the erun-dind sidecar).',
+      excludesBuilds: true,
+      cpu: {
+        available: true,
+        quotaCores: 12,
+        quota: '12.00 cores',
+        utilizationPercent: 1.3,
+        utilization: '1.3%',
+      },
+      memory: {
+        available: true,
+        currentBytes: 246960619,
+        current: '230 MiB',
+        limitBytes: 24696061952,
+        limit: '23.0 GiB',
+        percentOfLimit: 1,
+        oomKills: 0,
+      },
+      // No `dind` at all: the exec into the sidecar failed, and the reader
+      // returns the runtime container's reading without it.
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('1.3%');
+
+    // The zone is present and names the container it could not reach...
+    await expect(panel).toContainText('Builds — the erun-dind sidecar every image build runs in');
+    await expect(panel).toContainText('the sidecar did not answer');
+    // ...and carries no figures of its own, so the two meters are the runtime
+    // container's: a not-read sidecar must never borrow a bar meaning "measured".
+    await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveCount(0);
+    await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveCount(0);
+    await expect(panel.getByRole('meter')).toHaveCount(2);
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
 });

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routeroles"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -441,4 +442,139 @@ func TestRoleRepositoryGrantRejectsDuplicateAssignment(t *testing.T) {
 	if _, err := roles.Grant(ctx, reviewer, role.RoleID, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected ErrConflict granting the same role twice, got %v", err)
 	}
+}
+
+// TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet reproduces the
+// gap that makes a route reclassified OUT of TenantUserClass keep its grant:
+// ensureNarrowerRolesExist only ever INSERTed ON CONFLICT DO NOTHING, and
+// nothing under internal/ ever ran a DELETE FROM role_permissions, so the
+// reseed re-inserted the current set while the stale row stayed. The
+// narrowing a reclassification is supposed to apply therefore never reached a
+// tenant that had already been seeded, which is every tenant that exists.
+//
+// The stale grant is inserted by hand rather than by reclassifying a real
+// route, because the production set is a compile-time map: what is under test
+// is reconciliation against the set as it stands, not the contents of any
+// particular revision of that map.
+func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
+	db, tenantID := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+	admin := seedPermissionsUser(t, db, tenantID, "admin")
+	ctx := rolesContext(tenantID, admin)
+
+	// The first read is what creates TenantUser and seeds its grants.
+	if _, err := roles.List(ctx); err != nil {
+		t.Fatalf("seed narrower roles: %v", err)
+	}
+
+	var userRoleID string
+	mustNoErr(t, db.QueryRow(
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,
+	).Scan(&userRoleID), "find TenantUser role")
+
+	// DELETE /v1/tenants is OperationsOnly: never part of TenantUser's derived
+	// set, so a row granting it is exactly what a reclassification out of
+	// TenantUserClass leaves behind.
+	mustNoErr(t, func() error {
+		_, err := db.Exec(
+			`INSERT INTO role_permissions (tenant_id, role_id, api_method, api_path) VALUES ($1, $2, 'DELETE', '/v1/tenants')`,
+			tenantID, userRoleID,
+		)
+		return err
+	}(), "seed a grant outside the derived set")
+
+	if _, err := roles.List(ctx); err != nil {
+		t.Fatalf("reconcile narrower roles: %v", err)
+	}
+
+	var stale int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2 AND api_method = 'DELETE' AND api_path = '/v1/tenants'`,
+		tenantID, userRoleID,
+	).Scan(&stale), "count the stale grant")
+	if stale != 0 {
+		t.Fatalf("a grant outside TenantUser's derived set survived reconciliation: %d row(s) left", stale)
+	}
+
+	// Reconciliation must narrow, not empty: the routes TenantUserClass really
+	// grants still have to be there afterwards.
+	var granted int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2`, tenantID, userRoleID,
+	).Scan(&granted), "count the surviving grants")
+	if want := len(routeroles.TenantUserPermissions()); granted != want {
+		t.Fatalf("TenantUser holds %d grants after reconciliation, want the derived set's %d", granted, want)
+	}
+}
+
+// TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser pins the machine
+// role's contract at the database end: the role ensureNarrowerRolesExist
+// creates really carries TenantAgent's derived exact-route set -- no more, no
+// less -- and that set is a strict subset of TenantUser's. That containment is
+// the property the membership-set model exists to express; a single-valued
+// class per route could only ever have made the machine role a peer of
+// TenantUser, or narrowed TenantUser for every tenant already holding it.
+func TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser(t *testing.T) {
+	db, tenantID := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+	admin := seedPermissionsUser(t, db, tenantID, "admin")
+	ctx := rolesContext(tenantID, admin)
+
+	if _, err := roles.List(ctx); err != nil {
+		t.Fatalf("seed narrower roles: %v", err)
+	}
+
+	var agentRoleID, userRoleID string
+	mustNoErr(t, db.QueryRow(
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantAgentRoleName,
+	).Scan(&agentRoleID), "find TenantAgent role")
+	mustNoErr(t, db.QueryRow(
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,
+	).Scan(&userRoleID), "find TenantUser role")
+
+	agentGrants := rolePermissionPairs(t, db, tenantID, agentRoleID)
+	userGrants := rolePermissionPairs(t, db, tenantID, userRoleID)
+
+	for _, permission := range routeroles.TenantAgentPermissions() {
+		key := permission.Method + " " + permission.Path
+		if !agentGrants[key] {
+			t.Errorf("TenantAgent is missing %s, which the derived set grants it", key)
+		}
+		if !userGrants[key] {
+			t.Errorf("%s is granted to TenantAgent but not to the seeded TenantUser -- the machine role must stay inside TenantUser's reach", key)
+		}
+	}
+	if len(agentGrants) != len(routeroles.TenantAgentPermissions()) {
+		t.Errorf("TenantAgent holds %d grants, want the derived set's %d", len(agentGrants), len(routeroles.TenantAgentPermissions()))
+	}
+	// A tenant-wide build-history read is TenantUser's and deliberately not
+	// the machine role's: the containment has to be strict, or the two roles
+	// would be the same role under two names.
+	if agentGrants["GET /v1/builds"] {
+		t.Error("TenantAgent holds GET /v1/builds -- the machine role is meant to be strictly narrower than TenantUser")
+	}
+	if !userGrants["GET /v1/builds"] {
+		t.Error("TenantUser is missing GET /v1/builds -- the containment check above proved nothing")
+	}
+}
+
+// rolePermissionPairs reads one role's exact grants as a "METHOD path" set.
+func rolePermissionPairs(t *testing.T, db *sql.DB, tenantID, roleID string) map[string]bool {
+	t.Helper()
+	rows, err := db.Query(
+		`SELECT api_method, api_path FROM role_permissions WHERE tenant_id = $1 AND role_id = $2 AND api_method_pattern IS NULL`,
+		tenantID, roleID,
+	)
+	mustNoErr(t, err, "read role permissions")
+	defer func() { _ = rows.Close() }()
+	grants := map[string]bool{}
+	for rows.Next() {
+		var method, path string
+		mustNoErr(t, rows.Scan(&method, &path), "scan role permission")
+		grants[method+" "+path] = true
+	}
+	mustNoErr(t, rows.Err(), "iterate role permissions")
+	return grants
 }

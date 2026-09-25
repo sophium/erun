@@ -453,15 +453,42 @@ test('a sidecar with no CPU quota reports cumulative CPU-seconds and no strip', 
   assert.equal(metrics.builds.caption, 'erun-dind sidecar · 512Mi (no limit)');
 });
 
-// No sidecar reading at all is not a zero: the environment either carries no
-// sidecar or its cgroup could not be read, and the card renders no Builds row
-// rather than a row claiming the sidecar is idle. The age caption's
-// "excludes builds" caveat is the remaining disclosure for that case.
-test('an environment with no sidecar reading renders no Builds row', () => {
+// An absent `dind` has two causes, and this is the one that is not a defect:
+// the environment carries no erun-dind sidecar, so there is nothing to report
+// and no Builds row to draw. Rendering the not-read row below here would put a
+// permanent dash on every runtime environment.
+test('an environment that carries no sidecar renders no Builds row', () => {
   const metrics = readingOf(
     summarizeEnvironmentUsageMetrics(snapshotWith(readable(20)), Date.now()),
   );
   assert.equal(metrics.builds, undefined);
+});
+
+// The reported defect, and the other half of the distinction above. An absent
+// `dind` is not a zero, but it is also not one state: on an environment that
+// carries the sidecar it means the exec into it failed (an older runtime image,
+// a sidecar mid-restart), and the card rendered that exactly like an
+// environment carrying no sidecar at all -- as nothing. The operator was left
+// with the runtime container's near-idle CPU and memory qualified only by the
+// age caption's "excludes builds" caveat, which reads as idle rather than as
+// unknown, beside an Activity line saying a build was running. `excludesBuilds`
+// is the field that tells the two apart, and the unread state must render where
+// the Builds row would have been -- never as a zero.
+test('a build-capable environment whose sidecar could not be read says so rather than showing no Builds row', () => {
+  const metrics = readingOf(
+    summarizeEnvironmentUsageMetrics(
+      snapshotWith({ ...readable(20), excludesBuilds: true }),
+      Date.now(),
+    ),
+  );
+  assert.ok(
+    metrics.builds,
+    'an unread sidecar is a real state and must render as not-read, not as an environment without one',
+  );
+  assert.equal(metrics.builds.value, '—');
+  assert.equal(metrics.builds.utilization, undefined);
+  assert.equal(metrics.builds.caption, 'erun-dind sidecar');
+  assert.equal(metrics.builds.note, 'the sidecar could not be read');
 });
 
 test('an unreadable sidecar CPU reports the reason instead of an idle zero', () => {

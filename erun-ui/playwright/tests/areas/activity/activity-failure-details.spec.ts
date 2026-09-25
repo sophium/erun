@@ -41,12 +41,20 @@ test('failed deploy card reveals captured output and offers a copyable report', 
   // than matching controls across cards.
   const card = drawer.locator('article').filter({ hasText: 'petios/rihards-develop' }).first();
 
-  // The one-line summary stays first-class.
+  // The one-line summary stays first-class. waitFor (not expect) converges
+  // against the enclosing test's own budget rather than the event's render
+  // racing expect's fixed one.
+  await card
+    .getByText('==> Deploy failed after 4s', { exact: false })
+    .waitFor({ state: 'visible' });
   await expect(card.getByText('==> Deploy failed after 4s', { exact: false })).toBeVisible();
 
   // "UPGRADE FAILED" lives only in the captured output, never in the summary.
   await expect(card.getByText('UPGRADE FAILED', { exact: false })).toHaveCount(0);
   await card.getByRole('button', { name: 'Show output' }).click();
+  // Converge on the disclosure's render, then assert the captured-output
+  // invariant on the state it converged to.
+  await card.getByText('UPGRADE FAILED', { exact: false }).waitFor({ state: 'visible' });
   await expect(card.getByText('UPGRADE FAILED', { exact: false })).toBeVisible();
 
   // Clipboard reads are unavailable in the headless harness, and copyToClipboard
@@ -55,6 +63,7 @@ test('failed deploy card reveals captured output and offers a copyable report', 
   const copyButton = card.getByRole('button', { name: 'Copy failure report' });
   await expect(copyButton).toBeVisible();
   await copyButton.click();
+  await card.getByRole('button', { name: 'Copied' }).waitFor({ state: 'visible' });
   await expect(card.getByRole('button', { name: 'Copied' })).toBeVisible();
 
   // Failed deploy/open cards offer recovery actions; the clear-pending-helm one

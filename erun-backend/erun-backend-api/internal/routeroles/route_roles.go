@@ -1,6 +1,6 @@
-// Package routeroles is the single source of truth for which of the two
-// narrower predefined roles (TenantUser, TenantAdmin) grant which registered
-// API route. It exists in its own leaf package, rather than inside
+// Package routeroles is the single source of truth for which of the narrower
+// predefined roles (TenantUser, TenantAdmin, TenantAgent) grant which
+// registered API route. It exists in its own leaf package, rather than inside
 // internal/routes where the route registration calls actually live, because
 // internal/repository needs to import it to seed role_permissions rows and
 // repository must not import routes (see erun-backend-api/AGENTS.md's Layer
@@ -21,39 +21,81 @@
 // there is no second, hand-authored regex list that could drift from it.
 package routeroles
 
-// Class classifies one registered route against the two narrower predefined
-// roles.
-type Class int
+// Roles is the set of narrower predefined roles that grant one registered
+// route. It is a membership set rather than a single class per route because
+// TenantAgent is a strict subset of TenantUser's reach: a route can be
+// granted to TenantUser and TenantAdmin without being granted to the machine
+// role, and no single-valued constant can express that without either
+// over-granting the machine role or narrowing TenantUser for every tenant
+// that already holds it. A bit set says exactly which roles a route is for,
+// and each derived role's grant list is one mask over it.
+type Roles uint8
 
 const (
-	// OperationsOnly means neither TenantUser nor TenantAdmin grants this
-	// route. It stays reachable only through the wildcard ReadAll/WriteAll
-	// roles — a platform operator — even from inside an OPERATIONS tenant.
-	// Every route classified here is already gated at the handler by tenant
-	// type (or, for GET/PATCH /v1/tenant-issuers, shares a route with a half
-	// that is), so this classification is the role-permission layer's half
-	// of that same defense in depth.
-	OperationsOnly Class = iota
-	// TenantAdminOnly means TenantAdmin grants this route and TenantUser
-	// does not: full tenant administration (environments, contexts, users,
-	// invites, roles), never operations.
-	TenantAdminOnly
-	// TenantUserClass means both TenantUser and TenantAdmin grant this
-	// route: reading the tenant, and driving reviews/comments/builds/the
+	// TenantUserRole is the bit TenantUser's derived grant set is built
+	// from: reading the tenant, and driving reviews/comments/builds/the
 	// merge queue and existing environments.
-	TenantUserClass
+	TenantUserRole Roles = 1 << iota
+	// TenantAdminRole is the bit TenantAdmin's derived grant set is built
+	// from: full tenant administration (environments, contexts, users,
+	// invites, roles), never operations.
+	TenantAdminRole
+	// TenantAgentRole is the bit TenantAgent's derived grant set is built
+	// from — the machine role an environment's own identity holds. It is a
+	// deliberate strict subset of TenantUser's reach: an unattended
+	// environment drives the merge-queue gate and reports its own build, and
+	// nothing else. Extend it only after identifying a real additional
+	// caller, the same discipline the whole narrower-role model exists for.
+	TenantAgentRole
 )
 
-// Routes classifies every registered protected API route, keyed
-// "<METHOD> <canonical path template>" exactly as passed to
-// ProtectedRouteRegistrar — the same key shape route_audit.go's
-// InternalAPIRoutes/KnownUnsurfacedRoutes use. Grouped by the route file
-// each entry comes from so a reviewer can diff this against
-// internal/routes/*.go directly.
-var Routes = map[string]Class{
+const (
+	// OperationsOnly means no narrower predefined role grants this route. It
+	// stays reachable only through the wildcard ReadAll/WriteAll roles — a
+	// platform operator — even from inside an OPERATIONS tenant. Every route
+	// classified here is already gated at the handler by tenant type (or, for
+	// GET/PATCH /v1/tenant-issuers, shares a route with a half that is), so
+	// this classification is the role-permission layer's half of that same
+	// defense in depth.
+	OperationsOnly Roles = 0
+	// TenantUserClass means TenantUser and TenantAdmin both grant this
+	// route, and TenantAgent does not.
+	TenantUserClass Roles = TenantUserRole | TenantAdminRole
+	// TenantAdminOnly means TenantAdmin grants this route and TenantUser
+	// does not.
+	TenantAdminOnly Roles = TenantAdminRole
+	// TenantAgentClass means TenantUser, TenantAdmin and TenantAgent all
+	// grant this route — a route that is part of driving the merge-queue
+	// gate or reporting the environment's own build. Every route classified
+	// this way is a subset member, never a route of its own.
+	TenantAgentClass Roles = TenantUserRole | TenantAdminRole | TenantAgentRole
+)
+
+// Routes classifies every registered protected API route by the set of
+// narrower predefined roles that grant it, keyed "<METHOD> <canonical path
+// template>" exactly as passed to ProtectedRouteRegistrar — the same key
+// shape route_audit.go's InternalAPIRoutes/KnownUnsurfacedRoutes use.
+// Grouped by the route file each entry comes from so a reviewer can diff
+// this against internal/routes/*.go directly.
+//
+// TenantAgentClass appears on exactly the routes an environment's own
+// identity performs while it drives the merge-queue gate and reports its own
+// build: reading its own capabilities and the reviews it is gated against,
+// reporting the GATE build, starting and reporting the gate run, reporting
+// the merge, and the unattached `erun build` self-report. Two boundaries are
+// deliberate rather than omissions. GET /v1/builds is not among them: it is
+// the tenant-wide build history, read by the desktop dashboard and the
+// console, and no environment flow reads it — the self-report needs only the
+// POST half, and widening the machine role to a tenant-wide history read
+// would be a grant with no caller behind it. And the environment's own
+// build self-report is POST /v1/builds rather than only the review-nested
+// report: that unattached route is what `erun build` actually calls, so a
+// machine role scoped to the nested report alone would 403 on the call the
+// environment makes today.
+var Routes = map[string]Roles{
 	// whoami.go — every authenticated caller needs this to learn their own
 	// capabilities, regardless of role.
-	"GET /v1/whoami": TenantUserClass,
+	"GET /v1/whoami": TenantAgentClass,
 
 	// config.go — the console read model, RLS-scoped to the caller's tenant.
 	"GET /v1/config": TenantUserClass,
@@ -86,33 +128,44 @@ var Routes = map[string]Class{
 	"GET /v1/audit-events": TenantUserClass,
 
 	// reviews.go — driving reviews and the merge queue is exactly what
-	// TenantUser is for.
-	"GET /v1/reviews":                                    TenantUserClass,
+	// TenantUser is for. The reading half and the status report are what an
+	// environment's own identity does; opening a review, promoting the
+	// queue, assigning reviewers and closing one are the operator's own
+	// acts, so TenantAgent is not granted them.
+	"GET /v1/reviews":                                    TenantAgentClass,
 	"POST /v1/reviews":                                   TenantUserClass,
-	"GET /v1/reviews/merge-queue":                        TenantUserClass,
+	"GET /v1/reviews/merge-queue":                        TenantAgentClass,
 	"POST /v1/reviews/merge-queue/advance":               TenantUserClass,
 	"POST /v1/reviews/merge-queue/override-advance":      TenantUserClass,
-	"GET /v1/reviews/{review_id}":                        TenantUserClass,
-	"PATCH /v1/reviews/{review_id}/status":               TenantUserClass,
+	"GET /v1/reviews/{review_id}":                        TenantAgentClass,
+	"PATCH /v1/reviews/{review_id}/status":               TenantAgentClass,
 	"GET /v1/reviews/{review_id}/reviewers":              TenantUserClass,
 	"POST /v1/reviews/{review_id}/reviewers":             TenantUserClass,
 	"DELETE /v1/reviews/{review_id}/reviewers/{user_id}": TenantUserClass,
 
 	// builds.go — reporting/reading a review's builds is part of driving it.
 	// GET/POST /v1/builds is the same build-history surface, tenant-wide
-	// rather than review-nested (erun#1954).
-	"GET /v1/reviews/{review_id}/builds":            TenantUserClass,
-	"POST /v1/reviews/{review_id}/builds":           TenantUserClass,
+	// rather than review-nested (erun#1954). A review's own builds are part
+	// of reading that review — `erun review show` fetches them alongside its
+	// comments — and reporting the GATE build is the whole reason the
+	// machine role exists. The tenant-wide list is not: see Routes' own doc
+	// comment for why TenantAgent gets the POST half of /v1/builds without
+	// the GET half.
+	"GET /v1/reviews/{review_id}/builds":            TenantAgentClass,
+	"POST /v1/reviews/{review_id}/builds":           TenantAgentClass,
 	"GET /v1/reviews/{review_id}/builds/{build_id}": TenantUserClass,
 	"GET /v1/builds":                                TenantUserClass,
-	"POST /v1/builds":                               TenantUserClass,
+	"POST /v1/builds":                               TenantAgentClass,
 
 	// gate_runs.go — reading and driving gate runs is part of the same
 	// merge-queue workflow TenantUser already drives for reviews and builds.
+	// The environment driving the gate reports its own run, so the create
+	// and update pair is the machine role's; the reads are the operator's
+	// view of the queue's history.
 	"GET /v1/gate-runs":                 TenantUserClass,
-	"POST /v1/gate-runs":                TenantUserClass,
+	"POST /v1/gate-runs":                TenantAgentClass,
 	"GET /v1/gate-runs/{gate_run_id}":   TenantUserClass,
-	"PATCH /v1/gate-runs/{gate_run_id}": TenantUserClass,
+	"PATCH /v1/gate-runs/{gate_run_id}": TenantAgentClass,
 
 	// environment_events.go — reading an environment's event log and
 	// appending to it is reading and operating environments that already
@@ -120,8 +173,10 @@ var Routes = map[string]Class{
 	"GET /v1/events": TenantUserClass,
 	"POST /v1/environments/{environment_id}/events": TenantUserClass,
 
-	// comments.go — driving review comments.
-	"GET /v1/reviews/{review_id}/comments":                       TenantUserClass,
+	// comments.go — driving review comments. Reading them is part of reading
+	// the review (`erun review show` fetches comments unconditionally);
+	// writing one, or resolving a thread, is an operator's act.
+	"GET /v1/reviews/{review_id}/comments":                       TenantAgentClass,
 	"POST /v1/reviews/{review_id}/comments":                      TenantUserClass,
 	"PATCH /v1/reviews/{review_id}/comments/{comment_id}/status": TenantUserClass,
 
@@ -162,6 +217,15 @@ var Routes = map[string]Class{
 	// the same class as reading the environment itself.
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
 	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
+
+	// environment_definitions.go — uploading the portable subset of an
+	// environment's own settings, and reading it back, is the same class as
+	// the ai-sessions self-report above: operating an environment that already
+	// exists. It creates nothing and deletes nothing — the environment row is
+	// registered (or adopted) through POST /v1/environments, which stays
+	// tenant administration.
+	"PUT /v1/environments/{environment_id}/definition": TenantUserClass,
+	"GET /v1/environments/{environment_id}/definition": TenantUserClass,
 
 	// jobs.go — recording and updating what this caller is working on is the
 	// same class as reporting a build result: an actor's own account of its
@@ -256,21 +320,32 @@ type RoutePermission struct {
 	Path   string
 }
 
-// TenantUserPermissions returns every route classified TenantUserClass.
+// TenantUserPermissions returns every route TenantUser grants: every route
+// whose set includes TenantUserRole, which is TenantUserClass and
+// TenantAgentClass alike — the machine role's routes are a subset of
+// TenantUser's, never a set of their own.
 func TenantUserPermissions() []RoutePermission {
-	return permissionsFor(func(class Class) bool { return class == TenantUserClass })
+	return permissionsFor(TenantUserRole)
 }
 
 // TenantAdminPermissions returns every route TenantAdmin grants: everything
 // TenantUser grants, plus every TenantAdminOnly route.
 func TenantAdminPermissions() []RoutePermission {
-	return permissionsFor(func(class Class) bool { return class == TenantUserClass || class == TenantAdminOnly })
+	return permissionsFor(TenantAdminRole)
 }
 
-func permissionsFor(include func(Class) bool) []RoutePermission {
+// TenantAgentPermissions returns the machine role's routes — the subset of
+// TenantUser's reach an environment's own identity holds. See Routes' doc
+// comment for the boundary this set draws and why.
+func TenantAgentPermissions() []RoutePermission {
+	return permissionsFor(TenantAgentRole)
+}
+
+// permissionsFor returns every route whose role set includes role.
+func permissionsFor(role Roles) []RoutePermission {
 	permissions := make([]RoutePermission, 0, len(Routes))
-	for key, class := range Routes {
-		if !include(class) {
+	for key, granted := range Routes {
+		if granted&role == 0 {
 			continue
 		}
 		method, path, ok := splitRouteKey(key)
