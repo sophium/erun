@@ -144,7 +144,6 @@ func (a *App) autoUploadHostedDefinition(tenant, environment string) {
 			"Could not upload %s/%s's settings to the platform: %s. Its settings have changed here and the platform still holds the previous ones — retry from the Manage dialog's hosted panel, or run `erun platform env push %s %s`.",
 			tenant, environment, err, tenant, environment,
 		))
-		return
 	}
 }
 
