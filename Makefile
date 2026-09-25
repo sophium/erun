@@ -819,6 +819,13 @@ helm-chart-tests:
 # cannot run inside any image build. `terraform` itself is installed there too;
 # no binary the gate needs is visible to that guard, so the Dockerfile's own
 # install is what has to stay in step.
+#
+# Each module's `terraform init` is retried a bounded number of times on a
+# transient registry failure, because that one network step has reddened
+# branches that changed no terraform file; see the header of
+# scripts/terraform-module-tests.sh, and its self-test in fast-check. The
+# suites themselves are not retried -- they run against mocked providers, so a
+# retry there could only hide a real assertion failure.
 terraform-module-tests:
 	sh scripts/terraform-module-tests.sh
 
@@ -1039,7 +1046,8 @@ check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-e
 # don't need a full check-gate cycle to find: golangci-lint findings, the
 # tracker-reference gate (root AGENTS.md § "Code Comments"), the
 # regression-coverage gate (root AGENTS.md § "A Defect Fix Names Its
-# Reproduction"), the pre-commit hook's own regression test, and prettier
+# Reproduction"), the pre-commit hook's own regression test, the
+# terraform-module-tests init-retry self-test, and prettier
 # formatting. This is NOT a substitute for
 # check/check-gate -- it runs no
 # tests, no build, and no integration suite, so a green fast-check says
@@ -1103,6 +1111,8 @@ fast-check: lint
 	@node scripts/check-regression-coverage.mjs
 	@echo ">> pre-commit hook (bindings regenerated before the frontend lint)"
 	@sh scripts/pre-commit_test.sh
+	@echo ">> terraform-module-tests init retry (transient retried, bounded, permanent fails fast)"
+	@sh scripts/terraform-module-tests_test.sh
 	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
 	@for d in erun-kit erun-ui/frontend erun-console; do \
 		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \
