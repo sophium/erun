@@ -41,6 +41,34 @@ func markPlatformAliasUnusable(err error) error {
 	return platformAliasUnusableError{err: err}
 }
 
+// errPlatformAliasAmbiguous marks the one alias-resolution failure that names a
+// choice rather than a gap: several erun-type aliases are configured and none
+// was selected. Its remedy is the selection itself, so a caller that only knows
+// the call failed -- and reports the zero-alias remedy, which adds a fourth
+// alias to a config that already had too many -- is answering a question it
+// cannot tell apart. Reading the marker is how a caller distinguishes them
+// without matching on wording, which the transports vary by name.
+var errPlatformAliasAmbiguous = errors.New("multiple erun platform cloud provider aliases are configured")
+
+// platformAliasAmbiguityError marks the ambiguity while leaving the message the
+// caller rendered it with -- the selection is spelled per transport -- so the
+// operator-facing text is unchanged and the classification travels alongside it.
+type platformAliasAmbiguityError struct{ err error }
+
+func (e platformAliasAmbiguityError) Error() string { return e.err.Error() }
+func (e platformAliasAmbiguityError) Unwrap() error { return e.err }
+func (e platformAliasAmbiguityError) Is(target error) bool {
+	return target == errPlatformAliasAmbiguous
+}
+
+func platformAliasAmbiguity(err error) error { return platformAliasAmbiguityError{err: err} }
+
+// isPlatformAliasAmbiguity reports whether err is that ambiguity, through any
+// markPlatformAliasUnusable the resolver applied on the way out.
+func isPlatformAliasAmbiguity(err error) bool {
+	return errors.Is(err, errPlatformAliasAmbiguous)
+}
+
 // platformAliasSelection names, in the vocabulary of the transport the
 // operator is actually using, the argument that picks one alias out of
 // several. The CLI and the MCP server resolve aliases through this same
@@ -118,7 +146,8 @@ func resolveERunPlatformAlias(store CloudReadStore, alias string, selection plat
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass %s to choose one", selection))
+		return CloudProviderConfig{}, markPlatformAliasUnusable(platformAliasAmbiguity(
+			fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass %s to choose one", selection)))
 	}
 }
 
