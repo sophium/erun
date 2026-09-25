@@ -178,9 +178,9 @@ var cliOnlyAgentFacingFlags = map[string]bool{
 	// must choose that environment's local port range, and the range is this
 	// machine's own allocation -- the same decision `erun init` makes at the
 	// terminal and nothing else offers a control for. The desktop's hosted
-	// panel is read-only and never creates an environment (see erun-ui/AGENTS.md
-	// on the write->event->write loop), so there is no affordance that could
-	// host this flag and no defaulted value it would need.
+	// panel uploads the environment it is showing; it never pulls, and never
+	// creates an environment, so there is no affordance that could host this
+	// flag and no defaulted value it would need.
 	"platform env pull --port-range-start": true,
 }
 

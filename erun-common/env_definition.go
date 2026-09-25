@@ -1,6 +1,9 @@
 package eruncommon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -229,6 +232,35 @@ func BuildPlatformEnvDefinition(config EnvConfig) PlatformEnvDefinition {
 		field.Project(&definition, config)
 	}
 	return definition
+}
+
+// DefinitionDigest fingerprints a definition payload: the same portable
+// settings always produce the same value, and any changed setting produces a
+// different one.
+//
+// It is what lets a machine answer "have my settings moved since the platform
+// last heard them?" without a platform read, which matters because that
+// question is asked on paths that must not spend a network round-trip — the
+// config watcher deciding whether a file change is worth an upload, and the
+// marker panel on a machine that is offline. It is a fingerprint of the
+// *portable subset*, so it covers exactly what a transfer would carry and
+// nothing a host-owned field could leak into it.
+//
+// The encoding is canonical for this type: PlatformEnvDefinition is a closed
+// struct of strings, bools and slices with explicit JSON tags, so field order
+// and key spelling come from the declaration rather than from Go's
+// marshalling defaults.
+func DefinitionDigest(definition PlatformEnvDefinition) string {
+	encoded, err := json.Marshal(definition)
+	if err != nil {
+		// Unreachable for this type. A caller about to write a marker must
+		// still get a value rather than a panic, and an empty digest is never
+		// equal to a recorded one — so the copy reads as diverged rather than
+		// as in step with a transfer that was never fingerprinted.
+		return ""
+	}
+	sum := sha256.Sum256(encoded)
+	return hex.EncodeToString(sum[:])
 }
 
 func pointerIfSet[T any](value T, set bool) *T {

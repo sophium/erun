@@ -1182,16 +1182,31 @@ type uiHostedEnvironment struct {
 	// DefinitionRevision is the revision this local copy was last synced
 	// from; zero means it has never been synced.
 	DefinitionRevision int `json:"definitionRevision"`
+	// LocalChange is whether this machine's settings have moved since that
+	// revision was recorded. Unlike Drift it needs no platform read, so it is
+	// always resolved — including for an operator who has never connected.
+	LocalChange uiHostedDefinitionLocalChange `json:"localChange"`
 	// Drift is the read-only "the platform has moved" hint, resolved on the
 	// desktop's own poll. Nil when no comparison has been made yet, which
 	// reads as "nothing to say" rather than as "up to date".
 	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
 }
 
-// uiHostedDefinitionDrift is the read-only half of the drift hint: what the
-// platform holds against what this machine last pulled. Auto-upload is
-// deliberately not here — see erun-ui/AGENTS.md on the write→event→write loop
-// this repository has already shipped once.
+// uiHostedDefinitionLocalChange mirrors eruncommon.HostedDefinitionLocalChange:
+// whether this machine's portable settings have moved since the marker last
+// recorded a transfer. It is the offline half of the marker panel — no
+// platform read, no button — which is what makes a change made while the
+// desktop was closed visible at all.
+type uiHostedDefinitionLocalChange struct {
+	// Available is false when the marker records no digest, so nothing can be
+	// said either way. It is deliberately not rendered as "in step".
+	Available bool   `json:"available"`
+	Changed   bool   `json:"changed"`
+	Describe  string `json:"describe"`
+}
+
+// uiHostedDefinitionDrift is the half of the marker panel that only the
+// platform can answer: what it holds against what this machine last pulled.
 type uiHostedDefinitionDrift struct {
 	LocalRevision    int  `json:"localRevision"`
 	PlatformRevision int  `json:"platformRevision"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -117,10 +118,33 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 
 	var emitTimer *time.Timer
 	var emitMu sync.Mutex
+	// flushMu keeps two debounce windows from overlapping. A flush performs a
+	// platform round trip, and two concurrent flushes for one environment
+	// would each decide their own upload from a pre-write read of the same
+	// config — two revisions written for one change.
+	var flushMu sync.Mutex
+	pending := map[definitionWatchTarget]struct{}{}
 
-	queueEmit := func() {
+	flush := func() {
+		flushMu.Lock()
+		defer flushMu.Unlock()
+		emitMu.Lock()
+		targets := make([]definitionWatchTarget, 0, len(pending))
+		for target := range pending {
+			targets = append(targets, target)
+		}
+		pending = map[definitionWatchTarget]struct{}{}
+		emitMu.Unlock()
+
+		a.reactToConfigWatchTargets(targets)
+	}
+
+	queueEmit := func(path string) {
 		emitMu.Lock()
 		defer emitMu.Unlock()
+		if target, ok := definitionWatchTargetFor(root, path); ok {
+			pending[target] = struct{}{}
+		}
 		if emitTimer != nil {
 			emitTimer.Reset(configWatcherDebounce)
 			return
@@ -129,7 +153,7 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 			emitMu.Lock()
 			emitTimer = nil
 			emitMu.Unlock()
-			a.emitEnvironmentsChanged()
+			flush()
 		})
 	}
 
@@ -151,16 +175,50 @@ func (a *App) runConfigWatcher(ctx context.Context, cw *configWatcher, root stri
 	}
 }
 
+// definitionWatchTarget is the environment a config-tree event was attributed
+// to — the unit the watcher decides an upload for.
+type definitionWatchTarget struct {
+	tenant      string
+	environment string
+}
+
+// definitionWatchTargetFor attributes a config-tree event to an environment,
+// and reports false for everything else under the root.
+//
+// Only an environment's own config.yaml counts, and the path is resolved back
+// through the config store's own resolver rather than pattern-matched, so the
+// names that pass are exactly the ones the store would accept. The rest of the
+// tree is deliberately out of reach rather than merely skipped: the root
+// config.yaml holds CloudContextConfig.AdminToken in plaintext, and every live
+// config sits beside its own dated backups (`config.yaml.2026-09-25.bak`),
+// which is why the match is on the whole resolved path and not on a suffix.
+func definitionWatchTargetFor(root, path string) (definitionWatchTarget, bool) {
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return definitionWatchTarget{}, false
+	}
+	segments := strings.Split(relative, string(os.PathSeparator))
+	if len(segments) != 3 {
+		return definitionWatchTarget{}, false
+	}
+	tenant, environment := segments[0], segments[1]
+	expected, err := eruncommon.EnvConfigPath(tenant, environment)
+	if err != nil || filepath.Clean(expected) != filepath.Clean(path) {
+		return definitionWatchTarget{}, false
+	}
+	return definitionWatchTarget{tenant: tenant, environment: environment}, true
+}
+
 // handleConfigWatchEvent adds newly-created config subdirs to the watch set
 // because fsnotify is not recursive and would otherwise miss writes inside them.
-func handleConfigWatchEvent(watcher *fsnotify.Watcher, event fsnotify.Event, queueEmit func()) {
+func handleConfigWatchEvent(watcher *fsnotify.Watcher, event fsnotify.Event, queueEmit func(string)) {
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 			_ = watcher.Add(event.Name)
 		}
 	}
 	if event.Has(fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename) {
-		queueEmit()
+		queueEmit(event.Name)
 	}
 }
 

@@ -242,6 +242,172 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 	}
 }
 
+// hostedDefinitionFixture is a local environment whose marker names the row
+// the stub client serves, so a push resolves without a marker mismatch.
+func hostedDefinitionFixture(name string) EnvConfig {
+	return EnvConfig{
+		Name:              name,
+		Type:              EnvironmentTypeRuntime,
+		KubernetesContext: "test-context",
+		RuntimeVersion:    "1.2.3",
+		Hosted: HostedEnvironment{
+			APIHost:            "https://api.example.test",
+			TenantID:           "tenant-1",
+			EnvironmentID:      "env-1",
+			DefinitionRevision: 3,
+		},
+	}
+}
+
+func hostedDefinitionClient(config EnvConfig) *stubDefinitionClient {
+	return &stubDefinitionClient{row: PlatformEnvironment{
+		EnvironmentID:     config.Hosted.EnvironmentID,
+		TenantID:          config.Hosted.TenantID,
+		Name:              config.Name,
+		Type:              string(config.Type),
+		KubernetesContext: config.KubernetesContext,
+	}}
+}
+
+// pushOnce uploads one environment through the shared push path and returns
+// the config the push stamped, which is what every case below reads back.
+func pushOnce(t *testing.T, config EnvConfig) EnvConfig {
+	t.Helper()
+	store := &recordingDefinitionStore{envs: []EnvConfig{config}}
+	if _, err := PushEnvironmentDefinition(context.Background(), store, hostedDefinitionClient(config), EnvDefinitionPushParams{
+		Tenant: "team", Environment: config.Name,
+	}); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+	if len(store.saved) != 1 {
+		t.Fatalf("push saved %d configs, want 1", len(store.saved))
+	}
+	return store.saved[0]
+}
+
+// TestPushStampsTheDigestOfWhatItSent is the dirty flag's premise: an upload
+// records a fingerprint of the settings it carried, so the next reader can say
+// whether this machine has moved since. Without it the marker records only
+// *which* revision arrived, which cannot tell a local edit from a quiet
+// environment.
+func TestPushStampsTheDigestOfWhatItSent(t *testing.T) {
+	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
+
+	want := DefinitionDigest(BuildPlatformEnvDefinition(hostedDefinitionFixture("dev")))
+	if stamped.Hosted.DefinitionDigest != want {
+		t.Fatalf("stamped digest = %q, want %q", stamped.Hosted.DefinitionDigest, want)
+	}
+	if change := HostedDefinitionLocalChangeFor(stamped); !change.Available || change.Changed {
+		t.Fatalf("a just-pushed config reads as %+v, want available and unchanged", change)
+	}
+}
+
+// TestALocalEditAfterATransferReadsAsChanged is the case the dirty flag exists
+// for: a portable setting changed while nothing was watching — `erun init`,
+// `erun cloud set`, a deploy — is observable on the next read, with no
+// platform call and no timestamp to compare.
+func TestALocalEditAfterATransferReadsAsChanged(t *testing.T) {
+	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
+	stamped.RuntimeVersion = "2.0.0"
+
+	change := HostedDefinitionLocalChangeFor(stamped)
+	if !change.Available || !change.Changed {
+		t.Fatalf("an edited portable setting reads as %+v, want available and changed", change)
+	}
+	if !change.HasUnsentChange() {
+		t.Error("an edited portable setting did not ask for an upload")
+	}
+}
+
+// TestAHostOwnedEditIsNotADivergence is the other half, and it is what keeps
+// the dirty flag from crying wolf: the digest covers the portable subset only,
+// so a change to a setting that never leaves the machine — the repo path here
+// — must not read as "the platform is missing something".
+func TestAHostOwnedEditIsNotADivergence(t *testing.T) {
+	stamped := pushOnce(t, hostedDefinitionFixture("dev"))
+	stamped.LocalRepoPath = "/somewhere/else"
+	stamped.RuntimeRunningImage = "registry.example.test/erun-devops:9.9.9"
+
+	change := HostedDefinitionLocalChangeFor(stamped)
+	if !change.Available || change.Changed {
+		t.Fatalf("a host-owned edit reads as %+v, want available and unchanged", change)
+	}
+	if change.HasUnsentChange() {
+		t.Error("a host-owned edit asked for an upload of settings that never travel")
+	}
+}
+
+// TestAMarkerWithNoDigestCannotTell keeps "unknown" apart from both verdicts.
+// A marker written before the digest existed carries none, and neither
+// claiming a match (which would leave the environment untracked forever) nor
+// claiming a difference (which would announce a change nothing observed) is
+// honest. It still asks for one upload, which is what starts tracking it.
+func TestAMarkerWithNoDigestCannotTell(t *testing.T) {
+	legacy := hostedDefinitionFixture("dev")
+
+	change := HostedDefinitionLocalChangeFor(legacy)
+	if change.Available || change.Changed {
+		t.Fatalf("a marker with no digest reads as %+v, want neither available nor changed", change)
+	}
+	if !change.HasUnsentChange() {
+		t.Error("a marker with no digest never asks for the upload that would start tracking it")
+	}
+	if !strings.Contains(change.Describe(), "no record") {
+		t.Errorf("Describe does not say the answer is unknown: %q", change.Describe())
+	}
+}
+
+// TestPullStampsTheDigestToo covers the other transfer direction: a pull
+// leaves the local copy in step with the revision it just arrived at, so the
+// digest must describe the merged result rather than the platform's payload —
+// the platform is silent about fields this machine keeps, and a digest of its
+// payload alone would read every one of them as a local edit.
+func TestPullStampsTheDigestToo(t *testing.T) {
+	repoPath := t.TempDir()
+	version := "1.2.3"
+	story := &recordingDefinitionStore{envs: []EnvConfig{{
+		Name: "fresh", Type: EnvironmentTypeLocalAgent, KubernetesContext: "test-context",
+		LocalRepoPath: repoPath,
+		Hosted: HostedEnvironment{
+			APIHost: "https://api.example.test", TenantID: "tenant-1", EnvironmentID: "env-1",
+		},
+	}}}
+	client := &stubDefinitionClient{
+		row:        PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
+		definition: PlatformEnvDefinition{RuntimeVersion: &version},
+	}
+
+	result, err := PullEnvironmentDefinition(context.Background(), story, client, EnvDefinitionPullParams{
+		Tenant: "team", Environment: "fresh", LocalRepoPath: repoPath,
+	})
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if change := HostedDefinitionLocalChangeFor(result.Config); !change.Available || change.Changed {
+		t.Fatalf("a just-pulled config reads as %+v, want available and unchanged", change)
+	}
+}
+
+// TestDefinitionDigestIsStableAndSensitive pins the two properties the digest
+// is used for: it must not drift between two readers of the same settings (or
+// every read would look like a change), and it must not survive a change to a
+// portable field (or no read ever would).
+func TestDefinitionDigestIsStableAndSensitive(t *testing.T) {
+	base := BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))
+	if DefinitionDigest(base) != DefinitionDigest(BuildPlatformEnvDefinition(hostedDefinitionFixture("dev"))) {
+		t.Fatal("two builds of the same settings produced different digests")
+	}
+	if DefinitionDigest(base) == "" {
+		t.Fatal("the digest is empty, which no marker could ever match")
+	}
+
+	changed := hostedDefinitionFixture("dev")
+	changed.RuntimeVersion = "2.0.0"
+	if DefinitionDigest(base) == DefinitionDigest(BuildPlatformEnvDefinition(changed)) {
+		t.Fatal("a changed portable setting produced the same digest")
+	}
+}
+
 // recordingDefinitionStore is an in-memory envDefinitionConfigStore that
 // records what a pull wrote, so a test can assert a refusal wrote nothing.
 type recordingDefinitionStore struct {

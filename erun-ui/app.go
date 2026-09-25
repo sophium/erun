@@ -13,26 +13,27 @@ import (
 )
 
 const (
-	terminalOutputEvent         = "terminal-output"
-	terminalExitEvent           = "terminal-exit"
-	appStatusEvent              = "app-status"
-	appNotificationEvent        = "app-notification"
-	appNotificationClearEvent   = "app-notification-clear"
-	mcpReconnectLineEvent       = "mcp-reconnect-line"
-	environmentInitializedEvent = "environment-initialized"
-	environmentInitFailedEvent  = "environment-init-failed"
-	environmentDeployedEvent    = "environment-deployed"
-	environmentsChangedEvent    = "environments-changed"
-	doctorCompletedEvent        = "doctor-completed"
-	sshdInitCompletedEvent      = "sshd-init-completed"
-	aiActivityEvent             = "ai-activity"
-	orchestratorShellEvent      = "orchestrator-shell-activity"
-	envStatusEvent              = "env-status"
-	envActivityEvent            = "env-activity"
-	envUsageEvent               = "env-usage"
-	envNodeEvent                = "env-node"
-	appCloseGateEvent           = "app-close-gate"
-	appSessionEnvVar            = eruncommon.DesktopSessionEnvVar
+	terminalOutputEvent           = "terminal-output"
+	terminalExitEvent             = "terminal-exit"
+	appStatusEvent                = "app-status"
+	appNotificationEvent          = "app-notification"
+	appNotificationClearEvent     = "app-notification-clear"
+	mcpReconnectLineEvent         = "mcp-reconnect-line"
+	environmentInitializedEvent   = "environment-initialized"
+	environmentInitFailedEvent    = "environment-init-failed"
+	environmentDeployedEvent      = "environment-deployed"
+	environmentsChangedEvent      = "environments-changed"
+	hostedDefinitionUploadedEvent = "hosted-definition-uploaded"
+	doctorCompletedEvent          = "doctor-completed"
+	sshdInitCompletedEvent        = "sshd-init-completed"
+	aiActivityEvent               = "ai-activity"
+	orchestratorShellEvent        = "orchestrator-shell-activity"
+	envStatusEvent                = "env-status"
+	envActivityEvent              = "env-activity"
+	envUsageEvent                 = "env-usage"
+	envNodeEvent                  = "env-node"
+	appCloseGateEvent             = "app-close-gate"
+	appSessionEnvVar              = eruncommon.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {
@@ -212,11 +213,15 @@ type App struct {
 	// buffered line as fresh output, so the trace scanner would re-fire the event —
 	// each re-fire composes another deploy, whose write repaints again: an endless
 	// create→deploy loop. Fire at most once per env; reset on init-failure/delete.
-	initEmittedMu  sync.Mutex
-	initEmitted    map[string]struct{}
-	configWatcher  *configWatcher
-	contribute     *contributeStore
-	contributeApps *contributeAppForwards
+	initEmittedMu sync.Mutex
+	initEmitted   map[string]struct{}
+	configWatcher *configWatcher
+	// definitionWriteOrigin is the config watcher's origin filter: the env
+	// config writes this desktop made while transferring a definition, so the
+	// watcher stops firing on its own write. See hosted_definition_origin.go.
+	definitionWriteOrigin definitionWriteOrigin
+	contribute            *contributeStore
+	contributeApps        *contributeAppForwards
 
 	// cloudContextStatuses caches the live AWS-observed power state per cloud
 	// context. The persisted config no longer carries Status (it is operational
@@ -664,6 +669,10 @@ func (a *App) startup(ctx context.Context) {
 	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
 	a.startRestartControl()
+	// Migrate whatever changed while this desktop was closed. Off the startup
+	// path: it is per-environment config and network I/O, and nothing on screen
+	// waits for it. See hosted_definition_upload.go.
+	go a.catchUpHostedDefinitions()
 	// Populate and keep live every linked orchestrator mirror, not only envs
 	// opened this session. Off the startup path so config/network I/O per env
 	// does not delay first paint.

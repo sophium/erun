@@ -14,6 +14,7 @@ export type { EnvStatusPayload } from './envStatusPayload';
 export type { EnvUsagePayload } from './envUsagePayload';
 export type { GlobalConfigCloudProviderBusyAction } from './globalConfigCloudProviderBusyAction';
 export type { HiddenSessionMode } from './hiddenSessionMode';
+export type { HostedDefinitionUploadedPayload } from './hostedDefinitionUploadedPayload';
 export type { IDEKind } from './ideKind';
 export type { IdleCloudContextAction } from './idleCloudContextAction';
 export type { MountElements } from './mountElements';

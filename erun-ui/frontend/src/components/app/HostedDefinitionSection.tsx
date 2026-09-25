@@ -1,20 +1,27 @@
 import { Button, Label } from 'erun-kit';
-import { CloudDownload, RefreshCw } from 'lucide-react';
+import { CloudDownload, RefreshCw, Upload } from 'lucide-react';
 import * as React from 'react';
 
-import { readHostedDefinitionDrift } from '@/app/hostedDefinitionDrift';
-import type { UIHostedDefinitionDrift, UIHostedEnvironment } from '@/uiHostedDefinitionTypes';
+import { readError } from '@/app/errors';
+import { readHostedDefinitionDrift, uploadHostedDefinition } from '@/app/hostedDefinitionDrift';
+import type {
+  UIHostedDefinitionDrift,
+  UIHostedDefinitionLocalChange,
+  UIHostedDefinitionUpload,
+  UIHostedEnvironment,
+} from '@/uiHostedDefinitionTypes';
 
 // HostedDefinitionSection is the environment's hosted marker panel: which
-// platform row this local environment corresponds to, and — on request — how
-// far the local copy has fallen behind the definition that row holds.
+// platform row this local environment corresponds to, whether this machine's
+// own settings have moved since they were last sent, and — on request — how far
+// the local copy has fallen behind the definition that row holds.
 //
-// It is deliberately read-only and never writes. There is no auto-upload
-// control here: driving an upload from the config watcher is the write→event→
-// write loop this repository has already shipped once (see
-// erun-ui/AGENTS.md), and the dirty-flag half of that design is not built.
-// The operator pulls from the CLI (`erun platform env pull`); this panel tells
-// them whether there is anything to pull.
+// The divergence half needs no platform read, so it is rendered straight from
+// the read model: a change made while the desktop was closed (`erun init`,
+// `erun cloud set`, a deploy) is visible here without asking anything. The
+// desktop also uploads such a change on its own; the button is what the
+// operator has when it could not — a machine that is not signed in to the
+// tenant's platform, or an upload that failed.
 export function HostedDefinitionSection({
   tenant,
   environment,
@@ -26,17 +33,27 @@ export function HostedDefinitionSection({
 }): React.ReactElement | null {
   const [drift, setDrift] = React.useState<UIHostedDefinitionDrift | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
+  const [upload, setUpload] = React.useState<UIHostedDefinitionUpload | undefined>(undefined);
+  const [uploadError, setUploadError] = React.useState<string | undefined>(undefined);
+  const [uploading, setUploading] = React.useState(false);
   // The comparison is about one specific environment. Switching to another one
   // in the same dialog must not leave the previous environment's answer on
-  // screen, so the resolved drift is dropped whenever the target changes.
+  // screen, so everything resolved is dropped whenever the target changes.
   React.useEffect(() => {
     setDrift(undefined);
     setBusy(false);
+    setUpload(undefined);
+    setUploadError(undefined);
+    setUploading(false);
   }, [tenant, environment]);
 
   if (!hosted) {
     return null;
   }
+
+  // A completed upload reports the divergence it read back from disk, which is
+  // more current than the marker this panel was rendered with.
+  const localChange = upload?.localChange ?? hosted.localChange;
 
   const checkDrift = async (): Promise<void> => {
     setBusy(true);
@@ -44,6 +61,18 @@ export function HostedDefinitionSection({
       setDrift(await readHostedDefinitionDrift(tenant, environment));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const sendToPlatform = async (): Promise<void> => {
+    setUploading(true);
+    setUploadError(undefined);
+    try {
+      setUpload(await uploadHostedDefinition(tenant, environment));
+    } catch (error: unknown) {
+      setUploadError(readError(error));
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -73,8 +102,79 @@ export function HostedDefinitionSection({
       <div className="text-sm text-muted-foreground [overflow-wrap:anywhere]">
         {hosted.describe}
       </div>
+      <HostedDefinitionLocalChangeLine
+        change={localChange}
+        error={uploadError}
+        uploaded={upload?.describe}
+        uploading={uploading}
+        retryCommand={`erun platform env push ${tenant} ${environment}`}
+        onUpload={() => void sendToPlatform()}
+      />
       <HostedDefinitionDriftLine drift={drift} />
     </section>
+  );
+}
+
+// HostedDefinitionLocalChangeLine renders whether this machine's settings have
+// moved since they were last sent.
+//
+// The action is offered only where an upload would do something: a copy in step
+// needs no button, and one this desktop cannot tell about needs the upload that
+// starts tracking it as much as a changed one does. A failed upload is an
+// attempted failure and reads as an alert, per the shared design-language
+// record; a divergence and the unknown state are status.
+function HostedDefinitionLocalChangeLine({
+  change,
+  error,
+  uploaded,
+  uploading,
+  retryCommand,
+  onUpload,
+}: {
+  change: UIHostedDefinitionLocalChange;
+  error?: string;
+  uploaded?: string;
+  uploading: boolean;
+  retryCommand: string;
+  onUpload: () => void;
+}): React.ReactElement {
+  const actionable = !change.available || change.changed;
+  return (
+    <div className="grid gap-2">
+      {/* One status line for this machine's own settings, whether it is
+          reporting the standing divergence or the upload that just answered it.
+          Two would both be live regions about the same subject, and the named
+          region is what lets a reader — or a test — address this line rather
+          than whichever status the panel happens to render first. */}
+      <div
+        role="status"
+        aria-label="This machine's settings"
+        className="text-sm text-muted-foreground [overflow-wrap:anywhere]"
+      >
+        {change.describe}
+        {uploaded ? <span> {uploaded}</span> : null}
+      </div>
+      {error ? (
+        <div role="alert" className="text-sm text-amber-600 [overflow-wrap:anywhere]">
+          Cannot upload this environment&apos;s settings: {error} — retry here, or run `
+          {retryCommand}` from a terminal.
+        </div>
+      ) : null}
+      {actionable ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          disabled={uploading}
+          onClick={onUpload}
+          aria-label="Upload this environment's settings to the platform"
+        >
+          <Upload className="mr-2 h-4 w-4" aria-hidden="true" />
+          {uploading ? 'Uploading…' : 'Upload to platform'}
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -98,10 +198,22 @@ function HostedDefinitionDriftLine({
     );
   }
   if (!drift.behind) {
-    return <div className="text-sm text-muted-foreground">{drift.describe}</div>;
+    return (
+      <div
+        role="status"
+        aria-label="The platform's definition"
+        className="text-sm text-muted-foreground"
+      >
+        {drift.describe}
+      </div>
+    );
   }
   return (
-    <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div
+      role="status"
+      aria-label="The platform's definition"
+      className="flex items-center gap-2 text-sm text-muted-foreground"
+    >
       <CloudDownload className="h-4 w-4 shrink-0" aria-hidden="true" />
       {/* The recovery action names the command that performs it: the desktop
           does not pull on its own, and offering a button that does nothing
