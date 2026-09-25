@@ -278,7 +278,7 @@ ERun doesn't ship its own secret-management layer — it uses Kubernetes' native
 | Source | Used by | How |
 |---|---|---|
 | **Kubernetes `Secret` objects in the env's namespace** | Application services | Helm charts in `<tenant>-devops/k8s/<component>/` reference them via `envFrom: secretRef:` or volume mounts. Create them with `kubectl create secret` or template them in your chart. |
-| **OIDC service-account credentials** | Agents calling the erun API | Stored as a `Secret` in the env's namespace; mounted into the Agent's container at deploy time. See [Sign-in](/agent-reference/api-protocol#sign-in-oidc). |
+| **The delegating Operator's platform alias** | Agents calling the erun API | `erun init` on a signed-in host mints `<tenant>-devops-platform-alias` and the runtime chart mounts it read-only; the entrypoint seeds the pod's cloud config from it at boot. This is the **Operator's own** identity, not the Agent's — two envs provisioned from one host are indistinguishable in the audit trail. A per-Agent service-account credential is **(Planned.)** ([#1969](https://github.com/sophium/erun/issues/1969)). See [Sign-in](/agent-reference/api-protocol#sign-in-oidc). |
 | **Cloud credentials on the host** | The runtime pod (managed-cloud envs only) | When the env opts in via the desktop's env settings, the host's `~/.aws`, `~/.config/gcloud`, etc. are mounted into the pod read-only. |
 | **SSH key** | IDE attach over SSH | A locally-stored public key, injected by the helm chart into the runtime pod. Path configured per env in the desktop. |
 | **Registry auth** | `docker push` from inside the pod | Persisted at `~/.docker/config.json` in the pod's PVC. `erun push` reruns `docker login` interactively on a 401. |

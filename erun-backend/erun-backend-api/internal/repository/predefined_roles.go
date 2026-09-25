@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routeroles"
 	"github.com/uptrace/bun"
@@ -19,19 +20,27 @@ const (
 )
 
 // ensureNarrowerRolesExist creates TenantUser/TenantAdmin for the tenant if
-// they do not already exist, and (re)grants each its current exact-route
-// permission set from routeroles. The grant loop always runs, even when the
-// role rows already exist: every insert is ON CONFLICT DO NOTHING, so this is
-// what lets an already-bootstrapped tenant pick up a route that gets
-// reclassified into one of these roles later, the next time anything calls
-// this — never backfilled by a migration, the same lazy, idempotent pattern
-// grantPredefinedRoles already uses for ReadAll/WriteAll.
+// they do not already exist, and reconciles each one's exact-route permission
+// set to the current routeroles set. It runs on every call, even when the role
+// rows already exist, and the reconciliation replaces the set rather than
+// adding to it: inserts alone (ON CONFLICT DO NOTHING) already let an
+// already-bootstrapped tenant pick up a route reclassified *into* one of these
+// roles, but nothing ever removed a route reclassified back *out* of it, so
+// the narrowing a reclassification is for never reached a tenant that had
+// already been seeded — which is every tenant that exists. These two roles are
+// derived from routeroles and never hand-authored, so replacing their grants
+// outright is their whole contract. Never backfilled by a migration; the same
+// lazy, idempotent pattern grantPredefinedRoles uses for ReadAll/WriteAll.
 func ensureNarrowerRolesExist(ctx context.Context, tx bun.Tx, tenantID string) error {
 	userRoleID, err := findOrCreateRole(ctx, tx, tenantID, tenantUserRoleName)
 	if err != nil {
 		return err
 	}
-	for _, permission := range routeroles.TenantUserPermissions() {
+	userPermissions := routeroles.TenantUserPermissions()
+	if err := reconcileRolePermissions(ctx, tx, tenantID, userRoleID, userPermissions); err != nil {
+		return err
+	}
+	for _, permission := range userPermissions {
 		if err := grantRolePermissionExact(ctx, tx, tenantID, userRoleID, permission.Method, permission.Path); err != nil {
 			return err
 		}
@@ -41,12 +50,51 @@ func ensureNarrowerRolesExist(ctx context.Context, tx bun.Tx, tenantID string) e
 	if err != nil {
 		return err
 	}
-	for _, permission := range routeroles.TenantAdminPermissions() {
+	adminPermissions := routeroles.TenantAdminPermissions()
+	if err := reconcileRolePermissions(ctx, tx, tenantID, adminRoleID, adminPermissions); err != nil {
+		return err
+	}
+	for _, permission := range adminPermissions {
 		if err := grantRolePermissionExact(ctx, tx, tenantID, adminRoleID, permission.Method, permission.Path); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// reconcileRolePermissions removes roleID's grants that the derived set no
+// longer names, leaving the current set for the idempotent insert loop that
+// follows. Deleting only what the set omits — rather than clearing the role
+// and re-inserting it whole — keeps every surviving row's created_at stable,
+// which matters because this runs on every RoleRepository.List read and not
+// only on a role's first creation.
+func reconcileRolePermissions(ctx context.Context, tx bun.Tx, tenantID string, roleID string, derived []routeroles.RoutePermission) error {
+	tenantPredicate := "tenant_id IS NULL"
+	args := []any{}
+	if tenantID != "" {
+		tenantPredicate = "tenant_id = ?"
+		args = append(args, tenantID)
+	}
+	args = append(args, roleID)
+
+	if len(derived) == 0 {
+		_, err := tx.NewRaw(`DELETE FROM role_permissions WHERE `+tenantPredicate+` AND role_id = ?`, args...).Exec(ctx)
+		return err
+	}
+
+	// The row-constructor form of "not one of the derived pairs". Every
+	// placeholder is a bound parameter, and the set is bounded by the route
+	// table rather than by caller input.
+	pairs := make([]string, 0, len(derived))
+	for _, permission := range derived {
+		pairs = append(pairs, "(?, ?)")
+		args = append(args, permission.Method, permission.Path)
+	}
+	_, err := tx.NewRaw(
+		`DELETE FROM role_permissions WHERE `+tenantPredicate+` AND role_id = ? AND (api_method, api_path) NOT IN (VALUES `+strings.Join(pairs, ", ")+`)`,
+		args...,
+	).Exec(ctx)
+	return err
 }
 
 // grantFirstTenantUserRole ensures TenantUser/TenantAdmin exist for the

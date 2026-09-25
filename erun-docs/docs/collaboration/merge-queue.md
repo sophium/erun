@@ -67,7 +67,7 @@ The session therefore has to arrive from outside, and it does — by the same ro
 
 Two consequences are worth stating plainly:
 
-- **The environment acts as the operator whose machine ran `init`.** This is that operator's own identity, not a distinct machine identity, so every call an environment makes is attributed to them, and two environments provisioned from one host are indistinguishable in the platform's audit trail. A dedicated non-human identity for queue participation remains the better long-term answer; it is a separate, still-open design.
+- **The environment acts as the operator whose machine ran `init`.** This is that operator's own identity, not a distinct machine identity, so every call an environment makes is attributed to them, and two environments provisioned from one host are indistinguishable in the platform's audit trail. A dedicated non-human identity for queue participation remains the better long-term answer; it is a separate, still-open design, tracked as [erun#1969](https://github.com/sophium/erun/issues/1969) and planned in [erun#2684](https://github.com/sophium/erun/issues/2684).
 - **It covers only what `erun init` provisioned, from a host that had an alias.** An environment created before this existed, or by a host with no alias configured, still has none — and nothing inside the pod repairs that. Re-running `erun init` from a signed-in host is the fix.
 
 Where an environment holds no alias, a gate drive is a **credentialed-host operation**, run by an orchestrator or operator machine that has `erun cloud login` done and can reach the environment's worktree. The environment contributes the workspace, the daemon, and the warm caches the build runs in — not the record of what it built. Concretely:
