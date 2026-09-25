@@ -508,6 +508,78 @@ func TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet(t *testing.T) {
 	}
 }
 
+// TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName is the
+// same narrowing proof one form over. An exact grant outside TenantUser's
+// derived set is removed by the (api_method, api_path) pair comparison; a
+// pattern grant stores both of those as NULL
+// (role_permissions_exact_or_pattern_check), so that comparison evaluates to
+// NULL rather than TRUE and the row survived reconciliation untouched. The
+// derived set is exact-only, so no pattern row can ever be one of its
+// members, and a seeded role that keeps one holds a grant the model does not
+// name — the same "the narrowing silently failed to apply" state this
+// reconciliation exists to prevent, reached through the other permission
+// form.
+func TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName(t *testing.T) {
+	db, tenantID := rolesDatabase(t)
+	txs := NewTxManager(db, DialectPostgres)
+	roles := &RoleRepository{txs: txs}
+	admin := seedPermissionsUser(t, db, tenantID, "admin")
+	ctx := rolesContext(tenantID, admin)
+
+	if _, err := roles.List(ctx); err != nil {
+		t.Fatalf("seed narrower roles: %v", err)
+	}
+
+	var userRoleID string
+	mustNoErr(t, db.QueryRow(
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,
+	).Scan(&userRoleID), "find TenantUser role")
+
+	// A pattern row is the one shape the derived exact set can never name, so
+	// this is what a seeded role holding a grant outside the model looks like
+	// once it is written in the pattern form.
+	mustNoErr(t, func() error {
+		_, err := db.Exec(
+			`INSERT INTO role_permissions (tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES ($1, $2, '.*', '^/v1/.*$')`,
+			tenantID, userRoleID,
+		)
+		return err
+	}(), "seed a pattern grant outside the derived set")
+
+	// The row has to be really there before reconciliation, or a pass below
+	// would only be proving the insert failed.
+	var seeded int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2 AND api_method IS NULL`,
+		tenantID, userRoleID,
+	).Scan(&seeded), "count the seeded pattern grant")
+	if seeded != 1 {
+		t.Fatalf("expected the seeded pattern grant to be present before reconciliation, found %d", seeded)
+	}
+
+	if _, err := roles.List(ctx); err != nil {
+		t.Fatalf("reconcile narrower roles: %v", err)
+	}
+
+	var stale int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2 AND api_method IS NULL`,
+		tenantID, userRoleID,
+	).Scan(&stale), "count the surviving pattern grants")
+	if stale != 0 {
+		t.Fatalf("a pattern grant outside TenantUser's derived set survived reconciliation: %d row(s) left", stale)
+	}
+
+	// As in the exact-form case, reconciliation must narrow rather than empty.
+	var granted int
+	mustNoErr(t, db.QueryRow(
+		`SELECT count(*) FROM role_permissions WHERE tenant_id = $1 AND role_id = $2`, tenantID, userRoleID,
+	).Scan(&granted), "count the surviving grants")
+	if want := len(routeroles.TenantUserPermissions()); granted != want {
+		t.Fatalf("TenantUser holds %d grants after reconciliation, want the derived set's %d", granted, want)
+	}
+}
+
 // TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser pins the machine
 // role's contract at the database end: the role ensureNarrowerRolesExist
 // creates really carries TenantAgent's derived exact-route set -- no more, no

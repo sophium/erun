@@ -292,12 +292,21 @@ a substitute for GitHub-side enforcement.
   environment caller), opening or promoting reviews, comment/reviewer writes,
   and every release route. `ensureNarrowerRolesExist` seeds `TenantAgent` for
   every tenant alongside TenantUser/TenantAdmin, lazily and reconciled in both
-  directions, so an operator can grant it today. Coverage:
+  directions, so an operator can grant it today. **Reconciliation replaces a
+  derived role's grants outright, in both permission forms** — a route
+  reclassified *out* of one of these roles has to actually stop being granted
+  to a tenant seeded before the reclassification, which inserts alone
+  (`ON CONFLICT DO NOTHING`) never did. That is why the removal predicate
+  cannot be a bare `(api_method, api_path) NOT IN (...)`: a pattern row stores
+  both as NULL, so that comparison is NULL rather than TRUE and the row
+  survives, and the model has no pattern members to have named it. Coverage:
   `internal/routeroles/route_roles_test.go` (the subset invariant and the
-  closed route list), `internal/repository/roles_e2e_test.go` and
-  `role_policy_e2e_test.go` (`ERUN_E2E_ROLES_DATABASE_URL`,
-  `ERUN_E2E_PERMISSIONS_DATABASE_URL`: the seeded grants, and a TenantAgent
-  holder permitted exactly its set against every real registered route).
+  closed route list), `internal/repository/roles_e2e_test.go` (the seeded
+  grants, and both reconciliation removals — an exact pair, and the pattern
+  row), and this module root's `role_policy_e2e_test.go`
+  (`ERUN_E2E_ROLES_DATABASE_URL`, `ERUN_E2E_PERMISSIONS_DATABASE_URL`: a
+  TenantAgent holder permitted exactly its set against every real registered
+  route, and refused the rest).
 - **Implemented: the machine identity, and the privileged path that mints it.**
   `MachineIdentityService` (`internal/service/machine_identity.go`) provisions
   or returns one environment's own identity: it asks the tenant's own IdP for
@@ -397,5 +406,6 @@ unconfigured-refusal tests.
 - `internal/gitverify` has its own unit tests against real local git repositories (`verifier_test.go`) — no cluster or database, the same style `internal/mergeexec/job_test.go` used before this package replaced it. `TestRemoteVerifierIsAncestor*` cover `IsAncestor` directly: a direct ancestor, an ancestor separated by unrelated commits in between, a commit compared against itself, an unrelated commit that never led to the descendant at all (both directions), and a malformed hash.
 - The environment delete state machine has the same shape of opt-in gate: `ERUN_E2E_ENVIRONMENT_DATABASE_URL` runs `ClaimDelete`/`MarkDeleteBlocked`/`Count`/`ListByStatuses`'s SQL contracts against a migrated PostgreSQL (`environment_delete_e2e_test.go`).
 - The capability contract has its own opt-in gate: `ERUN_E2E_PERMISSIONS_DATABASE_URL` runs the property the whole contract rests on — for a given role set, every route the capability answer claims is one `Authorize` permits, and every route it omits is one `Authorize` refuses — against a migrated PostgreSQL (`internal/repository/permissions_e2e_test.go`), across pattern rules, exact rules, a deliberately narrow anchored pattern, and a caller with no permissions at all.
+- **The derived-role proofs are opt-in on `ERUN_E2E_ROLES_DATABASE_URL`/`ERUN_E2E_PERMISSIONS_DATABASE_URL`, and no gate target sets either** — so `go test ./...` reports a clean `ok` for a package whose role-contract assertions never executed, the `NOT RUN:` caveat root AGENTS.md describes. They need a real migrated PostgreSQL, and the test-stage image `make check-gate` runs in carries neither a docker daemon nor the atlas CLI, so like `test-retention`/`test-schema-drift`/`test-postgres-restart` they are run by hand or via `erun exec job` in an agent env rather than by a gate target. Run them before merging a change to `internal/routeroles`, the derived-role reconciliation in `internal/repository/predefined_roles.go`, or any route's classification. The names that matter: `TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet` and `TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName` (both removals a seeded role must actually take), `TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser` (the strict containment), and this module root's `TestTenantAgentDrivesTheGateAndNothingElse` and `TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles` (the machine role permitted exactly its set and refused the rest; an existing WriteAll holder unaffected).
 - The gate-run failure classifier (see "Gate Runs" above) has its own opt-in HTTP-level gate: `ERUN_E2E_GATE_RUN_DATABASE_URL` runs `gate_run_classifier_e2e_test.go` against a migrated PostgreSQL and a real handler — no dry-run, no mocked classifier. It drives `eruncommon.RunGateRunStart`/`RunGateRunReport` (the exact entry points the CLI and MCP tools call) with each of `GateRunInconclusiveSignatures()`'s known infrastructure signatures and confirms the persisted, read-back status is `INCONCLUSIVE`; drives a genuine, unmatched failure and confirms it stays `FAILED`; confirms `RunGateRunList`/its `status` filter let a caller tell the two apart (a caller filtering on `status=failed` must not see the classified run); and confirms `RunReviewRecordBuild --gate --failed` refuses a known-signature `--failure-detail` outright while still recording a genuine one. This closes the "verified end to end" claim in the "What a hand-run merge-queue script should hand off to erun" bullet above with a permanent, repeatable test — that verification had previously only ever been a manual, uncommitted session.
 - The mandatory unit-level refusal tests for `acceptMerged`'s three verification conditions live in `internal/service/reviews_test.go` (`TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch`, `TestAcceptMergedRefusesWhenGatedTipIsNotAnAncestorOfTheReportedCommit`, `TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded`), each driven by a fake `MergeVerifier` so the condition under test is isolated from the other two. `TestAcceptMergedSucceedsWhenParentIsTheGatedTip` and `TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting` are the corresponding acceptance cases for condition 2's ancestry check (erun#2250): the ordinary exact-parent-match case, and the case with unrelated commits landing in between.
