@@ -1,4 +1,4 @@
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // Diagnostics console: a viewer over the selected env's erun trace log and the
 // in-app UI (Redux) trace. It replaced the old raw-PTY mirror that filled with
@@ -65,12 +65,17 @@ test.describe('diagnostics console', () => {
 
     // A sidebar toggle mutates the layout slice, and each entry renders the
     // changed slice names — so the recorded text must contain 'layout'.
+    // withTestBudget, not expect's 10s default: the entry travels the app's
+    // own dispatch -> record -> render path, which this test declared 30s for.
     await expect
-      .poll(async () => (await app.debugPanel.uiTracePane().textContent()) ?? '')
+      .poll(async () => (await app.debugPanel.uiTracePane().textContent()) ?? '', withTestBudget())
       .toMatch(/layout/);
 
     await app.debugPanel.clearButton().click();
-    await expect(app.debugPanel.uiTracePane()).toContainText('No UI activity recorded yet.');
+    await expect(app.debugPanel.uiTracePane()).toContainText(
+      'No UI activity recorded yet.',
+      withTestBudget(),
+    );
   });
 
   test('panel surfaces contain no raw ANSI escape sequences', async ({ app }) => {

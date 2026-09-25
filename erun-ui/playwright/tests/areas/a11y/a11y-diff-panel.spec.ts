@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // The diff panel had exactly zero focusable scrollers -- the vertical
 // diff content area and every hunk's horizontal scroller had no tabIndex, so
@@ -131,8 +131,11 @@ test.describe('diff panel accessibility', () => {
     // Converge on the panel having opened before asserting on the diff it
     // renders.
     await app.reviewPanel.waitForOpen();
+    // withTestBudget, not expect's 10s default: the paths arrive once the
+    // stubbed LoadDiff round-trip resolves and the panel renders it, which is
+    // part of the setup this suite's tests already declared 30s for.
     await expect
-      .poll(() => app.reviewPanel.diffSectionPaths())
+      .poll(() => app.reviewPanel.diffSectionPaths(), withTestBudget())
       .toEqual(['src/very/long/path/wide-file.ts']);
   });
 

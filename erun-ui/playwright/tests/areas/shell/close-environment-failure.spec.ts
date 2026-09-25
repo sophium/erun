@@ -16,6 +16,11 @@ test.describe('close environment — failure surfacing', () => {
     seededEnv,
   }) => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    // waitFor (not expect) converges the open's own render against the
+    // enclosing test's budget rather than expect's fixed one.
+    await app.sidebar
+      .envOpenDot(seededEnv.tenant, seededEnv.environment)
+      .waitFor({ state: 'visible' });
     await expect(app.sidebar.envOpenDot(seededEnv.tenant, seededEnv.environment)).toBeVisible();
 
     await page.route('**/__erun_invoke', async (route, request) => {
@@ -35,6 +40,7 @@ test.describe('close environment — failure surfacing', () => {
     const pill = page
       .getByRole('alert')
       .filter({ hasText: 'CLOSE_ENVIRONMENT_UNREACHABLE_MARKER' });
+    await pill.waitFor({ state: 'visible' });
     await expect(pill).toBeVisible();
     await expect(page.getByRole('button', { name: 'Copy output' })).toBeHidden();
 
