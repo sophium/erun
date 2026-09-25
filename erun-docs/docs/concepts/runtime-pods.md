@@ -88,26 +88,45 @@ appears to do nothing.
 
 ## Reading the resource figures
 
-The CPU and memory figures on the Runtime tab are **one reading of the node right now**, not a
-ceiling on what an environment supports. Two things move underneath them: a node's allocatable
-capacity changes as its own reservations change, and the free figure depends on what every other
-pod on that node currently holds. So the number you see is a snapshot, and the tab says which node
-it came from.
+The CPU and memory figures on the Runtime tab are **readings of the node right now**, not a ceiling
+on what an environment supports. Two things move underneath them: a node's allocatable capacity
+changes as its own reservations change, and every free figure depends on what the other pods on that
+node currently hold. So the numbers you see are a snapshot, and the tab says which node they came
+from.
 
-Two cases the number alone cannot explain, so the tab spells them out:
+There are **two of them, because there are two questions**, and each states which one it answers:
+
+- **Schedulable capacity — what a deploy depends on.** This is the scheduler's own arithmetic:
+  allocatable minus what the pods on the node *request*. Kubernetes admits a pod on its requests, so
+  this is the figure that decides whether an environment can be placed at all, and it is what the
+  sliders are bounded by. For an environment not yet on the node it is stated exactly — a node with
+  nothing left says zero — and where a pod on the node declares a request the reading could not
+  parse, the figure is stated as the upper bound it is rather than as an answer. An environment
+  already on the node keeps the floor below, because a pod that exists has already been admitted.
+- **Worst-case headroom — what is left if everything bursts.** The same node, with every container on
+  it running to its declared *limit* at once. This is a real capacity-planning question and it is
+  labelled as one, kept visually apart from the scheduling figure. It is not a scheduling limit:
+  `erun deploy` sets limits only, a limit reserves nothing, and on a healthy cluster the requests are
+  a small fraction of the limits — so a node can read zero here and still place a pod immediately.
+  Its remedy is a namespace quota or fewer environments per node, never a smaller limit: the runtime
+  limit is sized for the cold `make check-gate` an agent runs inside that container, and lowering it
+  re-creates the out-of-memory kills that destroy the run and its unpushed work.
+
+Two cases neither figure alone can explain, so the tab spells them out:
 
 - **The maximum equals what this environment already has.** An environment can always keep what it
-  is already running with, so when the node has nothing left the slider's maximum is floored at the
-  current value. That reads like a product limit but means the opposite — the node is fully
-  committed. The remedy is to [stop an environment](/cli/stop) nobody is using on that node, after
-  which the figure rises.
-- **Some usage is not counted.** The reading prefers a container's declared limits, falls back to
-  its measured usage when the cluster reports metrics, and says how many containers it could not
-  account for at all when neither is available. The runtime pod's own two containers (`erun-devops`,
-  `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves them — so this gap
-  is about the application services deployed alongside them: any of those that declares no limit of
-  its own is invisible to the reading on a cluster without metrics, and the tab warns that the true
-  usage is higher than shown.
+  is already running with, so both readings floor their free figure at the current value for an
+  environment that is already on the node. That reads like a product limit but means the opposite —
+  the node is fully committed, by limits in the worst-case reading and by requests in the scheduling
+  one. The remedy that raises either is capacity on the node: [stop an environment](/cli/stop)
+  nobody is using there.
+- **Some usage is not counted.** The worst-case reading prefers a container's declared limits, falls
+  back to its measured usage when the cluster reports metrics, and says how many containers it could
+  not account for at all when neither is available. The runtime pod's own two containers
+  (`erun-devops`, `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves
+  them — so this gap is about the application services deployed alongside them: any of those that
+  declares no limit of its own is invisible to the reading on a cluster without metrics, and the tab
+  warns that the true usage is higher than shown.
 
 That is the node's answer to "how full is the machine". The environment's own answer to "how close
 am I to my own limits" is a different reading — CPU against its own quota, memory current and peak

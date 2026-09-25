@@ -13,7 +13,16 @@ Below an environment's resource sliders, two readings tell you what the environm
 
 ### See what an environment is running, and take resources back
 
-Below that, **Running in this environment** reports what the pod is doing right now: how many sessions actually have a live program behind them, and the processes holding memory — Gradle daemons a finished build left resident, the container build cache — grouped by what they are. It is a reading, not a cleanup: nothing is stopped until you click the action beside a group, and your worktree, sessions, and Agent are never touched. The resource figures in the sliders above are a live snapshot of the node, and when the maximum is capped by the node being full rather than by a limit on the environment, the tab says so and points at stopping an environment nobody is using. See [Runtime pods](/concepts/runtime-pods#reading-the-resource-figures).
+Below that, **Running in this environment** reports what the pod is doing right now: how many sessions actually have a live program behind them, and the processes holding memory — Gradle daemons a finished build left resident, the container build cache — grouped by what they are. It is a reading, not a cleanup: nothing is stopped until you click the action beside a group, and your worktree, sessions, and Agent are never touched.
+
+### Two readings above the sliders, because there are two questions
+
+The resource figures in the sliders are live snapshots of the node, and the panel states **which question each one answers** rather than leaving you to guess:
+
+- **Schedulable capacity** is the scheduler's own arithmetic — allocatable minus what the pods on the node *request*. Kubernetes admits a pod on its requests, so this is what decides whether a deploy places, and it is what bounds the sliders. A node with nothing left says zero; a request the reading could not parse is reported as the upper bound it makes the figure, never as a zero; and an environment already on the node keeps its own current size as the floor, because a pod that exists has already been admitted and resizing it must not become uneditable.
+- **Worst-case headroom** is the node with every container at its declared *limit* at once. It is labelled as that and kept visually apart, and it is not a scheduling limit: `erun deploy` sets limits only, a limit reserves nothing, and requests are normally a small fraction of the limits — so a node can read zero here and still place a pod immediately. Its levers are a namespace quota or fewer environments on the node, **not** a smaller limit: the runtime limit is sized for the cold `make check-gate` an agent runs in that container, and lowering it re-creates the out-of-memory kills that destroy the run and its unpushed work.
+
+When the scheduler has no room left on any node, the panel says so and points at stopping an environment nobody is using. See [Runtime pods](/concepts/runtime-pods#reading-the-resource-figures).
 
 ### What an environment's memory limit does under contention {#memory-limit-contention}
 

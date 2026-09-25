@@ -1141,29 +1141,62 @@ type uiRuntimeResourceInput struct {
 
 // uiRuntimeResourceStatus is a reading of node capacity taken at one instant,
 // not a fixed ceiling: allocatable moves as the node's own reservations move,
-// and the free figure depends on what every other pod currently holds. Notice
-// carries the explanation the bare number cannot — why the figure is capped,
-// and what would raise it.
+// and every free figure depends on what the other pods currently hold.
+//
+// It carries two readings because the two capacity questions have different
+// answers, and reporting one of them without saying which it is was the defect
+// this shape exists to close: the limits sum can read zero on a node with ample
+// room to place a pod, and an operator who reads that as scheduling then
+// shrinks a limit the node's own capacity planning assumes will be burst into.
 type uiRuntimeResourceStatus struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	Available         bool   `json:"available"`
-	Message           string `json:"message,omitempty"`
-	Notice            string `json:"notice,omitempty"`
-	Node              string `json:"node,omitempty"`
-	// Floored marks a reading where free capacity was clamped up to what this
-	// environment already holds, so its maximum equals its current limit. Without
-	// it the slider reads as a hard product limit rather than "the node is full".
+	// Message is why no reading was taken. Empty whenever one was: the headline
+	// an operator reads then belongs to a reading, because the two differ.
+	Message string `json:"message,omitempty"`
+	Node    string `json:"node,omitempty"`
+	// Schedulable is what the scheduler will do on the chosen node: allocatable
+	// minus the pods' declared requests. This is the reading a deploy's outcome
+	// follows, and the one the configuration dialog's bounds come from.
+	Schedulable uiRuntimeResourceReading `json:"schedulable"`
+	// SchedulableComplete is false when a pod on the chosen node declares a
+	// request the reading could not parse. The free figure above is then an
+	// upper bound, never a zero and never an exact answer.
+	SchedulableComplete bool `json:"schedulableComplete"`
+	// WorstCase is what would be left on the chosen node if every container on
+	// it ran to its declared limit at once -- oversubscription headroom, a
+	// capacity-planning figure that is not scheduling capacity.
+	WorstCase uiRuntimeResourceReading `json:"worstCase"`
+	// Floored marks a worst-case reading clamped up to what this environment
+	// already holds, so its maximum equals its current limit. Without it the
+	// slider reads as a hard product limit rather than "the node is full".
 	Floored bool `json:"floored"`
 	// MeasuredUsage reports whether a metrics source answered, so the UI can say
 	// whether unlimited containers were counted at their real usage or not
 	// counted at all.
 	MeasuredUsage bool `json:"measuredUsage"`
 	// UnmeasuredContainers counts containers on the chosen node that declare no
-	// limits and had no measured usage either — capacity this reading cannot see.
-	UnmeasuredContainers int                     `json:"unmeasuredContainers,omitempty"`
-	CPU                  uiRuntimeResourceMetric `json:"cpu"`
-	Memory               uiRuntimeResourceMetric `json:"memory"`
-	Nodes                []uiRuntimeResourceNode `json:"nodes,omitempty"`
+	// limits and had no measured usage either — capacity the worst-case reading
+	// cannot see.
+	UnmeasuredContainers int `json:"unmeasuredContainers,omitempty"`
+	// UnreadableRequests counts pods on the chosen node whose declared requests
+	// could not be read, which is what makes SchedulableComplete false.
+	UnreadableRequests int                     `json:"unreadableRequests,omitempty"`
+	Nodes              []uiRuntimeResourceNode `json:"nodes,omitempty"`
+}
+
+// uiRuntimeResourceReading is one node's answer to one capacity question, and
+// states which question that is. Message and Notice travel with the reading
+// rather than with the status because the two readings answer different
+// questions and need different remedies named.
+type uiRuntimeResourceReading struct {
+	CPU    uiRuntimeResourceMetric `json:"cpu"`
+	Memory uiRuntimeResourceMetric `json:"memory"`
+	// Message says which question this reading answers, in its own figures.
+	Message string `json:"message,omitempty"`
+	// Notice carries what the figures alone cannot: why a figure is capped,
+	// what is invisible to it, and which lever actually moves it.
+	Notice string `json:"notice,omitempty"`
 }
 
 type uiRuntimeResourceMetric struct {
@@ -1369,10 +1402,15 @@ type uiHostedRegistryStatus struct {
 	Recovery  string `json:"recovery,omitempty"`
 }
 
+// uiRuntimeResourceNode is one node's pair of readings. Unlike the chosen
+// node's, a node here carries no message of its own: the panel states the two
+// questions once, for the node it anchors to, and a per-node paragraph would
+// repeat it once per node on any cluster worth inspecting.
 type uiRuntimeResourceNode struct {
-	Name   string                  `json:"name"`
-	CPU    uiRuntimeResourceMetric `json:"cpu"`
-	Memory uiRuntimeResourceMetric `json:"memory"`
+	Name                string                   `json:"name"`
+	Schedulable         uiRuntimeResourceReading `json:"schedulable"`
+	SchedulableComplete bool                     `json:"schedulableComplete"`
+	WorstCase           uiRuntimeResourceReading `json:"worstCase"`
 }
 
 // Health-check statuses. "ok" is a passing check, "error" a blocking problem

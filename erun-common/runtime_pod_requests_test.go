@@ -235,3 +235,52 @@ func TestDryRunTracesThePodSpecReadWithoutInventingAReservation(t *testing.T) {
 		t.Fatalf("expected the dry-run trace to name the pod-spec read, got:\n%s", trace.String())
 	}
 }
+
+// TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule covers the exported
+// entry point the desktop's node-capacity reading consumes. That reading sums
+// the rule over every pod on a node to answer what the scheduler can still
+// admit there, so it must get the same answer the per-environment usage
+// reading does -- a second spelling of "max over the init containers, sum over
+// the containers" would report free capacity the scheduler does not have, and
+// would do it silently, since both spellings return a plausible number.
+func TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule(t *testing.T) {
+	requests, err := EffectiveKubernetesPodRequests(
+		[]KubernetesContainerResources{
+			{Name: "erun-devops", Requests: map[string]string{"cpu": "250m", "memory": "1024Mi"}},
+			{Name: "erun-dind", Requests: map[string]string{"cpu": "250m", "memory": "1024Mi"}},
+		},
+		[]KubernetesContainerResources{
+			{Name: "prepare-volumes", Requests: map[string]string{"cpu": "100m", "memory": "64Mi"}},
+			{Name: "install-binfmt", Requests: map[string]string{"cpu": "100m", "memory": "64Mi"}},
+			{Name: "adopt-worktree", Requests: map[string]string{"cpu": "100m", "memory": "64Mi"}},
+		},
+	)
+	if err != nil {
+		t.Fatalf("EffectiveKubernetesPodRequests: %v", err)
+	}
+	// The containers sum to 500m/2GiB and the init phase peaks at 100m/64Mi, so
+	// the containers are what the scheduler admits the pod on.
+	if requests.CPUMilli != 500 || requests.MemoryBytes != 2048*(1<<20) {
+		t.Fatalf("pod request = %d millicores / %d bytes, want the containers' 500m / 2GiB", requests.CPUMilli, requests.MemoryBytes)
+	}
+
+	raised, err := EffectiveKubernetesPodRequests(
+		[]KubernetesContainerResources{{Name: "erun-devops", Requests: map[string]string{"cpu": "250m"}}},
+		[]KubernetesContainerResources{{Name: "prepare-volumes", Requests: map[string]string{"cpu": "2"}}},
+	)
+	if err != nil {
+		t.Fatalf("EffectiveKubernetesPodRequests: %v", err)
+	}
+	if raised.CPUMilli != 2000 {
+		t.Fatalf("pod request = %d millicores, want the init phase's 2 CPU", raised.CPUMilli)
+	}
+
+	// A declared quantity this parser cannot read is an error, never a dropped
+	// zero: an understated reservation reports free capacity that is not there.
+	if _, err := EffectiveKubernetesPodRequests(
+		[]KubernetesContainerResources{{Name: "erun-devops", Requests: map[string]string{"cpu": "plenty"}}},
+		nil,
+	); err == nil {
+		t.Fatal("expected an unreadable request quantity to be an error")
+	}
+}
