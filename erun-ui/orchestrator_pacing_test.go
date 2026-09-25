@@ -992,7 +992,7 @@ func TestListOrchestratorsNeverMarksAnOrchestratorItHoldsASessionFor(t *testing.
 // holds no session of its own, which is the population under test here.
 func createOrchestratorNamed(t *testing.T, app *App, name string) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator(name, []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator(%q) failed: %v", name, err)
 	}

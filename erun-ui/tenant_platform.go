@@ -205,15 +205,9 @@ func chooseTenantERunAlias(candidates []string, primary string) string {
 // caller-wiring condition, not a state the frontend renders, so it surfaces
 // as a real error.
 func (a *App) tenantPlatformResolutionForResolveError(resolveErr error) (tenantPlatformResolution, error) {
-	providers, err := eruncommon.ListCloudProviders(a.deps.store)
+	aliases, err := a.configuredERunAliases()
 	if err != nil {
 		return tenantPlatformResolution{}, err
-	}
-	var aliases []string
-	for _, provider := range providers {
-		if provider.Provider == eruncommon.CloudProviderERun {
-			aliases = append(aliases, provider.Alias)
-		}
 	}
 	switch len(aliases) {
 	case 0:

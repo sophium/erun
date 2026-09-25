@@ -109,17 +109,22 @@ func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params Set
 	return orchestrator, nil
 }
 
+// findOrchestratorIndex locates orchestratorID's entry in config, or -1 when no
+// orchestrator carries that id.
+func findOrchestratorIndex(config ERunConfig, orchestratorID string) int {
+	for i, orchestrator := range config.Orchestrators {
+		if orchestrator.ID == orchestratorID {
+			return i
+		}
+	}
+	return -1
+}
+
 // findOrchestratorEnvLink locates orchestratorID's entry in config and, within
 // it, the link to tenant/environment, returning both indices so the caller can
 // mutate either the orchestrator or one of its environments in place.
 func findOrchestratorEnvLink(config ERunConfig, orchestratorID, tenant, environment string) (orchestratorIndex, envIndex int, err error) {
-	orchestratorIndex = -1
-	for i, orchestrator := range config.Orchestrators {
-		if orchestrator.ID == orchestratorID {
-			orchestratorIndex = i
-			break
-		}
-	}
+	orchestratorIndex = findOrchestratorIndex(config, orchestratorID)
 	if orchestratorIndex < 0 {
 		return -1, -1, fmt.Errorf("orchestrator %q not found", orchestratorID)
 	}

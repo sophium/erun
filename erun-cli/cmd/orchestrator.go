@@ -17,7 +17,61 @@ func newOrchestratorCmd(store common.OrchestratorRoleStore) *cobra.Command {
 		Short: "Manage host-side AI orchestrator definitions",
 	}
 	cmd.AddCommand(newOrchestratorSetRoleCmd(store))
+	cmd.AddCommand(newOrchestratorSetAliasCmd(store))
 	return cmd
+}
+
+func newOrchestratorSetAliasCmd(store common.OrchestratorAliasStore) *cobra.Command {
+	var alias string
+	cmd := &cobra.Command{
+		Use:   "set-alias ORCHESTRATOR_ID",
+		Short: "Set the erun platform alias an orchestrator acts as",
+		Long: "Set which erun platform alias this host-side orchestrator declares as its own -- " +
+			"the orchestrator-scoped counterpart of a tenant's own cloud alias, stored on the " +
+			"orchestrator's entry in config.yaml and read back by `erun list`. The alias must " +
+			"already be configured on this host: `erun cloud init erun --api-url <url>` adds " +
+			"one, and `erun list` shows the aliases this machine has. The command refuses one " +
+			"it cannot resolve rather than recording a declaration nothing could honour, and it " +
+			"selects among aliases this host already has -- it never creates or signs in to " +
+			"one. Pass \"" + common.OrchestratorAliasNone + "\" to declare no alias of its own again, " +
+			"which is the default and leaves the orchestrator following this machine's own alias.",
+		Example:      "  erun orchestrator set-alias my-orchestrator --alias erun+erunpaas.com@erun",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			parsedAlias, err := common.ParseOrchestratorAliasFlag(alias)
+			if err != nil {
+				return err
+			}
+			return runOrchestratorSetAliasCommand(commandContext(cmd), store, common.SetOrchestratorAliasParams{
+				OrchestratorID: args[0],
+				Alias:          parsedAlias,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&alias, "alias", "", fmt.Sprintf("erun platform alias to act as, or %q to declare none", common.OrchestratorAliasNone))
+	if err := cmd.MarkFlagRequired("alias"); err != nil {
+		panic(err)
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runOrchestratorSetAliasCommand(ctx common.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorAliasParams) error {
+	if _, err := common.SetOrchestratorAlias(ctx, store, params); err != nil {
+		return err
+	}
+	var err error
+	if ctx.DryRun {
+		_, err = fmt.Fprintln(ctx.Stdout, "Dry run: orchestrator platform alias update planned.")
+		return err
+	}
+	alias := common.OrchestratorAliasNone
+	if params.Alias != "" {
+		alias = params.Alias
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "Set platform alias %s for orchestrator %s\n", alias, params.OrchestratorID)
+	return err
 }
 
 func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Command {

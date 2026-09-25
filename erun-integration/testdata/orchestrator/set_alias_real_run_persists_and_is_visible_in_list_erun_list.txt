@@ -1,0 +1,21 @@
+Configuration:
+  directory: <TMP>
+Defaults:
+  tenant: none
+  environment: none
+Current Directory:
+  path: none
+  repo: none
+  configured tenant: none
+  effective target: unavailable (default tenant is not configured, and one could not be inferred from the working directory either — pass a tenant explicitly, or run `erun init --tenant <name> --set-default-tenant` to set a default)
+Cloud Providers:
+  - erun+api.example.test@erun provider=erun account=none status=not_configured message=not signed in; run `erun cloud login erun+api.example.test@erun`
+Tenants:
+  none
+Orchestrators:
+  - eng-1 "Eng One"
+    platform alias: erun+api.example.test@erun
+    environments: none
+    directories:
+      - /repo/scratch
+audit: erun list

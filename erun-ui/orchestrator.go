@@ -58,7 +58,12 @@ type orchestratorSession struct {
 	launchID  string
 	transient bool
 	name      string
-	envs      []eruncommon.OrchestratorEnvConfig
+	// alias is the erun platform alias this orchestrator acts as, held on the
+	// session for the same reason name and dirs are: the Edit dialog reads a
+	// running orchestrator's own snapshot, and a session that did not carry the
+	// alias would report none and erase it on the next save.
+	alias string
+	envs  []eruncommon.OrchestratorEnvConfig
 	// dirs are the orchestrator's own directories: paths it operates in that
 	// belong to no environment. Held on the session so a running orchestrator
 	// still reports them (the Edit dialog reads its scope from this snapshot),
@@ -282,6 +287,12 @@ type orchestratorInfo struct {
 	// the same Restart affordance without claiming the specific "tools
 	// missing" reason that does not apply here. See orchestratorRolesChanged.
 	RoleChanged bool `json:"roleChanged"`
+	// Alias is the erun platform alias this orchestrator acts as, empty when it
+	// declares none of its own (eruncommon.OrchestratorConfig.Alias). It is the
+	// dialog's own field, seeded from here and sent back on save, so a value
+	// written by `erun orchestrator set-alias` survives an unrelated edit made
+	// in the desktop.
+	Alias string `json:"alias,omitempty"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -1492,10 +1503,11 @@ func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, 
 	}
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
+func orchestratorInfoFor(id, name, alias string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                     id,
 		Name:                   name,
+		Alias:                  alias,
 		Environments:           envInfos(envs, envActivity, envUsage),
 		Tenants:                tenantsFromEnvs(envs),
 		Directories:            directoryPaths(dirs),
@@ -1755,6 +1767,36 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 	return eruncommon.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
 }
 
+// ListOrchestratorAliasChoices returns the erun platform aliases configured on
+// this host, for the Edit orchestrator dialog's Platform alias picker.
+//
+// A picker rather than a text field, for the reason the environment candidate
+// list is one: the writer refuses an alias this host cannot resolve
+// (eruncommon.ValidateOrchestratorAlias), so offering the resolved list is what
+// keeps the dialog from letting an operator choose something the save will
+// reject. An empty list is a real answer — no erun alias is configured on this
+// machine — and the control renders it as such rather than as an empty choice.
+func (a *App) ListOrchestratorAliasChoices() ([]string, error) {
+	return a.configuredERunAliases()
+}
+
+// configuredERunAliases is the one filter for "which configured cloud aliases
+// are erun platform aliases", shared by this picker and the tenant platform
+// resolution, so the two cannot come to disagree about what the host has.
+func (a *App) configuredERunAliases() ([]string, error) {
+	providers, err := eruncommon.ListCloudProviders(a.deps.store)
+	if err != nil {
+		return nil, err
+	}
+	aliases := []string{}
+	for _, provider := range providers {
+		if provider.Provider == eruncommon.CloudProviderERun {
+			aliases = append(aliases, provider.Alias)
+		}
+	}
+	return aliases, nil
+}
+
 // ListOrchestratorEnvCandidates returns every environment the operator could
 // consider linking, eligible or not — an env orchestratableEnv rejects is
 // still listed, disabled, with IneligibleReason explaining why, rather than
@@ -2000,10 +2042,14 @@ func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfi
 // host review directory (creating the mirror and wiring its sync where the env
 // needs one), then stores the definition. Created stopped — StartOrchestrator
 // spawns the session.
-func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
+func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string, alias string) (orchestratorInfo, error) {
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
 	if err != nil {
 		return orchestratorInfo{}, err
+	}
+	alias = strings.TrimSpace(alias)
+	if err := eruncommon.ValidateOrchestratorAlias(a.deps.store, alias); err != nil {
+		return orchestratorInfo{}, fmt.Errorf("orchestrator alias: %w", err)
 	}
 	if err := a.linkOrchestratorEnvironments(refs); err != nil {
 		return orchestratorInfo{}, err
@@ -2014,21 +2060,32 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	}
 	id := uniqueOrchestratorID(orchestratorDisplayName(name, refs), configs)
 	displayName := orchestratorDisplayName(name, refs)
-	def := eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
+	def := eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	return orchestratorInfoFor(id, displayName, alias, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments, the
-// directories it names for itself, and its name, re-wiring sync for the current
-// set.
-func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
+// directories it names for itself, its name, and the platform alias it acts as,
+// re-wiring sync for the current set.
+//
+// Every field comes from the caller rather than being read back off the stored
+// definition, because the save below replaces the whole entry: a field this
+// literal omits is not left alone, it is erased. alias in particular is
+// settable from the terminal (`erun orchestrator set-alias`) as well as from
+// this dialog, so the dialog must send back what it was shown even when the
+// operator edited something else entirely.
+func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string, alias string) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
 	if err != nil {
 		return orchestratorInfo{}, err
+	}
+	alias = strings.TrimSpace(alias)
+	if err := eruncommon.ValidateOrchestratorAlias(a.deps.store, alias); err != nil {
+		return orchestratorInfo{}, fmt.Errorf("orchestrator alias: %w", err)
 	}
 	configs, err := a.loadOrchestratorConfigs()
 	if err != nil {
@@ -2048,12 +2105,12 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 		return orchestratorInfo{}, err
 	}
 	displayName := orchestratorDisplayName(name, refs)
-	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
+	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
 	status, sessionID, busy, shell, pacing, restartRequired, roleChanged := a.updatedOrchestratorRunningSnapshot(id, refs)
-	return orchestratorInfoFor(id, displayName, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
+	return orchestratorInfoFor(id, displayName, alias, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
 }
 
 // updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
@@ -2125,6 +2182,7 @@ func (a *App) startPersistedOrchestrator(id, conversationID, resumePrompt string
 	return a.spawnOrchestratorSession(orchestratorSpawn{
 		id:             def.ID,
 		name:           def.Name,
+		alias:          def.Alias,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
 		dirs:           def.Directories,
 		conversationID: conversationID,
@@ -2167,12 +2225,13 @@ func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, 
 	}
 	a.stopOrchestratorSession(id)
 	return a.spawnOrchestratorSession(orchestratorSpawn{
-		id:   def.ID,
-		name: def.Name,
-		envs: a.refreshLinkedEnvDirectories(def.Environments),
-		dirs: def.Directories,
-		cols: cols,
-		rows: rows,
+		id:    def.ID,
+		name:  def.Name,
+		alias: def.Alias,
+		envs:  a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:  def.Directories,
+		cols:  cols,
+		rows:  rows,
 	})
 }
 
@@ -2186,7 +2245,7 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshotFromSession(session)
-	return orchestratorInfoFor(session.id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
+	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
 // orchestratorWiredEnvs returns the environment scope id's live session was
@@ -2254,6 +2313,7 @@ func orchestratorScopeOf(envs []eruncommon.OrchestratorEnvConfig) []string {
 type orchestratorSpawn struct {
 	id             string
 	name           string
+	alias          string
 	envs           []eruncommon.OrchestratorEnvConfig
 	dirs           []eruncommon.OrchestratorDirectoryConfig
 	initialPrompt  string
@@ -2364,6 +2424,7 @@ func (a *App) conversationToLaunch(id, named string) string {
 // orchestrators root and tracks the live session.
 func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
 	id, name, envs := spawn.id, spawn.name, spawn.envs
+	alias := spawn.alias
 	dirs := spawn.dirs
 	transient := spawn.transient
 	cols, rows := clampTerminalSize(spawn.cols, spawn.rows)
@@ -2462,6 +2523,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		launchID:       launchID,
 		transient:      transient,
 		name:           name,
+		alias:          alias,
 		envs:           envs,
 		dirs:           dirs,
 		startedAt:      time.Now(),
@@ -2482,7 +2544,7 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, dirs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	return orchestratorInfoFor(id, name, alias, envs, dirs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
 }
 
 // orchestratorRespawnFunc builds the closure tryReconnect calls when this
@@ -2606,7 +2668,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
+		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -2619,7 +2681,7 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshotFromSession(session)
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
+		out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out

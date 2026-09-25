@@ -4,6 +4,7 @@ Usage:
   erun orchestrator [command]
 
 Available Commands:
+  set-alias   Set the erun platform alias an orchestrator acts as
   set-role    Set the role an orchestrator uses one of its linked environments for
 
 Flags:

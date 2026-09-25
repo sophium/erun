@@ -296,7 +296,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 
 	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "runtime", Role: eruncommon.OrchestratorEnvRoleRuntime},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T)
 	for _, role := range []eruncommon.OrchestratorEnvRole{eruncommon.OrchestratorEnvRoleCode, eruncommon.OrchestratorEnvRoleBuild, ""} {
 		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 			{Tenant: "frs", Environment: "runtime", Role: role},
-		}, nil)
+		}, nil, "")
 		if err == nil {
 			t.Fatalf("expected linking the runtime env with role %q to be refused", role)
 		}
@@ -343,7 +343,7 @@ func TestCreateOrchestratorLinksLocalAgentWithoutSync(t *testing.T) {
 
 	info, err := app.CreateOrchestrator("laptop agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop", Directory: filepath.Join(t.TempDir(), "ignored")},
-	}, nil)
+	}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -371,10 +371,10 @@ func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
 	store.envs["frs/gone"] = eruncommon.EnvConfig{Name: "gone", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: missing}
 	store.envs["frs/unset"] = eruncommon.EnvConfig{Name: "unset", Type: eruncommon.EnvironmentTypeLocalAgent}
 
-	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}, nil); err == nil {
+	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}, nil, ""); err == nil {
 		t.Fatal("expected a local-agent env whose worktree is absent to be rejected")
 	}
-	if _, err := app.CreateOrchestrator("unset", []orchestratorEnvInput{{Tenant: "frs", Environment: "unset"}}, nil); err == nil {
+	if _, err := app.CreateOrchestrator("unset", []orchestratorEnvInput{{Tenant: "frs", Environment: "unset"}}, nil, ""); err == nil {
 		t.Fatal("expected a local-agent env with no repository path to be rejected")
 	}
 }
@@ -455,14 +455,14 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.CreateOrchestrator("no envs", nil, nil); err == nil {
+	if _, err := app.CreateOrchestrator("no envs", nil, nil, ""); err == nil {
 		t.Fatal("expected an orchestrator with no linked environments to be rejected")
 	}
 
 	info, err := app.CreateOrchestrator(
 		"validation agent",
 		[]orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}},
-		nil)
+		nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -489,7 +489,7 @@ func TestRestartOrchestratorRespawnsWithFreshSession(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -566,7 +566,7 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	created, err := app.CreateOrchestrator(
 		"agent",
 		[]orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}},
-		nil)
+		nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -577,7 +577,7 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 		[]orchestratorEnvInput{
 			{Tenant: "frs", Environment: "dev", Directory: t.TempDir()},
 		},
-		nil)
+		nil, "")
 	if err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
@@ -665,7 +665,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	mustNoErr(t, err, "CreateOrchestrator")
 	started, err := app.StartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "StartOrchestrator")
@@ -677,7 +677,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	// Re-scope to a different environment while the session is still running.
 	updated, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop", Directory: laptopRepo},
-	}, nil)
+	}, nil, "")
 	mustNoErr(t, err, "UpdateOrchestrator")
 	if updated.Status != "running" {
 		t.Fatalf("expected the live session to still be reported running, got %+v", updated)
@@ -2127,7 +2127,7 @@ func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T)
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2213,7 +2213,7 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2270,7 +2270,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2326,7 +2326,7 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

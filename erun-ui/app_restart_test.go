@@ -443,7 +443,7 @@ func restartTwoOrchestrators(t *testing.T) (*App, string, string, string) {
 	t.Helper()
 	app, restoreDir := restartTestApp(t)
 	first := createAndStartOrchestrator(t, app)
-	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil)
+	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	}
 	liveConversation := readRestoreState(t, restoreDir, id).ConversationID
 	stageOrchestratorConversation(t, liveConversation)
-	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
+	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -645,7 +645,7 @@ func TestMixedRestoreAttributesEachWarningToItsOwnOrchestrator(t *testing.T) {
 
 	stale := createAndStartOrchestrator(t, app)
 	stageOrchestratorConversation(t, orchestratorSessionID(stale))
-	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
+	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -888,7 +888,7 @@ func TestRestartHandoffStaysEmptyWhenNoLaunchIsNamed(t *testing.T) {
 // session object anywhere in this desktop.
 func createStoppedOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
