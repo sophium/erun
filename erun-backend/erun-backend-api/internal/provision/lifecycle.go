@@ -38,6 +38,20 @@ type EnvironmentRowDeleter interface {
 	MarkDeleteBlocked(ctx context.Context, tenantID, environmentID, reason string) error
 }
 
+// MachineIdentityRevoker removes the platform identity an environment was
+// provisioned with: the erun user a token from it resolves to, and the
+// identity-provider application that mints that token. Satisfied by
+// service.MachineIdentityService.
+//
+// It returns only an error because this package owns the teardown's own
+// ordering and failure semantics; what a revocation removed is the revoker's to
+// report. It must be idempotent — Delete re-runs an attempt that failed partway
+// from the top — and must treat "there was no identity" as success, since most
+// environments existing today were never provisioned one.
+type MachineIdentityRevoker interface {
+	Revoke(ctx context.Context, environmentID string) error
+}
+
 // EnvLifecycleInput is the non-secret placement a stop or delete Job needs:
 // the same coordinates a deploy Job uses, without a target version — stop and
 // delete act on whatever the environment is already running.
@@ -89,6 +103,11 @@ type EnvLifecycle struct {
 	usage        UsageRecorder
 	imageChecker RuntimeImageChecker
 	credentials  deployexec.PlacementCredentialResolver
+	// identities revokes the environment's own platform identity as part of
+	// deleting it. Nil revokes nothing, which is the state of a deployment that
+	// mints no machine identities at all — never a silent half-measure in one
+	// that does, since a provisioned identity has no other revoker.
+	identities MachineIdentityRevoker
 }
 
 // NewEnvLifecycle wires stop/delete. usage may be nil, which records no
@@ -96,9 +115,10 @@ type EnvLifecycle struct {
 // fallback and always names the tenant's own image. credentials may be nil,
 // which refuses (rather than silently deploying unauthenticated) any
 // environment that names a context (#1112); every environment placed into
-// the platform's own cluster is unaffected either way.
-func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker, credentials deployexec.PlacementCredentialResolver) *EnvLifecycle {
-	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker, credentials: credentials}
+// the platform's own cluster is unaffected either way. identities may be nil,
+// which revokes no machine identity on delete.
+func NewEnvLifecycle(runner EnvLifecycleRunner, rows EnvironmentRowDeleter, config EnvDeployConfig, usage UsageRecorder, imageChecker RuntimeImageChecker, credentials deployexec.PlacementCredentialResolver, identities MachineIdentityRevoker) *EnvLifecycle {
+	return &EnvLifecycle{runner: runner, rows: rows, config: config, usage: usage, imageChecker: imageChecker, credentials: credentials, identities: identities}
 }
 
 // placement resolves the live admin-token credential for input's target
@@ -175,6 +195,13 @@ func (l *EnvLifecycle) Stop(ctx context.Context, input EnvLifecycleInput) error 
 // teardown inside it did not (#1140, a namespace stuck on an unsatisfiable
 // finalizer) — moves the row to deletion-blocked naming why, rather than
 // silently leaving a caller unable to tell "still there" from "gone".
+//
+// It also revokes the environment's machine identity, once the namespace is
+// gone and before the row is, so that deleting an environment leaves nothing
+// usable behind. That revocation is part of the attempt rather than a
+// best-effort side effect: a failure blocks the delete and is retried by the
+// reconciler, which is the recoverable half of the choice — deleting the row
+// anyway would orphan the credential with nothing left naming it.
 func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) error {
 	if strings.TrimSpace(input.RunningVersion) != "" {
 		placement, err := l.placement(ctx, input)
@@ -214,6 +241,22 @@ func (l *EnvLifecycle) Delete(ctx context.Context, input EnvLifecycleInput) erro
 		}
 	}
 	l.recordUsage(ctx, input.EnvironmentID, model.UsageEventEnvironmentDeleted)
+	// The environment's own platform identity goes with it. An environment's
+	// credential outliving the environment is not a leak of a secret that has
+	// stopped being one: the client secret keeps minting tokens that keep
+	// resolving to a live user, so nothing else in the system will ever notice
+	// it, and leaving it is what makes a provisioned identity permanent.
+	//
+	// Revoked here rather than before the namespace teardown, because until the
+	// pod is gone the credential is still the one the environment is using; and
+	// before the row removal rather than after, because that removal is the
+	// last thing holding this environment's id — fail afterwards and there is
+	// no retryable record left that names what was not revoked.
+	if l.identities != nil {
+		if err := l.identities.Revoke(ctx, input.EnvironmentID); err != nil {
+			return l.blockDelete(ctx, input, fmt.Errorf("namespace torn down but revoking the environment's platform identity failed: %w", err))
+		}
+	}
 	// The namespace is gone but the row is not yet: a failure here would leave
 	// the row in `deleting` with no reason, contradicting this method's own
 	// contract that every non-success outcome names why (#1166). Record it, so

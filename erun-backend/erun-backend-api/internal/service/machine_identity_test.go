@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -21,6 +22,11 @@ type fakeMachineIdentityAdmin struct {
 	identities map[string]zitadel.MachineIdentity
 	ensureErr  error
 	calls      []zitadel.EnsureMachineIdentityParams
+	// deleteCalls records every revocation attempt, including the ones that
+	// found nothing, so a test can tell "revoked the identity" from "searched
+	// the right places and found none".
+	deleteCalls []zitadel.DeleteMachineIdentityParams
+	deleteErr   error
 }
 
 func newFakeMachineIdentityAdmin() *fakeMachineIdentityAdmin {
@@ -41,6 +47,28 @@ func (f *fakeMachineIdentityAdmin) EnsureMachineIdentity(_ context.Context, para
 	}
 	f.identities[params.LoginName] = identity
 	return identity, nil
+}
+
+// DeleteMachineIdentity reproduces the provider's find-first delete: what is
+// not there is reported as nothing removed, not as an error, so a test can
+// assert on what is left rather than only on which call was made.
+func (f *fakeMachineIdentityAdmin) DeleteMachineIdentity(_ context.Context, params zitadel.DeleteMachineIdentityParams) (bool, error) {
+	f.deleteCalls = append(f.deleteCalls, params)
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
+	if _, ok := f.identities[params.LoginName]; !ok {
+		return false, nil
+	}
+	delete(f.identities, params.LoginName)
+	return true, nil
+}
+
+// hasIdentity reports whether the provider still holds an identity under
+// loginName — the credential half of "nothing usable left behind".
+func (f *fakeMachineIdentityAdmin) hasIdentity(loginName string) bool {
+	_, ok := f.identities[loginName]
+	return ok
 }
 
 // fakeMachineIdentityEnvironments is the environment read.
@@ -68,6 +96,16 @@ type fakeMachineIdentityUsers struct {
 	bySubject map[string]model.User
 	grants    map[string]map[string]bool
 	createErr error
+	deleteErr error
+	// deleteCalls records what revocation asked the store to remove, so a test
+	// can assert the service scoped it to the environment's own tenant and to
+	// the name derived from the environment's id rather than to the session's.
+	deleteCalls []deleteByUsernameCall
+}
+
+type deleteByUsernameCall struct {
+	tenantID string
+	username string
 }
 
 func newFakeMachineIdentityUsers() *fakeMachineIdentityUsers {
@@ -88,6 +126,27 @@ func (f *fakeMachineIdentityUsers) Create(_ context.Context, params repository.C
 		f.grants[user.UserID][roleID] = true
 	}
 	return user, false, nil
+}
+
+// DeleteByUsername mirrors UserRepository.DeleteByUsername's contract: the
+// derived name is what finds the row, and removing the user removes the
+// identity's whole erun-side footprint — the row and the grants that pointed
+// at it. A name that is not there is reported as nothing removed, which is what
+// makes a second revocation a no-op.
+func (f *fakeMachineIdentityUsers) DeleteByUsername(_ context.Context, tenantID string, username string) (bool, error) {
+	f.deleteCalls = append(f.deleteCalls, deleteByUsernameCall{tenantID: tenantID, username: username})
+	if f.deleteErr != nil {
+		return false, f.deleteErr
+	}
+	for subject, user := range f.bySubject {
+		if user.Username != username {
+			continue
+		}
+		delete(f.bySubject, subject)
+		delete(f.grants, user.UserID)
+		return true, nil
+	}
+	return false, nil
 }
 
 // enrolledIdentities is how many distinct identities this tenant has rows
@@ -169,7 +228,11 @@ func newMachineIdentityFixture(t *testing.T) *machineIdentityFixture {
 		issuers: &fakeMachineIdentityIssuers{issuers: []model.TenantIssuer{
 			{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldKey: "urn:zitadel:iam:user:resourceowner:id", OrgFieldValue: "org-1"},
 		}},
-		env: &fakeMachineIdentityEnvironments{environment: model.Environment{EnvironmentID: "env-1", Name: "alpha"}},
+		// TenantID is what the environment row actually carries, and what
+		// revocation scopes the erun-side removal to: it is read off the row
+		// rather than the session, because the delete workflow may be running
+		// under an operations caller's own tenant.
+		env: &fakeMachineIdentityEnvironments{environment: model.Environment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "alpha"}},
 	}
 	fixture.ctx = security.WithContext(context.Background(), security.Context{
 		TenantID:   "tenant-1",
@@ -217,6 +280,153 @@ func assertHoldsExactlyTheMachineRole(t *testing.T, fixture *machineIdentityFixt
 	}
 	if !fixture.roles.granted[userID]["role-agent"] {
 		t.Fatalf("expected the %s role to be granted, got %+v", repository.TenantAgentRoleName, fixture.roles.granted[userID])
+	}
+}
+
+// TestRevokeRemovesTheIdentityTheUserRowAndTheGrant is the whole of what a
+// provisioned identity is, removed: the provider application that mints the
+// credential, the erun user a token from it resolves to, and the role grant
+// that would otherwise still name a user that is gone.
+//
+// Removing only the provider application would leave an erun user behind, and
+// removing only the user would leave a live client secret minting tokens — the
+// half-measure that makes a revoked identity look revoked while it is not. This
+// asserts both halves together.
+func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+	provisioned, err := fixture.service.Provision(fixture.ctx, "env-1")
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	assertHoldsExactlyTheMachineRole(t, fixture, provisioned.UserID)
+
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	loginName := MachineIdentityLoginName("env-1")
+	if fixture.admin.hasIdentity(loginName) {
+		t.Fatal("the provider still holds the identity: its client secret can still mint tokens")
+	}
+	if enrolled := fixture.users.enrolledIdentities(); enrolled != 0 {
+		t.Fatalf("expected no enrolled identity after revocation, got %d", enrolled)
+	}
+	if grants := len(fixture.users.grants[provisioned.UserID]); grants != 0 {
+		t.Fatalf("expected the user's grants to go with it, got %d", grants)
+	}
+	// The erun-side removal is scoped to the environment's own tenant and to
+	// the name derived from the environment's id: it runs behind the
+	// environment-delete workflow, where the session's tenant may be an
+	// operations caller's rather than the one that owns the environment.
+	if len(fixture.users.deleteCalls) != 1 {
+		t.Fatalf("expected the user store to be asked to delete once, got %+v", fixture.users.deleteCalls)
+	}
+	if call := fixture.users.deleteCalls[0]; call.tenantID != "tenant-1" || call.username != loginName {
+		t.Fatalf("user deletion = %+v, want tenant-1/%s", call, loginName)
+	}
+}
+
+// TestRevokeIsIdempotentAndToleratesAnEnvironmentThatNeverHadAnIdentity: the
+// revocation runs inside the environment-delete workflow, which retries an
+// attempt that failed partway from the top, so a second call must be the state
+// asked for rather than a conflict — including for the common environment that
+// was never provisioned a machine identity at all.
+func TestRevokeIsIdempotentAndToleratesAnEnvironmentThatNeverHadAnIdentity(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("revoking an environment that never had an identity: %v", err)
+	}
+	if len(fixture.admin.deleteCalls) != 1 {
+		t.Fatalf("expected the provider to be searched once, got %+v", fixture.admin.deleteCalls)
+	}
+	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("first Revoke: %v", err)
+	}
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("second Revoke: %v", err)
+	}
+	if enrolled := fixture.users.enrolledIdentities(); enrolled != 0 {
+		t.Fatalf("expected no enrolled identity after two revocations, got %d", enrolled)
+	}
+}
+
+// TestRevokeLeavesTheUserRowIntactWhenTheProviderCannotBeReached is the
+// ordering property that keeps a partial failure recoverable: the erun-side
+// rows are removed first and the provider application last, because the user
+// row is found by the client id the provider holds. A revocation that deleted
+// the application first and then failed would have lost the only thing that
+// names the user row, stranding it — and re-running would find nothing.
+func TestRevokeLeavesTheUserRowIntactWhenTheProviderCannotBeReached(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	fixture.admin.deleteErr = errors.New("identity provider unreachable")
+
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err == nil {
+		t.Fatal("expected an error when the provider cannot be reached")
+	}
+	if !fixture.admin.hasIdentity(MachineIdentityLoginName("env-1")) {
+		t.Fatal("the provider application was lost, so a retry can no longer find the user row it names")
+	}
+}
+
+// TestRevokeSearchesEveryOrgScopedIssuer: provisioning refuses a tenant with
+// several org-scoped issuers rather than guessing which organization an
+// identity belongs to. Revocation has the opposite job — it must not refuse,
+// because refusing leaves the identity alive exactly when the tenant's issuer
+// configuration has drifted — so it searches every one of them and removes
+// whatever it finds.
+func TestRevokeSearchesEveryOrgScopedIssuer(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+	// Provisioned while the tenant resolved by exactly one org-scoped issuer,
+	// which is the only state provisioning permits.
+	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	// And revoked after the tenant's mappings grew a second org-scoped entry
+	// and a single-tenant one — the drift that used to be indistinguishable
+	// from "there is nothing to revoke".
+	fixture.issuers.issuers = []model.TenantIssuer{
+		{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldValue: "org-1"},
+		{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldValue: "org-2"},
+		{TenantID: "tenant-1", Issuer: "https://auth.example", OrgFieldValue: ""},
+	}
+
+	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	searched := make([]string, 0, len(fixture.admin.deleteCalls))
+	for _, call := range fixture.admin.deleteCalls {
+		searched = append(searched, call.OrgID)
+	}
+	if strings.Join(searched, ",") != "org-1,org-2" {
+		t.Fatalf("provider orgs searched = %v, want every org-scoped issuer and no single-tenant one", searched)
+	}
+}
+
+// TestRevokeWithoutAProviderStillRemovesTheERunSide: a control plane that
+// administers no identity provider never minted an application, but the erun
+// user row is still the platform's own to remove — and it is what makes a token
+// unusable here, so leaving it because the provider is unconfigured would be
+// the wrong half to skip.
+func TestRevokeWithoutAProviderStillRemovesTheERunSide(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+	if _, err := fixture.service.Provision(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	withoutProvider := NewMachineIdentityService(fixture.env, fixture.users, fixture.roles, fixture.issuers, nil)
+
+	if err := withoutProvider.Revoke(fixture.ctx, "env-1"); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if enrolled := fixture.users.enrolledIdentities(); enrolled != 0 {
+		t.Fatalf("expected the user row to be removed even with no provider configured, got %d", enrolled)
 	}
 }
 

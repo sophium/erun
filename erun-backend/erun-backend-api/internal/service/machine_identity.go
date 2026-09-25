@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -12,11 +13,14 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 )
 
-// MachineIdentityAdmin is the identity-provider surface minting one
-// environment's machine identity needs. *zitadel.Client satisfies it; tests
-// supply a stub.
+// MachineIdentityAdmin is the identity-provider surface this service
+// administers: minting one environment's machine identity, and revoking it
+// again. Both halves live on one collaborator because they are one
+// relationship — the platform's own identity provider — and *zitadel.Client is
+// the only thing that satisfies either. Tests supply a stub.
 type MachineIdentityAdmin interface {
 	EnsureMachineIdentity(ctx context.Context, params zitadel.EnsureMachineIdentityParams) (zitadel.MachineIdentity, error)
+	DeleteMachineIdentity(ctx context.Context, params zitadel.DeleteMachineIdentityParams) (bool, error)
 }
 
 // ErrMachineIdentityProviderUnavailable means this control plane has no
@@ -38,11 +42,13 @@ type MachineIdentityEnvironmentReader interface {
 	Get(ctx context.Context, environmentID string) (model.Environment, error)
 }
 
-// MachineIdentityUserEnroller is erun's half of provisioning: creating the
-// user row and its external-identity mapping, and granting the roles named.
+// MachineIdentityUserStore is erun's half of an environment identity's
+// lifecycle: creating the user row, its external-identity mapping and the
+// roles named, and removing all three again on revocation.
 // repository.UserRepository satisfies it.
-type MachineIdentityUserEnroller interface {
+type MachineIdentityUserStore interface {
 	Create(ctx context.Context, params repository.CreateUserParams) (model.User, bool, error)
+	DeleteByUsername(ctx context.Context, tenantID string, username string) (bool, error)
 }
 
 // MachineIdentityRoleRepository is the authorization half.
@@ -80,13 +86,13 @@ type MachineIdentityIssuerLister interface {
 // the role grant converges rather than inserting twice.
 type MachineIdentityService struct {
 	environments  MachineIdentityEnvironmentReader
-	users         MachineIdentityUserEnroller
+	users         MachineIdentityUserStore
 	roles         MachineIdentityRoleRepository
 	tenantIssuers MachineIdentityIssuerLister
 	admin         MachineIdentityAdmin
 }
 
-func NewMachineIdentityService(environments MachineIdentityEnvironmentReader, users MachineIdentityUserEnroller, roles MachineIdentityRoleRepository, tenantIssuers MachineIdentityIssuerLister, admin MachineIdentityAdmin) *MachineIdentityService {
+func NewMachineIdentityService(environments MachineIdentityEnvironmentReader, users MachineIdentityUserStore, roles MachineIdentityRoleRepository, tenantIssuers MachineIdentityIssuerLister, admin MachineIdentityAdmin) *MachineIdentityService {
 	return &MachineIdentityService{
 		environments:  environments,
 		users:         users,
@@ -242,15 +248,9 @@ func (s *MachineIdentityService) machineIdentityIssuer(ctx context.Context) (mod
 	if err != nil {
 		return model.TenantIssuer{}, repository.ErrMissingSecurityContext
 	}
-	issuers, err := s.tenantIssuers.List(ctx, repository.TenantIssuerFilter{TenantID: securityContext.TenantID})
+	orgScoped, err := s.orgScopedIssuers(ctx, securityContext.TenantID)
 	if err != nil {
 		return model.TenantIssuer{}, err
-	}
-	orgScoped := make([]model.TenantIssuer, 0, len(issuers))
-	for _, issuer := range issuers {
-		if strings.TrimSpace(issuer.OrgFieldValue) != "" {
-			orgScoped = append(orgScoped, issuer)
-		}
 	}
 	switch len(orgScoped) {
 	case 0:
@@ -264,4 +264,130 @@ func (s *MachineIdentityService) machineIdentityIssuer(ctx context.Context) (mod
 		}
 		return model.TenantIssuer{}, fmt.Errorf("%w: it resolves by %d org-scoped issuers (%s)", ErrMachineIdentityUnavailable, len(orgScoped), strings.Join(named, ", "))
 	}
+}
+
+// orgScopedIssuers lists the tenant's registered issuer mappings that carry an
+// organization, in the order the repository returns them. tenantID names the
+// tenant explicitly rather than leaving it to RLS, because an operations
+// session bypasses RLS and an unfiltered read would offer every tenant's
+// mappings.
+func (s *MachineIdentityService) orgScopedIssuers(ctx context.Context, tenantID string) ([]model.TenantIssuer, error) {
+	issuers, err := s.tenantIssuers.List(ctx, repository.TenantIssuerFilter{TenantID: tenantID})
+	if err != nil {
+		return nil, err
+	}
+	orgScoped := make([]model.TenantIssuer, 0, len(issuers))
+	for _, issuer := range issuers {
+		if strings.TrimSpace(issuer.OrgFieldValue) != "" {
+			orgScoped = append(orgScoped, issuer)
+		}
+	}
+	return orgScoped, nil
+}
+
+// revocationResult reports what one revocation actually removed, so a caller
+// can tell a delete that revoked an identity from one that had none to revoke
+// without treating either as different outcomes.
+type revocationResult struct {
+	EnvironmentID string
+	// LoginName is the name the identity was provisioned under, derived from
+	// the environment's own id. It is reported so a delete's trace names the
+	// identity it acted on rather than only the environment that held it.
+	LoginName string
+	// UserRemoved reports whether this tenant still held the erun-side rows —
+	// the user, its external-identity mapping and its role grants. False is the
+	// ordinary answer for an environment that never had a machine identity.
+	UserRemoved bool
+	// ApplicationsRemoved counts the identity-provider applications deleted,
+	// summed over every organization the tenant resolves by.
+	ApplicationsRemoved int
+}
+
+// revokeIdentity is Revoke's implementation, returning what it actually
+// removed for the caller that reports it.
+//
+// The erun-side rows go first. Removing them is already enough to make the
+// identity unusable at this API — the middleware refuses a token whose subject
+// resolves to no user — while the provider half is the one that needs the
+// platform's identity-provider credential and so is the likelier to fail.
+// Ordering the reliable half first means a retry after a partial failure still
+// has the provider application to find, which is exactly what its own lookup
+// needs; the reverse order would lose the client id the user row is found by
+// and strand a live credential.
+//
+// Every org-scoped issuer the tenant resolves by is searched, rather than the
+// single one Provision insists on. The two have opposite biases: provisioning
+// must not guess which organization an identity belongs to, but a revocation
+// that gave up because the tenant's issuer mappings had since grown a second
+// entry would leave the identity alive precisely when the configuration
+// drifted. Searching each and removing what is found reconciles that instead of
+// refusing.
+func (s *MachineIdentityService) revokeIdentity(ctx context.Context, environmentID string) (revocationResult, error) {
+	environment, err := s.environments.Get(ctx, environmentID)
+	if err != nil {
+		return revocationResult{}, err
+	}
+	result := revocationResult{
+		EnvironmentID: environment.EnvironmentID,
+		LoginName:     MachineIdentityLoginName(environment.EnvironmentID),
+	}
+	// The environment's own tenant, not the session's: an operations caller
+	// deleting another tenant's environment must not scope this to their own.
+	removed, err := s.users.DeleteByUsername(ctx, environment.TenantID, result.LoginName)
+	if err != nil {
+		return result, err
+	}
+	result.UserRemoved = removed
+
+	if s.admin == nil {
+		// No provider is administered here, so nothing was ever minted in one
+		// and the erun-side half above is the whole of what could exist.
+		return result, nil
+	}
+	issuers, err := s.orgScopedIssuers(ctx, environment.TenantID)
+	if err != nil {
+		return result, err
+	}
+	for _, issuer := range issuers {
+		removed, err := s.admin.DeleteMachineIdentity(ctx, zitadel.DeleteMachineIdentityParams{
+			OrgID:     issuer.OrgFieldValue,
+			LoginName: result.LoginName,
+		})
+		if err != nil {
+			return result, err
+		}
+		if removed {
+			result.ApplicationsRemoved++
+		}
+	}
+	return result, nil
+}
+
+// Revoke removes environmentID's machine identity: the erun user row that a
+// token from it resolves to, and the provider application that mints that
+// token. It is what makes deleting an environment leave nothing usable behind,
+// rather than leaving a credential that outlives the environment it was minted
+// for.
+//
+// It is the whole public surface of revocation, and reports only whether it
+// succeeded: the caller that drives it is the environment-delete teardown,
+// which owns the delete's ordering and failure semantics and has no business
+// interpreting what a revocation removed. What was removed is logged instead,
+// so an environment's delete trace still names the identity it revoked.
+//
+// Idempotent by construction. Both halves are found by the same derived name
+// Provision created them under, and "there was no identity there" is answered
+// as the state asked for rather than as an error — which it has to be, because
+// the environment-delete workflow it runs inside retries an attempt that
+// failed partway from the top.
+func (s *MachineIdentityService) Revoke(ctx context.Context, environmentID string) error {
+	result, err := s.revokeIdentity(ctx, environmentID)
+	if err != nil {
+		return err
+	}
+	if result.UserRemoved || result.ApplicationsRemoved > 0 {
+		log.Printf("erun api machine identity: revoked %s for environment=%q (user row removed: %t, provider applications removed: %d)",
+			result.LoginName, result.EnvironmentID, result.UserRemoved, result.ApplicationsRemoved)
+	}
+	return nil
 }

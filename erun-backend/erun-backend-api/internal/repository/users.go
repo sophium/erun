@@ -276,6 +276,74 @@ func tenantHasNoUsers(ctx context.Context, tx bun.Tx, tenantID string) (bool, er
 	return count == 0, nil
 }
 
+// DeleteByUsername removes the user holding username, together with the
+// external-identity mapping and the role grants that point at it, and reports
+// whether there was one.
+//
+// It is revocation's erun-side half, for a machine identity whose footprint is
+// exactly those three rows. The username is derived from the environment's own
+// id (see service.MachineIdentityLoginName), so derivation rather than a stored
+// link is what finds it again — the same mechanism that makes provisioning
+// idempotent — and a call after a successful one is a no-op rather than an
+// error, which it has to be: it runs inside the environment-delete workflow,
+// where an attempt that fails partway is retried from the top.
+//
+// Removing the user row is what makes a revoked identity unusable at this API,
+// rather than merely unauthorized: a token the identity's own client secret
+// keeps minting resolves to no user, and the middleware refuses an unknown
+// external subject. The mapping and the grants are deleted explicitly rather
+// than left to the foreign keys, neither of which declares ON DELETE CASCADE —
+// the database would refuse the users delete outright rather than clean up
+// around it.
+//
+// tenantID scopes every statement, the same way EnvironmentRepository.Delete
+// scopes its own: this runs behind a durable workflow, so the caller passes the
+// owning tenant explicitly rather than relying on the session's RLS context —
+// which an operations-scoped retry would otherwise leave unscoped, matching
+// another tenant's identically-named row.
+func (r *UserRepository) DeleteByUsername(ctx context.Context, tenantID string, username string) (bool, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return false, nil
+	}
+	// An unnamed tenant is a wiring error, never something to scope around: an
+	// empty tenant_id matches no row as erun_tenant and every tenant's row as
+	// erun_operations, so the one answer this must not give is a silent one.
+	if tenantID == "" {
+		return false, ErrMissingSecurityContext
+	}
+	removed := false
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var user model.User
+		if err := normalizeNoRows(tx.NewRaw(`
+			SELECT user_id, tenant_id, username, created_at, updated_at
+			  FROM users
+			 WHERE tenant_id = ? AND username = ?
+		`, tenantID, username).Scan(ctx, &user)); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+			return err
+		}
+		for _, statement := range []string{
+			`DELETE FROM user_external_ids WHERE tenant_id = ? AND user_id = ?`,
+			`DELETE FROM user_roles WHERE tenant_id = ? AND user_id = ?`,
+			`DELETE FROM users WHERE tenant_id = ? AND user_id = ?`,
+		} {
+			if _, err := tx.NewRaw(statement, tenantID, user.UserID).Exec(ctx); err != nil {
+				return err
+			}
+		}
+		removed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	return removed, nil
+}
+
 func (r *UserRepository) Get(ctx context.Context, userID string) (model.User, error) {
 	var user model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
