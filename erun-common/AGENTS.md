@@ -197,6 +197,14 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- A recorded pass is replayed only for the run that produced it: its tree, its
+  command, and the environment it executed under. The environment travels with
+  the record instead of in the job id -- the id is also what a re-invocation
+  after an expired bounded wait attaches to, so moving it with the environment
+  would find no job there and start a second gate beside the first. A run whose
+  environment differs is named loudly and run fresh, never replayed: keyed on
+  the whole environment minus the wrapper's own control variables, so a knob
+  nobody thought to enumerate still separates two runs.
 - A wait expiring is the wrapper's own deadline, never the gated job's outcome.
   On expiry the wrapper reads the job's own record, so a job that finished is
   reported by its actual result and 124 is reserved for one still genuinely
