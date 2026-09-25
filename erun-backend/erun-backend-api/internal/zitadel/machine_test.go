@@ -97,6 +97,7 @@ func (f *fakeZitadel) routes() []fakeRoute {
 		{postSuffixed("/apps/api"), f.createAPIApp},
 		{getContaining("/apps/"), f.getApp},
 		{putSuffixed("/api_config"), f.updateAPIConfig},
+		{deleteContaining("/apps/"), f.deleteApp},
 	}
 }
 
@@ -112,6 +113,12 @@ func postSuffixed(suffix string) func(*http.Request) bool {
 
 func putSuffixed(suffix string) func(*http.Request) bool {
 	return func(r *http.Request) bool { return r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, suffix) }
+}
+
+func deleteContaining(substring string) func(*http.Request) bool {
+	return func(r *http.Request) bool {
+		return r.Method == http.MethodDelete && strings.Contains(r.URL.Path, substring)
+	}
 }
 
 func getContaining(substring string) func(*http.Request) bool {
@@ -203,6 +210,27 @@ func (f *fakeZitadel) updateAPIConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNotFound)
+}
+
+func (f *fakeZitadel) deleteApp(w http.ResponseWriter, r *http.Request) {
+	projectID := projectIDFromPath(r.URL.Path)
+	appID := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+	for key, app := range f.apps {
+		if strings.HasPrefix(key, projectID+"\x00") && app.id == appID {
+			delete(f.apps, key)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNotFound)
+}
+
+// holdsApp reports whether an application of this name is still in the
+// project — the credential half of what a revocation has to leave behind.
+func (f *fakeZitadel) holdsApp(projectID string, name string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.apps[projectID+"\x00"+name]
+	return ok
 }
 
 func writeFakeJSON(w http.ResponseWriter, body any) {
@@ -348,5 +376,76 @@ func TestEnsureMachineIdentityRefusesAnEmptyLoginName(t *testing.T) {
 	}
 	if calls := fake.recorded(); len(calls) != 0 {
 		t.Fatalf("expected no provider calls, got %v", calls)
+	}
+}
+
+// TestDeleteMachineIdentityRemovesTheApplicationsCredential is the whole point
+// of the call: the application is gone, so the client secret it carried can no
+// longer mint a token, and the call reports that it removed one.
+func TestDeleteMachineIdentityRemovesTheApplicationsCredential(t *testing.T) {
+	fake := newFakeZitadel()
+	client, _ := newTestClient(t, fake.handler())
+	ctx := context.Background()
+	if _, err := client.EnsureMachineIdentity(ctx, EnsureMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"}); err != nil {
+		t.Fatalf("EnsureMachineIdentity: %v", err)
+	}
+
+	removed, err := client.DeleteMachineIdentity(ctx, DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"})
+	if err != nil {
+		t.Fatalf("DeleteMachineIdentity: %v", err)
+	}
+	if !removed {
+		t.Fatal("expected the existing identity to be reported as removed")
+	}
+	if fake.holdsApp("project-"+machineIdentityProjectName, "erun-env-0192") {
+		t.Fatal("the application is still in the project, so its client secret can still mint tokens")
+	}
+}
+
+// TestDeleteMachineIdentityIsIdempotent: revocation runs inside a workflow that
+// retries a failed attempt from the top, so a second call must report that
+// there was nothing left rather than erroring on the absence it was asked to
+// produce.
+func TestDeleteMachineIdentityIsIdempotent(t *testing.T) {
+	fake := newFakeZitadel()
+	client, _ := newTestClient(t, fake.handler())
+	ctx := context.Background()
+	if _, err := client.EnsureMachineIdentity(ctx, EnsureMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"}); err != nil {
+		t.Fatalf("EnsureMachineIdentity: %v", err)
+	}
+	if _, err := client.DeleteMachineIdentity(ctx, DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"}); err != nil {
+		t.Fatalf("first DeleteMachineIdentity: %v", err)
+	}
+
+	removed, err := client.DeleteMachineIdentity(ctx, DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"})
+	if err != nil {
+		t.Fatalf("second DeleteMachineIdentity: %v", err)
+	}
+	if removed {
+		t.Fatal("a second revocation reported removing an identity that was already gone")
+	}
+}
+
+// TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor: revocation
+// asks where the machine-identity project is, and the answer "nowhere" must
+// stay that answer. A delete that conjures the container it was trying to empty
+// is worse than one that finds nothing — it leaves the platform with a project
+// that only ever existed because something was revoked.
+func TestDeleteMachineIdentityDoesNotCreateTheProjectItWasLookingFor(t *testing.T) {
+	fake := newFakeZitadel()
+	client, _ := newTestClient(t, fake.handler())
+
+	removed, err := client.DeleteMachineIdentity(context.Background(), DeleteMachineIdentityParams{OrgID: "org-1", LoginName: "erun-env-0192"})
+	if err != nil {
+		t.Fatalf("DeleteMachineIdentity: %v", err)
+	}
+	if removed {
+		t.Fatal("reported removed an identity in a project that does not exist")
+	}
+	if creates := fake.countExact("POST /management/v1/projects"); creates != 0 {
+		t.Fatalf("revocation created %d projects, calls %v", creates, fake.recorded())
+	}
+	if _, ok := fake.projects[machineIdentityProjectName]; ok {
+		t.Fatal("revocation created the machine-identity project")
 	}
 }

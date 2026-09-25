@@ -99,6 +99,14 @@ func (f *fakeE2EMachineIdentityAdmin) EnsureMachineIdentity(_ context.Context, p
 	return identity, nil
 }
 
+func (f *fakeE2EMachineIdentityAdmin) DeleteMachineIdentity(_ context.Context, params zitadel.DeleteMachineIdentityParams) (bool, error) {
+	if _, ok := f.identities[params.LoginName]; !ok {
+		return false, nil
+	}
+	delete(f.identities, params.LoginName)
+	return true, nil
+}
+
 // machineIdentityFixtureE2E wires the real repositories onto a migrated
 // database with the provider stubbed.
 type machineIdentityFixtureE2E struct {
@@ -289,5 +297,84 @@ func TestMachineIdentityProvisioningRestoresARevokedGrant(t *testing.T) {
 	users, externalIDs, grants := fixture.counts(t, username)
 	if users != 1 || externalIDs != 1 || grants != 1 {
 		t.Fatalf("after restoring a revoked grant: users=%d externalIds=%d grants=%d, want 1/1/1", users, externalIDs, grants)
+	}
+}
+
+// TestMachineIdentityRevocationLeavesNothingBehind is the acceptance case for
+// revocation, against a real database: a provisioned identity is removed from
+// both sides at once — the provider application whose client secret mints the
+// tokens, and all three erun rows a token from it would resolve through.
+//
+// Every count is asserted rather than only the user row. Revoking only the
+// provider application leaves a user whose grant still names it; revoking only
+// the user rows leaves a live credential. Either half alone passes a test that
+// checks one number, which is why this checks all four.
+func TestMachineIdentityRevocationLeavesNothingBehind(t *testing.T) {
+	fixture := newMachineIdentityFixtureE2E(t)
+	environment := fixture.seedEnvironment(t, "alpha")
+	fixture.provision(t, environment)
+
+	username := service.MachineIdentityLoginName(environment.EnvironmentID)
+	if users, externalIDs, grants := fixture.counts(t, username); users != 1 || externalIDs != 1 || grants != 1 {
+		t.Fatalf("before revocation: users=%d externalIds=%d grants=%d, want 1/1/1", users, externalIDs, grants)
+	}
+
+	if err := fixture.service.Revoke(fixture.ctx, environment.EnvironmentID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	if len(fixture.admin.identities) != 0 {
+		t.Fatalf("the provider still holds %d identities: the credential can still mint tokens", len(fixture.admin.identities))
+	}
+	users, externalIDs, grants := fixture.counts(t, username)
+	if users != 0 || externalIDs != 0 || grants != 0 {
+		t.Fatalf("after revocation: users=%d externalIds=%d grants=%d, want 0/0/0", users, externalIDs, grants)
+	}
+}
+
+// TestMachineIdentityRevocationIsIdempotentAgainstRealSQL: revocation is
+// re-run from the top whenever an environment delete fails partway, so the
+// second pass has to be the state asked for rather than a conflict — including
+// on the rows the first pass already removed.
+func TestMachineIdentityRevocationIsIdempotentAgainstRealSQL(t *testing.T) {
+	fixture := newMachineIdentityFixtureE2E(t)
+	environment := fixture.seedEnvironment(t, "alpha")
+	fixture.provision(t, environment)
+
+	if err := fixture.service.Revoke(fixture.ctx, environment.EnvironmentID); err != nil {
+		t.Fatalf("first Revoke: %v", err)
+	}
+	if err := fixture.service.Revoke(fixture.ctx, environment.EnvironmentID); err != nil {
+		t.Fatalf("second Revoke: %v", err)
+	}
+
+	username := service.MachineIdentityLoginName(environment.EnvironmentID)
+	if users, externalIDs, grants := fixture.counts(t, username); users != 0 || externalIDs != 0 || grants != 0 {
+		t.Fatalf("after two revocations: users=%d externalIds=%d grants=%d, want 0/0/0", users, externalIDs, grants)
+	}
+}
+
+// TestMachineIdentityRevocationLeavesOtherEnvironmentsAlone: the identity is
+// found by a name derived from one environment's own id, so revoking that
+// environment must not reach the identity beside it. A delete that revoked a
+// sibling's credential would take a live environment's platform calls down
+// with it.
+func TestMachineIdentityRevocationLeavesOtherEnvironmentsAlone(t *testing.T) {
+	fixture := newMachineIdentityFixtureE2E(t)
+	alpha := fixture.seedEnvironment(t, "alpha")
+	beta := fixture.seedEnvironment(t, "beta")
+	fixture.provision(t, alpha)
+	fixture.provision(t, beta)
+
+	if err := fixture.service.Revoke(fixture.ctx, alpha.EnvironmentID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	betaUsername := service.MachineIdentityLoginName(beta.EnvironmentID)
+	if users, externalIDs, grants := fixture.counts(t, betaUsername); users != 1 || externalIDs != 1 || grants != 1 {
+		t.Fatalf("the sibling environment was revoked too: users=%d externalIds=%d grants=%d, want 1/1/1", users, externalIDs, grants)
+	}
+	if len(fixture.admin.identities) != 1 {
+		t.Fatalf("expected exactly the sibling's identity to remain, got %d", len(fixture.admin.identities))
 	}
 }

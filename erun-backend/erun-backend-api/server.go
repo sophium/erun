@@ -345,21 +345,23 @@ func registerDatabaseRoutes(register routes.ProtectedRouteRegistrar, options Han
 	releaseService := service.NewReleaseService(repos.releases)
 	releaseRoutes := routes.RegisterReleaseRoutes(register, repos.releases, releaseService)
 	registerWorkflowRoutes(register, repos, releaseRoutes)
-	registerEnvironmentRoutes(register, options, repos, placementCredentials)
 	registerEventRoutes(register, repos)
 	registerTokenRoutes(register, options, repos, authorizer)
 	registerCredentialRoutes(register, options, txManager, repos, contextCredentials)
 	registerTenantAdminRoutes(register, options, txManager, repos)
 	registerIdentityAdminRoutes(register, options, txManager)
-	registerMachineIdentityRoutes(register, options, txManager, repos)
+	// Built once and shared: the same service provisions an environment's
+	// identity and is the revoker its delete tears down, so that the two halves
+	// of one identity's lifecycle cannot be wired to different collaborators.
+	machineIdentities := newMachineIdentityService(options, txManager, repos)
+	registerMachineIdentityRoutes(register, machineIdentities)
+	registerEnvironmentRoutes(register, options, repos, placementCredentials, machineIdentities)
 	return repos.tenants
 }
 
-// registerMachineIdentityRoutes wires provisioning an environment's own
-// platform identity. It is registered unconditionally: an unconfigured
-// identity provider is answered with an actionable 501 at the route, not by
-// leaving the route absent, so a caller can tell a deployment gap from a typo.
-func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) {
+// newMachineIdentityService wires one environment identity's whole lifecycle:
+// provisioning it, and revoking it when the environment is deleted.
+func newMachineIdentityService(options HandlerOptions, txManager *repository.TxManager, repos databaseRepositories) *service.MachineIdentityService {
 	// The interface check is explicit rather than `options.IdentityAdmin !=
 	// nil` at the call site: a typed nil *zitadel.Client stored in the
 	// interface is not nil, and would reach the service as a configured admin.
@@ -371,13 +373,21 @@ func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, opti
 	// databaseRepositories: that bundle exists so registerDatabaseRoutes does
 	// not repeat one constructor twelve times, and identity administration
 	// already constructs its own alongside this.
-	routes.RegisterMachineIdentityRoutes(register, service.NewMachineIdentityService(
+	return service.NewMachineIdentityService(
 		repos.environments,
 		repository.NewUserRepository(txManager),
 		repository.NewRoleRepository(txManager),
 		repos.tenantIssuers,
 		machineIdentityAdmin,
-	))
+	)
+}
+
+// registerMachineIdentityRoutes wires provisioning an environment's own
+// platform identity. It is registered unconditionally: an unconfigured
+// identity provider is answered with an actionable 501 at the route, not by
+// leaving the route absent, so a caller can tell a deployment gap from a typo.
+func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, identities *service.MachineIdentityService) {
+	routes.RegisterMachineIdentityRoutes(register, identities)
 }
 
 // registerWorkflowRoutes wires the routes describing a change in flight:
@@ -403,10 +413,10 @@ func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos datab
 // registerEnvironmentRoutes wires the environment lifecycle: what a placement
 // is, what it may consume, and the delete state machine that survives a
 // control-plane restart.
-func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, repos databaseRepositories, placementCredentials deployexec.PlacementCredentialResolver) {
-	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials)
+func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options HandlerOptions, repos databaseRepositories, placementCredentials deployexec.PlacementCredentialResolver, identities *service.MachineIdentityService) {
+	deleter := newEnvironmentDeleter(options, repos.environments, repos.usageEvents, placementCredentials, identities)
 	environmentAdmin := service.NewEnvironmentAdminService(repos.environments, repos.auditEvents)
-	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter, environmentAdmin)
+	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials, identities), deleter, environmentAdmin)
 	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
 	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
 	routes.RegisterEnvironmentDefinitionRoutes(register, repos.environmentDefinitions, repos.environments)
@@ -566,21 +576,24 @@ func missingEnvProvisionerConfig(options HandlerOptions, deploy provision.EnvDep
 // in-cluster client and the full deploy placement; nil (a concrete, not yet
 // interface-wrapped nil — callers must check before returning it as an
 // interface) when either is missing.
-func newEnvLifecycleExecutor(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) *provision.EnvLifecycle {
+func newEnvLifecycleExecutor(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) *provision.EnvLifecycle {
 	deploy := options.EnvDeploy
 	if options.KubeClient == nil ||
 		deploy.DeployerServiceAccount == "" || deploy.PlatformNamespace == "" || deploy.Registry == "" {
 		return nil
 	}
-	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options), credentials)
+	return provision.NewEnvLifecycle(deployexec.NewLauncher(options.KubeClient), environments, deploy, usage, newRuntimeImageChecker(options), credentials, identities)
 }
 
 // newEnvironmentLifecycle wires live stop, which needs an in-cluster client
 // and the full deploy placement but no durable workflow. Anything missing
 // leaves it nil, so stop reports the executor as unconfigured rather than
 // acting on partial config.
-func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentLifecycle {
-	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials)
+func newEnvironmentLifecycle(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) routes.EnvironmentLifecycle {
+	// The revoker is threaded through the shared executor rather than left out
+	// here so that stop and delete are built from identical collaborators; only
+	// Delete consults it, since a stopped environment is paused, not gone.
+	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials, identities)
 	if lifecycle == nil {
 		return nil
 	}
@@ -593,11 +606,11 @@ func newEnvironmentLifecycle(options HandlerOptions, environments *repository.En
 // leaving the environment stranded in `deleting`. nil under the same
 // preconditions as newEnvironmentLifecycle, plus a configured DBOSContext —
 // without one there is nowhere durable to run the workflow.
-func newEnvironmentDeleter(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver) routes.EnvironmentDeleter {
+func newEnvironmentDeleter(options HandlerOptions, environments *repository.EnvironmentRepository, usage *repository.UsageEventRepository, credentials deployexec.PlacementCredentialResolver, identities provision.MachineIdentityRevoker) routes.EnvironmentDeleter {
 	if options.DBOSContext == nil {
 		return nil
 	}
-	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials)
+	lifecycle := newEnvLifecycleExecutor(options, environments, usage, credentials, identities)
 	if lifecycle == nil {
 		return nil
 	}

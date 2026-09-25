@@ -110,16 +110,12 @@ type zitadelProject struct {
 }
 
 func (c *Client) ensureMachineIdentityProject(ctx context.Context, orgID string) (string, error) {
-	var search struct {
-		Result []zitadelProject `json:"result"`
-	}
-	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/projects/_search", map[string]any{}, &search); err != nil {
+	projectID, err := c.findMachineIdentityProjectID(ctx, orgID)
+	if err != nil {
 		return "", err
 	}
-	for _, project := range search.Result {
-		if project.Name == machineIdentityProjectName {
-			return project.ID, nil
-		}
+	if projectID != "" {
+		return projectID, nil
 	}
 	var created struct {
 		ID string `json:"id"`
@@ -133,6 +129,26 @@ func (c *Client) ensureMachineIdentityProject(ctx context.Context, orgID string)
 		return "", fmt.Errorf("zitadel created project %q but returned no id", machineIdentityProjectName)
 	}
 	return created.ID, nil
+}
+
+// findMachineIdentityProjectID is the read-only half of
+// ensureMachineIdentityProject: it answers where the machine-identity project
+// is, without creating one. Revocation needs that distinction — provisioning
+// asking "where is the project" wants one to exist, while revoking asking the
+// same question must not conjure the very thing it was trying to find.
+func (c *Client) findMachineIdentityProjectID(ctx context.Context, orgID string) (string, error) {
+	var search struct {
+		Result []zitadelProject `json:"result"`
+	}
+	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/projects/_search", map[string]any{}, &search); err != nil {
+		return "", err
+	}
+	for _, project := range search.Result {
+		if project.Name == machineIdentityProjectName {
+			return project.ID, nil
+		}
+	}
+	return "", nil
 }
 
 func (c *Client) findMachineIdentityAppID(ctx context.Context, orgID string, projectID string, loginName string) (string, error) {
@@ -225,4 +241,51 @@ func (c *Client) convergeMachineIdentityApp(ctx context.Context, orgID string, p
 		return MachineIdentity{}, fmt.Errorf("zitadel application %s reports no client credentials", appID)
 	}
 	return MachineIdentity{ClientID: config.ClientID, ClientSecret: config.ClientSecret}, nil
+}
+
+// DeleteMachineIdentityParams is revocation's input for one environment's
+// identity, and mirrors EnsureMachineIdentityParams: the same derived login
+// name that provisioned the application is what finds it again.
+type DeleteMachineIdentityParams struct {
+	// OrgID is the organization the identity belongs to. Empty acts in the
+	// credential's own organization, the same convention the rest of this
+	// client follows.
+	OrgID string
+	// LoginName is the identity's name inside the project, exactly as passed
+	// to EnsureMachineIdentity.
+	LoginName string
+}
+
+// DeleteMachineIdentity removes the machine identity named by
+// params.LoginName, reporting whether there was one to remove.
+//
+// Find-first, like everything else in this file, and for the same reason:
+// "this identity does not exist" is the state revocation asks for, not a
+// failure. An identity that was already revoked by an earlier attempt, never
+// provisioned at all, or removed by hand is answered (false, nil) rather than
+// as an error — which is what makes revocation safe to re-run, and it has to
+// be, because it runs inside the environment-delete workflow where an attempt
+// that fails partway is retried from the top.
+//
+// The project is searched for, never created: a delete that conjures the thing
+// it was trying to find is worse than one that finds nothing.
+func (c *Client) DeleteMachineIdentity(ctx context.Context, params DeleteMachineIdentityParams) (bool, error) {
+	loginName := strings.TrimSpace(params.LoginName)
+	if loginName == "" {
+		// Nothing derived no identity, so there is nothing to look for.
+		return false, nil
+	}
+	projectID, err := c.findMachineIdentityProjectID(ctx, params.OrgID)
+	if err != nil || projectID == "" {
+		return false, err
+	}
+	appID, err := c.findMachineIdentityAppID(ctx, params.OrgID, projectID, loginName)
+	if err != nil || appID == "" {
+		return false, err
+	}
+	path := fmt.Sprintf("/management/v1/projects/%s/apps/%s", url.PathEscape(projectID), url.PathEscape(appID))
+	if err := c.callInOrg(ctx, params.OrgID, http.MethodDelete, path, nil, nil); err != nil {
+		return false, err
+	}
+	return true, nil
 }
