@@ -188,27 +188,19 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(secretsDir, cloudSecretStoreDirName))}
 
 	t.Run("nil store", func(t *testing.T) {
-		if _, _, ok, _ := resolveHostPlatformAlias(nil, deps, ""); ok {
-			t.Fatal("a nil config store must resolve to nothing")
-		}
+		assertNoAliasToGive(t, nil, deps, "a nil config store")
 	})
 
 	t.Run("no configured alias", func(t *testing.T) {
-		if _, _, ok, _ := resolveHostPlatformAlias(staticCloudStore{}, deps, ""); ok {
-			t.Fatal("a host with no erun alias must resolve to nothing")
-		}
+		assertNoAliasToGive(t, staticCloudStore{}, deps, "a host with no erun alias")
 	})
 
 	t.Run("alias with no stored session", func(t *testing.T) {
-		if _, _, ok, _ := resolveHostPlatformAlias(signedInHostStore(), deps, ""); ok {
-			t.Fatal("an alias whose token was never stored must resolve to nothing")
-		}
+		assertNoAliasToGive(t, signedInHostStore(), deps, "an alias whose token was never stored")
 	})
 
 	t.Run("nil secret store", func(t *testing.T) {
-		if _, _, ok, _ := resolveHostPlatformAlias(signedInHostStore(), CloudDependencies{}, ""); ok {
-			t.Fatal("a host with no readable secret store must resolve to nothing")
-		}
+		assertNoAliasToGive(t, signedInHostStore(), CloudDependencies{}, "a host with no readable secret store")
 	})
 
 	t.Run("signed in", func(t *testing.T) {
@@ -230,6 +222,23 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 			t.Fatalf("got token %q, want the stored refresh token", token)
 		}
 	})
+}
+
+// assertNoAliasToGive asserts a resolve that declined for a reason no operator
+// can act on: nothing to hand the environment, and nothing to tell them either.
+// Every caller of resolveHostPlatformAlias treats that as a no-op, and the
+// ambiguity is the only unnamed decline that is not one -- so a decline that
+// quietly acquired a reason here is how the silence those callers rely on would
+// turn into a line a routine deploy carries.
+func assertNoAliasToGive(t *testing.T, store CloudReadStore, deps CloudDependencies, what string) {
+	t.Helper()
+	_, _, ok, cause := resolveHostPlatformAlias(store, deps, "")
+	if ok {
+		t.Fatalf("%s must resolve to nothing", what)
+	}
+	if cause != nil {
+		t.Fatalf("%s is a host with nothing to give, not a reason to report: %v", what, cause)
+	}
 }
 
 // TestResolveHostPlatformAliasIgnoresNonERunProviders proves the resolver is
@@ -255,6 +264,30 @@ func TestProvisionPlatformAliasSecretNoSignedInHostAlias(t *testing.T) {
 	}
 	if name != "" {
 		t.Fatalf("got %q, want empty when the host has no signed-in alias to give", name)
+	}
+}
+
+// TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing is the init
+// half of the same decline. A host with two aliases has nothing to hand the
+// environment, which is no reason to fail init -- but it is a reason to say
+// which of the two silences it is: the line a host with no alias at all gets
+// names a cause that is not this one, and init is where the operator is
+// watching.
+func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testing.T) {
+	store := ambiguousHostStore(t)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+
+	var log bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	name, err := provisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", DefaultCloudDependencies())
+	if err != nil {
+		t.Fatalf("an ambiguous host is a decline for init, not a failure: %v", err)
+	}
+	if name != "" {
+		t.Fatalf("an ambiguous host has no alias to give, got %q", name)
+	}
+	if trace := log.String(); !strings.Contains(trace, "multiple erun platform cloud provider aliases are configured") {
+		t.Fatalf("the ambiguity must be reported rather than read as an absent alias, got:\n%s", trace)
 	}
 }
 
@@ -560,8 +593,10 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 // TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral pins the selection
 // itself, away from the deploy path. With two erun aliases configured an
 // explicit name decides which one is resolved; with none the host still
-// declines as a no-op, which is the behaviour every caller had before the
-// selection existed and the one a flag must not quietly replace.
+// declines rather than guessing, which is the behaviour every caller had before
+// the selection existed and the one a flag must not quietly replace. The
+// decline comes back as the ambiguity rather than as nothing, because it is the
+// one decline the operator named nothing for that they can still lift.
 func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 	store := ambiguousHostStore(t)
 	deps := DefaultCloudDependencies()
@@ -581,8 +616,40 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 		t.Fatalf("got token %q, want the named alias's stored refresh token", token)
 	}
 
-	if _, _, ok, err := resolveHostPlatformAlias(store, deps, ""); ok || err != nil {
-		t.Fatalf("an ambiguous host naming no alias must still decline as a no-op, got ok=%v err=%v", ok, err)
+	_, _, ok, cause := resolveHostPlatformAlias(store, deps, "")
+	if ok {
+		t.Fatal("an ambiguous host must not pick one of its aliases without a selection")
+	}
+	if !isPlatformAliasAmbiguity(cause) {
+		t.Fatalf("an ambiguous host must report the ambiguity rather than decline as an absence, got %v", cause)
+	}
+}
+
+// TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause pins the one distinction
+// the retrofit's decline turns on: several erun aliases with none selected,
+// versus no erun alias at all. The resolver has always reported both as the
+// same silence, and only the first is the operator's to lift, so they have to
+// be tellable apart without matching on wording -- which each transport spells
+// its own way, naming its own selection.
+func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
+	several := staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
+		testPlatformAliasProvider(), secondPlatformAliasProvider(),
+	}}}
+
+	_, err := ResolveERunPlatformAlias(several, "")
+	if err == nil {
+		t.Fatal("several configured aliases with none selected must not resolve")
+	}
+	if !isPlatformAliasAmbiguity(err) {
+		t.Fatalf("several configured aliases must report the ambiguity, got: %v", err)
+	}
+
+	_, err = ResolveERunPlatformAlias(staticCloudStore{}, "")
+	if err == nil {
+		t.Fatal("a host with no erun alias must not resolve")
+	}
+	if isPlatformAliasAmbiguity(err) {
+		t.Fatalf("an absent alias must not be reported as the ambiguity, got: %v", err)
 	}
 }
 
@@ -693,15 +760,21 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	}
 }
 
-// TestReconcilePlatformAliasSecretStillDeclinesAnAmbiguousHostWithoutTheFlag is
-// the other half of the opt-in: a deploy that names no alias is byte-for-byte
-// the deploy every host ran before it. An ambiguous host has no answer the
+// TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag is the
+// reproduction of the reported failure. An ambiguous host has no answer the
 // retrofit could pick without guessing whose identity an environment acts as,
-// so it must still decline silently -- no Secret applied, no name threaded,
-// nothing added to a trace every runtime deploy carries. Both sessions here are
-// signed in, so ambiguity is the only reason to decline; had the selection
-// leaked into the default path, this is where it would show.
-func TestReconcilePlatformAliasSecretStillDeclinesAnAmbiguousHostWithoutTheFlag(t *testing.T) {
+// so declining is right -- but it declined as the same silence a host with
+// nothing to give gets, and that is the host this retrofit exists for. Every
+// deploy from it provisioned nothing, recorded nothing, and left nothing in the
+// trace, so the only symptom was a refusal inside the pod naming a cause that
+// was not this one. The decline still provisions nothing and threads nothing;
+// it must also say what happened and name the flag that lifts it.
+//
+// Both sessions here are signed in, so ambiguity is the only reason to decline;
+// had the selection leaked into the default path, this is where it would show,
+// and the recorded environment is asserted because a decline is not a licence
+// to write one.
+func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
@@ -717,13 +790,20 @@ func TestReconcilePlatformAliasSecretStillDeclinesAnAmbiguousHostWithoutTheFlag(
 	var log bytes.Buffer
 	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("a decline the operator never named is not a failed deploy: %v", err)
 	}
 	if deployInput.PlatformAliasSecretName != "" {
 		t.Fatalf("an ambiguous host must still decline when no alias is named, got %q", deployInput.PlatformAliasSecretName)
 	}
-	if got := log.String(); strings.TrimSpace(got) != "" {
-		t.Fatalf("a declined retrofit must add nothing to the trace, got:\n%s", got)
+	trace := log.String()
+	for _, want := range []string{
+		"multiple erun platform cloud provider aliases are configured",
+		"--erun-alias",
+		"no alias was provisioned for this environment",
+	} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("the declined retrofit must say %q, got:\n%s", want, trace)
+		}
 	}
 	recorded, _, err := LoadEnvConfig("team", "dev")
 	if err != nil {
@@ -731,6 +811,47 @@ func TestReconcilePlatformAliasSecretStillDeclinesAnAmbiguousHostWithoutTheFlag(
 	}
 	if recorded.PlatformAliasSecretName != "" {
 		t.Fatalf("got %q, want the environment left unrecorded", recorded.PlatformAliasSecretName)
+	}
+}
+
+// TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguousHost
+// keeps the ambiguity out of the one path that must stay silent whatever the
+// host looks like. The identity a recorded Secret carries is the operator's,
+// and an environment that already names one is never re-provisioned -- a
+// decision this deploy does not revisit, so it owes the trace nothing, and the
+// line the ambiguity earns on an unprovisioned environment would here be a
+// report of a decision that was not made on this host's behalf at all.
+func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguousHost(t *testing.T) {
+	ambiguousHostStore(t)
+	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	deployInput := HelmDeploySpec{
+		Tenant:                  "team",
+		Environment:             "dev",
+		ReleaseName:             RuntimeReleaseName("team"),
+		Namespace:               "team-dev",
+		PlatformAliasSecretName: "team-devops-platform-alias",
+	}
+	var log bytes.Buffer
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := "team-devops-platform-alias"; deployInput.PlatformAliasSecretName != want {
+		t.Fatalf("an already-provisioned environment's alias was changed: got %q, want %q", deployInput.PlatformAliasSecretName, want)
+	}
+	if got := log.String(); strings.TrimSpace(got) != "" {
+		t.Fatalf("a recorded environment owes the trace nothing, got:\n%s", got)
+	}
+	recorded, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load env config: %v", err)
+	}
+	if want := "team-devops-platform-alias"; recorded.PlatformAliasSecretName != want {
+		t.Fatalf("the recorded alias changed: got %q, want %q", recorded.PlatformAliasSecretName, want)
 	}
 }
 

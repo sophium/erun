@@ -477,18 +477,45 @@ func TestJobs(t *testing.T) {
 		golden.Equal(t, "jobs/finish_requires_a_job_id", normalize.Apply(result.Combined))
 	})
 
-	// RUNNING is only ever the status a claim assigns; accepting it on a
-	// finish would read as "reopen this job", which the platform refuses.
-	t.Run("finish_refuses_to_reopen_a_job", func(t *testing.T) {
+	// RUNNING on a finish is no longer refused locally. It means exactly one
+	// thing -- the PLANNED job this names has begun -- and which moves are
+	// legal from a job's current status is the platform's to decide: it
+	// accepts RUNNING for a plan, treats it as a no-op on a running job, and
+	// refuses it on a finished one. Restating that as a local guess about a
+	// status this layer cannot read is what would drift.
+	t.Run("finish_passes_running_to_the_platform", func(t *testing.T) {
 		setup := env.New(t)
 		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
 		result := erun.Run(t, []string{
 			"jobs", "finish", "job_01HQ", "--status", "RUNNING",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
-			t.Fatalf("exit 0 for --status RUNNING, want a non-zero exit:\n%s", result.Combined)
+			t.Fatalf("exit 0 with no signed-in platform, want a non-zero exit:\n%s", result.Combined)
 		}
-		golden.Equal(t, "jobs/finish_refuses_to_reopen_a_job", normalize.Apply(result.Combined))
+		golden.Equal(t, "jobs/finish_passes_running_to_the_platform", normalize.Apply(result.Combined))
+	})
+
+	// PLANNED is the rung the whole pipeline view is built on: work recorded
+	// against its issue before any code exists. The trace has to carry the
+	// status it is recording, or a plan silently becomes a claim that
+	// something is already running.
+	t.Run("start_planned_dry_run_names_the_status", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		result := erun.Run(t, []string{
+			"jobs", "start",
+			"--type", "triage",
+			"--status", "planned",
+			"--issue", "sophium/erun#1",
+			"--scope", "sophium/erun#1",
+			"--summary", "planning the jobs status ladder",
+			"--actor", "erun/ideas",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "jobs/start_planned_dry_run_names_the_status", normalize.Apply(result.Combined))
 	})
 
 	t.Run("finish_unknown_status_is_refused_as_a_bad_argument", func(t *testing.T) {

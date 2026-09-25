@@ -237,6 +237,15 @@ var Routes = map[string]Roles{
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
 	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
 
+	// environment_definitions.go — uploading the portable subset of an
+	// environment's own settings, and reading it back, is the same class as
+	// the ai-sessions self-report above: operating an environment that already
+	// exists. It creates nothing and deletes nothing — the environment row is
+	// registered (or adopted) through POST /v1/environments, which stays
+	// tenant administration.
+	"PUT /v1/environments/{environment_id}/definition": TenantUserClass,
+	"GET /v1/environments/{environment_id}/definition": TenantUserClass,
+
 	// jobs.go — recording and updating what this caller is working on is the
 	// same class as reporting a build result: an actor's own account of its
 	// work, not administration of the tenant. Reading the queue back is the
@@ -246,6 +255,12 @@ var Routes = map[string]Roles{
 	"GET /v1/jobs/{job_id}":                      TenantUserClass,
 	"PATCH /v1/jobs/{job_id}":                    TenantUserClass,
 	"GET /v1/environments/{environment_id}/jobs": TenantUserClass,
+
+	// pipeline.go — reading the pipeline is reading the tenant's own jobs and
+	// reviews together, one read of what the two routes above and the review
+	// listings already expose separately. It grants reach over no data
+	// TenantUser cannot already read, and it writes nothing at all.
+	"GET /v1/pipeline": TenantUserClass,
 
 	// contexts.go — reading registered contexts is TenantUser; registering a
 	// new one is tenant administration (explicitly named in the issue this

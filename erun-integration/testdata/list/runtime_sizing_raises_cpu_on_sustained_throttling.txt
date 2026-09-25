@@ -38,6 +38,7 @@ Tenants:
           sizing: memory lower to 1536Mi from 8192Mi (peak 1024Mi of 8192Mi (12%), no oom kills, keeping 1.5x headroom, low confidence); cpu raise to 3 from 2 (12.00% of scheduling periods throttled (12000 of 100000), high confidence)
           sizing-evidence: 31h12m observed, 240 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none

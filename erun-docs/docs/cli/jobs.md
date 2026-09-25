@@ -25,7 +25,9 @@ Every subcommand accepts `--erun-alias` (defaults to the sole configured erun-ty
 
 Lists jobs, the live queue first, narrowed by any combination of `--status`, `--environment-id`, `--issue`, `--scope`, and `--actor`. Each entry names what is being done, by whom, and how long it has been going.
 
-A `RUNNING` job is work in flight. `ABANDONED` means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. An empty queue is `[]`, never `null`.
+A `RUNNING` job is work in flight, and so is `PLANNED` — work recorded before it starts. `ABANDONED` means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. An empty queue is `[]`, never `null`.
+
+`PLANNED` is never swept to `ABANDONED`, and that exemption is the point of the status: the sweep exists to clear a `RUNNING` job whose actor went quiet, and a parked plan has no actor yet to go quiet. Backlog work stays in the backlog until someone picks it up or supersedes it.
 
 ### `jobs show` {#jobs-show}
 
@@ -33,7 +35,9 @@ Shows one job in full by JOB_ID, including the scope it claims and the in-pod jo
 
 ### `jobs start` {#jobs-start}
 
-Records that this actor is starting a piece of work: `--type`, `--summary`, and `--actor` are required; `--actor-kind`, `--environment`, `--issue`, `--scope`, and `--local-job-id` are optional.
+Records that this actor is starting a piece of work: `--type`, `--summary`, and `--actor` are required; `--actor-kind`, `--environment`, `--issue`, `--scope`, `--status`, and `--local-job-id` are optional.
+
+`--status PLANNED` records work that has not started — a `triage`/`plan` item parked against its issue, visible in the pipeline view before any code exists. It is a claim on `--scope` exactly as a running job is, so two actors cannot both plan the same work.
 
 With `--scope` set this is a **claim**. If an open job already holds that scope, the command fails with `409` naming the holder — its actor, its prose summary, and when it started — so you can pick up something else instead of duplicating the work.
 
@@ -41,15 +45,19 @@ With `--scope` set this is a **claim**. If an open job already holds that scope,
 
 ### `jobs finish` {#jobs-finish}
 
-Reports how a job ended (`--status SUCCEEDED|FAILED|ABANDONED|SUPERSEDED`), refreshes what it is doing (`--summary`), or records the in-pod job id it mirrors (`--local-job-id`). A job that has already finished cannot be updated: its outcome is the record that coordination and reporting both read.
+Reports how a job ended (`--status SUCCEEDED|FAILED|ABANDONED|SUPERSEDED`), opens a planned one (`--status RUNNING`), refreshes what it is doing (`--summary`), or records the in-pod job id it mirrors (`--local-job-id`). A job that has already finished cannot be updated: its outcome is the record that coordination and reporting both read, and no status reopens it.
 
 ## Examples
 
 ```bash
+erun jobs list --status PLANNED
 erun jobs list --status RUNNING
 erun jobs list --issue sophium/erun#2109
 erun jobs start --type fix --issue sophium/erun#2109 --scope sophium/erun#2109 \
   --summary "fixing the jobs claim race" --actor erun/code4
+erun jobs start --type triage --status PLANNED --issue sophium/erun#2109 \
+  --scope sophium/erun#2109 --summary "planning the jobs claim fix" --actor erun/ideas
+erun jobs finish job_01H... --status RUNNING      # the planned work has begun
 erun jobs finish job_01H... --status SUCCEEDED
 ```
 

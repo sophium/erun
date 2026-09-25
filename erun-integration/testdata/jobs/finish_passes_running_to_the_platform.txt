@@ -1,0 +1,3 @@
+audit: erun jobs finish --status RUNNING job_01HQ
+platform: PATCH https://api.example.test/v1/jobs/job_01HQ (status=RUNNING)
+mint platform api bearer token: not signed in; run `erun cloud login erun+test@erun`

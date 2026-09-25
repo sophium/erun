@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
+	"github.com/sophium/erun/erun-integration/internal/fixture"
 	"github.com/sophium/erun/erun-integration/internal/golden"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
@@ -223,6 +224,54 @@ func platformAPIStubServer(t testing.TB) *httptest.Server {
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1", "name": "prod", "type": "runtime", "status": "deleting", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	// The definition store. Both handlers authenticate, so a scenario
+	// proves the CLI actually attached the bearer it minted. The stored payload
+	// is passed through verbatim and the revision advances on every upload,
+	// exactly as environment_definitions' upsert does.
+	var definitionMu sync.Mutex
+	type storedDefinition struct {
+		revision   int
+		definition map[string]any
+	}
+	definitions := map[string]storedDefinition{}
+	mux.HandleFunc("PUT /v1/environments/{environment_id}/definition", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		var body struct {
+			Definition map[string]any `json:"definition"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad body", http.StatusBadRequest)
+			return
+		}
+		definitionMu.Lock()
+		revision := definitions[r.PathValue("environment_id")].revision + 1
+		definitions[r.PathValue("environment_id")] = storedDefinition{revision: revision, definition: body.Definition}
+		definitionMu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1",
+			"revision": revision, "definition": body.Definition, "writtenByUserId": "user-1",
+			"createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
+		})
+	})
+	mux.HandleFunc("GET /v1/environments/{environment_id}/definition", func(w http.ResponseWriter, r *http.Request) {
+		if !requireBearer(w, r) {
+			return
+		}
+		definitionMu.Lock()
+		stored, ok := definitions[r.PathValue("environment_id")]
+		definitionMu.Unlock()
+		if !ok {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"environmentId": r.PathValue("environment_id"), "tenantId": "tenant-1",
+			"revision": stored.revision, "definition": stored.definition, "writtenByUserId": "user-1",
+			"createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
 		})
 	})
 	mux.HandleFunc("GET /v1/contexts", func(w http.ResponseWriter, r *http.Request) {
@@ -642,6 +691,129 @@ func TestPlatform(t *testing.T) {
 		}
 	})
 
+	t.Run("env_push_dry_run", func(t *testing.T) {
+		// The dry run resolves the local marker and traces which row it names
+		// and which portable fields would travel, without reaching the network
+		// or writing anything. The fields list is the allowlist itself, so a
+		// host-owned value appearing here would be the leak this plan forbids.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", "https://api.example.test", "tenant-1", "env-1", 1)
+		result := erun.Run(t, []string{"platform", "env", "push", "acme", "prod", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/env_push_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("env_pull_dry_run", func(t *testing.T) {
+		// The pull's dry run traces the two reads it would make and states the
+		// boundary it will hold: only portable fields are written.
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", "https://api.example.test", "tenant-1", "env-1", 1)
+		result := erun.Run(t, []string{"platform", "env", "pull", "acme", "prod", "--dry-run"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "platform/env_pull_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("env_definition_round_trip_real_run", func(t *testing.T) {
+		// The round trip the issue names, driven through the compiled binary
+		// against the API double: an upload, then a pull, showing the portable
+		// fields arrive while every host-owned value stays exactly as this
+		// machine had it.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", server.URL, "tenant-1", "env-1", 1)
+		configPath := filepath.Join(setup.ConfigHome, "erun", "acme", "prod", "config.yaml")
+
+		push := erun.Run(t, []string{"platform", "env", "push", "acme", "prod"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if push.ExitCode != 0 {
+			t.Fatalf("push exit %d: %s", push.ExitCode, push.Combined)
+		}
+		if !strings.Contains(push.Combined, "revision 1") {
+			t.Fatalf("push did not report the revision it wrote:\n%s", push.Combined)
+		}
+
+		// Edit the portable value locally, then pull the platform's copy back.
+		rewriteEnvConfigLine(t, configPath, "runtimeversion: 1.0.0", "runtimeversion: 9.9.9")
+		pull := erun.Run(t, []string{"platform", "env", "pull", "acme", "prod"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if pull.ExitCode != 0 {
+			t.Fatalf("pull exit %d: %s", pull.ExitCode, pull.Combined)
+		}
+
+		restored := mustReadFile(t, configPath)
+		if !strings.Contains(restored, "runtimeversion: 1.0.0") {
+			t.Errorf("pull did not restore the portable runtime version:\n%s", restored)
+		}
+		if !strings.Contains(restored, "definitionrevision: 1") {
+			t.Errorf("pull did not stamp the revision it synced from:\n%s", restored)
+		}
+		for _, hostOwned := range []string{
+			"host-owned-pull-secret",
+			"host-owned-component",
+			"localportrangestart: 17100",
+			"localrepopath:",
+			// A key this binary cannot model at all: a pull preserves it
+			// because the writer only ever touches keys EnvConfig declares.
+			"futureunmodelledkey: keep-me",
+		} {
+			if !strings.Contains(restored, hostOwned) {
+				t.Errorf("pull dropped the host-owned value %q:\n%s", hostOwned, restored)
+			}
+		}
+	})
+
+	t.Run("env_pull_refuses_a_platform_name_mismatch", func(t *testing.T) {
+		// A platform row whose name is not the local directory being pulled
+		// into. The stub's row is named "prod"; this environment is "dev".
+		// Writing it would create a second environment rather than update this
+		// one, so the pull must refuse rather than rename.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "dev", server.URL, "tenant-1", "env-1", 1)
+
+		result := erun.Run(t, []string{"platform", "env", "pull", "acme", "dev"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("a platform-name mismatch was accepted:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "Name is platform-owned") {
+			t.Fatalf("refusal did not name the platform-owned field:\n%s", result.Combined)
+		}
+		configPath := filepath.Join(setup.ConfigHome, "erun", "acme", "dev", "config.yaml")
+		if config := mustReadFile(t, configPath); strings.Contains(config, "runtimeversion: 1.2.3") {
+			t.Fatalf("a refused pull still wrote the platform's definition:\n%s", config)
+		}
+	})
+
+	t.Run("env_pull_refuses_a_marker_pointing_at_another_tenant", func(t *testing.T) {
+		// The marker names tenant-other; the platform resolves tenant-1.
+		// Adopting the resolved identity instead of refusing would write the
+		// definition to a row this machine does not think it is following.
+		setup := env.New(t)
+		server := platformAPIStubServer(t)
+		platformAlias(t, setup, server)
+		fixture.SeedHostedRuntimeTenantEnv(t, setup, "acme", "prod", server.URL, "tenant-other", "env-1", 1)
+
+		result := erun.Run(t, []string{"platform", "env", "pull", "acme", "prod"},
+			erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("a tenant mismatch was adopted rather than refused:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "refusing to transfer the definition") {
+			t.Fatalf("refusal did not say it refused the transfer:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("env_get_not_found", func(t *testing.T) {
 		setup := env.New(t)
 		server := platformAPIStubServer(t)
@@ -735,4 +907,19 @@ func TestPlatform(t *testing.T) {
 			t.Fatalf("expected structured JSON result on stdout, got:\n%s", result.Combined)
 		}
 	})
+}
+
+// rewriteEnvConfigLine replaces one line of a seeded env config in place, so a
+// scenario can move a portable value locally and prove the next pull brings the
+// platform's copy back without touching anything else in the file.
+func rewriteEnvConfigLine(t testing.TB, path, from, to string) {
+	t.Helper()
+	content := mustReadFile(t, path)
+	updated := strings.Replace(content, from, to, 1)
+	if updated == content {
+		t.Fatalf("env config %s has no line %q to rewrite:\n%s", path, from, content)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("rewrite %s: %v", path, err)
+	}
 }

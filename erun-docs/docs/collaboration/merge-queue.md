@@ -12,11 +12,17 @@ For the standing builder/reviewer roles that drive a review through this queue, 
 
 Two reviews can each be green on their own and still break the target branch when both land — the second one was only ever tested against a target branch snapshot that the first hadn't touched yet. The merge queue closes that gap by serialising `READY` reviews per target branch: the second review promoted onto a branch is always gated against whatever the first one just landed, never against a stale snapshot.
 
+## Where planned work appears
+
+Not here. The merge queue answers "what is eligible to land next on this target branch", and only a review that has passed its build can. Planned work — a job recorded before any code exists — is shown by the **pipeline view** (`GET /v1/pipeline`, the console's Pipeline section), which unions the tenant's jobs and reviews on the canonical `owner/repo#number` issue key and labels each with the rung it stands on: `PLANNED → IN_PROGRESS → REVIEW_OPEN → READY → MERGING → MERGED`. Read it for the whole picture; read this page for the mechanics of the one rung that has a queue behind it.
+
 ## Shape of the queue
 
 The queue is **shared per repository and target branch**, not global — and not per target branch alone. A tenant may serve more than one repository, and two of them both have a `main`: keyed on the branch alone, one repository's queued work would show up as another's and a promotion would gate a branch that need not exist in the checkout driving it. `GET /v1/reviews/merge-queue?repository=<remote>&targetBranch=main` lists one repository's queue in order; `erun review queue list` derives `--repository` from the checkout it runs in.
 
 Every `READY` review for that pair waits in a single FIFO. A review that has been promoted (status `MERGE`) has already left that waiting line; only one review per repository and target branch may be `MERGE` at a time, so the review currently being gated and the reviews still waiting are always disjoint sets.
+
+**The queue is `READY` reviews only, and it stays that way.** It is an eligibility list, not a view: its head query is what a merge driver acts on, so a row placed here that is not eligible to merge would hand that driver a branch that does not exist. Work that has not become a review — planned and in-progress jobs, which carry no branch at all — is never a row here, however it is displayed elsewhere. The [pipeline view](#where-planned-work-appears) shows it beside the queue; the queue itself is unchanged.
 
 A review created before the platform recorded a repository carries none. That is the **absence of an answer, not a second answer**: it is not a repository of its own, so it neither makes a queue ambiguous nor resolves one. One named repository beside any number of such rows is still one repository's queue, and promoting it promotes the row at its head like any other — refusing the whole queue because some of its rows predate repository identity is what once stranded exactly the work a tenant most needed advanced.
 

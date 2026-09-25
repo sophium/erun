@@ -153,6 +153,12 @@ type PlatformCreateReviewParams struct {
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
+	// IssueRef is the issue this work belongs to, recorded on the review:
+	// the canonical owner/repo#number, or the bare number a branch name
+	// carries, which the platform joins to the review's own repository.
+	// Recorded as declared, so it outranks whatever the source branch looks
+	// like. A value that is neither shape is refused rather than stored.
+	IssueRef string `json:"issueRef,omitempty"`
 }
 
 // CreateReview opens a review. name is the eventual squash-merge message and

@@ -291,8 +291,16 @@ func RunReviewCreate(ctx Context, store CloudReadStore, alias string, params Pla
 	if err != nil {
 		return PlatformReview{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/reviews",
-		"repository="+params.Repository, "name="+params.Name, "targetBranch="+params.TargetBranch, "sourceBranch="+params.SourceBranch)
+	details := []string{
+		"repository=" + params.Repository,
+		"name=" + params.Name,
+		"targetBranch=" + params.TargetBranch,
+		"sourceBranch=" + params.SourceBranch,
+	}
+	if strings.TrimSpace(params.IssueRef) != "" {
+		details = append(details, "issueRef="+strings.TrimSpace(params.IssueRef))
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/reviews", details...)
 	if ctx.DryRun {
 		return PlatformReview{}, nil
 	}

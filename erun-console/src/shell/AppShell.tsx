@@ -16,6 +16,7 @@ import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
 import { UsersPanel } from '../identity/UsersPanel';
 import { JobsPanel } from '../jobs/JobsPanel';
 import { MCPAccessPanel } from '../mcp/MCPAccessPanel';
+import { PipelinePanel } from '../pipeline/PipelinePanel';
 import { ProvisionPanel } from '../provision/ProvisionPanel';
 import { QuotaPanel } from '../quota/QuotaPanel';
 import { RequestsPanel } from '../requests/RequestsPanel';
@@ -136,6 +137,8 @@ function SectionContent({
       return <GateRunsPanel token={token} />;
     case 'jobs':
       return <JobsPanel token={token} />;
+    case 'pipeline':
+      return <PipelinePanel token={token} />;
     default:
       return (
         <OperationsSectionContent

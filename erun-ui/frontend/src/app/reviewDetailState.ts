@@ -15,6 +15,7 @@ export type TenantDashboardTab =
   | 'reviews'
   | 'queue'
   | 'gates'
+  | 'pipeline'
   | 'builds'
   | 'audit'
   | 'registration'

@@ -71,6 +71,11 @@ func NewPlatformClient(baseURL string, mint PlatformTokenMinter) *PlatformClient
 	}
 }
 
+// APIHost is the platform base URL this client was built against — the address
+// the hosted marker records, so a later call can tell "the same platform" from
+// "a same-named environment somewhere else".
+func (c *PlatformClient) APIHost() string { return c.baseURL }
+
 // WithUsernameHint returns a copy of c that sends username as the
 // X-ERun-Username hint. erun-backend-api names a user it enrols (or renames)
 // from that header, which is how a caller whose token carries no username
@@ -185,6 +190,47 @@ type PlatformEnvironment struct {
 	DeleteError string    `json:"deleteError,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+// PlatformEnvDefinitionRecord mirrors the environment_definitions row as the
+// API returns it: the stored portable subset, the revision it carries, and who
+// wrote it.
+type PlatformEnvDefinitionRecord struct {
+	EnvironmentID string `json:"environmentId"`
+	TenantID      string `json:"tenantId"`
+	// Revision increases by one on every upload. It is the number a local
+	// marker stamps to record what it last synced from.
+	Revision   int                   `json:"revision"`
+	Definition PlatformEnvDefinition `json:"definition"`
+	// WrittenByUserID is the ERun user whose token performed the upload.
+	WrittenByUserID string    `json:"writtenByUserId,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+// PutEnvironmentDefinition stores definition as the environment's current one,
+// advancing its revision by one — or writing revision 1 for an environment that
+// has none yet. It is what an upload calls.
+func (c *PlatformClient) PutEnvironmentDefinition(ctx context.Context, environmentID string, definition PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
+	body := struct {
+		Definition PlatformEnvDefinition `json:"definition"`
+	}{Definition: definition}
+	var record PlatformEnvDefinitionRecord
+	path := "/v1/environments/" + url.PathEscape(environmentID) + "/definition"
+	err := c.do(ctx, http.MethodPut, path, body, true, &record)
+	return record, err
+}
+
+// GetEnvironmentDefinition reads the environment's stored definition and the
+// revision it carries. A platform that holds none answers ErrPlatformNotFound,
+// which a caller must render as "nothing has been uploaded" rather than as an
+// empty definition: those are different states, and only one is resolved by
+// uploading.
+func (c *PlatformClient) GetEnvironmentDefinition(ctx context.Context, environmentID string) (PlatformEnvDefinitionRecord, error) {
+	var record PlatformEnvDefinitionRecord
+	path := "/v1/environments/" + url.PathEscape(environmentID) + "/definition"
+	err := c.do(ctx, http.MethodGet, path, nil, true, &record)
+	return record, err
 }
 
 // PlatformContext mirrors model.Context's JSON shape.
@@ -540,6 +586,12 @@ type PlatformCreateEnvironmentParams struct {
 	// platform requires KubernetesContext and refuses RuntimeVersion/
 	// ContextID when Adopt is set, and never starts a deploy for it.
 	Adopt bool `json:"adopt,omitempty"`
+	// TenantID places the row in a named tenant instead of the caller's own.
+	// It is honoured only for an operations-tenant caller and refused with 403
+	// for anyone else, so a client cannot use it to write into a tenant that
+	// is not its own. The response's TenantID is the tenant that actually
+	// resolved, which is what the hosted marker records.
+	TenantID string `json:"tenantId,omitempty"`
 }
 
 // CreateEnvironment registers an environment, or — with Adopt set — records

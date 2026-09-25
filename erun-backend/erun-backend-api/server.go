@@ -272,44 +272,46 @@ func newAuthMiddlewareFor(options HandlerOptions, txManager *repository.TxManage
 // so registration reads as what each route needs rather than as 12 repeated
 // repository.NewXRepository(txManager) calls (#1302).
 type databaseRepositories struct {
-	reviews           *repository.ReviewRepository
-	reviewReviewers   *repository.ReviewReviewerRepository
-	builds            *repository.BuildRepository
-	comments          *repository.CommentRepository
-	tenantIssuers     *repository.TenantIssuerRepository
-	tenants           *repository.TenantRepository
-	environments      *repository.EnvironmentRepository
-	aiSessions        *repository.AISessionRepository
-	contexts          *repository.ContextRepository
-	tenantQuotas      *repository.TenantQuotaRepository
-	usageEvents       *repository.UsageEventRepository
-	auditEvents       *repository.AuditEventRepository
-	releases          *repository.ReleaseRepository
-	rateLimits        *repository.PlatformRateLimitRepository
-	gateRuns          *repository.GateRunRepository
-	jobs              *repository.JobRepository
-	environmentEvents *repository.EnvironmentEventRepository
+	reviews                *repository.ReviewRepository
+	reviewReviewers        *repository.ReviewReviewerRepository
+	builds                 *repository.BuildRepository
+	comments               *repository.CommentRepository
+	tenantIssuers          *repository.TenantIssuerRepository
+	tenants                *repository.TenantRepository
+	environments           *repository.EnvironmentRepository
+	aiSessions             *repository.AISessionRepository
+	contexts               *repository.ContextRepository
+	tenantQuotas           *repository.TenantQuotaRepository
+	usageEvents            *repository.UsageEventRepository
+	auditEvents            *repository.AuditEventRepository
+	releases               *repository.ReleaseRepository
+	rateLimits             *repository.PlatformRateLimitRepository
+	gateRuns               *repository.GateRunRepository
+	jobs                   *repository.JobRepository
+	environmentEvents      *repository.EnvironmentEventRepository
+	environmentDefinitions *repository.EnvironmentDefinitionRepository
 }
 
 func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositories {
 	return databaseRepositories{
-		reviews:           repository.NewReviewRepository(txManager),
-		reviewReviewers:   repository.NewReviewReviewerRepository(txManager),
-		builds:            repository.NewBuildRepository(txManager),
-		comments:          repository.NewCommentRepository(txManager),
-		tenantIssuers:     repository.NewTenantIssuerRepository(txManager),
-		tenants:           repository.NewTenantRepository(txManager),
-		environments:      repository.NewEnvironmentRepository(txManager),
-		aiSessions:        repository.NewAISessionRepository(txManager),
-		contexts:          repository.NewContextRepository(txManager),
-		tenantQuotas:      repository.NewTenantQuotaRepository(txManager),
-		usageEvents:       repository.NewUsageEventRepository(txManager),
-		auditEvents:       repository.NewAuditEventRepository(txManager),
-		releases:          repository.NewReleaseRepository(txManager),
-		rateLimits:        repository.NewPlatformRateLimitRepository(txManager),
-		gateRuns:          repository.NewGateRunRepository(txManager),
-		jobs:              repository.NewJobRepository(txManager),
-		environmentEvents: repository.NewEnvironmentEventRepository(txManager),
+		reviews:                repository.NewReviewRepository(txManager),
+		reviewReviewers:        repository.NewReviewReviewerRepository(txManager),
+		builds:                 repository.NewBuildRepository(txManager),
+		comments:               repository.NewCommentRepository(txManager),
+		tenantIssuers:          repository.NewTenantIssuerRepository(txManager),
+		tenants:                repository.NewTenantRepository(txManager),
+		environments:           repository.NewEnvironmentRepository(txManager),
+		aiSessions:             repository.NewAISessionRepository(txManager),
+		contexts:               repository.NewContextRepository(txManager),
+		tenantQuotas:           repository.NewTenantQuotaRepository(txManager),
+		usageEvents:            repository.NewUsageEventRepository(txManager),
+		auditEvents:            repository.NewAuditEventRepository(txManager),
+		releases:               repository.NewReleaseRepository(txManager),
+		rateLimits:             repository.NewPlatformRateLimitRepository(txManager),
+		gateRuns:               repository.NewGateRunRepository(txManager),
+		jobs:                   repository.NewJobRepository(txManager),
+		environmentEvents:      repository.NewEnvironmentEventRepository(txManager),
+		environmentDefinitions: repository.NewEnvironmentDefinitionRepository(txManager),
 	}
 }
 
@@ -391,6 +393,11 @@ func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos datab
 	routes.RegisterBuildRoutes(register, repos.builds, repos.environments, service.NewBuildService(repos.builds, reviewService))
 	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
 	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
+	// The pipeline view spans both halves above -- the jobs recording planned
+	// and in-flight work, and the reviews moving through the queue -- which is
+	// why it is registered here rather than with either of them alone. It
+	// reads both and writes neither.
+	routes.RegisterPipelineRoutes(register, service.NewPipelineService(repos.jobs, repos.reviews))
 }
 
 // registerEnvironmentRoutes wires the environment lifecycle: what a placement
@@ -402,6 +409,7 @@ func registerEnvironmentRoutes(register routes.ProtectedRouteRegistrar, options 
 	routes.RegisterEnvironmentRoutes(register, repos.environments, repos.tenantQuotas, repos.tenants, repos.contexts, newEnvironmentProvisioner(options, repos.environments, repos.usageEvents, placementCredentials), newEnvironmentLifecycle(options, repos.environments, repos.usageEvents, placementCredentials), deleter, environmentAdmin)
 	newEnvironmentDeleteReconciler(options, repos.environments, repos.tenants, repos.contexts, deleter)
 	routes.RegisterAISessionRoutes(register, repos.aiSessions, repos.environments)
+	routes.RegisterEnvironmentDefinitionRoutes(register, repos.environmentDefinitions, repos.environments)
 	jobService := service.NewJobService(repos.jobs)
 	routes.RegisterJobRoutes(register, repos.jobs, repos.environments, jobService)
 	newJobAbandonReconciler(options, jobService)

@@ -44,4 +44,16 @@ var OperatorSettableConfigFields = []OperatorSettableConfigField{
 		Name:  "OrchestratorEnvConfig.Role",
 		Token: "orchestratorenvrole",
 	},
+	{
+		// Written by `erun platform env register --adopt --definition` and by
+		// `erun platform env pull`, and shown as a read-only row in the
+		// desktop's environment General tab (HostedDefinitionSection.tsx,
+		// whose uiHostedEnvironment mirror is what this token matches). It is
+		// registered rather than declared Internal because the operator does
+		// act on it — from the desktop by pulling, from the CLI by
+		// registering — and the surface is where they see which platform row
+		// this environment corresponds to.
+		Name:  "EnvConfig.Hosted",
+		Token: "hostedenvironment",
+	},
 }

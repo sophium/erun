@@ -2027,8 +2027,17 @@ func erunPlatformDashboardFixtures(platformTenantName string) map[string]string 
 		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
 		"/v1/builds":                  `{"builds":[]}`,
 		"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
-		"/v1/audit-events":            `{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`,
-		"/v1/users":                   `[]`,
+		// The pipeline fixture carries both halves of the union in one view:
+		// a planned job with no branch and no review behind it, and a review
+		// whose only issue link was parsed out of its branch name.
+		"/v1/pipeline": `[{"issueKey":"sophium/erun#2683","items":[` +
+			`{"issueKey":"sophium/erun#2683","issueRef":"sophium/erun#2683","issueRefSource":"DECLARED","rung":"PLANNED",` +
+			`"job":{"jobId":"job-1","jobType":"triage","issueRef":"sophium/erun#2683","summary":"plan the pipeline view","status":"PLANNED","actorKind":"orchestrator","actorId":"erun/ideas","startedAt":"2026-01-01T00:00:00Z"}},` +
+			`{"issueKey":"sophium/erun#2683","issueRef":"2683","issueRefSource":"INFERRED","rung":"REVIEW_OPEN",` +
+			`"review":{"reviewId":"review-1","repository":"github.com/sophium/erun","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"OPEN"}}` +
+			`]}]`,
+		"/v1/audit-events": `{"events":[{"auditEventId":"event-1","tenantId":"tenant-1","erunUserId":"user-1","externalUserId":"subject-1","externalIssuerId":"` + testERunIssuer + `","type":"API","apiMethod":"GET","apiPath":"/v1/reviews","createdAt":"2026-01-01T00:00:00Z"}]}`,
+		"/v1/users":        `[]`,
 	}
 }
 
@@ -2066,7 +2075,8 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 		t.Fatalf("expected the resolved platform alias to be reported, got %q", dashboard.PlatformAlias)
 	}
 	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	assertERunPlatformDashboardPipeline(t, dashboard.Pipeline)
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/pipeline,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}
@@ -2084,6 +2094,44 @@ func assertERunPlatformDashboardUser(t *testing.T, dashboard uiTenantDashboard) 
 	}
 	if dashboard.User.TenantName != "frs" {
 		t.Fatalf("expected the dashboard to name the platform tenant, got %q", dashboard.User.TenantName)
+	}
+}
+
+// assertERunPlatformDashboardPipeline pins what the Pipeline tab is for: the
+// planned job and the review arrive in one group keyed on the same issue, the
+// job is a job (a record with no branch) and the review is a review, and the
+// provenance of every link survives the read.
+func assertERunPlatformDashboardPipeline(t *testing.T, issues []uiPipelineIssue) {
+	t.Helper()
+	if len(issues) != 1 || issues[0].IssueKey != "sophium/erun#2683" || len(issues[0].Items) != 2 {
+		t.Fatalf("unexpected pipeline: %+v", issues)
+	}
+	assertERunPlatformDashboardPlannedJob(t, issues[0].Items[0])
+	assertERunPlatformDashboardOpenReview(t, issues[0].Items[1])
+}
+
+func assertERunPlatformDashboardPlannedJob(t *testing.T, planned uiPipelineItem) {
+	t.Helper()
+	if planned.Job == nil || planned.Review != nil {
+		t.Fatalf("expected the planned item to be a job and only a job, got %+v", planned)
+	}
+	if planned.Rung != "PLANNED" || planned.Job.JobType != "triage" || planned.IssueRefSource != "DECLARED" {
+		t.Fatalf("unexpected planned item: %+v", planned)
+	}
+	// A planned job is a backlog entry: it carries no endedAt, and a reader
+	// must not see one invented for it.
+	if planned.Job.EndedAt != "" {
+		t.Fatalf("a planned job must carry no endedAt, got %q", planned.Job.EndedAt)
+	}
+}
+
+func assertERunPlatformDashboardOpenReview(t *testing.T, open uiPipelineItem) {
+	t.Helper()
+	if open.Review == nil || open.Job != nil {
+		t.Fatalf("expected the review item to be a review and only a review, got %+v", open)
+	}
+	if open.IssueRefSource != "INFERRED" {
+		t.Fatalf("expected the branch-derived link to arrive as INFERRED, got %q", open.IssueRefSource)
 	}
 }
 

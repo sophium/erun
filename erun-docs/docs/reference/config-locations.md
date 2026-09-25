@@ -108,6 +108,20 @@ Every environment-scoped command (`open`, `doctor`, `deploy`, a scoped `upgrade`
 
 Unlike the per-user config root above, `~/.erun` is always the home directory and never moves with `XDG_CONFIG_HOME`.
 
+### The hosted marker {#hosted-marker}
+
+An environment that has been registered on a hosted platform carries a `hosted:` block in its own `config.yaml`, under `erun/<tenant>/<environment>/`:
+
+```yaml
+hosted:
+  apihost: api.erunpaas.com
+  tenantid: 018f4b2a-...
+  environmentid: 018f9c31-...
+  definitionrevision: 3
+```
+
+It records which platform row this local environment corresponds to — the API host, the tenant the platform resolved from your token's issuer, the row's environment id, and the definition revision this machine last synced from (absent or `0` means the definition has never been synced). It is a purely local fact; the platform stores no equivalent. Deleting the block by hand is the supported way to say "this environment is no longer hosted", and the next `erun platform env push`/`pull` will then refuse until it is registered again. See [Managing hosted environments · The hosted marker](/collaboration/hosted-environments#the-hosted-marker).
+
 ## Per-project (committed in the repo)
 
 ```

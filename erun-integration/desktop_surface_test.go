@@ -468,6 +468,17 @@ var apiRouteWailsBindings = map[string]string{
 	// both read through) -- the real desktop entry point this route's own
 	// literal path never appears in TypeScript for.
 	"GET /v1/invite-requests/mine": "GetMyTenantInviteRequest",
+	// CheckHostedDefinitionDrift -> hostedDefinitionDriftFor ->
+	// client.GetEnvironmentDefinition -> "GET
+	// /v1/environments/{environment_id}/definition" in
+	// erun-common/platform_client.go. Called from
+	// erun-ui/frontend/src/app/hostedDefinitionDrift.ts, which the Manage
+	// dialog's General tab reads through HostedDefinitionSection.tsx -- the
+	// hosted-marker panel, whose "Check for updates" control is this route's
+	// desktop entry point. The route's literal path never appears in
+	// TypeScript for the same reason the other entries here do not: the
+	// desktop reaches the platform through eruncommon.PlatformClient.
+	"GET /v1/environments/{environment_id}/definition": "CheckHostedDefinitionDrift",
 	// LoadTenantDashboard -> appendUnattachedTenantDashboardBuilds ->
 	// client.ListAllBuilds -> "GET /v1/builds" (erun-ui/tenant_dashboard.go,
 	// erun-common/platform_client_builds.go) -- merges an unattached build

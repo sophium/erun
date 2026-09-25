@@ -16,6 +16,7 @@ import { ContainerRegistriesField } from '@/components/app/ContainerRegistriesFi
 import { EnvironmentHealthSection } from '@/components/app/EnvironmentHealthSection';
 import { cloudProviderTypeLabel } from '@/components/app/GlobalConfigDialog.helpers';
 import { CloudStatusBadge } from '@/components/app/GlobalConfigDialog.shared';
+import { HostedDefinitionSection } from '@/components/app/HostedDefinitionSection';
 import { LocalRepoPathInput } from '@/components/app/LocalRepoPathInput';
 import { ReadonlyField } from '@/components/app/ManageDialog.fields';
 import { PullCoordinatesFields } from '@/components/app/ManageDialogPullCoordinates';
@@ -48,6 +49,7 @@ export function GeneralTab(): React.ReactElement {
   // One statement of "the editor is not accepting input right now", so each
   // field does not restate it.
   const fieldsDisabled = dialog.busy || dialog.configLoading;
+  const hostedTarget = managedHostedTarget(dialog.selection, config.name);
 
   return (
     <>
@@ -98,6 +100,11 @@ export function GeneralTab(): React.ReactElement {
         onChange={(patch) => {
           dispatch(updateManageConfig(patch));
         }}
+      />
+      <HostedDefinitionSection
+        tenant={hostedTarget.tenant}
+        environment={hostedTarget.environment}
+        hosted={config.hosted}
       />
       <CloudAliasSlots config={config} disabled={dialog.busy} />
       <CloudContextField
@@ -413,4 +420,19 @@ function UnlinkedCloudContext({
       />
     </div>
   );
+}
+
+// managedHostedTarget names the environment the hosted-marker panel reads. The
+// dialog's own selection is authoritative when it has one; the loaded config's
+// name is the fallback for the moment before a selection is set, and an empty
+// tenant there is answered by the panel's own guard rather than by a local
+// branch that would count against this component's complexity budget.
+function managedHostedTarget(
+  selection: { tenant: string; environment: string } | null,
+  configName: string,
+): { tenant: string; environment: string } {
+  if (selection) {
+    return { tenant: selection.tenant, environment: selection.environment };
+  }
+  return { tenant: '', environment: configName };
 }

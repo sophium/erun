@@ -425,7 +425,13 @@ type uiTenantDashboard struct {
 	// and what recent gates decided, independent of whether the change
 	// gated is an erun review at all — see erun-backend-api/AGENTS.md's
 	// "Gate Runs".
-	GateRuns    []uiGateRun              `json:"gateRuns,omitempty"`
+	GateRuns []uiGateRun `json:"gateRuns,omitempty"`
+	// Pipeline is the Pipeline tab's own view: every job and review the
+	// platform holds for this tenant, unioned on the issue each belongs to
+	// and labelled by the rung it stands on. It spans the Reviews and Gates
+	// tabs rather than repeating either — planned work with no branch and no
+	// review is only visible here.
+	Pipeline    []uiPipelineIssue        `json:"pipeline,omitempty"`
 	AuditEvents []uiTenantDashboardAudit `json:"auditEvents,omitempty"`
 	Panels      []uiTenantDashboardPanel `json:"panels,omitempty"`
 	// CanCreateReview and CanAdvanceMergeQueue report whether the signed-in user
@@ -716,6 +722,62 @@ type uiTenantDashboardAudit struct {
 	Actor     string `json:"actor,omitempty"`
 	Action    string `json:"action"`
 	CreatedAt string `json:"createdAt,omitempty"`
+}
+
+// uiPipelineIssue is one issue's own group of pipeline work, with every item
+// keyed on it. IssueKey is empty for the single group that names no issue,
+// which the platform orders last -- the view shows work without an issue
+// rather than guessing an issue for it.
+type uiPipelineIssue struct {
+	IssueKey string           `json:"issueKey"`
+	Items    []uiPipelineItem `json:"items"`
+}
+
+// uiPipelineItem is one piece of work on one rung, with the record it came
+// from. Exactly one of Job or Review is set: a row that could not say which
+// it was would send an operator looking for a branch that does not exist (a
+// job) or a job that does (a review).
+//
+// Rung is the platform's own label (PLANNED, IN_PROGRESS, REVIEW_OPEN,
+// READY, MERGING, MERGED, or an outcome such as FAILED), never re-derived
+// here: the desktop renders whatever the platform said, under the shared
+// vocabulary in erun-kit's pipelineRungs.
+type uiPipelineItem struct {
+	IssueKey string `json:"issueKey"`
+	// IssueRef/IssueRefSource are the item's own link and where it came from,
+	// so a branch-derived one renders as inferred. Empty IssueRefSource is
+	// "the platform stated no link", never "the author declared this".
+	IssueRef       string            `json:"issueRef,omitempty"`
+	IssueRefSource string            `json:"issueRefSource,omitempty"`
+	Rung           string            `json:"rung"`
+	Job            *uiPipelineJob    `json:"job,omitempty"`
+	Review         *uiPipelineReview `json:"review,omitempty"`
+}
+
+// uiPipelineJob is the job half: work that exists as a record and carries its
+// own issue reference and owning actor. It has no branch, and nothing derives
+// one for it.
+type uiPipelineJob struct {
+	JobID     string `json:"jobId"`
+	JobType   string `json:"jobType"`
+	IssueRef  string `json:"issueRef,omitempty"`
+	Summary   string `json:"summary"`
+	Status    string `json:"status"`
+	ActorKind string `json:"actorKind"`
+	ActorID   string `json:"actorId"`
+	StartedAt string `json:"startedAt,omitempty"`
+	EndedAt   string `json:"endedAt,omitempty"`
+}
+
+// uiPipelineReview is the review half: work proposed for merge, with the
+// branches it moves between.
+type uiPipelineReview struct {
+	ReviewID     string `json:"reviewId"`
+	Repository   string `json:"repository,omitempty"`
+	Name         string `json:"name"`
+	TargetBranch string `json:"targetBranch"`
+	SourceBranch string `json:"sourceBranch"`
+	Status       string `json:"status"`
 }
 
 type uiReviewDetailInput struct {
@@ -1099,6 +1161,49 @@ type uiEnvironmentConfig struct {
 	// alone. Editing it raises the pending-redeploy banner, since it changes what
 	// a redeploy rolls out.
 	DeployComponents []string `json:"deployComponents,omitempty"`
+	// Hosted is the platform row this environment corresponds to, when it has
+	// one. Nil means the environment is not marked as hosted. See
+	// eruncommon.HostedEnvironment.
+	Hosted *uiHostedEnvironment `json:"hosted,omitempty"`
+}
+
+// uiHostedEnvironment is the desktop's view of eruncommon.HostedEnvironment:
+// which platform row this local environment corresponds to, and how far the
+// local copy has fallen behind the definition that row holds.
+type uiHostedEnvironment struct {
+	// Describe renders the row for the operator: host, tenant, environment.
+	Describe string `json:"describe"`
+	APIHost  string `json:"apiHost"`
+	TenantID string `json:"tenantId"`
+	// EnvironmentID is the platform row's environment_id, shown so the
+	// operator can match the local environment against `erun platform env
+	// list` without guessing.
+	EnvironmentID string `json:"environmentId"`
+	// DefinitionRevision is the revision this local copy was last synced
+	// from; zero means it has never been synced.
+	DefinitionRevision int `json:"definitionRevision"`
+	// Drift is the read-only "the platform has moved" hint, resolved on the
+	// desktop's own poll. Nil when no comparison has been made yet, which
+	// reads as "nothing to say" rather than as "up to date".
+	Drift *uiHostedDefinitionDrift `json:"drift,omitempty"`
+}
+
+// uiHostedDefinitionDrift is the read-only half of the drift hint: what the
+// platform holds against what this machine last pulled. Auto-upload is
+// deliberately not here — see erun-ui/AGENTS.md on the write→event→write loop
+// this repository has already shipped once.
+type uiHostedDefinitionDrift struct {
+	LocalRevision    int  `json:"localRevision"`
+	PlatformRevision int  `json:"platformRevision"`
+	Behind           bool `json:"behind"`
+	// Describe is the operator-facing sentence, worded once in
+	// eruncommon.HostedDefinitionDrift.Describe so the CLI and the desktop
+	// cannot phrase the same state two ways.
+	Describe string `json:"describe"`
+	// Error is set when the comparison could not be made; it states what could
+	// not be read before the cause, per the Diagnostic Decision Record in
+	// erun-common/AGENTS.md.
+	Error string `json:"error,omitempty"`
 }
 
 type uiClaudeConfig struct {

@@ -287,6 +287,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
 	result := uiEnvironmentConfig{
 		Name:                         name,
+		Hosted:                       hostedEnvironmentToUI(config),
 		Type:                         config.ResolvedType(),
 		LocalRepoPath:                strings.TrimSpace(config.LocalRepoPath),
 		RepoPath:                     config.EffectiveLocalRepoPath(),
