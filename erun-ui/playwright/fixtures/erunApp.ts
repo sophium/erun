@@ -1,4 +1,4 @@
-import { expect, type Locator } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { AppShell } from '../pages/index.js';
 import { test as base } from './workerBackend.js';
 import { reapStubProcesses } from './stubProcesses.js';
@@ -208,6 +208,56 @@ export async function captureHoverCard(card: Locator, filePath: string): Promise
 // the deadline the test chose rather than at a default it never chose.
 export function withTestBudget(): { timeout: number } {
   return { timeout: test.info().timeout };
+}
+
+// disablePopoverEntranceAnimation freezes the Radix popover's entrance
+// animation before any geometry read, so the card is measured at rest.
+//
+// PopoverContent (erun-kit/src/components/ui/popover.tsx) carries
+// `data-[state=open]:animate-in ... zoom-in-95`, so every open runs a ~150ms
+// transform. `toBeVisible()` resolves the instant the element is visible, not
+// once that transform settles, so a bounding-box or colour read taken right
+// after can land mid-transition and report a smaller-than-rest size --
+// indistinguishable from a real difference between two cards. The animation
+// has to be off before the first measurement, not waited out.
+//
+// Injected with `page.evaluate`, not `page.addStyleTag`. addStyleTag appends
+// the element and then awaits the element's `load` event, which HTML does not
+// define for an inline <style>; it also issues that call with no timeout of
+// its own, so a round trip that stalls does not give up -- it silently
+// consumes whatever budget the calling test had left, and the spec reports a
+// bare test timeout naming addStyleTag rather than the measurement it was
+// about to make. One evaluate is a single bounded round trip with nothing to
+// wait on but the document itself.
+//
+// One copy, in the module every one of these specs already imports, rather
+// than the three that had drifted apart. Its contract -- the popover really is
+// at rest afterwards -- is pinned by
+// tests/areas/sidebar/sidebar-hovercard-animation-off.spec.ts.
+const POPOVER_ENTRANCE_ANIMATION_OFF = [
+  '[role="dialog"][data-state] {',
+  '  animation: none !important;',
+  '  transform: none !important;',
+  '}',
+].join('\n');
+
+const POPOVER_ANIMATION_OFF_ATTR = 'data-erun-test-popover-animation-off';
+
+export async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+  await page.evaluate(
+    ({ css, attr }) => {
+      // Idempotent: a spec may call this more than once, and after a
+      // `reboot()` the previous document is gone and the rule must return.
+      if (document.head.querySelector(`style[${attr}]`)) {
+        return;
+      }
+      const style = document.createElement('style');
+      style.setAttribute(attr, '');
+      style.textContent = css;
+      document.head.append(style);
+    },
+    { css: POPOVER_ENTRANCE_ANIMATION_OFF, attr: POPOVER_ANIMATION_OFF_ATTR },
+  );
 }
 
 export { expect };

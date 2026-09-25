@@ -1,7 +1,7 @@
 import type { Page, Request } from '@playwright/test';
 
 import type { AppShell } from '../../../pages/index.js';
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // Guards against a terminal-query reply being misrouted to the wrong PTY: the
 // pre-fix code addressed the reply to whichever session was selected at reply
@@ -124,13 +124,17 @@ test.describe('terminal query responses (#347)', () => {
 
     await emitTerminalOutput(page, selectedId, CPR_QUERY);
 
+    // The reply is a round trip through the event pipeline, and the value
+    // being polled belongs to this spec's own invoke capture -- so it is
+    // bounded by the budget this test declared, not by expect.timeout's
+    // separate 10s, which would red a 30s test at a third of its clock.
     await expect
       .poll(() => {
         const reply = invokes.find(
           (call) => call.method === 'SendSessionInput' && isCprReply(call.args[1]),
         );
         return reply?.args[0];
-      })
+      }, withTestBudget())
       .toBe(selectedId);
   });
 
@@ -148,14 +152,19 @@ test.describe('terminal query responses (#347)', () => {
     await emitTerminalOutput(page, backgroundId, CPR_QUERY);
     await emitTerminalOutput(page, selectedId, CPR_QUERY);
 
+    // Same clock as the poll above: the foreground reply is a real round trip
+    // whose landing this test's 30s budget already covers, so capping it at
+    // expect.timeout's 10s is what turned a slow gate into a red spec.
     await expect
-      .poll(() =>
-        invokes.some(
-          (call) =>
-            call.method === 'SendSessionInput' &&
-            isCprReply(call.args[1]) &&
-            call.args[0] === selectedId,
-        ),
+      .poll(
+        () =>
+          invokes.some(
+            (call) =>
+              call.method === 'SendSessionInput' &&
+              isCprReply(call.args[1]) &&
+              call.args[0] === selectedId,
+          ),
+        withTestBudget(),
       )
       .toBe(true);
 

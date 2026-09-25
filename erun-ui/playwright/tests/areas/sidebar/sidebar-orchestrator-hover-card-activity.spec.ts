@@ -1,7 +1,12 @@
 import type { Locator, Page } from '@playwright/test';
 
 import { artifactPath } from '../../../fixtures/artifacts.js';
-import { captureHoverCard, expect, test } from '../../../fixtures/erunApp.js';
+import {
+  captureHoverCard,
+  disablePopoverEntranceAnimation,
+  expect,
+  test,
+} from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 
@@ -78,19 +83,6 @@ async function withOrchestratorCard(
     await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     await read(card(page));
   }).toPass({ timeout: 25_000 });
-}
-
-// Radix's PopoverContent (erun-kit/components/ui/popover.tsx) runs a ~150ms
-// zoom-in-95 + slide-in entrance transform on every open. `toBeVisible()`
-// resolves the instant the element is visible, not once that transform
-// settles, so a `boundingBox()` read taken right after can land mid-transition
-// and report a smaller-than-rest size. Mirrors the same workaround in
-// sidebar-hovercard-layout.spec.ts.
-async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content:
-      '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
-  });
 }
 
 // CHECK_FAILED_LINE is the prose the check-failed row renders: a status clause
