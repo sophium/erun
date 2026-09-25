@@ -298,18 +298,56 @@ a substitute for GitHub-side enforcement.
   `role_policy_e2e_test.go` (`ERUN_E2E_ROLES_DATABASE_URL`,
   `ERUN_E2E_PERMISSIONS_DATABASE_URL`: the seeded grants, and a TenantAgent
   holder permitted exactly its set against every real registered route).
-- **Still design, not implemented: the machine user itself** — a tenant IdP
-  machine user with client_credentials through existing issuer-generic OIDC
-  verification (no new signing trust anchor), minted idempotently server-side
-  with the first agent-capable environment, delivered through the existing
-  Kubernetes Secret channel, and granted `TenantAgent`. Doing so still needs
-  the answer to who may grant it: the enrolment and grant routes are
-  TenantAdminOnly, while the alias `erun init` delegates is an ordinary
-  operator's session, so a provisioning path of its own (or an operations
-  caller) is required. Common's login/token resolution must mint refreshable
-  short-lived tokens through the new grant. That is what makes queue
-  participation attributable to the queue rather than to an operator, and it
-  is the thing to build next here.
+- **Implemented: the machine identity, and the privileged path that mints it.**
+  `MachineIdentityService` (`internal/service/machine_identity.go`) provisions
+  or returns one environment's own identity: it asks the tenant's own IdP for
+  an application under a login name *derived from the environment's id*
+  (`MachineIdentityLoginName`), enrols the `(issuer, subject)` pair as an erun
+  user, and converges the `TenantAgent` grant. Every step is idempotent, and
+  derivation rather than storage is the whole mechanism — nothing links an
+  environment to its identity but that arithmetic, so a second call can only
+  find what the first created. The route is
+  `POST /v1/environments/{environment_id}/machine-identity`, classified
+  `TenantUserClass`: the credential is strictly weaker than the mcp-token that
+  class already mints, and the caller is provisioning an environment that
+  already exists in their own tenant.
+  - **Who may grant it: a new privileged internal path, and never an operations
+    caller.** The enrolment and the role grant the identity needs are both
+    `TenantAdminOnly` as routes, while the session provisioning runs under is an
+    ordinary operator's delegated alias — so on any tenant whose operator is not
+    its genesis user (the common case) those routes could never be called. The
+    service therefore performs both itself, with the API's own authority, behind
+    a route whose own classification *is* the authorization. An operations
+    caller was the alternative and is rejected: it would put platform staff in
+    the middle of every tenant's own provisioning, and `OperationsOnly` names a
+    platform-operator position rather than a tenant's act.
+  - **It refuses rather than guesses where it cannot mint.** A tenant resolving
+    by no org-scoped issuer, or by several, is refused (`409
+    MACHINE_IDENTITY_UNAVAILABLE`, naming which); an unconfigured control plane
+    answers `501 MACHINE_IDENTITY_UNCONFIGURED` at the route, never a 404. The
+    identity is created in the tenant's *own* organization — minting it in
+    anyone else's is the attribution collapse this feature exists to remove.
+  - **Delivery reuses the existing channel**: `erun-common`'s
+    `provisionMachineIdentitySecret` writes the same
+    `<tenant>-devops-platform-alias` Secret the runtime chart already mounts,
+    carrying a `clientsecretref` in place of a `refreshtokenref`, and
+    `resolveERunAccessToken` picks the grant that reference implies. It
+    exchanges the credential for a token *before* writing anything, and falls
+    back to the delegating alias — traced, never silent — when any step cannot
+    be completed, so an environment never trades a working identity for a
+    broken one. Coverage: `internal/service/machine_identity_test.go`,
+    `internal/zitadel/machine_test.go` (the Management API binding, against a
+    fake), `internal/routes/machine_identity_test.go`, and
+    `machine_identity_e2e_test.go` (`ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL`:
+    two provisioning calls leave one user row, one mapping and one grant).
+  - **Two things remain open, both tracked in #2684.** Revocation and the
+    migration of an environment already carrying the operator's credential are
+    separate work — `EnvConfig.PlatformAliasSecretName` is a single scalar, so
+    an environment is on one identity or the other and never both, and
+    re-running `erun init` is the switch. And the Management API binding
+    (`internal/zitadel/machine.go`) is exercised only against a fake: the
+    issuer-generic *token* half is the verified go/no-go, the provisioning
+    calls are not verified against a live instance.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.

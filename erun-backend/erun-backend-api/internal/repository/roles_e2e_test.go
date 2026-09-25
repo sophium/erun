@@ -528,7 +528,7 @@ func TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser(t *testing.T) {
 
 	var agentRoleID, userRoleID string
 	mustNoErr(t, db.QueryRow(
-		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantAgentRoleName,
+		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, TenantAgentRoleName,
 	).Scan(&agentRoleID), "find TenantAgent role")
 	mustNoErr(t, db.QueryRow(
 		`SELECT role_id FROM roles WHERE tenant_id = $1 AND name = $2`, tenantID, tenantUserRoleName,

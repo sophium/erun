@@ -119,14 +119,36 @@ func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (str
 	return provisionRegistryCredentialSecret(s.Context, target.Tenant, namespace, target.EnvConfig.KubernetesContext, registries)
 }
 
-// resolvePlatformAliasSecret mints the Secret carrying this host's own signed-in
-// erun platform alias, which the runtime chart mounts for the pod's `erun` to
-// read. Unlike the registry credential it is not gated on anything the
+// resolvePlatformAliasSecret mints the Secret carrying the identity the runtime
+// chart mounts for the pod's `erun` to read: the environment's own machine
+// identity when the platform will mint one, and this host's own signed-in alias
+// otherwise. Unlike the registry credential it is not gated on anything the
 // environment declared -- any agent environment may be promoted to drive the
-// merge queue, so the question is only whether the host has an alias to give.
+// merge queue, so the question is only whether the host has an identity to give.
+//
+// The machine identity is asked for first because it is the whole point of
+// preferring one: an environment's platform calls are attributed to whoever ran
+// init when they are made through a delegated session, and two environments
+// provisioned from one host are indistinguishable in the audit trail. Every
+// reason the platform will not mint one -- this host holds no alias to ask
+// with, the environment is not registered yet, the tenant resolves by no issuer
+// the platform administers, or the credential it returned does not exchange for
+// a token -- falls back to that delegated session, which is exactly what the
+// environment would have had before this existed. The fallbacks are traced, not
+// silent: a deployment that stayed on the operator's identity has to be
+// distinguishable from one that never asked.
 func (s bootstrapRunner) resolvePlatformAliasSecret(target OpenResult) (string, error) {
 	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
-	return provisionPlatformAliasSecret(s.Context, ConfigStore{}, target.Tenant, namespace, target.EnvConfig.KubernetesContext, DefaultCloudDependencies())
+	store := ConfigStore{}
+	deps := DefaultCloudDependencies()
+	name, provisioned, err := provisionMachineIdentitySecret(s.Context, store, target.Tenant, target.Environment, namespace, target.EnvConfig.KubernetesContext, deps)
+	if err != nil {
+		return "", err
+	}
+	if provisioned {
+		return name, nil
+	}
+	return provisionPlatformAliasSecret(s.Context, store, target.Tenant, namespace, target.EnvConfig.KubernetesContext, deps)
 }
 
 func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {

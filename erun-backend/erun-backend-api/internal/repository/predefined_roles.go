@@ -8,7 +8,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// tenantUserRoleName, tenantAdminRoleName and tenantAgentRoleName are the
+// tenantUserRoleName, tenantAdminRoleName and TenantAgentRoleName are the
 // narrower predefined roles that ship alongside the wildcard
 // ReadAll/WriteAll: TenantUser uses erun without administering it, TenantAdmin
 // administers the tenant without the platform-operator reach ReadAll/WriteAll
@@ -20,8 +20,13 @@ import (
 const (
 	tenantUserRoleName  = "TenantUser"
 	tenantAdminRoleName = "TenantAdmin"
-	tenantAgentRoleName = "TenantAgent"
 )
+
+// TenantAgentRoleName is exported because something outside this package has
+// to name it: provisioning an environment's machine identity grants the
+// identity this role, and that caller resolves it by name from the roles this
+// repository seeds.
+const TenantAgentRoleName = "TenantAgent"
 
 // derivedRoles is every narrower predefined role this repository owns,
 // paired with the routeroles set its grants are derived from. The order is
@@ -34,7 +39,7 @@ var derivedRoles = []struct {
 }{
 	{tenantUserRoleName, routeroles.TenantUserPermissions},
 	{tenantAdminRoleName, routeroles.TenantAdminPermissions},
-	{tenantAgentRoleName, routeroles.TenantAgentPermissions},
+	{TenantAgentRoleName, routeroles.TenantAgentPermissions},
 }
 
 // ensureNarrowerRolesExist creates every role in derivedRoles for the tenant

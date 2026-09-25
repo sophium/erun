@@ -543,6 +543,36 @@ func (c *PlatformClient) GetEnvironment(ctx context.Context, environmentID strin
 	return environment, err
 }
 
+// PlatformMachineIdentity is one environment's own platform identity, as the
+// API provisioned it: the client-credentials pair a token is minted from, the
+// issuer that mints it, and what the resulting token resolves as.
+//
+// ClientSecret is the credential's confidential half, returned exactly once
+// per provisioning call and placed straight into the environment's own secret
+// store. It is never recorded anywhere in erun's own config: the alias entry
+// written beside it carries only a reference.
+type PlatformMachineIdentity struct {
+	EnvironmentID   string `json:"environmentId"`
+	EnvironmentName string `json:"environmentName"`
+	Issuer          string `json:"issuer"`
+	Subject         string `json:"subject"`
+	ClientID        string `json:"clientId"`
+	ClientSecret    string `json:"clientSecret"`
+	UserID          string `json:"userId"`
+	// AlreadyEnrolled is true when this environment already had an identity
+	// and the call returned it rather than minting a new one.
+	AlreadyEnrolled bool `json:"alreadyEnrolled"`
+}
+
+// MintMachineIdentity provisions (or returns) environmentID's own platform
+// identity. Idempotent server-side, so a caller may call it on every deploy
+// without minting a second identity.
+func (c *PlatformClient) MintMachineIdentity(ctx context.Context, environmentID string) (PlatformMachineIdentity, error) {
+	var identity PlatformMachineIdentity
+	err := c.do(ctx, http.MethodPost, "/v1/environments/"+url.PathEscape(environmentID)+"/machine-identity", nil, true, &identity)
+	return identity, err
+}
+
 // PlatformCreateEnvironmentParams is the environment-registration input.
 type PlatformCreateEnvironmentParams struct {
 	Name              string `json:"name"`

@@ -251,6 +251,98 @@ func TestDefaultRefreshERunTokensPropagatesServerError(t *testing.T) {
 	}
 }
 
+// TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope pins
+// the two properties that decide whether a machine token is usable at all: the
+// credential form the provisioned application is configured for, and the scope
+// that makes an org-scoped issuer's token carry the claim erun resolves the
+// tenant from. A request omitting either still authenticates and then resolves
+// to no tenant, which is the failure this test exists to keep from returning.
+func TestDefaultClientCredentialsERunTokensSendsBasicAuthAndTheOrgClaimScope(t *testing.T) {
+	var gotUser, gotSecret string
+	var gotBasic bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser, gotSecret, gotBasic = r.BasicAuth()
+		assertClientCredentialsRequest(t, r)
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "machine-access", "expires_in": 3600})
+	}))
+	defer srv.Close()
+
+	tokens, err := defaultClientCredentialsERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
+	if err != nil {
+		t.Fatalf("defaultClientCredentialsERunTokens: %v", err)
+	}
+	if tokens.AccessToken != "machine-access" || tokens.ExpiresIn != time.Hour {
+		t.Fatalf("tokens = %+v", tokens)
+	}
+	if !gotBasic || gotUser != "client-1" || gotSecret != "secret-1" {
+		t.Fatalf("basic auth = %v (%q/%q)", gotBasic, gotUser, gotSecret)
+	}
+}
+
+// assertClientCredentialsRequest checks the two properties of the request
+// itself: the grant, the org-claim scope, and that the secret is in the header
+// rather than the body.
+func assertClientCredentialsRequest(t *testing.T, r *http.Request) {
+	t.Helper()
+	if err := r.ParseForm(); err != nil {
+		t.Fatalf("parse form: %v", err)
+	}
+	if r.FormValue("grant_type") != "client_credentials" {
+		t.Fatalf("grant_type = %q", r.FormValue("grant_type"))
+	}
+	if r.FormValue("scope") != erunOrgClaimScope {
+		t.Fatalf("scope = %q, want %q", r.FormValue("scope"), erunOrgClaimScope)
+	}
+	// The secret belongs in the header, not the body: one is a credential
+	// transport, the other is a payload a proxy or an access log may keep.
+	if r.FormValue("client_secret") != "" {
+		t.Fatal("client secret travelled in the request body")
+	}
+}
+
+// TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope: an issuer that
+// has never heard of the org claim — a tenant's own BYO IdP — must not turn a
+// working identity into a failing one.
+func TestDefaultClientCredentialsERunTokensRetriesAnUnknownScope(t *testing.T) {
+	scopes := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		scopes = append(scopes, r.FormValue("scope"))
+		if r.FormValue("scope") != "" {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_scope"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "machine-access", "expires_in": 3600})
+	}))
+	defer srv.Close()
+
+	tokens, err := defaultClientCredentialsERunTokens(Context{}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1")
+	if err != nil {
+		t.Fatalf("defaultClientCredentialsERunTokens: %v", err)
+	}
+	if tokens.AccessToken != "machine-access" {
+		t.Fatalf("tokens = %+v", tokens)
+	}
+	if len(scopes) != 2 || scopes[0] != erunOrgClaimScope || scopes[1] != "" {
+		t.Fatalf("requested scopes = %q, want the org claim then none", scopes)
+	}
+}
+
+// TestDefaultClientCredentialsERunTokensDryRunPerformsNoRequest: provisioning
+// runs under --dry-run too, and a preview must not depend on the issuer being
+// reachable.
+func TestDefaultClientCredentialsERunTokensDryRunPerformsNoRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("dry run reached the issuer")
+	}))
+	defer srv.Close()
+
+	if _, err := defaultClientCredentialsERunTokens(Context{DryRun: true}, OIDCDiscovery{TokenEndpoint: srv.URL}, "client-1", "secret-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestPKCEChallengeMatchesVerifierSHA256(t *testing.T) {
 	verifier, err := erunPKCEVerifier()
 	if err != nil {

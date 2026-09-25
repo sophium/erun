@@ -2410,7 +2410,25 @@ func sanitizeFilename(s string) string {
 func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, environment, alias string) {
 	t.Helper()
 	SeedTenantEnv(t, setup, tenant, environment)
+	SeedSignedInERunPlatformAlias(t, setup, tenant, alias, "https://api.example.test")
+}
+
+// SeedSignedInERunPlatformAlias makes the invoking host a signed-in credential
+// source, without seeding a tenant/environment tree: the root config naming
+// alias on the erun platform at apiURL (with the stored-session ref the alias
+// carries) and the refresh token that ref resolves to.
+//
+// It takes the platform's URL because the two halves have to agree: a scenario
+// that drives what the host does with that alias -- the machine-identity
+// provisioning `erun init` asks for over it, or a platform call made through it
+// -- points both at the stub server it seeded, while a scenario only asserting
+// that a credential was delivered keeps the fixed host.
+func SeedSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, alias, apiURL string) {
+	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
 	// The stored-session reference travels with the alias, exactly as it does in
 	// a real signed-in config: the alias is inert without it.
 	ref := "erun/refresh/" + alias
@@ -2419,9 +2437,9 @@ func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, t
 			"cloudproviders:\n"+
 			"  - alias: "+alias+"\n"+
 			"    provider: erun\n"+
-			"    oidcissuerurl: https://api.example.test\n"+
+			"    oidcissuerurl: "+apiURL+"\n"+
 			"    erun:\n"+
-			"      apiurl: https://api.example.test\n"+
+			"      apiurl: "+apiURL+"\n"+
 			"      clientid: cli-test-client\n"+
 			"      refreshtokenref: "+ref+"\n",
 	)
@@ -2429,6 +2447,46 @@ func SeedTenantEnvWithSignedInERunPlatformAlias(t testing.TB, setup env.Setup, t
 	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
 		t.Fatalf("save host refresh token: %v", err)
 	}
+}
+
+// SeedMachineIdentityCredential stores clientSecret under the ref an alias's
+// machine-identity entry names, so a scenario can put a host or an environment
+// on a credential without an `erun init` having minted one. The ref is derived
+// the way erun-common derives it, so the two cannot drift.
+func SeedMachineIdentityCredential(t testing.TB, setup env.Setup, alias, clientSecret string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	store := eruncommon.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
+	if err := store.SaveCloudSecret("erun/clientsecret/"+alias, clientSecret); err != nil {
+		t.Fatalf("save machine identity client secret: %v", err)
+	}
+}
+
+// SeedMachineIdentityAlias writes the root config naming an erun platform alias
+// that authenticates as a machine identity rather than as a delegated human
+// session: a client-secret reference and no refresh-token reference. It is the
+// shape a pod carries once `erun init` has provisioned its own identity.
+func SeedMachineIdentityAlias(t testing.TB, setup env.Setup, tenant, alias, apiURL, clientID, clientSecret string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", root, err)
+	}
+	mustWrite(t, filepath.Join(root, "config.yaml"),
+		"defaulttenant: "+tenant+"\n"+
+			"cloudproviders:\n"+
+			"  - alias: "+alias+"\n"+
+			"    provider: erun\n"+
+			"    oidcissuerurl: "+apiURL+"\n"+
+			"    erun:\n"+
+			"      apiurl: "+apiURL+"\n"+
+			"      clientid: "+clientID+"\n"+
+			"      clientsecretref: erun/clientsecret/"+alias+"\n",
+	)
+	SeedMachineIdentityCredential(t, setup, alias, clientSecret)
 }
 
 // SeedHostedRuntimeTenantEnv writes a runtime-type env that is marked as hosted

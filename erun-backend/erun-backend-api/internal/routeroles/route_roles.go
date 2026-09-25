@@ -197,10 +197,29 @@ var Routes = map[string]Roles{
 	"POST /v1/environments/{environment_id}/stop":   TenantUserClass,
 	"DELETE /v1/environments/{environment_id}":      TenantAdminOnly,
 
-	// dns01_token.go, mcp_token.go — minting a token scoped to an environment
-	// that already exists is operating it, not administering the tenant.
-	"POST /v1/environments/{environment_id}/dns01-token": TenantUserClass,
-	"POST /v1/environments/{environment_id}/mcp-token":   TenantUserClass,
+	// dns01_token.go, mcp_token.go, machine_identity.go — minting a credential
+	// scoped to an environment that already exists is operating it, not
+	// administering the tenant.
+	//
+	// machine-identity is the one of the three whose handler does privileged
+	// work: the identity it returns is only usable once it has been enrolled
+	// and granted TenantAgent, and both of those happen server-side with the
+	// API's own authority rather than through the TenantAdminOnly routes that
+	// normally own them (see internal/service's machine identity service). The
+	// classification is still TenantUser, and deliberately so: the credential
+	// is strictly weaker than the mcp-token this same class already mints —
+	// TenantAgent reaches the merge-queue gate and the build self-report,
+	// while a minted MCP token can carry erun:admin and drive a raw exec in
+	// the environment — and the caller is an operator provisioning an
+	// environment that already exists in their own tenant, which is what this
+	// class is for. Classifying it TenantAdminOnly would reinstate exactly the
+	// problem it exists to solve: the session provisioning runs under is an
+	// ordinary operator's delegated alias, so on any tenant whose operator is
+	// not its genesis user the call would be refused and no environment could
+	// ever be given an identity.
+	"POST /v1/environments/{environment_id}/dns01-token":      TenantUserClass,
+	"POST /v1/environments/{environment_id}/mcp-token":        TenantUserClass,
+	"POST /v1/environments/{environment_id}/machine-identity": TenantUserClass,
 
 	// environment_hostname.go — pointing an already-existing environment's
 	// own wildcard hostname at an IP is the same class as the
