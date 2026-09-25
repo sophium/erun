@@ -118,13 +118,42 @@ export class Sidebar {
   // now + N)`, so N is a second fixed cap of exactly the kind being replaced --
   // a calling test that declared 60s would still fail the step at N. Any N
   // here is a number the step's own test never chose.
+  //
+  // The activation itself has to be conditional, because the first click is
+  // what removes its own target. Clicking dispatches openManageDialog, which
+  // opens a modal Dialog; a modal marks everything outside it aria-hidden, and
+  // the row's edit button is one of those. `environmentRow` is a role query,
+  // so on the second attempt it resolves to nothing -- and dispatchEvent, like
+  // every locator action, waits for its selector rather than failing, with no
+  // per-action timeout to stop it. An unconditional retry therefore blocks on
+  // attempt 2 for the rest of the test's budget, and because the outer toPass
+  // reports the last attempt that COMPLETED, the red names attempt 1's short
+  // probe: one 2s look at a 30s test, reported as if that were the whole wait.
+  //
+  // So press only while the button is still there to press, and let the rest
+  // of each attempt be the probe. That is what the step actually waits for
+  // once the dialog is up: not a second click, but the config load the first
+  // click started, which is what clears configLoading and renders the tab the
+  // probe looks for. A row that was never pressable at all still fails
+  // outright rather than spinning, and a dialog that never finishes loading
+  // still converges to a red at the caller's own budget.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
     const dialog = this.page
       .getByRole('dialog')
       .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
       .first();
+    let activated = false;
     await expect(async () => {
-      await this.environmentRow(tenant, env).dispatchEvent('click');
+      const edit = this.environmentRow(tenant, env);
+      if ((await edit.count()) > 0) {
+        activated = true;
+        await edit.dispatchEvent('click');
+      }
+      if (!activated) {
+        throw new Error(
+          `${tenant} / ${env} has no reachable edit button, so this step would activate nothing`,
+        );
+      }
       await dialog.waitFor({ state: 'visible', timeout: 2_000 });
     }).toPass();
   }
