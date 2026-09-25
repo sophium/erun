@@ -3,6 +3,7 @@ import type { Locator, Page } from '@playwright/test';
 import { artifactPath } from '../../../fixtures/artifacts.js';
 import {
   captureHoverCard,
+  constrainPopoverWidth,
   disablePopoverEntranceAnimation,
   expect,
   test,
@@ -439,7 +440,7 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // Deliberately width-constrained, the way the deploy overlay's own
     // narrow-width capture is: 11rem is well below the card's fixed w-90, so
     // the string cannot fit on one line however the card is later sized.
-    await page.addStyleTag({ content: '[role="dialog"] { width: 11rem !important; }' });
+    await constrainPopoverWidth(page, '11rem');
 
     await withOrchestratorCard(page, app, async (dialog) => {
       await expect(dialog).toBeVisible();

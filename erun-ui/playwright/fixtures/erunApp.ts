@@ -243,11 +243,14 @@ const POPOVER_ENTRANCE_ANIMATION_OFF = [
 
 const POPOVER_ANIMATION_OFF_ATTR = 'data-erun-test-popover-animation-off';
 
-export async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+// injectTestStylesheet is the mechanism every caller below shares: one
+// stylesheet appended to the live document, keyed by its own attribute so a
+// repeated call is a no-op and a re-navigation ("reboot()") gets the rule
+// back. See the block comment above for why this is an evaluate rather than
+// page.addStyleTag.
+async function injectTestStylesheet(page: Page, attr: string, css: string): Promise<void> {
   await page.evaluate(
     ({ css, attr }) => {
-      // Idempotent: a spec may call this more than once, and after a
-      // `reboot()` the previous document is gone and the rule must return.
       if (document.head.querySelector(`style[${attr}]`)) {
         return;
       }
@@ -256,7 +259,22 @@ export async function disablePopoverEntranceAnimation(page: Page): Promise<void>
       style.textContent = css;
       document.head.append(style);
     },
-    { css: POPOVER_ENTRANCE_ANIMATION_OFF, attr: POPOVER_ANIMATION_OFF_ATTR },
+    { css, attr },
+  );
+}
+
+export async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+  await injectTestStylesheet(page, POPOVER_ANIMATION_OFF_ATTR, POPOVER_ENTRANCE_ANIMATION_OFF);
+}
+
+// constrainPopoverWidth narrows the popover below its own fixed w-90, for the
+// clipping cases that need a long value to overflow whatever the card is
+// later sized to.
+export async function constrainPopoverWidth(page: Page, width: string): Promise<void> {
+  await injectTestStylesheet(
+    page,
+    'data-erun-test-popover-width',
+    `[role="dialog"] { width: ${width} !important; }`,
   );
 }
 
