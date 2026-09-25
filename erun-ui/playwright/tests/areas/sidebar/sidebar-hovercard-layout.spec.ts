@@ -1,6 +1,11 @@
 import type { Locator, Page } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import {
+  disablePopoverEntranceAnimation,
+  expect,
+  test,
+  waitForSeededRow,
+} from '../../../fixtures/erunApp.js';
 import {
   SEED_ENV_ALPHA,
   SEED_ORCHESTRATOR,
@@ -19,23 +24,6 @@ import {
 // row changes only its own zone's height. This spec locks the layout
 // contract computationally, mirroring sidebar-hovercard-type-scale.spec.ts's
 // approach for the type contract.
-
-// Radix's PopoverContent (erun-kit/components/ui/popover.tsx) runs a ~150ms
-// zoom-in-95 + slide-in entrance transform on every open. `toBeVisible()`
-// resolves the instant the element is visible, not once that transform
-// settles, so a `getBoundingClientRect()` read taken right after can land
-// mid-transition and report a smaller-than-rest size -- indistinguishable
-// from a real difference between what two cards render unless the animation
-// is accounted for. Disabling the transform outright (rather than waiting
-// past it) makes the settled geometry available from the very first frame;
-// the same test-only-workaround shape `Sidebar.ts` already uses to freeze
-// `animate-spin` before a hover-stability check.
-async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content:
-      '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
-  });
-}
 
 // measureLabelColumnWidth reads a label `dt`'s own rendered width -- which,
 // since HOVER_CARD_GRID_CLASS's grid items stretch to fill their column by
