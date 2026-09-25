@@ -85,9 +85,16 @@ func dockerfileHasVersionedFrom(dockerfilePath string) bool {
 	return dockerfileVersionedFromPattern.Match(data)
 }
 
-var dockerfileTestStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+test\b`)
+// Both patterns require the stage name to be exactly `test`. A word-boundary
+// match is not enough: `AS test-toolchain` and `COPY --from=test-toolchain`
+// satisfy one, and the pair then reads as the gate convention while the
+// Dockerfile runs no gate at all -- exempting it from fingerprint promotion and
+// granting it the host-network entitlement for nothing. Naming a stage after
+// the toolchain it installs is ordinary, and the erun-backend-api Dockerfile
+// carries exactly such a stage beside its real gate stage.
+var dockerfileTestStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+test(?:\s|$)`)
 
-var dockerfileCopyFromTestPattern = regexp.MustCompile(`(?im)^\s*COPY\s+--from=test\b`)
+var dockerfileCopyFromTestPattern = regexp.MustCompile(`(?im)^\s*COPY\s+--from=test(?:\s|$)`)
 
 // dockerfileHasGateTestStage reports whether a Dockerfile declares a `test`
 // stage that a later stage depends on via `COPY --from=test` — the
