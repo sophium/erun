@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -92,11 +94,12 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	servers := newCapabilityServerCache(func(identity authIdentity) *mcp.Server {
 		return newServer(info, runtime, identity, recorder)
 	})
-	handler := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
+	streamable := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
 		JSONResponse:          true,
-		SessionTimeout:        5 * time.Minute,
+		SessionTimeout:        mcpSessionTimeout,
 		CrossOriginProtection: crossOriginProtectionForAuthenticatedEdge(cfg.Path),
 	})
+	handler := withSessionKeepAlive(streamable, cfg.Path, mcpSessionTimeout)
 
 	authCfg := mcpAuthConfigFromEnv()
 	mux := http.NewServeMux()
@@ -234,6 +237,26 @@ func endpointURL(cfg HTTPConfig) string {
 	return "http://" + listenAddress(cfg) + cfg.Path
 }
 
+// mcpSessionTimeout is how long the SDK keeps a session it has heard no POST
+// from. It is the edge's own idle-reap budget, and it has to stay in step with
+// the keepalive that renews a session a caller is still attached to
+// (session_keepalive.go), so the two read from one value rather than two.
+var mcpSessionTimeout = 5 * time.Minute
+
+// mcpServerLogger receives the MCP SDK's own server-side diagnostics. It is a
+// variable rather than a literal so a test can read what would otherwise go
+// straight to the pod's stderr.
+//
+// Leaving it nil is not "no logging configured"; it is
+// slog.New(slog.DiscardHandler) (mcp/ensureLogger), which silently drops every
+// diagnostic the SDK raises — including the "method %q is invalid during
+// session initialization" guard a client hits when it calls a tool on a
+// session the edge no longer knows. That is how a pod log containing zero
+// occurrences of the guard error was read as "those calls never arrived", when
+// the calls had arrived and been refused: the silence was this logger, not the
+// absence of the request.
+var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
 func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
 	info = eruncommon.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
@@ -241,7 +264,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "erun",
 		Version: info.Version,
-	}, nil)
+	}, &mcp.ServerOptions{Logger: mcpServerLogger})
 
 	reg := toolRegistrar{server: server, identity: identity, metrics: metrics}
 	registerReadModelTools(reg, info, runtime)

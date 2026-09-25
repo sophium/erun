@@ -147,8 +147,31 @@ func structHasJSONField(rt reflect.Type, name string, seen map[reflect.Type]bool
 // number...) can never satisfy.
 var rawJSONSchemaOverrides = &jsonschema.ForOptions{
 	TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[json.RawMessage](): {},
+		reflect.TypeFor[json.RawMessage](): anyJSONValueSchema(),
 	},
+}
+
+// anyJSONValueSchema is the schema published for a json.RawMessage field, and
+// what it must be is "any JSON value" — expressed as an object, never as the
+// boolean `true`.
+//
+// An empty jsonschema.Schema is the obvious way to write that, and it is
+// wrong here: Schema.MarshalJSON deliberately collapses `{}` to `true` (the
+// two are the same schema), and a boolean subschema is not something every
+// client's tool-list validator accepts. One json.RawMessage field anywhere in
+// one tool's output schema was enough for a client to refuse the *entire*
+// tools/list — build_profile's record (BuildProfileResult.Record) took the
+// whole erun surface away from an in-pod agent, which then saw no erun tools
+// at all rather than one tool with an odd schema.
+//
+// So the six-type union says the same thing in a shape no validator has to
+// special-case. It is every JSON type the spec defines, so it accepts exactly
+// what `true` accepts; adding a seventh type to the language is the only way
+// it could ever become narrower, and the MCP protocol would have moved first.
+func anyJSONValueSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Types: []string{"object", "array", "string", "number", "boolean", "null"},
+	}
 }
 
 // outputSchemaFor computes the schema for a tool's Out type the same way the
