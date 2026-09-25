@@ -1,0 +1,307 @@
+package eruncommon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/adrg/xdg"
+)
+
+// TestHostedMarkerSurvivesAReload is the case the plan names directly: the
+// marker is written into the environment's own config.yaml and read back
+// unchanged, so a later push or pull knows which platform row this machine
+// follows without being told again.
+func TestHostedMarkerSurvivesAReload(t *testing.T) {
+	useConfigHome(t)
+	marker := HostedEnvironment{
+		APIHost:            "https://api.example.test",
+		TenantID:           "tenant-1",
+		EnvironmentID:      "env-1",
+		DefinitionRevision: 3,
+	}
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime, Hosted: marker}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	reloaded, _, err := LoadEnvConfig("team", "dev")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	recorded, ok := HostedEnvironmentFromConfig(reloaded)
+	if !ok {
+		t.Fatalf("the marker did not survive the reload: %+v", reloaded.Hosted)
+	}
+	if recorded != marker {
+		t.Fatalf("marker round-tripped as %+v, want %+v", recorded, marker)
+	}
+}
+
+// TestEnvironmentWithNoMarkerOmitsIt keeps "not hosted" and "hosted somewhere
+// we cannot name" apart on disk: a config that was never hosted carries no
+// hosted block at all, so a reader is never asked to interpret an empty one.
+func TestEnvironmentWithNoMarkerOmitsIt(t *testing.T) {
+	configHome := useConfigHome(t)
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(configHome, "erun", "team", "dev", "config.yaml"))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(raw), "hosted:") {
+		t.Fatalf("an unhosted environment wrote a hosted block:\n%s", raw)
+	}
+}
+
+// TestPlanPullLocalPortRangeStartRefusesAClaimedRange is the collision case the
+// plan requires, and it is checked before any write: PlanPullLocalPortRangeStart
+// answers first, so a pull that would collide never reaches SaveEnvConfig.
+func TestPlanPullLocalPortRangeStartRefusesAClaimedRange(t *testing.T) {
+	useConfigHome(t)
+	seedTenantConfigForPortPlanning(t)
+	if err := SaveEnvConfig("team", EnvConfig{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	_, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "fresh", LowerServicePort)
+	var overlap ErrLocalPortRangeOverlap
+	if !errors.As(err, &overlap) {
+		t.Fatalf("a claimed range start was accepted: err = %v", err)
+	}
+	if overlap.A != "team/taken" || overlap.B != "team/fresh" {
+		t.Fatalf("overlap names %q and %q, want the two environments", overlap.A, overlap.B)
+	}
+}
+
+func TestPlanPullLocalPortRangeStartAllocatesTheLowestFreeRange(t *testing.T) {
+	useConfigHome(t)
+	seedTenantConfigForPortPlanning(t)
+	if err := SaveEnvConfig("team", EnvConfig{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	start, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "fresh", 0)
+	if err != nil {
+		t.Fatalf("allocate: %v", err)
+	}
+	if start != LowerServicePort+EnvironmentPortRangeSize {
+		t.Fatalf("allocated %d, want the range after the claimed one", start)
+	}
+}
+
+func TestPlanPullLocalPortRangeStartIgnoresTheEnvironmentItself(t *testing.T) {
+	useConfigHome(t)
+	seedTenantConfigForPortPlanning(t)
+	// Re-pulling into an environment that already holds a range must not
+	// collide with itself: the pull is updating this environment, not
+	// competing with it.
+	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	start, err := PlanPullLocalPortRangeStart(ConfigStore{}, "team", "dev", LowerServicePort)
+	if err != nil {
+		t.Fatalf("an environment's own range start was treated as a collision: %v", err)
+	}
+	if start != LowerServicePort {
+		t.Fatalf("allocated %d, want the environment's own range", start)
+	}
+}
+
+func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
+	_, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeHost)}, "", 0)
+	if err == nil {
+		t.Fatal("a host row was accepted as hostable")
+	}
+	if !strings.Contains(err.Error(), "no pod and no cluster") {
+		t.Fatalf("refusal does not say why a host env cannot be hosted: %v", err)
+	}
+}
+
+func TestNewPullAsNewEnvironmentRequiresAUsableRepoPath(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeLocalAgent)}, "", 0); err == nil {
+		t.Fatal("a local-agent pull-as-new was accepted with no repo path")
+	}
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeLocalAgent)}, dir, LowerServicePort); err != nil {
+		t.Fatalf("a real directory was refused: %v", err)
+	}
+	// A runtime env rides a PVC worktree, so it needs no host path and an
+	// empty one is not a refusal.
+	if _, err := NewPullAsNewEnvironment(PlatformEnvironment{Name: "dev", Type: string(EnvironmentTypeRuntime)}, "", LowerServicePort); err != nil {
+		t.Fatalf("a runtime pull-as-new was refused for want of a host path: %v", err)
+	}
+}
+
+func TestIsHostableEnvironmentType(t *testing.T) {
+	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime} {
+		if !IsHostableEnvironmentType(envType) {
+			t.Errorf("%s should be hostable", envType)
+		}
+	}
+	if IsHostableEnvironmentType(EnvironmentTypeHost) {
+		t.Error("host environments cannot be hosted and must not report as hostable")
+	}
+}
+
+// seedTenantConfigForPortPlanning gives the "team" tenant its own config.yaml.
+// The port planner walks tenants through ListTenantConfigs, which skips any
+// directory whose tenant config is absent -- so without this the planner sees
+// an empty machine and every range start looks free.
+func seedTenantConfigForPortPlanning(t *testing.T) {
+	t.Helper()
+	if err := SaveTenantConfig(TenantConfig{Name: "team"}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+}
+
+// useConfigHome points config resolution at a scenario-private directory and
+// returns it, so a test never reads or writes the operator's real erun config.
+func useConfigHome(t *testing.T) string {
+	t.Helper()
+	restore := setConfigHomeForModeTest(t)
+	t.Cleanup(restore)
+	return xdg.ConfigHome
+}
+
+// TestPullAsNewRefusesAPortCollisionBeforeWriting is the "checked before the
+// write" half of the port-range case: the refusal has to land before
+// SaveEnvConfig, because a config written first is one the port resolver then
+// refuses on some later command, far from the pull that caused it.
+func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
+	store := &recordingDefinitionStore{
+		envs: []EnvConfig{
+			{Name: "taken", Type: EnvironmentTypeRuntime, LocalPortRangeStart: LowerServicePort},
+		},
+	}
+	client := &stubDefinitionClient{row: PlatformEnvironment{
+		EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(EnvironmentTypeRuntime),
+	}}
+	_, err := PullEnvironmentDefinition(context.Background(), store, client, EnvDefinitionPullParams{
+		Tenant: "team", Environment: "fresh", EnvironmentID: "env-1",
+		// The operator asked for the range another environment already holds,
+		// which is the shape a collision takes: an unspecified start allocates
+		// the lowest free range instead and never collides.
+		LocalPortRangeStart: LowerServicePort,
+	})
+	var overlap ErrLocalPortRangeOverlap
+	if !errors.As(err, &overlap) {
+		t.Fatalf("a pull-as-new onto a claimed range start was not refused: err = %v", err)
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("a refused pull wrote %d config(s) anyway", len(store.saved))
+	}
+	if client.definitionReads != 0 {
+		t.Error("the pull read the platform's definition before settling the local port range")
+	}
+}
+
+// TestPullAsNewCreatesTheEnvironmentFromThePlatformRow is the acceptance half:
+// with a free range and a usable repo path, the pull writes a new environment
+// carrying the platform-owned identity plus the definition's portable fields,
+// and leaves the host-owned fields to this machine.
+func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
+	repoPath := t.TempDir()
+	store := &recordingDefinitionStore{}
+	version := "1.2.3"
+	hostile := "localrepopath-placeholder"
+	client := &stubDefinitionClient{
+		row: PlatformEnvironment{
+			EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh",
+			Type: string(EnvironmentTypeLocalAgent), KubernetesContext: "test-context",
+		},
+		definition: PlatformEnvDefinition{RuntimeVersion: &version},
+		// The payload also tries to carry a host-owned value, which the pull
+		// must not write.
+		rawDefinition: []byte(`{"runtimeVersion":"1.2.3","localRepoPath":"` + hostile + `"}`),
+	}
+
+	result, err := PullEnvironmentDefinition(context.Background(), store, client, EnvDefinitionPullParams{
+		Tenant: "team", Environment: "fresh", EnvironmentID: "env-1", LocalRepoPath: repoPath,
+	})
+	if err != nil {
+		t.Fatalf("pull-as-new: %v", err)
+	}
+	if !result.Created {
+		t.Error("a pull into a non-existent environment did not report creating it")
+	}
+	if result.Config.RuntimeVersion != "1.2.3" {
+		t.Errorf("portable runtime version = %q, want the platform's", result.Config.RuntimeVersion)
+	}
+	if result.Config.LocalRepoPath != repoPath {
+		t.Errorf("repo path = %q, want this machine's %q", result.Config.LocalRepoPath, repoPath)
+	}
+	if result.Config.LocalPortRangeStart != LowerServicePort {
+		t.Errorf("port range start = %d, want the lowest free range", result.Config.LocalPortRangeStart)
+	}
+	if result.Marker.DefinitionRevision != 3 {
+		t.Errorf("marker revision = %d, want the revision that was pulled", result.Marker.DefinitionRevision)
+	}
+}
+
+// recordingDefinitionStore is an in-memory envDefinitionConfigStore that
+// records what a pull wrote, so a test can assert a refusal wrote nothing.
+type recordingDefinitionStore struct {
+	envs  []EnvConfig
+	saved []EnvConfig
+}
+
+func (s *recordingDefinitionStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+	for _, env := range s.envs {
+		if env.Name == environment {
+			return env, "/dev/null", nil
+		}
+	}
+	for _, env := range s.saved {
+		if env.Name == environment {
+			return env, "/dev/null", nil
+		}
+	}
+	return EnvConfig{}, "", ErrNotInitialized
+}
+
+func (s *recordingDefinitionStore) SaveEnvConfig(_ string, config EnvConfig) error {
+	s.saved = append(s.saved, config)
+	return nil
+}
+
+func (s *recordingDefinitionStore) ListTenantConfigs() ([]TenantConfig, error) {
+	return []TenantConfig{{Name: "team"}}, nil
+}
+
+func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]EnvConfig, error) {
+	return append(append([]EnvConfig(nil), s.envs...), s.saved...), nil
+}
+
+// stubDefinitionClient answers the three platform reads and writes a pull
+// makes, from fixed values.
+type stubDefinitionClient struct {
+	row             PlatformEnvironment
+	definition      PlatformEnvDefinition
+	rawDefinition   []byte
+	definitionReads int
+}
+
+func (c *stubDefinitionClient) APIHost() string { return "https://api.example.test" }
+
+func (c *stubDefinitionClient) GetEnvironment(context.Context, string) (PlatformEnvironment, error) {
+	return c.row, nil
+}
+
+func (c *stubDefinitionClient) GetEnvironmentDefinition(context.Context, string) (PlatformEnvDefinitionRecord, error) {
+	c.definitionReads++
+	definition := c.definition
+	if len(c.rawDefinition) > 0 {
+		if err := json.Unmarshal(c.rawDefinition, &definition); err != nil {
+			return PlatformEnvDefinitionRecord{}, err
+		}
+	}
+	return PlatformEnvDefinitionRecord{EnvironmentID: c.row.EnvironmentID, TenantID: c.row.TenantID, Revision: 3, Definition: definition}, nil
+}
+
+func (c *stubDefinitionClient) PutEnvironmentDefinition(context.Context, string, PlatformEnvDefinition) (PlatformEnvDefinitionRecord, error) {
+	return PlatformEnvDefinitionRecord{}, nil
+}

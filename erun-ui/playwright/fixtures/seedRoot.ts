@@ -31,6 +31,16 @@ export const SEED_ENV_BETA = 'beta';
 // two independent selectors, one per provider type, each pre-selected to the
 // env's attachment.
 export const SEED_ENV_GAMMA = 'gamma';
+// One environment marked as hosted on a platform row, so the Manage dialog's
+// Hosted environment panel is stageable without a live platform: the marker is
+// a purely local config fact, and the drift comparison is stubbed over
+// /__erun_invoke by the spec that needs it. The api host is deliberately a
+// host the harness never contacts.
+export const SEED_ENV_DELTA = 'delta';
+export const SEED_HOSTED_API_HOST = 'api.example.test';
+export const SEED_HOSTED_TENANT_ID = 'seeded-platform-tenant';
+export const SEED_HOSTED_ENVIRONMENT_ID = 'seeded-platform-env';
+export const SEED_HOSTED_REVISION = 4;
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
@@ -546,6 +556,17 @@ export function seedBaseline(): void {
   seedEnvironment(SEED_TENANT, SEED_ENV_BETA, `cloudprovideralias: ${SEED_CLOUD_ALIAS}\n`);
   // gamma links both an AWS alias (legacy scalar) and a Cloudflare alias
   // (per-type map) so the per-provider-type env selectors are stageable.
+  // delta carries a hosted marker. It is a local-agent env like alpha, so the
+  // only thing distinguishing it is the marker itself.
+  seedEnvironment(
+    SEED_TENANT,
+    SEED_ENV_DELTA,
+    'hosted:\n' +
+      `  apihost: ${SEED_HOSTED_API_HOST}\n` +
+      `  tenantid: ${SEED_HOSTED_TENANT_ID}\n` +
+      `  environmentid: ${SEED_HOSTED_ENVIRONMENT_ID}\n` +
+      `  definitionrevision: ${SEED_HOSTED_REVISION}\n`,
+  );
   seedEnvironment(
     SEED_TENANT,
     SEED_ENV_GAMMA,

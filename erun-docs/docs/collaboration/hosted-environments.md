@@ -106,6 +106,78 @@ An **Operate**-scoped token skips that connectivity check (calling `version` wou
 
 The same panel's **Attach to a live session** control opens a live terminal to a session already running in the environment's pod (the one `erun open --ai` or a linked desktop orchestrator started), directly in the browser — no port-forward, no separate SSH or attach client. It mints its own narrower token (`erun:attach`, not the `erun:admin` the tool-driving form above uses). The session id field discovers what the environment has actually reported: it prefills the most recently active live session and offers a quick-pick button for every other one, so you no longer need to already know the id from wherever the session was started; you can still type one by hand, including for an environment that has not reported any sessions yet. Type a line and press **Send**; output streams into the scrollback as it arrives. This is a minimal, line-based view rather than a full terminal (no cursor-addressed rendering yet), and **Disconnect** ends only this browser's view — the session itself keeps running for the next attach.
 
+## Keep an environment's settings on the platform
+
+Registering an environment does **not** upload how it is configured. The platform row holds identity and lifecycle; the settings that describe the environment itself — its runtime version and image, its sizing, its idle policy, which AI tool its agent uses — live in your local config until you upload them.
+
+```bash
+erun platform env register --name dev --type local-agent --adopt \
+  --kubernetes-context kind-dev --definition acme/dev
+```
+
+`--adopt` records a row for an environment that already exists on your machine instead of asking the platform to provision one. Paired with `--definition TENANT/ENVIRONMENT`, it also uploads that environment's portable settings as the row's **definition revision 1** and writes a **hosted marker** into the local config, recording which platform row this machine follows.
+
+### The hosted marker
+
+The marker is a local fact, not server state: on the platform every row is hosted by definition, so "this environment is hosted" can only mean *this local environment corresponds to that platform row*. It records four things:
+
+| Element | What it names |
+|---|---|
+| API host | which platform — `api.erunpaas.com`, or a self-hosted one |
+| Tenant id | the tenant the platform resolved from your token's issuer, not the directory name |
+| Environment id | the row itself |
+| Definition revision | the revision this machine last synced from |
+
+All four are needed. Two platforms can hold rows that share an environment id in the sense that they are unrelated, and a tenant directory name is not a platform tenant — so no single element identifies the row. `erun platform env push` and `pull` compare the whole marker against what the platform resolves and **refuse** on a disagreement rather than re-pointing the environment: adopting the resolved identity would silently write your settings to a different tenant's row.
+
+The marker is visible in `erun list`, on the `hosted:` line beside `managed-cloud:`. The two are different facts — `managed-cloud` says the platform manages this environment's *lifecycle*, `hosted` says it holds this environment's *definition* — so an environment can be either, both, or neither.
+
+### Upload and pull
+
+```bash
+erun platform env push acme/dev     # upload the current settings; advances the revision
+erun platform env pull acme/dev      # bring the platform's copy back down
+```
+
+`push` uploads; `pull` reads the row and its stored definition and writes the portable subset into `erun/<tenant>/<env>/config.yaml`. Both accept `--dry-run`, which resolves and traces what would travel without contacting the platform or writing anything.
+
+A `pull` into an environment this machine does not have yet needs `--environment-id` — nothing local can say which row you mean:
+
+```bash
+erun platform env pull acme/dev --environment-id 018f4b2a-... --repo-path ~/src/acme
+```
+
+That path is checked *before* anything is written. The repository path is a host-owned setting, so a pull never obtains one from the platform; for the types that require it (`local-agent`), a pull-as-new without a usable `--repo-path` is refused rather than creating an environment that cannot build. The same applies to the local port range: a newcomer gets the lowest free range on this machine, and a collision with an environment that already holds one is refused before the write rather than discovered later by whatever needs a port.
+
+### Which settings never leave the machine
+
+The rule is a positive allowlist: a setting travels only if it describes the environment itself. Everything else is host-owned — it describes *this machine*, or names an object that only exists on *this* cluster — and is never uploaded and never written by a pull.
+
+**Travels:** the runtime version, runtime image and runtime chart; the runtime and dind pod sizing; the namespace quota; the idle policy; the agent configuration; which AI tool the environment uses; whether it rides upgrades and on which channel; the marked container registry list; and `deploy.timeout`.
+
+**Never travels:** the repo path and the local port range; sshd keys, ports and paths; the MCP auth public key path; `imagePullSecrets`, `registryCredentialSecretName` and `platformAliasSecretName` (each names a Kubernetes Secret, and a name is a cluster-local reference whose absence elsewhere is not an error); cloud provider aliases; `managedCloud`; the runtime registry endpoint; host credential delivery; `platformAccount`; auto-start and the stopped flag; whether the build script is disabled; `deploy.components`, which is this machine's own saved selection; and the hosted marker itself.
+
+**Refuses instead of merging:** three settings mirror columns on the row and are fixed at registration — the environment's **name**, its **type**, and its **Kubernetes context**. A local value that disagrees is a refusal, not a merge, and the name is the load-bearing one: the local config path is derived from it, so pulling a differently-named row would write a second environment instead of updating this one.
+
+The root `config.yaml` and the secret store are permanently out of scope. The root file holds the plaintext admin token, and a transfer that could reach it would be a credential-exfiltration path rather than a convenience.
+
+### When both sides have changed
+
+Only portable settings can genuinely conflict. A pull compares the revision this machine last synced from against the revision the platform holds; when the platform has moved ahead, that is a catch-up and the pull applies it. When *this machine* has also moved past the revision it last synced from, the same setting may have been edited on both sides, and the pull shows you the diff and asks:
+
+```
+  This environment and the platform have both changed since the last sync:
+    runtime version: 1.2.2 -> 1.2.3
+```
+
+Answer `y` to take the platform's copy, or `n` to leave your own in place. `-y` accepts without asking, for non-interactive callers; with no way to ask at all (an MCP caller), a two-sided edit is a refusal carrying the diff rather than a silent overwrite.
+
+A pull preserves everything the platform has no opinion about, including keys this erun does not model.
+
+### Knowing when the platform has moved
+
+`erun list` shows the revision your local copy was synced from. In the desktop app, the environment's **General** tab carries a **Hosted environment** panel: which row this environment corresponds to, and a **Check for updates** button that compares revisions and tells you when the platform is ahead. The panel is read-only by design — it names `erun platform env pull` rather than performing it, so a config change never triggers a write of its own.
+
 ## Quotas
 
 Your tenant has a cap on how many environments it may register at once. `erun platform env register` reports a clear conflict at the cap; `erun platform provision` shows you the same quota decision in its preview before you commit. An environment you have asked to delete stops counting against that cap as soon as the delete is accepted — a teardown that gets stuck can't lock you out of your own allowance. In the desktop, hitting the cap shows the same message inline on the register form rather than a raw error — it names the cap and the fix (delete or stop another environment first), the same recoverable state the CLI reports.

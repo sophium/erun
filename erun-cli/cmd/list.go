@@ -838,6 +838,7 @@ func environmentDetailLines(tenantName string, env common.ListEnvironmentResult)
 	lines = append(lines, runtimeSizingLines(env.Sizing, indent)...)
 	lines = append(lines, []string{
 		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
+		indent + "hosted: " + hostedEnvironmentLabel(env.Hosted),
 		indent + "ai-tool: " + valueOrNone(env.AITool),
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
@@ -1072,6 +1073,18 @@ func enabledDisabledLabel(enabled bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+// hostedEnvironmentLabel renders the hosted marker beside managed-cloud, which
+// is where an operator already looks to learn whether the platform has any
+// relationship with this environment. The two answer different questions --
+// managed-cloud is lifecycle, hosted is definition -- so both are shown rather
+// than one standing in for the other.
+func hostedEnvironmentLabel(hosted *common.HostedEnvironment) string {
+	if hosted == nil {
+		return "no"
+	}
+	return hosted.Describe()
 }
 
 func portRangeLabel(ports common.EnvironmentLocalPorts) string {

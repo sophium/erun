@@ -163,6 +163,15 @@ var Routes = map[string]Class{
 	"POST /v1/environments/{environment_id}/ai-sessions": TenantUserClass,
 	"GET /v1/environments/{environment_id}/ai-sessions":  TenantUserClass,
 
+	// environment_definitions.go — uploading the portable subset of an
+	// environment's own settings, and reading it back, is the same class as
+	// the ai-sessions self-report above: operating an environment that already
+	// exists. It creates nothing and deletes nothing — the environment row is
+	// registered (or adopted) through POST /v1/environments, which stays
+	// tenant administration.
+	"PUT /v1/environments/{environment_id}/definition": TenantUserClass,
+	"GET /v1/environments/{environment_id}/definition": TenantUserClass,
+
 	// jobs.go — recording and updating what this caller is working on is the
 	// same class as reporting a build result: an actor's own account of its
 	// work, not administration of the tenant. Reading the queue back is the
