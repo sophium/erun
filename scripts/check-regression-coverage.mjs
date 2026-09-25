@@ -164,6 +164,12 @@ export function statementIsSubstantive(statement) {
   return { ok: true };
 }
 
+// The notes that are a caveat on the verdict rather than a footnote to it:
+// the run reached a conclusion about the change but did not check part of what
+// that conclusion is read as covering. They are rendered set apart so an
+// exit-0 result cannot be read as "clean" when it is partly "not checked".
+export const caveatMarkers = ['UNCHECKED:', 'NOT RUN:'];
+
 const trailerPattern = /^(Regression-Test|Regression-Test-Exemption|Regression-Test-Existing|Reproduces|Defect-Fix):[ \t]*(.*)$/;
 
 // parseTrailers collects the declaration trailers from every commit in the
@@ -234,9 +240,166 @@ function resolveNamedCase(spec, change, io, { requireInDiff }) {
   return null;
 }
 
+// --- opt-in gating ------------------------------------------------------
+//
+// A declared reproduction that resolves, is a test, and is part of the diff
+// can still be one that no gate ever executes. .erun-backend-api's opt-in
+// end-to-end suites read an ERUN_E2E_* variable and skip when it is unset, and
+// no gate target sets any of them: `make check-gate` (and so `erun build
+// --gate`) runs `go test ./...` non-verbosely, which prints no SKIP line at
+// all, so the gate reports a clean `ok` for every package whose entire
+// database contract went unexercised. That is the shape a fix for a
+// database-only defect takes when it ships green against a fake repository
+// while the real database rejects the row: the declaration is honest, and the
+// case it names never ran.
+//
+// This names that hole instead of leaving it silent. It decides only what it
+// can see: the same-file call closure from the named case down to a
+// `t.Skip(...)`, and whether the variable that skip names is set in this
+// process's environment. When it cannot see a skip it says nothing -- a
+// missed gate is a silence, never a false accusation -- and nothing here
+// fails a build. How suites are selected for a gate is a separate, open
+// question this deliberately does not answer.
+
+// functionBodies indexes the top-level functions of Go source by name. A
+// function's body is scanned with paren-depth tracking so a parameter type
+// carrying its own braces (`cfg struct{ ... }`) does not look like the body's
+// opening brace.
+export function functionBodies(source) {
+  const bodies = new Map();
+  const signature = /^func\s+(?:\([^)\n]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+  let match;
+  while ((match = signature.exec(source)) !== null) {
+    const open = bodyBraceIndex(source, signature.lastIndex);
+    const close = open < 0 ? -1 : matchingBraceIndex(source, open);
+    if (close < 0) continue;
+    if (!bodies.has(match[1])) bodies.set(match[1], source.slice(open, close + 1));
+    signature.lastIndex = close + 1;
+  }
+  return bodies;
+}
+
+// bodyBraceIndex finds the brace opening a signature's body, starting from
+// just past the '(' that opened its parameter list.
+function bodyBraceIndex(source, from) {
+  let depth = 1;
+  for (let i = from; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return source.indexOf('{', i);
+    }
+  }
+  return -1;
+}
+
+// matchingBraceIndex finds the brace closing the one at `open`, skipping
+// braces inside string literals, runes and comments -- a skip message reading
+// "set X=1 (see docs)" or a comment about `{}` must not be counted as code.
+function matchingBraceIndex(source, open) {
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '/' && source[i + 1] === '/') {
+      i = source.indexOf('\n', i);
+      if (i < 0) return -1;
+      continue;
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      i = source.indexOf('*/', i);
+      if (i < 0) return -1;
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === '`' || ch === "'") {
+      const quote = ch;
+      i++;
+      while (i < source.length && source[i] !== quote) {
+        if (source[i] === '\\' && quote !== '`') i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+// reachedBodies walks the same-file call graph out from `root`, so a case that
+// reaches the gate through its own helper -- which is how these suites are
+// written -- is recognised as gated rather than missed.
+function reachedBodies(bodies, root) {
+  if (!bodies.has(root)) return [];
+  const seen = new Set([root]);
+  const queue = [root];
+  const reached = [];
+  while (queue.length > 0) {
+    const body = bodies.get(queue.shift());
+    reached.push(body);
+    for (const callee of bodies.keys()) {
+      if (seen.has(callee)) continue;
+      if (new RegExp(`\\b${callee}\\s*\\(`).test(body)) {
+        seen.add(callee);
+        queue.push(callee);
+      }
+    }
+  }
+  return reached;
+}
+
+const skipCallPattern = /\bt\.Skip(?:f|Now)?\s*\(([^)]*)\)/g;
+const envNamePattern = /ERUN_[A-Z0-9_]+/g;
+
+// optInGatesFor answers which opt-in variables the named test case skips
+// without. Empty means "not gated, or not a shape this can read" -- both are
+// silence rather than a claim.
+export function optInGatesFor(spec, io) {
+  const sep = spec.lastIndexOf('::');
+  if (sep < 0) return [];
+  const path = spec.slice(0, sep).trim();
+  const testCase = spec.slice(sep + 2).trim();
+  if (!/\.go$/.test(path) || !testCase) return [];
+  if (!io.fileExists(path)) return [];
+
+  const unset = new Set();
+  for (const body of reachedBodies(functionBodies(io.readFile(path)), testCase)) {
+    for (const skip of body.matchAll(skipCallPattern)) {
+      // Prefer the variable the skip message itself names -- the author
+      // writes that line to say exactly what to set -- and fall back to the
+      // ones the enclosing function reads only when it names none.
+      const messageNames = [...skip[1].matchAll(envNamePattern)].map((m) => m[0]);
+      const candidates = messageNames.length > 0 ? messageNames : [...body.matchAll(envNamePattern)].map((m) => m[0]);
+      for (const name of candidates) {
+        if (!io.getEnv(name)) unset.add(name);
+      }
+    }
+  }
+  return [...unset].sort();
+}
+
+// optInSkipNote states the hole the resolved declaration leaves, with the
+// exact variable to set. It is a note and never a failure: the suites are
+// opt-in by design, and requiring a database to run them is not this gate's
+// decision to make.
+export function optInSkipNote(trailer, spec, gates) {
+  const list = gates.join(', ');
+  const plural = gates.length === 1;
+  return (
+    `NOT RUN: ${trailer}: ${spec} is opt-in gated -- it skips unless ${list} ${plural ? 'is' : 'are'} set, ` +
+    `and no gate target sets ${plural ? 'it' : 'them'}. The declaration resolved, but the gate that read it did ` +
+    `not execute the case: run it with ${list} pointing at the real dependency before treating this change as verified.`
+  );
+}
+
 // evaluateRegressionCoverage is the whole classifier. `change` carries the
-// facts a caller reads from git; `io` carries the two filesystem reads, both
-// injected so the unit tests never touch the real tree.
+// facts a caller reads from git; `io` carries the filesystem reads and the
+// environment lookup, all injected so the unit tests never touch the real
+// tree.
 export function evaluateRegressionCoverage(change, io) {
   const failures = [];
   const notes = [];
@@ -362,6 +525,13 @@ export function evaluateRegressionCoverage(change, io) {
   notes.push(
     'This gate confirms the case exists, is a test, and is part of this change. Whether it reproduces the reported failure is a review judgement -- read the "Reproduces:" line against the issue.',
   );
+  // A declaration that resolves is not yet a declaration that ran: say which
+  // of the named cases this gate will skip rather than let a clean run imply
+  // they all executed.
+  for (const spec of namedClaims) {
+    const gates = optInGatesFor(spec, io);
+    if (gates.length > 0) notes.push(optInSkipNote('Regression-Test', spec, gates));
+  }
   return { defectFix: true, classification: 'declared', failures: [], notes };
 }
 
@@ -389,8 +559,8 @@ function evaluateExemption(change, io, trailers, failures, notes) {
     if (problem) failures.push(`Exemption ${problem}.`);
   }
 
+  const existing = kind === 'covered-by-existing' ? trailers['Regression-Test-Existing'] || [] : [];
   if (kind === 'covered-by-existing') {
-    const existing = trailers['Regression-Test-Existing'] || [];
     if (existing.length === 0) {
       failures.push(
         '"covered-by-existing" needs a "Regression-Test-Existing: <path>::<case>" trailer naming the test that already reproduces the reported failure.',
@@ -404,6 +574,11 @@ function evaluateExemption(change, io, trailers, failures, notes) {
 
   if (failures.length > 0) {
     return { defectFix: true, classification: 'exempt-invalid', failures, notes };
+  }
+  // An existing case that this gate skips covers nothing it claims to.
+  for (const value of existing) {
+    const gates = optInGatesFor(value, io);
+    if (gates.length > 0) notes.push(optInSkipNote('Regression-Test-Existing', value, gates));
   }
   notes.push(`Exempt: ${kind} -- ${reason}`);
   if (!spec.verify) {
@@ -511,6 +686,7 @@ function isWorkingTreeDirty() {
 const realIO = {
   fileExists: (path) => existsSync(join(repoRoot, path)),
   readFile: (path) => readFileSync(join(repoRoot, path), 'utf8'),
+  getEnv: (name) => process.env[name] || '',
 };
 
 function usage() {
@@ -561,11 +737,12 @@ function main(argv) {
   } else {
     const scope = `${change.base.slice(0, 12)}..${change.head}${change.branchName ? ` (${change.branchName})` : ''}`;
     console.log(`regression-coverage gate: ${result.classification} [${scope}]`);
-    // A note saying the gate examined nothing is the caveat on the verdict
-    // itself rather than a footnote to it, so it is set apart and unlabelled:
-    // an exit-0 run has to be readable as "not checked" and not as "clean".
+    // A note saying the gate examined nothing -- or examined a declaration it
+    // then did not execute -- is the caveat on the verdict itself rather than
+    // a footnote to it, so it is set apart and unlabelled: an exit-0 run has
+    // to be readable as "not checked" and not as "clean".
     for (const note of result.notes) {
-      if (note.startsWith('UNCHECKED:')) {
+      if (caveatMarkers.some((marker) => note.startsWith(marker))) {
         console.log('');
         console.log(`  ${note}`);
         console.log('');
