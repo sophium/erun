@@ -35,11 +35,19 @@ test.describe('app-notification message centre', () => {
     await expect(app.titlebar.messageCenterIcon('info')).toBeVisible();
 
     // Auto-dismiss marks it read (unread count -> 0), so the icon disappears
-    // -- but the entry survives in history, which is exactly why the
-    // fallback "Message history" entry point takes its place instead of the
-    // titlebar going fully quiet.
+    // -- but the entry survives in history, so the titlebar still offers a way
+    // into the message centre instead of going fully quiet. WHICH way is not
+    // this spec's to pin: the "Message history" fallback renders only while no
+    // class at all is unread, so a notice another spec left arriving in this
+    // worker's page keeps that class's icon up and the fallback off. Assert
+    // the reachability the spec actually owns, then use the entry point to
+    // read the entry back out of history.
+    // titlebar-message-centre-entry-point.spec.ts drives both titlebar shapes
+    // deterministically in one page.
     await expect(app.titlebar.messageCenterIcon('info')).toHaveCount(0);
-    await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
+    await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
+    await app.titlebar.openMessageCenterFromTitlebar();
+    await expect(app.titlebar.messageCenterRow(message)).toBeVisible();
   });
 
   test('error notification persists and is readable in the dialog', async ({ app, page }) => {
