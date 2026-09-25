@@ -45,33 +45,53 @@
 # replacement for it.
 #
 # 15m was calibrated against an uncapped build container, which took 22 of a
-# 24-core node before the build-container CPU cap (#2255/#2257) started
-# holding it to its declared cpu= (commonly 4). Once every module actually
-# got only that many cores, the fixed 15m stopped fitting: every module
-# reported "0 issues" and then hit the timeout anyway, turning an
-# environmental CPU shortage into a false-red gate (erun#2266). Scale the
-# timeout inversely with the same resolved CPU quota LINT_PARALLELISM already
-# reads below (scripts/parallel-gate.sh's cpu-quota mode, which honors the
-# erun-devops Dockerfile's PARALLEL_GATE_CPU_LIMIT=$DIND_CPU_LIMIT override
-# the same way LINT_PARALLELISM's width calculation does), floored at the
-# original 15m so an environment at or above the 22-core reference never gets
-# less time than before. At the reference DIND_CPU_LIMIT default of 4 this
-# resolves to 82m, comfortably past the ~24.5m (1468s) a starved run was
-# observed to take in erun#2266 before failing. LINT_TIMEOUT's `?=` keeps the
-# existing manual override: an explicit `LINT_TIMEOUT=<duration> make check`
-# (or an env var of the same name) still wins over this computed default.
+# 24-core node before the build-container CPU cap started holding it to its
+# declared cpu= (commonly 4). Once every module actually got only that many
+# cores, the fixed 15m stopped fitting: every module reported "0 issues" and
+# then hit the timeout anyway, turning an environmental CPU shortage into a
+# false-red gate. Scale that reference budget -- 15m at 22 cores -- by the
+# smallest CPU erun sizes a build environment at (MinimumRuntimeDindCPU in
+# erun-common/runtime_resources.go, "the floor RuntimeDindCPULimit refuses to
+# size a build below") rather than by this pod's own quota, so the same
+# commit's lint is handed the same deadline wherever it runs: 15m * 22 / 4 =
+# 82m, past the ~24.5m (1468s) a starved run was observed to take before the
+# old formula replaced it, and past the longest lint measured on the fleet
+# since. LINT_TIMEOUT's `?=` keeps the existing manual override: an explicit
+# `LINT_TIMEOUT=<duration> make check` (or an env var of the same name) still
+# wins over this computed default.
 #
-# The floor above is a floor on the budget, not a guarantee that the budget
-# fits: at the 22-core reference this resolves to the floor, and the lint has
-# outlived it while reporting "0 issues.". See the `lint` target's comment for
-# why the verdict is read from golangci-lint's report rather than from the
-# deadline this number sizes.
+# The budget reads no cgroup and no PARALLEL_GATE_CPU_LIMIT on purpose. It
+# used to be scaled inversely with this pod's own resolved quota, which made
+# the lint's deadline -- and so the meaning of a lint red -- a property of the
+# machine that ran it: the 22-core environment resolved the 15m floor, the
+# 8-core ones 41m, and `erun review record-build --gate --failed` cannot tell
+# a lint that found something from one killed by a deadline its environment
+# never had a chance to meet. The scaling's premise was that wall-clock scales
+# as 1/cores; the measured runs do not, because a lint's fixed phases --
+# package loading, the warm cache, the twelve other targets check-gate fans
+# out beside it -- do not parallelize: the same commit's lint took 912s, 1296s
+# and up to 2569s on the *most*-resourced environment in the fleet, which the
+# old formula handed the *least* time. A budget that is the same everywhere is
+# what makes a red attributable wherever it was produced.
+#
+# The trade is deliberate and stated rather than hidden: a lint that never
+# finishes -- or never loads its packages, and so has no report to read -- is
+# now diagnosed in up to 82m on every environment, where a 22-core pod used to
+# give up at 15m. Since the verdict is read from golangci-lint's own report
+# rather than from its deadline (see the `lint` target's comment), a deadline
+# expiring around an analysis that did report is not a failure: the only red
+# this budget can still produce is a starved run killed before it could report
+# at all, which is the false red this formula's lineage exists to remove, and
+# it costs a review ejected from the merge queue plus a full cold gate
+# rebuild. A wedged run needs a human either way; a healthy one must not be
+# failed for being slow.
 LINT_TIMEOUT_REFERENCE_CPU := 22
 LINT_TIMEOUT_BASE_MINUTES := 15
-LINT_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
-	m=$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / cpu )); \
-	[ "$$m" -ge $(LINT_TIMEOUT_BASE_MINUTES) ] || m=$(LINT_TIMEOUT_BASE_MINUTES); \
-	echo "$${m}m")
+# The smallest CPU erun sizes a build environment at, named rather than inlined
+# so the resolved budget below stays auditable against that floor -- and fixed
+# rather than read from this pod, so the budget is identical everywhere.
+LINT_TIMEOUT_FLEET_MIN_CPU := 4
+LINT_TIMEOUT ?= $(shell echo "$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / $(LINT_TIMEOUT_FLEET_MIN_CPU) ))m")
 
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
@@ -181,8 +201,10 @@ GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # still making progress. A gate that fails a correct tree for being slow is
 # worse than a slow gate, because it teaches its operators to re-run it.
 #
-# Scale the budget inversely with the resolved CPU quota, the same shape
-# LINT_TIMEOUT above uses for the identical defect in the sibling linter run.
+# Scale the budget inversely with the resolved CPU quota -- the shape
+# LINT_TIMEOUT above used for the identical defect in the sibling linter run
+# until its budget was made uniform across environments instead (see its
+# comment); this one still has to fit the work to the machine.
 # The quota is what GO_TEST_GOMAXPROCS already divides into this suite's
 # `-parallel` share, so at or above GO_TEST_TARGET_COUNT CPUs the suite has its
 # reference share and takes the base, and below it the suite is at its serial
@@ -243,36 +265,42 @@ INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota)
 # a timeout and reads as a lint failure to anything watching the status,
 # including `erun review record-build --gate --failed`.
 #
-# The lineage, because the constant above reads as though this were solved:
-# the timeout used to be a flat 15m, calibrated on a build container that took
-# 22 of a 24-core node; once the container's declared cpu= was actually
-# enforced every module reported "0 issues" and then hit the deadline anyway,
-# so the timeout was scaled inversely with the resolved quota and floored at
-# that original 15m. That corrected the starved-environment end of the range
-# and left the floor calibrated for a lint that owns the whole quota -- which
-# is not what this target hands it. check-gate fans 13 targets out at -j13 and
-# this target runs all six LINT_MODULES at LINT_PARALLELISM=6, so at
-# PARALLEL_GATE_CPU_LIMIT=22 each lint gets LINT_GOMAXPROCS = 22/6 = 3 cores
-# while twelve other targets run beside it. At exactly the 22-core reference
-# the scaling term is inert (15m * 22 / 22) and the run takes the floor -- the
-# *least* budget the formula can hand out, asked to cover the most work in the
-# gate. erun-backend-api's analysis completed with "0 issues." and was
-# reported as a lint failure at 912s and at 1296s against that 900s floor.
-# Raising the floor is not the fix: it clears a red by moving a threshold and
-# trades a short false red for a long one. The invariant is narrower than the
-# timeout -- a lint that reported its whole result and found nothing must not
-# red the gate -- so it is read off the report, and the deadline stays as it
-# is: a bound on a lint that never finishes, or never loads its packages,
-# which has no report to read and still fails.
+# The lineage, because the deadline has moved twice and each move has a
+# reason. The timeout used to be a flat 15m, calibrated on a build container
+# that took 22 of a 24-core node; once the container's declared cpu= was
+# actually enforced every module reported "0 issues" and then hit the deadline
+# anyway, so the timeout was scaled inversely with the resolved quota and
+# floored at that original 15m. That corrected the starved-environment end of
+# the range and left the floor calibrated for a lint that owns the whole
+# quota -- which is not what this target hands it. check-gate fans 13 targets
+# out at -j13 and this target runs all six LINT_MODULES at LINT_PARALLELISM=6,
+# so at PARALLEL_GATE_CPU_LIMIT=22 each lint gets LINT_GOMAXPROCS = 22/6 = 3
+# cores while twelve other targets run beside it; erun-backend-api's analysis
+# completed with "0 issues." and was reported as a lint failure at 912s and at
+# 1296s against that 900s floor.
+#
+# Raising the floor was not the fix on its own: while the verdict still came
+# from the deadline, moving the threshold only traded a short false red for a
+# long one. The invariant is narrower than the timeout -- a lint that reported
+# its whole result and found nothing must not red the gate -- so it is read
+# off the report, and the deadline keeps its role as a bound on a lint that
+# never finishes, or never loads its packages, which has no report to read and
+# still fails. Reading the verdict off the report is also what makes raising
+# the budget safe now: with no verdict riding on it, a longer deadline cannot
+# turn a finding green -- it can only let a starved run finish far enough to
+# say what it found -- and the run it waits for instead is one that never
+# reported at all. LINT_TIMEOUT above is therefore both uniform and generous,
+# for the same reason the verdict is read from the report and not from the
+# clock: a red has to mean one thing, the same thing, wherever this gate runs.
 #
 # What this target does not leave implicit: the budget it ran under. The
-# timeout above is scaled by the environment's own CPU quota, so two pods run
-# the same commit's lint against different deadlines -- and a red produced by
-# the shorter one reads, in the log, exactly like a red produced by a finding.
+# timeout above is the same on every environment now, but the fan-out width and
+# the per-lint CPU share are not, and both decide how long a module's lint can
+# take -- so a red still needs the numbers it ran under beside it to be read.
 # The recipe therefore prints the numbers it passes (the timeout, the fan-out
-# width, the per-lint GOMAXPROCS) beside the cpu quota they were derived from,
-# once before the fan-out and again beside the aggregated failure line. It
-# prints its own expanded variables rather than recomputing them, so an
+# width, the per-lint GOMAXPROCS) beside the cpu quota the widths were derived
+# from, once before the fan-out and again beside the aggregated failure line.
+# It prints its own expanded variables rather than recomputing them, so an
 # operator's LINT_TIMEOUT/LINT_PARALLELISM/LINT_GOMAXPROCS override is what
 # shows up here: the numbers worth printing are the ones the modules got, not a
 # second resolution of the formula that produced them.
@@ -287,7 +315,7 @@ lint:
 		   exit 1 ;; \
 	esac
 	@cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
-	budget="LINT_TIMEOUT=$(LINT_TIMEOUT) LINT_PARALLELISM=$(LINT_PARALLELISM) LINT_GOMAXPROCS=$(LINT_GOMAXPROCS), resolved from a cpu quota of $$cpu"; \
+	budget="LINT_TIMEOUT=$(LINT_TIMEOUT) LINT_PARALLELISM=$(LINT_PARALLELISM) LINT_GOMAXPROCS=$(LINT_GOMAXPROCS), the widths from a cpu quota of $$cpu (the timeout is the same on every environment)"; \
 	echo ">> lint budget: $$budget"; \
 	for m in $(LINT_MODULES); do \
 		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "$(CURDIR)/scripts/lint-module.sh $(LINT_GOMAXPROCS) $(LINT_TIMEOUT) $$m"; \

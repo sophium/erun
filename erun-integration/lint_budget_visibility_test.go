@@ -1,16 +1,20 @@
 package integration
 
-// The lint target's deadline is scaled by the environment's own CPU quota, so
-// the same commit's lint is handed a different budget by a CPU-22 pod (900s,
-// the floor) than by a CPU-8 one (2460s). Both verdicts are real, but only one
-// of them is about the code: a lint killed by the shorter deadline and a lint
-// that found something produce the same red, and nothing in the log said which
-// budget the run had. A reader of that log could not tell whether the tree
-// regressed or the pod changed.
+// The lint target's deadline used to be scaled by the environment's own CPU
+// quota, so the same commit's lint was handed a different budget by a CPU-22
+// pod (900s, the floor) than by a CPU-8 one (2460s). Both verdicts were real,
+// but only one of them was about the code: a lint killed by the shorter
+// deadline and a lint that found something produced the same red, and nothing
+// in the log said which budget the run had. A reader of that log could not
+// tell whether the tree regressed or the pod changed.
 //
-// So the recipe prints the budget it resolved -- the timeout, the fan-out
-// width, the per-lint GOMAXPROCS, and the CPU quota they were derived from --
-// and repeats it beside the aggregated failure line.
+// The budget is now one number on every environment
+// (TestLintBudgetDoesNotVaryWithTheEnvironmentsCPULimit drives that), and the
+// quota still decides what does have to vary with the machine -- the fan-out
+// width and the per-lint CPU share. So the recipe prints the budget it ran
+// under -- the timeout, the fan-out width, the per-lint GOMAXPROCS, and the
+// CPU quota the widths were derived from -- and repeats it beside the
+// aggregated failure line.
 //
 // What this pins is not that a line was printed but that the numbers on it are
 // the numbers the lint process actually got: the stub golangci-lint below
@@ -91,14 +95,81 @@ func TestLintTargetPrintsTheResolvedBudgetItRunsUnder(t *testing.T) {
 		})
 	}
 
-	// The reported asymmetry itself, now legible: two pods, two budgets. This
-	// is what keeps the cases above from quietly becoming vacuous on a machine
-	// whose quota makes the scaling term inert, where both pods would agree
-	// and their assertions would pass without exercising anything.
+	// The asymmetry this file was written around is gone: two pods, one
+	// budget. This guard asserted the opposite until the budget was made
+	// uniform -- it existed to keep the cases above from becoming vacuous on a
+	// machine whose quota made the scaling term inert, by failing when the two
+	// pods agreed. The difference between them was the defect, so the
+	// assertion is inverted rather than dropped: a 22-core pod and an 8-core
+	// pod running one commit's lint now have to resolve one deadline, or a red
+	// stops meaning the same thing depending on which of them produced it.
 	if slow, ok := deadlines[22]; ok {
-		if fast, ok := deadlines[8]; ok && slow == fast {
-			t.Errorf("a 22-core pod and an 8-core pod both resolved LINT_TIMEOUT=%s: the cases above no "+
-				"longer exercise the asymmetry they exist for, so their pass proves nothing about it", slow)
+		if fast, ok := deadlines[8]; ok && slow != fast {
+			t.Errorf("a 22-core pod resolved LINT_TIMEOUT=%s and an 8-core pod %s: the budget is decided "+
+				"by the environment again, so the same commit's lint can pass on one of them and fail on "+
+				"the other, and neither red says which happened", slow, fast)
+		}
+	}
+}
+
+// TestLintBudgetDoesNotVaryWithTheEnvironmentsCPULimit is the invariant the
+// budget line exists for: the deadline a module's lint is given is a property
+// of the gate, not of the machine that happens to be running it. It drives
+// the real target at every CPU quota a gate environment resolves -- from 4,
+// the smallest erun sizes a build environment at, to 22, the reference the
+// budget is calibrated from -- and requires one resolved LINT_TIMEOUT across
+// all of them, read back from the stub linter so the number compared is the
+// one the module was actually handed rather than a second resolution of the
+// formula that produced it.
+//
+// Quotas the fleet does not currently run at are included on purpose: what is
+// asserted is that the value does not move with the quota at all, not that the
+// quotas in use today happen to agree.
+func TestLintBudgetDoesNotVaryWithTheEnvironmentsCPULimit(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	pin, err := os.ReadFile(filepath.Join(root, "GOLANGCI_LINT_VERSION"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := strings.TrimPrefix(strings.TrimSpace(string(pin)), "v")
+
+	moduleDir := t.TempDir()
+	quotas := []int{4, 8, 12, 16, 22}
+
+	budgets := map[int]string{}
+	for _, cores := range quotas {
+		stubDir := t.TempDir()
+		writeReportingLintStub(t, stubDir, version, 0)
+
+		out, err := runLintTarget(t, root, stubDir, moduleDir, "PARALLEL_GATE_CPU_LIMIT="+strconv.Itoa(cores))
+		if err != nil {
+			t.Fatalf("the lint target failed a stub that exited 0 at PARALLEL_GATE_CPU_LIMIT=%d: %v\n%s",
+				cores, err, out)
+		}
+
+		budget := parseLintBudget(t, out)
+		budgets[cores] = budget["LINT_TIMEOUT"]
+
+		// The budget the line names has to be the one this run's linter was
+		// handed: a uniform number printed beside a module that got another
+		// number would satisfy the comparison below without anything being
+		// uniform about the run.
+		if got := stubReport(t, out)["timeout"]; got != budget["LINT_TIMEOUT"] {
+			t.Errorf("at PARALLEL_GATE_CPU_LIMIT=%d the target printed LINT_TIMEOUT=%s but handed the "+
+				"linter --timeout %s", cores, budget["LINT_TIMEOUT"], got)
+		}
+	}
+
+	first := quotas[0]
+	for _, cores := range quotas[1:] {
+		if budgets[cores] != budgets[first] {
+			t.Errorf("a %d-core environment resolved LINT_TIMEOUT=%s and a %d-core one resolved %s: the "+
+				"lint budget is decided by the pod's CPU quota, so one commit's lint is handed two "+
+				"deadlines and a red produced under the shorter one cannot be told from a lint that "+
+				"found something (see the Makefile's LINT_TIMEOUT comment for the trade this makes)",
+				first, budgets[first], cores, budgets[cores])
 		}
 	}
 }
