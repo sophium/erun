@@ -144,12 +144,14 @@ This keeps the audit story clean: every change is its own row with its own actor
 
 ## 9. Service-account identity
 
-Agents running unattended use a service-account OIDC identity (see [Sign-in](/agent-reference/api-protocol#sign-in-oidc)). The Agent's `sub` claim resolves to a stable `creator_user_id` in every audit record — there is no anonymous Agent action.
+Agents running unattended use a service-account OIDC identity (see [Sign-in](/agent-reference/api-protocol#sign-in-oidc)). erun's verification is issuer-generic, so a service account in the tenant's **own** identity provider — an Okta service app, an AWS IAM Identity Center machine identity — authenticates today, given a registered issuer and a token carrying the org claim. The token's `sub` claim resolves to the ERun user that service account is enrolled as, and every audit row records it: `audit_events` carries `erun_user_id`, `external_user_id`, and `external_issuer_id`. There is no anonymous Agent action.
 
 Practical implications:
 
 - Use a *different* service account per Agent. Distinct identities in the audit trail are how the Operator distinguishes Agent A's actions from Agent B's.
 - Rotate credentials on a regular cadence; the service-account refresh flow re-issues short-lived tokens without code changes.
+
+**(Planned.)** erun does not yet *provision* a service account, and the credential an environment carries today is not one: `erun init` delegates the Operator's own identity to the environment it creates, so an Agent's platform calls are attributed to whoever ran `init`, and two environments provisioned from one host are indistinguishable in the audit trail. A tenant machine user minted with the first agent-capable environment — a genuinely per-environment identity, delivered through the same Kubernetes `Secret` channel as the registry credential ([#1969](https://github.com/sophium/erun/issues/1969), [#2684](https://github.com/sophium/erun/issues/2684)) — is not available yet. Until it is, the split in [Merge queue · What runs where](/collaboration/merge-queue#capability-split) still decides which calls an environment can make at all.
 
 ## 10. Be loud in `--dry-run`, terse in real runs
 

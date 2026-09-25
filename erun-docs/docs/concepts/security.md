@@ -8,10 +8,10 @@ ERun's security story is one sentence: **identity, isolation, audit — for ever
 
 ## Identity
 
-Every actor (Operator or Agent) presents an OIDC token. The erun API verifies the signature against the tenant's trusted issuers and resolves the `sub` claim to a stable `creator_user_id` recorded in every audit row.
+Every actor (Operator or Agent) presents an OIDC token. The erun API verifies the signature against the tenant's trusted issuers and resolves the `sub` claim to a stable audit identity — `audit_events` records `erun_user_id`, `external_user_id`, and `external_issuer_id` for every authorised request.
 
 - **Operators** sign in with their organisation's identity provider (Identity Center, Auth0, Keycloak, …) — the same provider they use for SSO.
-- **Agents** use a service-account identity — a long-lived client credential exchanged for short-lived JWTs via the OAuth 2.0 client-credentials flow.
+- **Agents** can authenticate with a service-account identity — a long-lived client credential exchanged for short-lived JWTs via the OAuth 2.0 client-credentials flow. The service account must live in the tenant's own identity provider; erun verifies it but does not provision it. See [Service-account flow for Agents](/agent-reference/api-protocol#service-account-flow-for-agents).
 
 There is no anonymous action.
 
@@ -61,7 +61,7 @@ ERun uses Kubernetes' native `Secret` primitive — there is no ERun-specific se
 | Source | For |
 |---|---|
 | Namespace `Secret` objects | Application services |
-| OIDC service-account credentials | Agents calling the erun API |
+| The delegating Operator's platform alias (mounted by `erun init`) | Agents calling the erun API — under the Operator's identity, until per-Agent service-account credentials are provisioned ([#1969](https://github.com/sophium/erun/issues/1969)) |
 | Host AWS credentials (delivered when an AWS cloud alias is attached to the env) | Managed cloud envs |
 | SSH key | IDE attach |
 | Registry auth | `docker push` from the pod |
