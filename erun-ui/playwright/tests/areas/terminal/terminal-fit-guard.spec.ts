@@ -86,10 +86,15 @@ function parseInvoke(req: Request): InvokeCall | null {
 // The app always calls ResizeSession at the end of its resize path, whether or
 // not the fit itself ran -- so it's a reliable "the debounced resize handling
 // finished" signal for both the skip and the recovery below.
+//
+// No timeout of its own, so the wait resolves against the budget the enclosing
+// test declared -- the clock it would otherwise get. The whole of what this
+// step waits for is the 40ms resize debounce plus one loopback ResizeSession,
+// and the 60s it used to carry sat outside the 30s test it was nested in: it
+// could never fire, and it was fifteen times the duration of the entire test
+// on a quiet box.
 function waitForNextResizeSession(page: Page): Promise<Request> {
-  return page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession', {
-    timeout: 60_000,
-  });
+  return page.waitForRequest((req) => parseInvoke(req)?.method === 'ResizeSession');
 }
 
 async function discoverSelectedSessionId(app: AppShell, page: Page): Promise<number> {
