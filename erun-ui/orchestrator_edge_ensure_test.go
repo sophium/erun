@@ -97,8 +97,9 @@ func orchestratorEdgeTestApp(t *testing.T, edge *spawnEdgeProbe) (*App, *capture
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-		canReachMCPEndpoint: edge.reachable,
-		reconnectMCP:        edge.reconnect,
+		canReachMCPEndpoint:         edge.reachable,
+		reconnectMCP:                edge.reconnect,
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	app.ctx = context.Background()
 	app.SetEmitter(emits.fn())

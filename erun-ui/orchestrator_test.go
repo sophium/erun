@@ -94,7 +94,8 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-		canReachMCPEndpoint: reachable,
+		canReachMCPEndpoint:         reachable,
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	// Stage failure reports inside the test's own directory. Left at the default
 	// they land in the shared host temp dir, which is how a suite that spawns
@@ -530,7 +531,8 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) { return "claude-stub", nil, nil },
+		resolveOrchestratorLaunch:   func(string, string, string, string) (string, []string, error) { return "claude-stub", nil, nil },
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 
@@ -718,6 +720,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 			seededPrompt = prompt
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	app.investigations.reportDir = t.TempDir()
 	defer app.shutdown(context.Background())
@@ -2120,6 +2123,7 @@ func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T)
 			launchedConversation, launchedPrompt = sessionID, resumePrompt
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 
@@ -2203,6 +2207,7 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 			mu.Unlock()
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 	emits := newCapturedEmits()
@@ -2259,6 +2264,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 	emits := newCapturedEmits()
@@ -2316,6 +2322,7 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 

@@ -28,8 +28,9 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
-		orchestratorOpenPath:   openPath,
-		orchestratorRestoreDir: restoreDir,
+		orchestratorOpenPath:        openPath,
+		orchestratorRestoreDir:      restoreDir,
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	app.investigations.reportDir = t.TempDir()
 	return app, openPath, restoreDir

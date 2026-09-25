@@ -112,6 +112,13 @@ type erunUIDeps struct {
 	relaunchApp                  func() error
 	quitApp                      func()
 	desktopControlMarkerPath     string
+	// runOrchestratorLabelCommand runs the GitHub CLI calls that provision an
+	// orchestrator's claim label. It is the shared host-command runner under a
+	// name of its own, so a test that drives provisioning says which host
+	// boundary it is stubbing instead of stubbing the sidebar's working-issue
+	// probe by accident -- and a test that drives the sidebar does not have to
+	// know a label is being minted somewhere behind it.
+	runOrchestratorLabelCommand workingIssueCommandRunner
 }
 
 type App struct {
@@ -516,6 +523,26 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	deps = withDefaultWorkspaceDeps(deps)
 	deps = withDefaultPodDeps(deps)
 	deps = withDefaultWindowAndContributeDeps(deps)
+	deps = withDefaultOrchestratorDeps(deps)
+	return deps
+}
+
+// withDefaultOrchestratorDeps fills in what an orchestrator's own state —
+// where its durable records live, and the GitHub boundary its claim label is
+// provisioned through — defaults to.
+func withDefaultOrchestratorDeps(deps erunUIDeps) erunUIDeps {
+	if deps.orchestratorRestoreDir == "" {
+		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
+	}
+	if deps.orchestratorOpenPath == "" {
+		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
+	}
+	if deps.orchestratorNudgeHistoryPath == "" {
+		deps.orchestratorNudgeHistoryPath = defaultOrchestratorNudgeHistoryPath()
+	}
+	if deps.runOrchestratorLabelCommand == nil {
+		deps.runOrchestratorLabelCommand = execWorkingIssueCommand
+	}
 	return deps
 }
 
@@ -617,15 +644,6 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.interruptedActivityPath == "" {
 		deps.interruptedActivityPath = defaultInterruptedActivityPath()
-	}
-	if deps.orchestratorRestoreDir == "" {
-		deps.orchestratorRestoreDir = defaultOrchestratorRestoreDir()
-	}
-	if deps.orchestratorOpenPath == "" {
-		deps.orchestratorOpenPath = defaultOrchestratorOpenPath()
-	}
-	if deps.orchestratorNudgeHistoryPath == "" {
-		deps.orchestratorNudgeHistoryPath = defaultOrchestratorNudgeHistoryPath()
 	}
 	if deps.desktopControlMarkerPath == "" {
 		deps.desktopControlMarkerPath = eruncommon.DefaultDesktopControlMarkerPath()

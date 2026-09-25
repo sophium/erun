@@ -166,12 +166,13 @@ func restartControlTestApp(t *testing.T, markerPath string) *App {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	app := NewApp(erunUIDeps{
-		store:                    newOrchestratorStubStore(t.TempDir()),
-		orchestratorRestoreDir:   filepath.Join(home, "state", orchestratorRestoreDirName),
-		orchestratorOpenPath:     filepath.Join(home, "orchestrator-open.json"),
-		relaunchApp:              func() error { return nil },
-		quitApp:                  func() {},
-		desktopControlMarkerPath: markerPath,
+		store:                       newOrchestratorStubStore(t.TempDir()),
+		orchestratorRestoreDir:      filepath.Join(home, "state", orchestratorRestoreDirName),
+		orchestratorOpenPath:        filepath.Join(home, "orchestrator-open.json"),
+		relaunchApp:                 func() error { return nil },
+		quitApp:                     func() {},
+		desktopControlMarkerPath:    markerPath,
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app

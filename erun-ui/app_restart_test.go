@@ -35,7 +35,8 @@ func restartTestApp(t *testing.T) (*App, string) {
 		quitApp:                func() {},
 		// beforeClose reads the window's maximised state on its way out, and
 		// the real probe needs a Wails context a test does not have.
-		windowMaximised: func(context.Context) bool { return false },
+		windowMaximised:             func(context.Context) bool { return false },
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, restoreDir
