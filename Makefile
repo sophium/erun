@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-backend-api-e2e test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -904,6 +904,23 @@ test-atlas-validate:
 # agent env, before merging a change to erun-devops/docker/erun-console/.
 test-console-nginx:
 	sh erun-devops/docker/erun-console/nginx_test.sh
+
+# The opt-in ERUN_E2E_* database suites of erun-backend-api, against a real
+# postgres and the real migrations -- the venue that decides whether the
+# `Regression-Test:` cases those suites carry are actually run. The gate proper
+# is the erun-backend-api image's own `test` stage, which runs this same script
+# inside `erun build`/`erun build --gate` and fails the build when it fails;
+# that is the venue a pull request is graded by, and it is why this target is
+# not in `make check`.
+#
+# Same "needs a real docker daemon and the atlas CLI" exclusion from make check
+# as test-postgres-restart/test-retention above -- and, unlike those, the
+# erun-backend-api image's own test stage carries both, which is what lets it
+# run this script in-build. Kept as a target as well so an agent or human can
+# reproduce a gate failure without a full image build. Run it before merging a
+# change to erun-backend-api's database-backed behavior.
+test-erun-backend-api-e2e:
+	sh erun-devops/docker/erun-backend-api/e2e_gate_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in

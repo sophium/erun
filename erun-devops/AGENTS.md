@@ -341,19 +341,34 @@ composition and release invariants belong to root/shared logic, not chart policy
   needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
   this stage cannot depend on the `builder` stage it gates without inverting the
   marker order), and a test asserting a deployed version (that runs after `deploy`,
-  per the `/pipeline` convention, never during build). The concrete in-scope
-  instances are `erun-backend-db/migrate_test.sh`, `retention*_test.sh`,
-  `schema_drift_test.sh`, and `erun-console/nginx_test.sh` — each needs only a real
-  docker daemon (`migrate_test.sh` additionally needs the atlas CLI, a toolchain
-  `COPY` away) — and none is migrated into a component `test` stage yet: they remain
-  the root Makefile's `test-postgres-restart`/`test-retention`/
+  per the `/pipeline` convention, never during build).
+- **`erun-backend-api` is the first component migrated into that venue, and it is
+  the template for the rest.** Its Dockerfile declares `AS test`, consumes the
+  entitlement with `RUN --network=host` against `DOCKER_HOST=tcp://127.0.0.1:2375`
+  through a client it copies from its own pinned `test-toolchain` stage, and its
+  `builder` stage depends on the result via `COPY --from=test /test-ok` — so the
+  image cannot be built when the gate fails, and `erun build --gate` invalidates and
+  executes that stage by name. The stage runs
+  `erun-devops/docker/erun-backend-api/e2e_gate_test.sh`: a real `postgres:18.3`
+  fixture plus `erun-backend-db`'s real Atlas migrations, one database per package
+  (the platform-bootstrap suites assert whole-database state and are not mutually
+  isolated), and every `ERUN_E2E_*_DATABASE_URL` the module's tests read derived from
+  those sources rather than listed, so a suite added later is covered when it lands.
+  The run fails when a database-gated case skips with the database configured,
+  because that is the shape this venue exists to remove: without it the module was
+  reached only by `make check`'s bare `go test -count=1 ./...` with no `ERUN_E2E_*`
+  variable set, so every database-backed case reported `SKIP` under a package line
+  that still read `ok`. The same script runs by hand via `make
+  test-erun-backend-api-e2e`.
+- The remaining in-scope instances are still unmigrated:
+  `erun-backend-db/migrate_test.sh`, `retention*_test.sh`, `schema_drift_test.sh`,
+  and `erun-console/nginx_test.sh` each need only a real docker daemon
+  (`migrate_test.sh` additionally needs the atlas CLI, a toolchain `COPY` away) and
+  remain the root Makefile's `test-postgres-restart`/`test-retention`/
   `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
   hand or via `erun exec job` before merging a change to the behavior they cover.
-  Retiring them is now blocked only by the migration itself: the entitlement above
-  has landed, so nothing but the per-component `test` stage work remains. Until that
-  lands they stay runnable only by hand or via `erun exec job`, never in `make check`
-  — see the venue note in the root Makefile, which is a real constraint rather than
-  an oversight.
+  They stay runnable only that way, never in `make check` — see the venue note in
+  the root Makefile, which is a real constraint rather than an oversight.
 
 ## Release Workflow
 
@@ -377,8 +392,11 @@ composition and release invariants belong to root/shared logic, not chart policy
   behavior. Keep release-sensitive common, CLI, and MCP suites aligned.
 - `helm-chart-tests` uses render-only tests without a cluster; new tests under
   `k8s` are discovered automatically. Keep real-daemon tests separate and explicit:
-  `test-postgres-restart` for reset/migration/recovery and `test-console-nginx`
-  for shipped nginx behavior. Run affected entrypoint/helper script tests too.
+  `test-postgres-restart` for reset/migration/recovery, `test-console-nginx`
+  for shipped nginx behavior, and `test-erun-backend-api-e2e` for the
+  `erun-backend-api` opt-in `ERUN_E2E_*` database suites (the same script that
+  module's own image `test` stage runs in every build). Run affected
+  entrypoint/helper script tests too.
 - Live RBAC, resource isolation, and restart guarantees need corresponding real
   probes when changed; render tests alone cannot establish them.
 - Guidance-only edits use root's consistency/reference validation exemption.
