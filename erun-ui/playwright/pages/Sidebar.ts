@@ -462,8 +462,19 @@ export class Sidebar {
 
   // The row's shape-encoded status light, labelled by state, is the same
   // StatusDotGlyph env rows use — so status is never colour-only.
+  //
+  // Matched exactly, and it has to be: `getByRole({ name })` is a
+  // case-insensitive *substring* match by default, and the restart-required
+  // light's label ("... is running but needs a restart to apply its new
+  // environments") opens with the plain running light's label. A substring
+  // match therefore resolves to the restart-required light whenever the plain
+  // one is absent, so "this row shows a plain running dot" would hold on a row
+  // that does not show one — the exact distinction the erun#1319 work is about.
   orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {
-    return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
+    return this.erunSection().getByRole('img', {
+      name: `Orchestrator ${name} is ${state}`,
+      exact: true,
+    });
   }
 
   // Distinct from a plain running dot (erun#1319): a live session whose
