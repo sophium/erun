@@ -1,6 +1,6 @@
 import type { Page, Request, Route } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -299,7 +299,12 @@ test.describe('tenant dashboard — opening a review (#1348)', () => {
       const signIn = dialog.locator().getByRole('button', { name: 'Log in' });
       await expect(signIn).toBeVisible();
       await signIn.click();
-      await expect.poll(() => loginAlias).toBe('pw-aws');
+      // The alias the sign-in carried is this spec's own route handler's to
+      // record, so this step waits on that answer arriving -- and
+      // `expect.poll` carries no timeout of its own, resolving to expect's
+      // 10s default rather than the 30s this test declares. Pointed at that
+      // budget (see tenant-dashboard-permissions.spec.ts's held-answer case).
+      await expect.poll(() => loginAlias, withTestBudget()).toBe('pw-aws');
 
       // The dialog must recover: the stale write error and its Log in
       // button are gone, and the dialog is ready for the operator to retry
