@@ -356,6 +356,14 @@ export class TerminalController {
     store.dispatch(updateOpenStatusFromOutput(payload.sessionId, decodeTerminalOutput(data)));
     const displayData = filterTerminalDisplayData(data);
     this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
+    // Not rendered, not lost: only the store's active session is on screen
+    // (the middleware in terminalDisplayMiddleware pairs every change of it
+    // with a reset and an activateSession), and what is buffered above is
+    // replayed by that session's next activation. The one way a render is lost
+    // for good is a session the user is looking at having the store moved off
+    // it, because nothing activates it again -- so the store must not be
+    // re-pointed off a tab the user has picked, which is finishOpenSession's
+    // restore to keep.
     if (payload.sessionId !== store.getState().terminal.sessionId) {
       return;
     }
