@@ -1,9 +1,10 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { artifactPath } from '../../../fixtures/artifacts.js';
 import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import { expectFramesAllDistinct, holdResponse } from '../../../fixtures/visualFrames.js';
+import type { AppShell } from '../../../pages/index.js';
 
 // The Ports tab's public-exposure surface (issue #1351). The headless harness
 // has no real cluster and no project with a platform block (see
@@ -87,13 +88,39 @@ const SERVICES_POPULATED = {
   },
 };
 
+// convergeOnPortsTab opens the Ports tab and settles the paired reads behind it
+// before anything inside is asserted on.
+//
+// Every assertion on this tab reads a value one of the two stubbed route
+// handlers owns, and `expect(...)` carries no timeout of its own: with no
+// explicit one it resolves to expect.timeout (playwright.config.ts sets 10s on
+// POSIX), which is independent of the 30s the test itself declared. A tab whose
+// read is merely slow under a loaded builder therefore reds the step with two
+// thirds of the test's own budget unspent -- the step is slow, not wrong.
+// `waitFor` is the idiom that defers to the test on its own (erun-ui/playwright/
+// AGENTS.md, "No flaky tests"), so the tab is waited to its resolved state here
+// and the assertions that follow read already-rendered DOM.
+//
+// `resolved` is the locator whose appearance means the ready state the test
+// cares about has rendered: the empty state, the populated row, the refusal, or
+// the failure -- whichever this test is about.
+async function convergeOnPortsTab(app: AppShell, resolved: Locator): Promise<void> {
+  await app.manageDialog.selectTab('Ports');
+  await resolved.waitFor({ state: 'visible' });
+}
+
 test.describe('manage dialog ports tab — public exposures (#1351)', () => {
   test('a cluster-backed environment with no platform block names the fix and links to it', async ({
     app,
   }) => {
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    // Computed from the env's own project, not an RPC, but the tab still has to
+    // reach the state before the rest of the card is read.
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('Not available for this environment'),
+    );
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Not available for this environment')).toBeVisible();
@@ -129,7 +156,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     const { tenant, environment } = seededHostEnv;
     await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('Not available for this environment type'),
+    );
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Not available for this environment type')).toBeVisible();
@@ -152,7 +182,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('You may not have access to see this'),
+    );
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('You may not have access to see this')).toBeVisible();
@@ -180,7 +213,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('EXPOSURE_LOAD_FAILURE_MARKER'),
+    );
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('EXPOSURE_LOAD_FAILURE_MARKER')).toBeVisible();
@@ -190,7 +226,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     await dialog.screenshot({ path: artifactPath('test-results/1351-visual/ports-failed.png') });
 
     await retry.click();
-    await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
+    // The retry's own listing is a second round trip through the stub, so the
+    // empty state it returns is waited to rather than raced on expect's clock.
+    await dialog.getByText('Nothing exposed yet').waitFor({ state: 'visible' });
     expect(calls).toBe(2);
 
     await app.manageDialog.cancel();
@@ -220,7 +258,13 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    // The read that answered is this test's own subject, so the tab is waited to
+    // *its* resolution -- the address it returned -- rather than to the paired
+    // read that failed.
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('api.pw-alpha.services.test'),
+    );
     const dialog = app.manageDialog.locator();
 
     // The read that answered still renders what it answered ...
@@ -258,7 +302,10 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByText('web.pw-alpha.services.test'),
+    );
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('web.pw-alpha.services.test')).toBeVisible();
@@ -308,7 +355,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(app, app.manageDialog.locator().getByText('Nothing exposed yet'));
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
@@ -330,7 +377,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     // response can reach the renderer.
     exposeGate.release();
 
-    await expect(dialog.getByText('api.pw-alpha.services.test')).toBeVisible();
+    // The expose round trip's own answer, once released -- so it is waited to
+    // rather than bounded by expect's 10s default.
+    await dialog.getByText('api.pw-alpha.services.test').waitFor({ state: 'visible' });
     expect(exposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 
@@ -384,7 +433,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(app, app.manageDialog.locator().getByText('Nothing exposed yet'));
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
@@ -417,7 +466,7 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    await convergeOnPortsTab(app, app.manageDialog.locator().getByText('Nothing exposed yet'));
     const dialog = app.manageDialog.locator();
 
     await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
@@ -470,7 +519,12 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.selectTab('Ports');
+    // The populated listing is the ready state this test acts on: the remove
+    // control only exists once the exposures read has answered.
+    await convergeOnPortsTab(
+      app,
+      app.manageDialog.locator().getByRole('button', { name: 'Remove public access' }),
+    );
     const dialog = app.manageDialog.locator();
 
     const removeButton = dialog.getByRole('button', { name: 'Remove public access' });
@@ -521,7 +575,9 @@ test.describe('manage dialog ports tab — public exposures (#1351)', () => {
       artifactPath('test-results/1351-visual/ports-remove-inflight.png'),
     ]);
 
-    await expect(dialog.getByText('Nothing exposed yet')).toBeVisible();
+    // The removal's own refetch is a second listing, so the empty state it
+    // returns is waited to rather than raced on expect's clock.
+    await dialog.getByText('Nothing exposed yet').waitFor({ state: 'visible' });
     expect(unexposeCalls).toBe(1);
     expect(listCalls).toBe(2);
 

@@ -1,4 +1,4 @@
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // The Manage dialog Runtime tab's "Mount source code" toggle is a runtime-only
 // opt-in: it flips the env's worktree onto a PVC the pod clones at the deployed
@@ -21,17 +21,27 @@ test.describe('manage dialog mount-source toggle (#736)', () => {
     await expect(toggle).not.toBeChecked();
     // The URL field stays hidden until the toggle is on (recognition over recall).
     await expect(app.manageDialog.repoURLInput()).toHaveCount(0);
-    expect(await app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    // A one-shot read compares once and gives up; the dot's own state is the
+    // dialog's to settle, so it is polled on this test's clock instead.
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(false);
 
     await toggle.click();
     await expect(toggle).toBeChecked();
     const url = app.manageDialog.repoURLInput();
     await expect(url).toBeVisible();
     await url.fill('https://github.com/sophium/erun.git');
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(true);
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(true);
 
     await app.manageDialog.save();
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    // The dot clearing is this save's own round-trip answer, so it waits on the
+    // budget the test declared rather than expect's 10s default.
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(false);
     await app.manageDialog.waitForRedeployBanner();
     await expect(app.manageDialog.redeployBanner()).toBeVisible();
 
@@ -43,7 +53,9 @@ test.describe('manage dialog mount-source toggle (#736)', () => {
     );
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
-    await expect(app.manageDialog.mountSourceCheckbox()).toBeChecked();
+    // The reopened dialog's own config load is what answers these, so the first
+    // read carries this test's clock rather than expect's 10s default.
+    await expect(app.manageDialog.mountSourceCheckbox()).toBeChecked(withTestBudget());
     await expect(app.manageDialog.repoURLInput()).toHaveValue(
       'https://github.com/sophium/erun.git',
     );
