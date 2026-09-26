@@ -1,4 +1,4 @@
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import type { Page, Request } from '@playwright/test';
 import type { AppShell } from '../../../pages/index.js';
 
@@ -18,6 +18,14 @@ import type { AppShell } from '../../../pages/index.js';
 // same application code path (ResizeObserver -> queueTerminalResize ->
 // runTerminalResize -> safeFit) against the same shape of bad measurement,
 // without relying on a race.
+//
+// The staged output reaches the viewport over the emit bridge, and the poll
+// that reads it carries no timeout of its own: `expect.poll` with none resolves
+// to expect's 10s default rather than the 30s this test declares, so output
+// that is merely slow reds the step with the test's own clock unspent. The
+// held-emit case at the end of this file reproduces that; `withTestBudget()`
+// points the poll at the budget its test declared, where a viewport that never
+// updates still fails -- now at that deadline.
 test.describe('terminal fit guard against a near-zero container (#1767)', () => {
   test('a near-zero container mid-resize is skipped and the buffer survives; the next real size retries it', async ({
     app,
@@ -35,7 +43,10 @@ test.describe('terminal fit guard against a near-zero container (#1767)', () => 
 
     const anchor = `anchor-${'x'.repeat(120)}`;
     await emitTerminalOutput(page, sessionId, `${anchor}\r\nmore output\r\n`);
-    await expect.poll(() => rowsText(page)).toContain(anchor);
+    // The poll waits on the emit bridge's own round trip, so it takes the clock
+    // this test declared rather than expect's 10s default; see the held-emit
+    // case at the end of this file.
+    await expect.poll(() => rowsText(page), withTestBudget()).toContain(anchor);
 
     const colsBefore = await readTerminalCols(page);
     expect(colsBefore).toBeGreaterThan(0);
@@ -62,6 +73,55 @@ test.describe('terminal fit guard against a near-zero container (#1767)', () => 
 
     expect(await readTerminalCols(page)).toBe(colsBefore);
     expect(await rowsText(page)).toContain(anchor);
+  });
+
+  // The staged output is delivered over the emit bridge -- `runtime.EventsEmit`
+  // POSTs to /__erun_emit and the backend streams it back to the app -- so the
+  // poll that reads the viewport is bounded by the round trip's own clock. With
+  // no timeout of its own it resolves to expect's 10s default while this test
+  // declares 60s, so output that is merely slow reds the step with the test's
+  // own clock unspent, which is how a loaded machine turns into a failing
+  // branch nobody touched.
+  //
+  // The emit is held past that 10s default -- the smallest delay that
+  // discriminates -- so the suite pays seconds here rather than the tens a
+  // genuinely loaded machine would. The hold is injected at the bridge's own
+  // POST rather than by loading the machine, and the anchor is staged only
+  // after the gate is armed, so the viewport provably cannot show it early:
+  // pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused, post-fix it passes at the emit's real arrival.
+  test('output that lands past the step cap still reaches the viewport', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    test.setTimeout(60_000);
+    const { tenant, environment } = seededEnv;
+    await app.sidebar.openEnvironment(tenant, environment);
+    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
+    await localTab.waitFor({ state: 'visible' });
+    await localTab.click();
+
+    const sessionId = await discoverSelectedSessionId(app, page);
+    expect(sessionId).toBeGreaterThan(0);
+
+    let releaseEmit: () => void = () => undefined;
+    const emitHeld = new Promise<void>((resolve) => {
+      releaseEmit = resolve;
+    });
+    await page.route('**/__erun_emit', async (route) => {
+      await emitHeld;
+      await route.continue();
+    });
+
+    const anchor = `anchor-${'x'.repeat(120)}`;
+    await emitTerminalOutput(page, sessionId, `${anchor}\r\nmore output\r\n`);
+
+    // Deliberate stimulus, not a wait for the app: the hold *is* the contention
+    // this case exists to reproduce, so it is sized on the clock it has to
+    // disagree with.
+    setTimeout(releaseEmit, 12_000);
+    await expect.poll(() => rowsText(page), withTestBudget()).toContain(anchor);
   });
 });
 
