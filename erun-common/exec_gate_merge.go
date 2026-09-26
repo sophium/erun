@@ -249,11 +249,30 @@ func gateMergeCarriesTrailer(line string) bool {
 	return false
 }
 
-// gateMergeStartsTrailerBlock reports whether one line begins a new trailer
-// entry. Any token-shaped line does, carried or not, so an unrecognised
-// trailer between two carried ones does not fold the second into the first as
-// an indented continuation.
-var gateMergeStartsTrailerBlock = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*(?::|[ \t])`)
+// gateMergeTrailerToken is a "Token:" line: a token at the start of the line
+// followed immediately by a colon. It is the spelling every carried trailer but
+// "Closes #N" uses, and the spelling git itself requires of a trailer entry.
+var gateMergeTrailerToken = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*:`)
+
+// gateMergeReferencedIssue is the colon-less "Token #N" spelling "Closes #N"
+// shares with a bare "Refs #N". It is named apart from the carried set because
+// an issue reference this squash does not carry still ends the entry above it.
+var gateMergeReferencedIssue = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]*[ \t]+#[0-9]+`)
+
+// gateMergeStartsTrailerEntry reports whether one line begins a new trailer
+// entry: a "Token:" line, or an issue reference in the colon-less spelling.
+// Any entry does, carried or not, so an unrecognised trailer between two
+// carried ones does not fold the second into the first as a continuation.
+//
+// It is deliberately narrower than "any token-shaped line". The bare
+// "Token value" spelling matches the first word of nearly every line of
+// ordinary prose, and a hard-wrapped trailer value — one whose continuation
+// lines start at column 0, which is how a long hand-written value is wrapped —
+// is exactly a run of such lines. Reading that loose form as the end of an
+// entry is what truncated a wrapped "Reproduces:" to its first physical line.
+func gateMergeStartsTrailerEntry(line string) bool {
+	return gateMergeTrailerToken.MatchString(line) || gateMergeReferencedIssue.MatchString(line)
+}
 
 // gateMergeTrailerLogArgs is the git invocation that reads back a source
 // branch's own commit bodies. The base is the ref the source is being squashed
@@ -287,8 +306,10 @@ func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps Ga
 
 // gateMergeTrailersFromBody extracts the carried trailer entries from one
 // commit body. Every line of the body is considered, and an entry extends over
-// the indented continuation lines git folds into it, so a wrapped "Reproduces:"
-// arrives whole rather than truncated at its first line break.
+// that entry's own continuation lines — indented, as git folds them, or
+// hard-wrapped at column 0 as a long hand-written value arrives — bounded by
+// the paragraph break beneath it, so a wrapped "Reproduces:" arrives whole
+// rather than truncated at its first line break.
 //
 // There is deliberately no "trailer block" boundary deciding which lines are
 // looked at. Every such boundary this has had was a way to lose a declaration
@@ -308,8 +329,18 @@ func gateMergeTrailersFromBody(body string) []string {
 }
 
 // gateMergeTrailerEntries picks the carried entries out of a commit body's
-// lines, folding each one's indented continuation lines into it so a wrapped
+// lines, folding each one's continuation lines into it so a wrapped
 // "Reproduces:" arrives whole rather than truncated at its first line break.
+//
+// A continuation is any line that is not blank and does not itself begin a new
+// trailer entry, so a value hard-wrapped at column 0 is read as its author
+// wrote it and not only one git indented by hand. What ends an entry is
+// therefore the paragraph break the author already wrote: blank, and the value
+// is over. That bound cannot run away with the message — an entry can never
+// take a line separated from its own declaration by a blank line, which is
+// where every commit body puts its prose — and it is decided by the position of
+// the blank lines within the entry's own text, not by any boundary deciding
+// which lines of the body are looked at.
 func gateMergeTrailerEntries(lines []string) []string {
 	var carried []string
 	var entry []string
@@ -320,7 +351,7 @@ func gateMergeTrailerEntries(lines []string) []string {
 		}
 	}
 	for _, line := range lines {
-		if gateMergeStartsTrailerBlock.MatchString(line) {
+		if gateMergeStartsTrailerEntry(line) {
 			flush()
 			if gateMergeCarriesTrailer(line) {
 				entry = []string{line}
@@ -337,10 +368,13 @@ func gateMergeTrailerEntries(lines []string) []string {
 	return carried
 }
 
-// gateMergeContinuesTrailer reports whether a line is an indented continuation
-// of the trailer above it, which is the shape git folds into one entry.
+// gateMergeContinuesTrailer reports whether a line belongs to the trailer entry
+// above it. That is every line but a blank one, which is the only thing a
+// trailer value cannot contain and the bound that keeps an entry inside its own
+// paragraph. An indented continuation — the shape git folds into one entry
+// itself — is one case of it rather than the whole rule.
 func gateMergeContinuesTrailer(line string) bool {
-	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+	return strings.TrimSpace(line) != ""
 }
 
 // gateMergeCommitMessage is the message one source lands under: the caller's

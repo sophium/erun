@@ -156,6 +156,75 @@ func TestGateMergeOneSourceCarriesTrailersWhenTheBranchEndsWithAnIssueReference(
 	}
 }
 
+// TestGateMergeOneSourceCarriesAHardWrappedReproducesTrailer is the
+// reproduction of the reported failure: a branch whose "Reproduces:" value is
+// hard-wrapped across four physical lines — each continuation starting at
+// column 0, which is how a long hand-written value is wrapped and how the
+// value on the landing this was observed on was written — landed through the merge
+// queue with only its first physical line. The carried entry was truncated
+// mid-clause ("...by the boot's own"), and because the truncated line still
+// matched the trailer pattern nothing downstream noticed: the landed commit
+// asserted a weaker reproduction than its author wrote, and the loss was
+// invisible without diffing the branch tip's body against the landed one.
+func TestGateMergeOneSourceCarriesAHardWrappedReproducesTrailer(t *testing.T) {
+	const branchBody = "Re-hover the orchestrator card a boot landing drops mid-read\n\n" +
+		"Reproduces: a hover card closed under a stationary pointer by the boot's own\n" +
+		"default-landing open, read again as if it were still there -- expect's 10s\n" +
+		"default expires with \"element(s) not found\" for the card that answered the\n" +
+		"read before it.\n" +
+		"Regression-Test: erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts::a hover card dropped while the boot lands is re-hovered, not read as absent\n"
+	var committed string
+	deps := gateMergeTrailerSeam(branchBody, &committed)
+
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "bug/2459", Message: "Re-hover the orchestrator card a boot landing drops mid-read"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+		t.Fatalf("gate-merge one source: %v", err)
+	}
+
+	for _, want := range []string{
+		"Reproduces: a hover card closed under a stationary pointer by the boot's own\ndefault-landing open, read again as if it were still there -- expect's 10s\ndefault expires with \"element(s) not found\" for the card that answered the\nread before it.",
+		"Regression-Test: erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts::a hover card dropped while the boot lands is re-hovered, not read as absent",
+	} {
+		if !strings.Contains(committed, want) {
+			t.Fatalf("the squash commit must carry the branch's own %q trailer whole, got:\n%s", want, committed)
+		}
+	}
+}
+
+// TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph is the
+// other half of the wrapped-value contract, and the half a naive "keep
+// consuming lines until the next trailer" fix fails: a wrapped value must take
+// its own paragraph and no more. Two continuations are folded — an indented one
+// and a hard-wrapped one — and then the entry stops dead at the blank line
+// under it, at the "Closes #N" that follows, and at the unrecognised "Note:"
+// under that. A carriage that swallowed the rest of the message would be a
+// worse defect than the truncation it replaced, because it would put an
+// author's prose on an unattended commit on the target.
+func TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"Reproduces: the parts arrived in append order rather than the order they\n" +
+		"were declared, so every caller reading the widget got\n" +
+		"  the parts back to front.\n" +
+		"\n" +
+		"The widget was assembled backwards by the old builder.\n" +
+		"\n" +
+		"Closes #2703\n" +
+		"Note: this is a workaround for a quirk\n"
+
+	got := gateMergeTrailersFromBody(body)
+	want := []string{
+		"Reproduces: the parts arrived in append order rather than the order they\nwere declared, so every caller reading the widget got\n  the parts back to front.",
+		"Closes #2703",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("trailer %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+}
+
 // TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer pins the boundary that
 // replaced the block walk, and the two shapes the walk decided wrongly in both
 // directions. A declaration sitting above a trailing paragraph the walk did not
