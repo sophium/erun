@@ -54,7 +54,9 @@ Orchestrators:
       - my-tenant/prod role=build directory=/Users/you/code/my-project
 ```
 
-The line is absent when the orchestrator declares none, which is the default and means it follows this machine's own alias. [`erun orchestrator set-alias`](/cli/orchestrator) writes it, and the desktop's Edit orchestrator dialog has the same control.
+The line is absent when the orchestrator declares none, which is the default. [`erun orchestrator set-alias`](/cli/orchestrator) writes it, and the desktop's Edit orchestrator dialog has the same control.
+
+The line is what the declaration *is*, not what it does: an orchestrator resolves this machine's own alias whether or not it declares one of its own, so the line records an intent nothing acts on yet. See [Configuration · `ERunConfig`](/reference/configuration#erunconfig) for the field's current behavior and [erun#2684](https://github.com/sophium/erun/issues/2684) for the work that will change it.
 
 ## Stale ssh aliases {#stale-ssh-aliases}
 
