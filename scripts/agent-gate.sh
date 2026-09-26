@@ -56,9 +56,12 @@
 # and the *record* carries the environment instead: the name this leaves in
 # the job store ends with a marker derived from the environment of the
 # invocation that started it, and a recorded pass is replayed only when that
-# marker matches the environment asking for it. A differing environment is
-# never replayed -- it is named loudly and run fresh, because a pass recorded
-# somewhere else answers a question the caller did not ask. A record with no
+# marker matches the environment asking for it. A recorded pass from a
+# differing environment is never replayed -- it is named loudly and run fresh,
+# because a pass recorded somewhere else answers a question the caller did not
+# ask. A run already *live* under a differing environment is the one case with
+# nothing to run fresh (the exclusive claim below refuses a second gate beside
+# it), so that invocation is named loudly and attached instead. A record with no
 # marker at all (one written before this existed, still readable for the
 # store's retention window) is treated the same way: unattributable, so not
 # replayed.
@@ -219,11 +222,15 @@ cmd_state_key() {
 }
 
 # gate_control_env names the variables *this wrapper itself* consumes to decide
-# how it waits and whether it replays at all -- never anything the gated
-# command can read to change what it does. They are held out of the
+# how it waits and whether it replays at all. They are held out of the
 # environment key below so that a caller turning one on for a retry (adding
 # AGENT_GATE_AWAIT_VERDICT=1 to its second invocation, say) does not read as a
-# different run and cost it the record it came back to collect.
+# different run and cost it the record it came back to collect. Being held out
+# of the key is not the same as being hidden from the work: `job start --env` is
+# additive and the supervisor inherits this process's own environment, so a
+# caller that exported one of these does hand it to the gated command. Nothing
+# the gate runs reads them; a variable the work *did* read would change the run
+# instead of describing it, and does not belong on this list.
 gate_control_env="AGENT_GATE_RERUN AGENT_GATE_AWAIT_VERDICT ERUN_AGENT_GATE_AWAIT_TIMEOUT"
 
 # env_state_key prints a key over the environment a gated run will execute
@@ -237,6 +244,13 @@ gate_control_env="AGENT_GATE_RERUN AGENT_GATE_AWAIT_VERDICT ERUN_AGENT_GATE_AWAI
 # part. Like the scope key above, it reads the process environment rather than
 # the shell's own variables, so a value that never reached this process
 # cannot describe a run it is not in.
+#
+# The pod a run executed on is covered by that whole-environment rule rather
+# than by a term of its own: the container runtime puts the pod name in
+# HOSTNAME -- the same value a job record keeps as its Hostname -- so a pass
+# recorded before the pod was replaced keys differently afterwards and is not
+# replayed. Nothing here has to name the pod, and scrubbing HOSTNAME out of the
+# environment would take that protection with it.
 env_state_key() {
 	pattern=""
 	sep=""

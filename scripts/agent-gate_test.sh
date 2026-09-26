@@ -1467,5 +1467,68 @@ stub_erun "${case_dir}/bin"
 	esac
 )
 
+# --- the pod a run executed on is part of what its recorded pass is a pass
+# *of*, and it is already in the environment key without being named: the
+# container runtime sets HOSTNAME to the pod name -- the same value a job
+# record keeps as its Hostname -- and the key hashes the whole environment. A
+# replaced pod carries a different runtime image and toolchain, so a pass from
+# the pod it replaced is not evidence about it.
+#
+# Nothing else separates these invocations: same argv, same tree, same store,
+# one channel of difference. A key that lost the pod -- by enumerating the
+# variables it covers instead of hashing what it is given, or by scrubbing
+# HOSTNAME -- would replay the first pod's pass for the second and report a pod
+# that executed nothing as green.
+case_dir="${work_root}/pod-replacement-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	export HOSTNAME=erun-devops-pod-a
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: the first pod's run expected exit 0, got $STATUS ($OUT)"
+
+	# The marker the first pod's own invocation recorded, read back from the
+	# store rather than reproduced by hand -- a hand-built marker could agree
+	# with the wrapper's key for a reason this case never exercised.
+	first_marker=$(sed -n 's/.*\[env \([0-9a-f]\{16\}\)\].*/\1/p' "${STUB_STORE_DIR}"/*.status | head -1)
+	[ -n "$first_marker" ] || fail "pod replacement replay: the first pod's run recorded no environment marker, so this case would prove nothing"
+
+	export HOSTNAME=erun-devops-pod-b
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: the replacing pod's run expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "pod replacement replay: a pod that replaced the one which produced the recorded pass must actually execute rather than replaying it, ran $runs of 2"
+	case "$OUT" in
+	*"refusing to replay"*) ;;
+	*) fail "pod replacement replay: refusing a pass recorded on another pod must say so on stderr rather than silently re-running, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"$first_marker"*) ;;
+	*) fail "pod replacement replay: the refusal must name the environment that run actually ran under ($first_marker), got: $OUT" ;;
+	esac
+
+	# Same pod as the run above, which is now this invocation's own
+	# environment: that one is a genuine replay, and losing it would cost every
+	# gate on this pod its cache.
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: identical re-run on the same pod expected exit 0, got $STATUS ($OUT)"
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "pod replacement replay: a second run on the same pod must still replay rather than re-execute, ran $runs of 2"
+	case "$OUT" in
+	*"replaying a cached PASS"*) ;;
+	*) fail "pod replacement replay: expected the replay notice for a same-pod re-run, got: $OUT" ;;
+	esac
+)
+
 echo "ok: agent-gate.sh"
 echo "ok: erun-ui/playwright/run.sh detachment wiring"

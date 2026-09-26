@@ -201,10 +201,16 @@ demonstrated:
   command, and the environment it executed under. The environment travels with
   the record instead of in the job id -- the id is also what a re-invocation
   after an expired bounded wait attaches to, so moving it with the environment
-  would find no job there and start a second gate beside the first. A run whose
-  environment differs is named loudly and run fresh, never replayed: keyed on
-  the whole environment minus the wrapper's own control variables, so a knob
-  nobody thought to enumerate still separates two runs.
+  would find no job there and start a second gate beside the first. A recorded
+  pass from a differing environment is named loudly and run fresh, never
+  replayed: keyed on the whole environment minus the wrapper's own control
+  variables, so a knob nobody thought to enumerate still separates two runs --
+  and so does the pod, whose name the container puts in HOSTNAME, so a recorded
+  pass does not survive the pod that produced it being replaced. A run still
+  *live* under a differing environment is the one case the wrapper cannot run
+  fresh, since the exclusive claim refuses a second gate beside it: it names
+  the mismatch loudly and attaches, reporting that run's verdict as that
+  environment's and not the caller's.
 - A wait expiring is the wrapper's own deadline, never the gated job's outcome.
   On expiry the wrapper reads the job's own record, so a job that finished is
   reported by its actual result and 124 is reserved for one still genuinely
