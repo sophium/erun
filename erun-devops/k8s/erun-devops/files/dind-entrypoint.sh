@@ -141,8 +141,10 @@ cap_build_container_cpu || true
 # reuses it on every later start, so the identity is a property of this volume,
 # not of the pod: measured on a rolled environment, the file was created with
 # the volume and every record in buildkit/cache.db is still keyed
-# "<engine-id>::<ref>" across repeated rolls. That is what makes a roll keep
-# serving the cache the volume holds.
+# "<engine-id>::<ref>" across repeated rolls. That keeps the namespace a roll
+# lands in stable, not everything the volume holds: the build's RUN steps are
+# keyed under a --cgroup-parent derived from the pod's own hostname
+# (erun-common/build_cpu_cap.go), so a roll re-executes them.
 #
 # So do not anchor a worker id here. buildkit's <buildkit-root>/workerid is
 # read only by standalone buildkitd's runc and containerd workers (base.ID);

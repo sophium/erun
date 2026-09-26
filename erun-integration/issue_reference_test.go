@@ -319,7 +319,6 @@ var issueReferenceBaseline = map[string]int{
 	"erun-common/activity_lease.go":                       1,
 	"erun-common/activity_lease_test.go":                  5,
 	"erun-common/ai_launch_test.go":                       1,
-	"erun-common/build_cpu_cap.go":                        1,
 	"erun-common/build_dind_resources.go":                 1,
 	"erun-common/build_report.go":                         1,
 	"erun-common/build_run.go":                            2,

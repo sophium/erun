@@ -145,8 +145,12 @@ composition and release invariants belong to root/shared logic, not chart policy
 - BuildKit attributes its cache records and cache mounts to the daemon's own
   engine id (moby's builder passes `ID: opt.EngineID`), which dockerd persists
   at `<data-root>/engine-id` on the docker-state volume and reuses on every
-  later start — so a rolled pod keeps serving the cache that volume already
-  holds, `<engine-id>::<ref>` keys and all. Do not anchor a worker id in
+  later start, so the *namespace* those keys live in is a property of the
+  volume and survives a roll, `<engine-id>::<ref>` keys and all. What the
+  volume holds is not thereby servable: a build's RUN steps are keyed under a
+  `--cgroup-parent` derived from the pod's own hostname
+  (erun-common/build_cpu_cap.go), so a roll re-executes them while only the
+  steps before the first one still replay. Do not anchor a worker id in
   `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
   buildkitd's runc/containerd workers, so writing one changes no key.
   `dind-entrypoint.sh` carries the measured detail beside the wrapper.
