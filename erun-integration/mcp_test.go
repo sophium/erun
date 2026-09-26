@@ -1126,6 +1126,50 @@ exit 3`)
 		}
 	})
 
+	t.Run("call_real_run_a_live_edge_that_refuses_the_session_points_at_the_cli", func(t *testing.T) {
+		// The reported failure: an environment whose edge is up and answering
+		// refuses this client's session on every call. Read as an unreachable
+		// endpoint it says the environment is down, and an orchestrator that
+		// believes that stops dispatching to a live environment — the one reading
+		// that costs capacity, since the CLI was reaching it throughout.
+		skipIfPortsBusy(t, mcpEdgeLocalPort)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", mcpEdgeLocalPort)
+		fixture.SeedDesktopIdentity(t, setup)
+		edge := &fakeMCPEdge{RPCErrors: map[string]string{
+			"tools/call": `{"code":-32603,"message":"method \"tools/call\" is invalid during session initialization"}`,
+		}}
+		edge.start(t, mcpEdgeLocalPort)
+
+		result := erun.Run(t, []string{"mcp", "call", "--tool", "version"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a session the edge never accepts, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "mcp/call_real_run_a_live_edge_that_refuses_the_session_points_at_the_cli", normalize.Apply(result.Combined))
+
+		// Which side broke, named: the edge answered, so nothing about the
+		// environment is in question.
+		for _, want := range []string{"the MCP edge answered", "team/dev is up and dispatchable", "use the CLI"} {
+			if !strings.Contains(result.Combined, want) {
+				t.Fatalf("expected the message to contain %q, got:\n%s", want, result.Combined)
+			}
+		}
+		// The path that keeps working, named. It is what makes the difference
+		// between "wait for the environment" and "dispatch to it now".
+		if !strings.Contains(result.Combined, "erun exec job start --tenant team --environment dev") {
+			t.Fatalf("expected the CLI dispatch path to be spelled out, got:\n%s", result.Combined)
+		}
+		// The collapse the report described: an unreachable endpoint is a
+		// port-forward problem, and this failure is not one.
+		if strings.Contains(result.Combined, "so the local MCP port-forward is up") {
+			t.Fatalf("a live edge must not be reported as an unreachable endpoint, got:\n%s", result.Combined)
+		}
+		// Bounded recovery: one re-handshake, then the truth.
+		if handshakes := edge.requestsFor("initialize"); len(handshakes) != 2 {
+			t.Fatalf("edge saw %d initialize requests, want the handshake plus exactly one retry: %+v", len(handshakes), edge.recorded())
+		}
+	})
+
 	t.Run("proxy_real_run_answers_a_request_the_edge_left_unanswered", func(t *testing.T) {
 		// An edge that accepts a request and returns no body would leave the client
 		// waiting forever on a reply. The relay closes that hole: the request is

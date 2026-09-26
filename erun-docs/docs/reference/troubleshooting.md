@@ -106,6 +106,8 @@ erun mcp call --tool list --output json                      # keep working mean
 
 If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`. The proxy surfaces both of those as JSON-RPC errors carrying the same recovery text, so a client wired through it shows the fix instead of going silent.
 
+If instead it reports `the MCP edge answered, but without a session it recognizes for this client`, the environment is **not** down: the edge answered, so only this client's MCP session failed. Retry the call to re-handshake, and dispatch with `erun exec job start --tenant <tenant> --environment <env> …` in the meantime — the CLI reaches the environment without needing that session. Reading this one as an unreachable environment leaves a working environment idle.
+
 ## Orchestrator started without its environment tools
 
 **Symptoms:** the desktop titlebar's warning icon picks up an unread message reading `<name> started without its environment tools`, and the [orchestrator](/collaboration/workflow) has none of the tools for the environments it links — every call against one fails, even though the session itself looks healthy.

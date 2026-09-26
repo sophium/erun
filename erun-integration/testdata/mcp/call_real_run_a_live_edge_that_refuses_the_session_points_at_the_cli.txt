@@ -1,0 +1,3 @@
+audit: erun mcp call --tool version
+mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
+the MCP edge answered, but without a session it recognizes for this client: http://<LOOPBACK>:26100/mcp (HTTP 200) answered method "tools/call" is invalid during session initialization (code -32603); team/dev is up and dispatchable — what is broken is this MCP client's session with its edge, not the environment. Calling again re-handshakes; to dispatch work now, use the CLI, which needs no MCP session of its own: `erun exec job start --tenant team --environment dev --id <job id> --name <name> -- <command>`

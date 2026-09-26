@@ -209,6 +209,11 @@ func waitForLocalPortReachable(t *testing.T, port int) {
 type mcpEdgeForgettingItsSession struct {
 	handshakes int
 	calls      int
+	// refuseEverySession answers the guard to every call, however many times
+	// the caller handshakes: an edge that is up and serving and will still not
+	// hold a session for this client, which is the shape a caller retrying on
+	// the same message cannot tell from the environment being down.
+	refuseEverySession bool
 }
 
 func (e *mcpEdgeForgettingItsSession) serve(w http.ResponseWriter, req *http.Request) {
@@ -236,8 +241,9 @@ func (e *mcpEdgeForgettingItsSession) serve(w http.ResponseWriter, req *http.Req
 	case "tools/list":
 		// The first call after the handshake is the one the edge no longer
 		// has a session for; once the caller has handshaked again, the same
-		// call is answered normally.
-		if e.handshakes < 2 {
+		// call is answered normally — unless this edge refuses sessions
+		// outright, in which case it never answers anything else.
+		if e.refuseEverySession || e.handshakes < 2 {
 			e.calls++
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"error":{"code":-32603,"message":"method \"tools/list\" is invalid during session initialization"}}`, decoded.ID)
@@ -277,5 +283,45 @@ func TestTheClientRecoversWhenTheEdgeAnswersWithTheInitializationGuard(t *testin
 	}
 	if edge.calls != 1 {
 		t.Fatalf("expected the guard to be answered once, saw it %d times", edge.calls)
+	}
+}
+
+// TestALiveEdgeThatRefusesEverySessionIsNotReportedAsAnUnreachableEndpoint pins
+// the classification the operator-facing messages are built on: an edge that
+// answers every call and still never accepts a session is a session loss, and
+// must never be reported the way a port-forward nothing is listening on is.
+//
+// The reported failure was exactly this edge read as that one. An operator told
+// the endpoint is unreachable stops dispatching to an environment whose edge is
+// serving, and every retry says the same thing, so the reading survives being
+// checked.
+func TestALiveEdgeThatRefusesEverySessionIsNotReportedAsAnUnreachableEndpoint(t *testing.T) {
+	edge := &mcpEdgeForgettingItsSession{refuseEverySession: true}
+	server := httptest.NewServer(http.HandlerFunc(edge.serve))
+	t.Cleanup(server.Close)
+
+	_, err := ListMCPTools(context.Background(), MCPToolListParams{
+		Endpoint:      server.URL,
+		MintToken:     func() (string, error) { return "test-token", nil },
+		ClientVersion: "test",
+	})
+	if err == nil {
+		t.Fatal("expected a call no session is ever accepted for to fail")
+	}
+	if !errors.Is(err, ErrMCPSessionLost) {
+		t.Fatalf("a live edge that will not hold a session is a session loss, got: %v", err)
+	}
+	// The distinction the whole fix rests on: the endpoint was reached, and it
+	// answered, so nothing may report it as unreachable.
+	if errors.Is(err, ErrMCPEndpointUnreachable) {
+		t.Fatalf("an edge that answered must not be reported as unreachable, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "answered") {
+		t.Fatalf("the failure has to say the edge answered, got: %v", err)
+	}
+	// Bounded recovery: one re-handshake, then the truth, never a retry loop
+	// against an edge that keeps refusing.
+	if edge.handshakes != 2 {
+		t.Fatalf("expected exactly one recovery handshake, saw %d", edge.handshakes)
 	}
 }

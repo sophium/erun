@@ -304,12 +304,23 @@ func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
 	}
 }
 
-// mcpEdgeError turns the two failures an operator can act on into instructions:
-// a missing port-forward and an edge that does not trust this machine's identity.
+// mcpEdgeError turns the failures an operator can act on into instructions: a
+// missing port-forward, an edge that does not trust this machine's identity,
+// and the one that is not about the environment at all — a live edge that will
+// not hold this client's session.
+//
+// The session loss is the case that has to say which side broke. Every other
+// branch here sends the operator to the tunnel or to the environment, and that
+// reading of a lost session is what leaves a dispatchable environment sitting
+// idle: the edge answered this very call, so nothing about the environment is
+// in question, and the CLI — which dispatches through the same edge without
+// this client's session — keeps working meanwhile.
 func mcpEdgeError(target mcpEdgeTarget, err error) error {
 	switch {
 	case errors.Is(err, common.ErrMCPTargetNotAnswering):
 		return fmt.Errorf("%w; the port-forward is up, so retry in a few seconds once %s/%s has finished starting — re-establish the forward with `erun open %s %s --reconnect` only if it stays unresponsive", err, target.tenant, target.environment, target.tenant, target.environment)
+	case errors.Is(err, common.ErrMCPSessionLost):
+		return fmt.Errorf("%w; %s/%s is up and dispatchable — what is broken is this MCP client's session with its edge, not the environment. Calling again re-handshakes; to dispatch work now, use the CLI, which needs no MCP session of its own: `erun exec job start --tenant %s --environment %s --id <job id> --name <name> -- <command>`", err, target.tenant, target.environment, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPEndpointUnreachable):
 		return fmt.Errorf("%w; run `erun open %s %s` so the local MCP port-forward is up", err, target.tenant, target.environment)
 	case errors.Is(err, common.ErrMCPUnauthorized):
