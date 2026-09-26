@@ -300,6 +300,12 @@ export class ManageDialog {
     return this.page.locator('[data-slot="popover-content"]');
   }
 
+  // The panel's own search box: a control inside the panel, so a spec can put
+  // focus there without a pointer and then observe what moving it out does.
+  versionPickerSearchInput(): Locator {
+    return this.page.getByPlaceholder('Search versions...');
+  }
+
   // Shown in place of the checklist until a version is picked — the charts are
   // that version's, so there's nothing to choose before one is selected.
   deployComponentsHint(): Locator {
