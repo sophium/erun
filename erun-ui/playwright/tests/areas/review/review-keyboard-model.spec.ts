@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -124,7 +124,7 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
   }) => {
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['a.go', 'b.go']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['a.go', 'b.go']);
 
     const aHunk1 = review.hunkRegionAt('a.go', '@@ -1,1 +1,1 @@');
     const aHunk2 = review.hunkRegionAt('a.go', '@@ -5,1 +5,1 @@');
@@ -154,7 +154,7 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
   }) => {
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['a.go', 'b.go']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['a.go', 'b.go']);
 
     const aHunk1 = review.hunkRegionAt('a.go', '@@ -1,1 +1,1 @@');
     const bHunk1 = review.hunkRegionAt('b.go', '@@ -1,1 +1,1 @@');
@@ -174,13 +174,56 @@ test.describe('diff panel keyboard model — next/previous hunk and changed file
   }) => {
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['a.go', 'b.go']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['a.go', 'b.go']);
 
     await review.keyboardShortcutsButton().click();
     const popover = review.keyboardShortcutsPopover();
-    await expect(popover.getByText('Next / previous hunk')).toBeVisible();
-    await expect(popover.getByText('Next / previous changed file')).toBeVisible();
-    await expect(popover.getByText('Start a review')).toBeVisible();
+    await expect(popover.getByText('Next / previous hunk')).toBeVisible(withTestBudget());
+    await expect(popover.getByText('Next / previous changed file')).toBeVisible(withTestBudget());
+    await expect(popover.getByText('Start a review')).toBeVisible(withTestBudget());
+  });
+
+  // Every spec above converges on `diffSectionPaths()` -- the hunks the panel
+  // renders from LoadDiff's answer -- with an `expect.poll` that carries no
+  // timeout of its own, so it resolves to expect's 10s default rather than the
+  // budget its test declared. Under contention a read that is merely slow
+  // therefore reds the step with the test's clock unspent, and because the poll
+  // is the first step after the panel opens, it reds before any of the
+  // bindings the spec exists to cover have been exercised at all.
+  //
+  // The hold below is deliberately just past that 10s default: the smallest
+  // delay that discriminates. It is injected at a named RPC (this spec's own
+  // LoadDiff stub) rather than by loading the machine, so the reproduction is
+  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
+  // with 20s of its own budget unused.
+  test('a diff read that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // 60s, not the suite's 30s default: this case deliberately spends 12s of
+    // its own budget holding the read above, so the default is not a clock for
+    // the scenario -- it is a clock for the scenario minus the delay this case
+    // exists to introduce. Same pairing the sibling held-read cases use.
+    test.setTimeout(60_000);
+    let held = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        if (!held) {
+          held = true;
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+        }
+        await fulfillJSON(route, TWO_FILE_DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
+    await expect
+      .poll(() => app.reviewPanel.diffSectionPaths(), withTestBudget())
+      .toEqual(['a.go', 'b.go']);
   });
 });
 
@@ -216,7 +259,7 @@ test.describe('diff panel keyboard model — starting a review with S (#1421)', 
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['a.go']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['a.go']);
 
     await review.hunkRegionAt('a.go', '@@ -1,1 +1,1 @@').focus();
     await expect(app.createReviewDialog.locator()).toBeHidden();
@@ -226,6 +269,7 @@ test.describe('diff panel keyboard model — starting a review with S (#1421)', 
     await app.createReviewDialog.waitForOpen();
     await expect(app.createReviewDialog.locator()).toContainText(
       `${seededEnv.tenant} / ${seededEnv.environment}`,
+      withTestBudget(),
     );
   });
 });
@@ -362,8 +406,8 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
       const dialog = app.reviewDetailDialog;
       const aliceThread = dialog.commentThread('alice');
       const bobThread = dialog.commentThread('bob');
-      await expect(aliceThread).toBeVisible();
-      await expect(bobThread).toBeVisible();
+      await expect(aliceThread).toBeVisible(withTestBudget());
+      await expect(bobThread).toBeVisible(withTestBudget());
 
       await aliceThread.focus();
       await expect(aliceThread).toBeFocused();
@@ -385,8 +429,8 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
       await page.keyboard.type('has an r in it');
       await expect(replyInput).toHaveValue('has an r in it');
       await page.keyboard.press('Enter');
-      await expect.poll(() => replySubmittedBody).toBe('has an r in it');
-      await expect(replyInput).toBeHidden();
+      await expect.poll(() => replySubmittedBody, withTestBudget()).toBe('has an r in it');
+      await expect(replyInput).toBeHidden(withTestBudget());
 
       // Submitting invalidates and reloads the whole review detail
       // (loadReviewDetail), which flashes the dialog to its loading state
@@ -394,14 +438,14 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
       // mouse click on Send today too, not something this keyboard model
       // introduces. The remounted list resets to its default roving focus
       // (the first thread); re-focus it the way one more Tab press would.
-      await expect(aliceThread).toBeVisible();
+      await expect(aliceThread).toBeVisible(withTestBudget());
       await aliceThread.focus();
       await expect(aliceThread).toBeFocused();
 
       // Enter resolves the focused (alice's) thread -- not a reply target.
-      await expect(aliceThread.getByText('Unresolved')).toBeVisible();
+      await expect(aliceThread.getByText('Unresolved')).toBeVisible(withTestBudget());
       await page.keyboard.press('Enter');
-      await expect(aliceThread.getByText('Resolved')).toBeVisible();
+      await expect(aliceThread.getByText('Resolved')).toBeVisible(withTestBudget());
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
@@ -447,8 +491,10 @@ test.describe('review detail dialog keyboard model — reply and resolve/unresol
 
       await openReviewDetailFromDashboard(app, environment, REVIEW.name);
       await app.reviewDetailDialog.keyboardShortcutsButton().click();
-      await expect(app.page.getByText('Reply to the focused thread')).toBeVisible();
-      await expect(app.page.getByText('Resolve / reopen the focused thread')).toBeVisible();
+      await expect(app.page.getByText('Reply to the focused thread')).toBeVisible(withTestBudget());
+      await expect(app.page.getByText('Resolve / reopen the focused thread')).toBeVisible(
+        withTestBudget(),
+      );
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }

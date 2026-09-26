@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
   SEED_TENANT,
@@ -13,6 +13,14 @@ import {
 // the diff panel knows which line was clicked. The Go side
 // (CreateReviewComment) is covered by erun-ui/tenant_review_write_test.go;
 // these specs cover the desktop's own precondition gating and the happy path.
+//
+// Everything the diff panel offers is rendered from LoadDiff's answer, and a
+// locator assertion carries no clock of its own: `toHaveCSS`, `toBeVisible`,
+// `toHaveAttribute` and `toHaveCount` resolve to expect's 10s default rather
+// than the budget these tests declare. Under contention a read that is merely
+// slow therefore reds the step with the test's clock unspent — the class
+// fixtures/erunApp.ts's `withTestBudget` exists for, and what the held-read
+// case at the end of this file reproduces.
 
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -172,25 +180,31 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // on every row: the diff is the densest reading surface in the app, so a
     // persistent per-line icon would compete with the code it discusses.
     const action = app.page.getByRole('button', { name: 'Comment on line 1 of main.go' });
-    await expect(action).toHaveCSS('opacity', '0');
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
     await app.page.getByText('package main').hover();
-    await expect(action).toHaveCSS('opacity', '1');
+    // The reveal is the hover's own render, so it converges on this test's
+    // declared budget rather than on expect's 10s default.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
     await action.click();
     await expect(
       app.page.getByText('Open a review from the Reviews tab to comment on this line.'),
-    ).toBeVisible();
+    ).toBeVisible(withTestBudget());
 
     // Unlike the other two blocked reasons (checked below), this one names a
     // destination on a different surface -- so the popover carries a real
     // action to get there in one click, rather than leaving the reader to
     // find the tenant dashboard on their own (#1388).
     const openReviewsTab = app.page.getByRole('button', { name: 'Open Reviews tab' });
-    await expect(openReviewsTab).toBeVisible();
+    await expect(openReviewsTab).toBeVisible(withTestBudget());
     await openReviewsTab.click();
 
     await app.tenantDashboard.waitForOpen();
-    await expect(app.tenantDashboard.tab('Reviews')).toHaveAttribute('aria-selected', 'true');
+    await expect(app.tenantDashboard.tab('Reviews')).toHaveAttribute(
+      'aria-selected',
+      'true',
+      withTestBudget(),
+    );
   });
 
   test('still explains — with no action — that the change needs a commit first', async ({
@@ -226,7 +240,9 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await page.getByText('package main').waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
-      await expect(page.getByText('Commit this change before commenting on it.')).toBeVisible();
+      await expect(page.getByText('Commit this change before commenting on it.')).toBeVisible(
+        withTestBudget(),
+      );
       // This blocked reason is actionable exactly where the operator already
       // stands (commit the change), so it stays message-only (#1388).
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
@@ -268,9 +284,9 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await page.getByText('package main').waitFor({ state: 'visible' });
 
       await page.getByRole('button', { name: 'Comment on line 1 of main.go' }).click();
-      await expect(
-        page.getByText('You do not have access to comment on this review.'),
-      ).toBeVisible();
+      await expect(page.getByText('You do not have access to comment on this review.')).toBeVisible(
+        withTestBudget(),
+      );
       // Actionable exactly where the operator stands (ask for access), so no
       // navigation button here either (#1388).
       await expect(page.getByRole('button', { name: 'Open Reviews tab' })).toHaveCount(0);
@@ -332,7 +348,9 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
       await page.getByLabel('New comment').fill('what does this do?');
       await page.getByRole('button', { name: 'Comment', exact: true }).click();
 
-      await expect(page.getByLabel('New comment')).toHaveCount(0);
+      // The composer closes when CreateReviewComment's own answer lands, so
+      // this convergence waits on the round trip, not on expect's 10s default.
+      await expect(page.getByLabel('New comment')).toHaveCount(0, withTestBudget());
       expect(commentInput).toMatchObject({
         reviewId: REVIEW.reviewId,
         commitId: 'abc123',
@@ -343,5 +361,49 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
+  });
+
+  // The line-comment affordance exists only once the panel has rendered the
+  // diff LoadDiff answered with, and the assertions on it carry no timeout of
+  // their own: `toHaveCSS` resolves to expect's 10s default rather than the
+  // budget this test declares. A read that is merely slow therefore reds the
+  // step with the test's own clock unspent.
+  //
+  // The hold below is deliberately just past that 10s default: the smallest
+  // delay that discriminates. It is injected at a named RPC (this spec's own
+  // LoadDiff stub) rather than by loading the machine, so the reproduction is
+  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
+  // with 20s of its own budget unused.
+  test('a diff read that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // 60s, not the suite's 30s default: this case deliberately spends 12s of
+    // its own budget holding the read above, so the default is not a clock for
+    // the scenario -- it is a clock for the scenario minus the delay this case
+    // exists to introduce. Same pairing the sibling held-read cases use.
+    test.setTimeout(60_000);
+    let held = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        if (!held) {
+          held = true;
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+        }
+        await fulfillJSON(route, DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+
+    const action = app.page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
   });
 });

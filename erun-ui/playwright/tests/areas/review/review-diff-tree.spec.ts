@@ -139,8 +139,10 @@ test.describe('review diff/tree consistency', () => {
     // diffs it renders.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    await expect(review.changedFilesTree()).toBeVisible();
-    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
+    await expect(review.changedFilesTree()).toBeVisible(withTestBudget());
+    // Both reads are the tree and diffs LoadDiff answered with, so they wait on
+    // this test's declared budget rather than expect's 10s default.
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(SMALL_ORDER);
     expect(await review.treeFilePaths()).toEqual(SMALL_ORDER);
   });
 
@@ -156,7 +158,7 @@ test.describe('review diff/tree consistency', () => {
     // diffs it renders.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(SMALL_ORDER);
 
     // The filter field is a controlled input fed from the store, and the panel
     // re-renders on its own silent diff refresh, so a fill landing inside that
@@ -168,8 +170,8 @@ test.describe('review diff/tree consistency', () => {
     await nextDiffRefresh(page);
     await review.setDiffFilter('b.ts');
     await expect(review.filterInput()).toHaveValue('b.ts');
-    await expect.poll(() => review.treeFilePaths()).toEqual(['src/b.ts']);
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['src/b.ts']);
+    await expect.poll(() => review.treeFilePaths(), withTestBudget()).toEqual(['src/b.ts']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['src/b.ts']);
   });
 
   test('collapsing a directory hides its files in both the tree and the diff', async ({
@@ -184,11 +186,11 @@ test.describe('review diff/tree consistency', () => {
     // diffs it renders.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths()).toEqual(SMALL_ORDER);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(SMALL_ORDER);
 
     await review.collapseDirectory('src');
-    await expect.poll(() => review.treeFilePaths()).toEqual(['docs/c.md']);
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['docs/c.md']);
+    await expect.poll(() => review.treeFilePaths(), withTestBudget()).toEqual(['docs/c.md']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['docs/c.md']);
   });
 
   test('the tree scrolls to keep the active file visible as the diff scrolls', async ({
@@ -229,7 +231,9 @@ test.describe('review diff/tree consistency', () => {
     // diffs it renders.
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
+    await expect
+      .poll(() => review.diffSectionPaths().then((paths) => paths.length), withTestBudget())
+      .toBe(30);
 
     // The panel keeps reloading its diff on a timer (see nextDiffRefresh's own
     // comment above); anchor to the quiet window right after one of those
@@ -253,9 +257,12 @@ test.describe('review diff/tree consistency', () => {
     // and the call still timed out every attempt, for the whole retry budget.
     // Attached is the one property this step depends on, and toPass still
     // supplies the re-resolve.
+    // A bare toPass defers to the deadline this test declared (240s). A fixed
+    // 30s here would give up while the test still had room, which is the
+    // outer-bound/inner-bound mistake rather than a convergence.
     await expect(async () => {
       await scrollDiffToLastFile(page);
-    }).toPass({ timeout: 30_000 });
+    }).toPass();
 
     const node = review.currentTreeNode();
     await expect(node).toBeVisible();
@@ -266,20 +273,17 @@ test.describe('review diff/tree consistency', () => {
     // scrollspy re-render) fails fast and the poll gets another attempt,
     // rather than one attempt consuming the whole convergence window.
     await expect
-      .poll(
-        async () => {
-          const nb = await node.boundingBox({ timeout: 2_000 }).catch(() => null);
-          const cb = await review
-            .changedFilesTree()
-            .boundingBox({ timeout: 2_000 })
-            .catch(() => null);
-          if (!nb || !cb) {
-            return false;
-          }
-          return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
-        },
-        { timeout: 120_000 },
-      )
+      .poll(async () => {
+        const nb = await node.boundingBox({ timeout: 2_000 }).catch(() => null);
+        const cb = await review
+          .changedFilesTree()
+          .boundingBox({ timeout: 2_000 })
+          .catch(() => null);
+        if (!nb || !cb) {
+          return false;
+        }
+        return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
+      }, withTestBudget())
       .toBe(true);
   });
 
@@ -320,12 +324,14 @@ test.describe('review diff/tree consistency', () => {
     await app.titlebar.toggleReviewPanel();
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
-    await expect.poll(() => review.diffSectionPaths().then((paths) => paths.length)).toBe(30);
+    await expect
+      .poll(() => review.diffSectionPaths().then((paths) => paths.length), withTestBudget())
+      .toBe(30);
 
     await nextDiffRefresh(page);
     await expect(async () => {
       await scrollDiffToLastFile(page);
-    }).toPass({ timeout: 30_000 });
+    }).toPass();
 
     // The scrollspy's own update is coalesced onto the next animation frame
     // (TerminalController.queueVisibleDiffSelectionUpdate), so the tree does
@@ -361,23 +367,20 @@ test.describe('review diff/tree consistency', () => {
     // same predicate the scroll spec asserts, read the same bounded way so a
     // reload landing mid-measurement costs one retry rather than the read.
     await expect
-      .poll(
-        async () => {
-          const nb = await review
-            .currentTreeNode()
-            .boundingBox({ timeout: 2_000 })
-            .catch(() => null);
-          const cb = await review
-            .changedFilesTree()
-            .boundingBox({ timeout: 2_000 })
-            .catch(() => null);
-          if (!nb || !cb) {
-            return false;
-          }
-          return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
-        },
-        { timeout: 20_000 },
-      )
+      .poll(async () => {
+        const nb = await review
+          .currentTreeNode()
+          .boundingBox({ timeout: 2_000 })
+          .catch(() => null);
+        const cb = await review
+          .changedFilesTree()
+          .boundingBox({ timeout: 2_000 })
+          .catch(() => null);
+        if (!nb || !cb) {
+          return false;
+        }
+        return nb.y >= cb.y - 2 && nb.y + nb.height <= cb.y + cb.height + 2;
+      }, withTestBudget())
       .toBe(true);
   });
 
@@ -444,16 +447,63 @@ test.describe('review diff/tree consistency', () => {
 
     const panelNotice = review.noLocalChangesNotice(review.diffContentRegion());
     const treeNotice = review.noLocalChangesNotice(review.changedFilesTree());
-    await expect(panelNotice).toBeVisible();
-    await expect(panelNotice).toContainText('2 commits');
-    await expect(treeNotice).toBeVisible();
+    // Both notices are LoadDiff's own answer for the "current" scope, so they
+    // wait on this test's budget rather than expect's 10s default.
+    await expect(panelNotice).toBeVisible(withTestBudget());
+    await expect(panelNotice).toContainText('2 commits', withTestBudget());
+    await expect(treeNotice).toBeVisible(withTestBudget());
     // Never a flat "No changes" that hides the two pending commits.
     await expect(review.diffContentRegion().getByText('No changes', { exact: true })).toHaveCount(
       0,
     );
 
     await review.viewAllBranchChangesButton(review.diffContentRegion()).click();
-    await expect.poll(() => review.diffSectionPaths()).toEqual(['feature.txt']);
+    await expect.poll(() => review.diffSectionPaths(), withTestBudget()).toEqual(['feature.txt']);
     await expect(panelNotice).toHaveCount(0);
+  });
+
+  // Every spec above opens on a poll of `diffSectionPaths()` -- the files the
+  // panel renders from LoadDiff's answer -- and an `expect.poll` carries no
+  // timeout of its own, so it resolves to expect's 10s default rather than the
+  // budget its test declared. Under contention a read that is merely slow
+  // therefore reds the step with the test's clock unspent.
+  //
+  // The hold below is deliberately just past that 10s default: the smallest
+  // delay that discriminates. It is injected at a named RPC (this spec's own
+  // LoadDiff stub) rather than by loading the machine, so the reproduction is
+  // deterministic on a quiet host. Pre-fix this case reds at exactly 10_000ms
+  // with 20s of its own budget unused.
+  test('a diff read that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // 60s, not the suite's 30s default: this case deliberately spends 12s of
+    // its own budget holding the read above, so the default is not a clock for
+    // the scenario -- it is a clock for the scenario minus the delay this case
+    // exists to introduce. Same pairing the sibling held-read cases use.
+    test.setTimeout(60_000);
+    let held = false;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method: string };
+      if (body.method === 'LoadDiff') {
+        if (!held) {
+          held = true;
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+        }
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: diffResult(SMALL_FILES, SMALL_TREE) }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await expect
+      .poll(() => app.reviewPanel.diffSectionPaths(), withTestBudget())
+      .toEqual(SMALL_ORDER);
   });
 });
