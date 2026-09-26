@@ -1623,6 +1623,7 @@ Failure mapping. Every one of these is answered as a JSON-RPC error on the faili
 | Condition | `error.message` |
 |---|---|
 | Nothing listening on the local MCP port | `MCP endpoint is not reachable: <endpoint> (…); run erun open <tenant> <env> so the local MCP port-forward is up` |
+| Edge is up and answered, but will not hold this client's session | `the MCP edge answered, but without a session it recognizes for this client: <endpoint> (HTTP 404, or the session-initialization guard on a 200); <tenant>/<env> is up and dispatchable — … use the CLI …` — the endpoint is reached, so this is not a port-forward problem, and the message says which side failed and names `erun exec job start` as the path that needs no MCP session of this client's own. |
 | Edge answered `401`/`403` | `MCP endpoint rejected the bearer token: <endpoint> (HTTP 401); <tenant>/<env> was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app` |
 | Edge accepted a request but returned no body | `the MCP edge at <endpoint> accepted the request but returned no reply` — the client fails visibly instead of waiting on a reply that is not coming. |
 | No desktop identity on this machine | The minting error, naming the path it looked at. |
@@ -1659,6 +1660,7 @@ Error codes:
 | `--tool is required` | `call` invoked without `--tool`. | `1` |
 | `--args must be a JSON object` | `--args` did not parse as a JSON object. Raised before the target resolves. | `1` |
 | `MCP endpoint is not reachable` | The dial to the local MCP port failed — normally a missing port-forward. Recovery: `erun open <tenant> <env>`. | `1` |
+| `the MCP edge answered, but without a session it recognizes for this client` | The endpoint *was* reached and answered, so the environment is dispatchable: this client's MCP session is what failed. Recovery: retry the call to re-handshake, or dispatch over the CLI (`erun exec job start …`), which needs no session of this client's own. | `1` |
 | `MCP endpoint rejected the bearer token` | The edge answered `401`/`403`: it does not trust this machine's identity. Recovery: redeploy the env from the desktop app so the current public key is injected. | `1` |
 | `MCP tool <name> reported an error` | The tool set `isError`; the message is the tool's own. | `1` |
 | `MCP tools/call failed` | A JSON-RPC-level error (unknown tool, invalid arguments), reported with the protocol code. | `1` |
