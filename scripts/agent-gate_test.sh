@@ -38,6 +38,26 @@ stub_erun() {
 	cat >"${bin_dir}/erun" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
+# `erun version` is how agent-gate.sh names the binary that will run the gate.
+# The default answer carries the lines a real `erun version` prints after its
+# identity line -- a project VERSION resolved from the working directory, and
+# the registry's latest stable -- so a case can prove the wrapper reads the
+# `erun <version>` line rather than whichever line happens to come first or
+# last. STUB_VERSION_OUTPUT set but empty stands in for a binary whose version
+# is unreadable; STUB_NO_VERSION_NO_REGISTRY=1 stands in for one that predates
+# the flag this wrapper prefers.
+if [ "$1" = "version" ]; then
+	if [ "${STUB_NO_VERSION_NO_REGISTRY:-}" = "1" ] && [ "${2:-}" = "--no-registry" ]; then
+		printf 'Error: unknown flag: --no-registry\n' >&2
+		exit 1
+	fi
+	if [ -n "${STUB_VERSION_OUTPUT+x}" ]; then
+		printf '%s' "$STUB_VERSION_OUTPUT"
+	else
+		printf 'erun 9.9.9 (abc1234 built 2026-01-01T00:00:00Z)\nproject erun 9.9.11\nlatest stable: 9.9.10\n'
+	fi
+	exit 0
+fi
 case "$1 $2 $3" in
 "exec job start")
 	# The capability probe agent-gate.sh reads --exclusive support off. Defaults
@@ -148,6 +168,21 @@ stub_erun_stateful() {
 #!/bin/sh
 printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
 mkdir -p "$STUB_STORE_DIR"
+
+# Same `erun version` answer as stub_erun above, so a case that needs a real
+# job store can still observe the version banner the wrapper prints first.
+if [ "$1" = "version" ]; then
+	if [ "${STUB_NO_VERSION_NO_REGISTRY:-}" = "1" ] && [ "${2:-}" = "--no-registry" ]; then
+		printf 'Error: unknown flag: --no-registry\n' >&2
+		exit 1
+	fi
+	if [ -n "${STUB_VERSION_OUTPUT+x}" ]; then
+		printf '%s' "$STUB_VERSION_OUTPUT"
+	else
+		printf 'erun 9.9.9 (abc1234 built 2026-01-01T00:00:00Z)\nproject erun 9.9.11\nlatest stable: 9.9.10\n'
+	fi
+	exit 0
+fi
 
 job_id=""
 job_name=""
@@ -303,6 +338,125 @@ stub_erun "${case_dir}/bin"
 	grep -q -- 'make check-gate' "$STUB_ARGV_FILE" || fail "happy path: the real command was not forwarded to job start"
 	grep -q 'exec job await' "$STUB_ARGV_FILE" || fail "happy path: job await was never called"
 	grep -q 'exec job output' "$STUB_ARGV_FILE" || fail "happy path: job output was never read back"
+)
+
+# --- the pod's own `erun` -- not the checkout being gated -- is what runs this
+# gate and `erun exec gate-merge`, and the two are routinely a release or two
+# apart. That skew is what makes a merged fix to erun's own build/gate/landing
+# layer look ineffective: merging changes nothing until the environment is
+# upgraded, so a gate that passes over the old behaviour, or a landing whose
+# trailer still comes back the old way, reads as that fix having failed when it
+# has not run at all. The reported failure is the silence rather than the skew,
+# so what these cases pin is the announcement: it is on stdout (the channel a
+# lane captures a gate's result from), it is the `erun <version>` line and not
+# the project or registry line printed beside it, and it says which binary it
+# is naming.
+case_dir="${work_root}/pod-erun-version"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	set +e
+	stdout=$("$gate" check "make check" -- make check-gate 2>/dev/null)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "pod erun version: expected exit 0, got $STATUS ($stdout)"
+	case "$stdout" in
+	*"erun 9.9.9"*) ;;
+	*) fail "pod erun version: the pod's own erun version must be named on stdout, the channel a gate's result is read from, got: $stdout" ;;
+	esac
+	# The stub answers with the project VERSION and the registry lines a real
+	# `erun version` prints alongside its identity line, so a wrapper that read
+	# the wrong one -- or the last one -- would report one of these instead.
+	case "$stdout" in
+	*9.9.10* | *9.9.11*)
+		fail "pod erun version: must report erun's own build version, not the project or registry line printed beside it, got: $stdout"
+		;;
+	*) ;;
+	esac
+	case "$stdout" in
+	*"gate-merge"*) ;;
+	*) fail "pod erun version: must say this same binary is what runs the gate and \`erun exec gate-merge\`, got: $stdout" ;;
+	esac
+	case "$stdout" in
+	*"job output line"*) ;;
+	*) fail "pod erun version: the gate itself must still run and report, got: $stdout" ;;
+	esac
+)
+
+# --- an environment whose installed erun predates `--no-registry` is exactly
+# the case this banner exists for, so the flag's rejection must not be read as
+# "no version to report": the wrapper falls back to the plain form and still
+# names the version, and the gate keeps its verdict either way.
+case_dir="${work_root}/pod-erun-version-old-binary"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_NO_VERSION_NO_REGISTRY=1
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	set +e
+	stdout=$("$gate" check "make check" -- make check-gate 2>/dev/null)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "pod erun version old binary: expected exit 0, got $STATUS ($stdout)"
+	case "$stdout" in
+	*"erun 9.9.9"*) ;;
+	*) fail "pod erun version old binary: must still name the version after falling back to plain \`erun version\`, got: $stdout" ;;
+	esac
+	grep -q '^version --no-registry$' "$STUB_ARGV_FILE" || fail "pod erun version old binary: must prefer the registry-free form"
+	grep -q '^version$' "$STUB_ARGV_FILE" || fail "pod erun version old binary: must fall back to plain \`erun version\` when the installed binary predates the flag"
+)
+
+# --- a version that cannot be read is reported as exactly that and nothing
+# more. The banner is a fact, not a check: an unreadable binary must not fail
+# the gate, but it must not go quiet either, because silence is the
+# invisibility this exists to remove -- and it must never invent a version to
+# fill the gap, which would be worse than no line at all.
+case_dir="${work_root}/pod-erun-version-unreadable"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_VERSION_OUTPUT=
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "pod erun version unreadable: an unreadable version must not fail the gate, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"could not read the pod"*) ;;
+	*) fail "pod erun version unreadable: must name the version as unreadable rather than passing it over in silence, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*9.9.*) fail "pod erun version unreadable: must never report a version it could not read, got: $OUT" ;;
+	*) ;;
+	esac
+	case "$OUT" in
+	*"job output line"*) ;;
+	*) fail "pod erun version unreadable: the gate must still run and report, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "pod erun version unreadable: the gate must still be started"
 )
 
 # --- an outer `timeout` wrapping this invocation is warned about: it can only

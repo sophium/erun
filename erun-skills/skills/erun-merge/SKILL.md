@@ -285,6 +285,19 @@ else
 fi
 ```
 
+**Every `erun` in this rung — and the gate and landing that follow it — runs
+the environment's installed binary, not the branch being merged.** That binary
+is a release, routinely one or two behind this checkout, so a fix to erun's own
+build/gate/landing layer is inert here until the environment is upgraded (`erun
+pin` / `erun deploy`): a green result after such a merge says the branch builds,
+not that the fix ran. Read the version that will actually run it before drawing
+that conclusion — `scripts/agent-gate.sh` names the same one for `make check`,
+and `erun-merge-queue-drive` for `erun exec gate-merge`:
+
+```sh
+erun version --no-registry   # the `erun <version>` line is the pod's binary
+```
+
 A build that watched BuildKit replay a Dockerfile's whole `test` stage — the
 stage `make check` runs in — exits non-zero and refuses to record; see the
 failure detail it prints. That is deliberate: a replay built images without
