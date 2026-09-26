@@ -117,9 +117,35 @@ var buildCheckCoverage = map[string]coverageEntry{
 	},
 	"erun-console/playwright": {
 		kind: deliberatelyExcluded,
-		reason: "opt-in real-Zitadel OIDC end-to-end suite, skipped unless ERUN_E2E_CONSOLE_OIDC=1 (set only by its " +
-			"own run.sh after standing up the stack); never part of the per-commit gate (erun-console/playwright/AGENTS.md)",
+		reason: "opt-in real-infrastructure end-to-end suites, each skipped unless the opt-in variable its own " +
+			"runner sets is present; never part of the per-commit gate (erun-console/playwright/AGENTS.md). This " +
+			"entry answers for the package as a whole; consolePlaywrightRunnerGates below answers for each runner " +
+			"one level down",
 	},
+}
+
+// consolePlaywrightRunnerGates classifies every end-to-end runner
+// erun-console/playwright/package.json declares, one entry per runner script.
+// The package-level entry above is keyed on the package, so it can only ever
+// name one suite in prose, and prose is what nothing keeps complete: the
+// package's other four opt-in runners (test:mcp-operate-scope,
+// test:mcp-attach-session, test:rest-surfaces, test:landing-layout) were
+// enumerated by no entry at all, so a sixth runner could ship without anyone
+// deciding whether a gate should run it. Keying by the runner's own script
+// rather than by yarn's script name keeps the table free of the `:headed`
+// invocation variants, which are the same script with a flag and the same gate.
+//
+// The gate variable is the exclusion reason in checkable form: each script sets
+// it only after standing up that suite's own dependencies, so a runner invoked
+// without them stops rather than passing vacuously. The test verifies each pair
+// against the script's real text instead of trusting the table, the same way the
+// Makefile-backed entries above are verified against the Makefile's real text.
+var consolePlaywrightRunnerGates = map[string]string{
+	"./run.sh":                    "ERUN_E2E_CONSOLE_OIDC",
+	"./run-mcp-operate-scope.sh":  "ERUN_E2E_CONSOLE_MCP_OPERATE",
+	"./run-mcp-attach-session.sh": "ERUN_E2E_CONSOLE_MCP_ATTACH",
+	"./run-rest-surfaces.sh":      "ERUN_E2E_CONSOLE_REST",
+	"./run-landing-layout.sh":     "ERUN_E2E_CONSOLE_LANDING_LAYOUT",
 }
 
 // skipDirNames are directories this gate never descends into: version
@@ -205,6 +231,95 @@ func TestBuildCheckGateCoversEveryTestSuite(t *testing.T) {
 		t.Errorf("buildCheckCoverage names modules/packages that no longer have their own tests (renamed, removed, "+
 			"or tests deleted): %v", stale)
 	}
+}
+
+// TestConsolePlaywrightRunnersAreClassified is the runner-level half of the
+// same contract. TestBuildCheckGateCoversEveryTestSuite above sees
+// erun-console/playwright as one package, because one of its scripts is called
+// "test" and packageJSONHasTestScript reads only that name -- so a runner added
+// beside it is enumerated by nothing and can go silent exactly the way the four
+// this table names did.
+func TestConsolePlaywrightRunnersAreClassified(t *testing.T) {
+	t.Parallel()
+	root := repoRoot(t)
+	pkgDir := filepath.Join(root, "erun-console", "playwright")
+
+	scripts, err := packageJSONScripts(filepath.Join(pkgDir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// declared maps each runner script back to the yarn script names that
+	// invoke it, so a failure names the runner an operator would actually type.
+	declared := make(map[string][]string)
+	for name, command := range scripts {
+		if name != "test" && !strings.HasPrefix(name, "test:") {
+			continue
+		}
+		script, ok := runnerScriptPath(command)
+		if !ok {
+			t.Errorf("erun-console/playwright's %q runner (%s) does not invoke a \"./*.sh\" script -- this gate "+
+				"cannot classify what it runs, so widen the table deliberately rather than leaving it unmatched",
+				name, command)
+			continue
+		}
+		declared[script] = append(declared[script], name)
+	}
+	if len(declared) == 0 {
+		t.Fatal("erun-console/playwright/package.json declares no test runner -- the scan is misconfigured")
+	}
+
+	for script, runners := range declared {
+		sort.Strings(runners)
+		invoked := strings.Join(runners, ", ")
+		gate, ok := consolePlaywrightRunnerGates[script]
+		if !ok {
+			t.Errorf("erun-console/playwright's %s runner(s) run %s, which consolePlaywrightRunnerGates does not "+
+				"classify -- name the opt-in variable that gates it, or say why no gate should run it",
+				invoked, script)
+			continue
+		}
+		if gate == "" {
+			t.Errorf("erun-console/playwright's %s runner(s) are classified with no opt-in variable, which gates "+
+				"nothing", invoked)
+			continue
+		}
+		body, readErr := os.ReadFile(filepath.Join(pkgDir, filepath.FromSlash(script)))
+		if readErr != nil {
+			t.Errorf("erun-console/playwright's %s runner(s) classify %s as gated on %s: %v", invoked, script, gate, readErr)
+			continue
+		}
+		if !strings.Contains(string(body), gate) {
+			t.Errorf("erun-console/playwright's %s runner(s) claim %s is gated on %s, but that script never names "+
+				"it -- the classification does not match what the runner actually does", invoked, script, gate)
+		}
+	}
+
+	var stale []string
+	for script := range consolePlaywrightRunnerGates {
+		if _, ok := declared[script]; !ok {
+			stale = append(stale, script)
+		}
+	}
+	if len(stale) > 0 {
+		sort.Strings(stale)
+		t.Errorf("consolePlaywrightRunnerGates names runner scripts erun-console/playwright/package.json no "+
+			"longer invokes (renamed or removed): %v", stale)
+	}
+}
+
+// runnerScriptPath matches the leading "./<name>.sh" a runner's package.json
+// command invokes, ignoring any flag arguments that follow it.
+var runnerScriptPathPattern = regexp.MustCompile(`(\./[A-Za-z0-9_.\-]+\.sh)\b`)
+
+// runnerScriptPath returns the runner script a package.json test command
+// invokes, reporting false when the command has no such leading script.
+func runnerScriptPath(command string) (string, bool) {
+	m := runnerScriptPathPattern.FindStringSubmatch(command)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 func containsString(haystack []string, needle string) bool {
@@ -328,18 +443,28 @@ func jsPackagesWithTests(t testing.TB, root string) []string {
 	return packages
 }
 
-func packageJSONHasTestScript(path string) (bool, error) {
+// packageJSONScripts returns a package.json's declared script bodies, keyed by
+// script name.
+func packageJSONScripts(path string) (map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	var manifest struct {
 		Scripts map[string]string `json:"scripts"`
 	}
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return false, fmt.Errorf("%s: %w", path, err)
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	return strings.TrimSpace(manifest.Scripts["test"]) != "", nil
+	return manifest.Scripts, nil
+}
+
+func packageJSONHasTestScript(path string) (bool, error) {
+	scripts, err := packageJSONScripts(path)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(scripts["test"]) != "", nil
 }
 
 func readMakefile(t testing.TB, root string) string {
