@@ -225,6 +225,92 @@ func TestGateMergeTrailersFromBodyStopsAHardWrappedValueAtItsParagraph(t *testin
 	}
 }
 
+// TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine is the
+// reproduction of the reported over-consumption: a body whose "Closes #N" is
+// followed on the very next line — no blank between them — by a sentence of
+// prose carried that sentence as part of the declaration, because every
+// non-blank line beneath a trailer was read as a continuation of it. The prose
+// then reached the unattended commit on the target inside the reported trailer
+// set as though the author had declared it.
+//
+// It is fixable where a continuation opening a "Token:" line is not, because a
+// "Closes #N" reference list has no second line to write: the pattern is
+// anchored at both ends and every alternative is on the one line, so the
+// declaration is complete where it stands. A line beneath it is therefore not a
+// reading of the value that is merely unlikely — there is nothing for it to be.
+func TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"Closes #2703\n" +
+		"See the linked issue for the full reproduction, which I ran by hand.\n" +
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n"
+
+	got := gateMergeTrailersFromBody(body)
+	want := []string{
+		"Closes #2703",
+		"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("trailer %d: expected %q, got %q", i, want[i], got[i])
+		}
+	}
+	if strings.Contains(got[0], "See the linked issue") {
+		t.Fatalf("the prose under the declaration must not be carried as its value, got %q", got[0])
+	}
+}
+
+// TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer
+// pins the terminator on a value that is itself continuable, which is the case
+// the closing spelling stops exercising once it stands complete on its own line.
+// A "Token:" line this squash does not carry still ends the entry above it, so
+// the line stays out of the value rather than being folded into it. Treating
+// one as a continuation instead is what would carry a real "Defect-Fix: yes" or
+// "Refs #N" onto the target as part of the declaration above it.
+func TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"Reproduces: the parts arrived in append order rather than the order they\n" +
+		"were declared.\n" +
+		"Defect-Fix: yes\n" +
+		"Refs #2642\n"
+
+	got := gateMergeTrailersFromBody(body)
+	want := []string{"Reproduces: the parts arrived in append order rather than the order they\nwere declared."}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
+	}
+	if got[0] != want[0] {
+		t.Fatalf("expected the value to end at the unrecognised trailer, got %q", got[0])
+	}
+}
+
+// TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry records the
+// residual the wrap fix leaves open. It states what the carrier can decide
+// rather than holding the outcome up as wanted: a continuation that starts at
+// column 0 with a "Token:" spelling is the same bytes as a trailer entry
+// starting there, and a hand-wrapped value's continuation lines are exactly a
+// run of such lines, so no rule tells the two apart. Reading the line as an
+// entry truncates the value above it; reading it as a continuation is the only
+// way to carry a hard-wrapped value whole, and widening the entry to take it
+// would fold every genuine line of that shape — the "Defect-Fix: yes" and
+// "Refs #N" the terminator above exists for — into the declaration instead.
+func TestGateMergeTrailersFromBodyReadsAColumnZeroTokenLineAsANewEntry(t *testing.T) {
+	body := "Fix the widget\n\n" +
+		"Reproduces: the card closed under a stationary pointer, and\n" +
+		"Note: the observer had already been detached by the boot's landing.\n"
+
+	got := gateMergeTrailersFromBody(body)
+	want := []string{"Reproduces: the card closed under a stationary pointer, and"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
+	}
+	if got[0] != want[0] {
+		t.Fatalf("expected the value to stop at the trailer-shaped continuation, got %q", got[0])
+	}
+}
+
 // TestGateMergeTrailersFromBodyReadsEveryDeclaredTrailer pins the boundary that
 // replaced the block walk, and the two shapes the walk decided wrongly in both
 // directions. A declaration sitting above a trailing paragraph the walk did not
