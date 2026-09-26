@@ -52,15 +52,15 @@ A monorepo of independent deployables — each with its own `docker`/`k8s`/`VERS
 
 Independent images build **concurrently by default**. Most images in a multi-image project have no relationship to each other, so building them one after another spends most of its wall-clock waiting.
 
-What stays ordered is only what has to: an image whose Dockerfile `FROM`s a sibling does not start until that sibling has finished and written its tags. `erun build` resolves those edges into **waves** — one wave is a set of images that can build at the same time — and reports the plan before it starts:
+What stays ordered is only what has to: an image whose Dockerfile `FROM`s a sibling does not start until that sibling has finished and written its tags — and it starts the moment its *own* bases are done, not when every image beside it is done. An image built on a base that is a cache hit therefore starts almost immediately, however long the images discovered next to it take. `erun build` resolves those edges and reports them before it starts:
 
 ```
-build: 9 images in 2 waves — wave 1 (8): …; wave 2 (1): erun-mcp
+build: 9 images, 1 waiting on a sibling base — erun-mcp after erun-devops
 ```
 
 The plan is a pure function of the Dockerfiles, so it is the same on every machine. The number of workers is not printed, because it is derived from the machine.
 
-`--jobs 1` restores strictly sequential building, including keeping each image's decision lines next to its own build output. Above one, each image's output is buffered and flushed in wave order, so a run is readable and two runs of the same build produce the same stream.
+`--jobs 1` restores strictly sequential building, including keeping each image's decision lines next to its own build output. Above one, each image's output is published in build order — the image whose turn it is streams live, and one that ran ahead of it is held until its turn — so a run is readable and two runs of the same build produce the same stream, whatever order the images finished in.
 
 `ERUN_BUILD_JOBS` sets the same degree by environment.
 

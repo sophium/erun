@@ -93,7 +93,7 @@ func TestStepTimingConcurrentChildrenReportOverlapNotNegative(t *testing.T) {
 	root := newStepTiming("build", clock.now)
 
 	// Two children whose combined duration exceeds the parent's own wall time
-	// — the shape a concurrent build wave produces.
+	// — the shape a concurrent build produces.
 	a := root.child("amd64")
 	b := root.child("arm64")
 	clock.advance(5 * time.Second)
