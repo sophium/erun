@@ -3,15 +3,25 @@ import type { Page } from '@playwright/test';
 import { expect, test, type SeededEnvironment } from '../../../fixtures/erunApp.js';
 import type { AppShell } from '../../../pages/index.js';
 
-// #1322: switching to a session that has produced a lot of output while it
-// was not the visible tab used to re-feed its entire retained log, visibly
-// scrolling through it before landing at the live prompt -- and the cost grew
-// with the session's total history, unbounded for an alt-screen session.
+// Switching to a session that has produced a lot of output while it was not
+// the visible tab used to re-feed its entire retained log, visibly scrolling
+// through it before landing at the live prompt -- and the cost grew with the
+// session's total history, unbounded for an alt-screen session.
 // TerminalController now snapshots a session's rendered screen on
 // switch-away (@xterm/addon-serialize) and restores it in one write on
 // switch-back, replaying only the (already retention-bounded) output
 // buffered since. These specs measure that directly rather than eyeballing a
 // scroll animation.
+//
+// The measurement is structural, not a stopwatch, and that is what makes it
+// able to fail. A wall-clock bound on the switch cannot red on a controller
+// that has stopped snapshotting: xterm coalesces a burst of write() calls into
+// a single parse, so re-feeding a session's whole retained log costs the same
+// milliseconds and lands the same screen as the one snapshot write that
+// carries those bytes. What the two paths differ in is the number of writes
+// they make, which the terminal pane publishes on its own read-model
+// attributes (see terminalActivationReadModel.ts) and the case below asserts
+// on directly.
 
 // Sized so the replay below is long enough to be told apart from a snapshot
 // restore without pushing this spec's own body toward its 30s test timeout --
@@ -22,36 +32,22 @@ import type { AppShell } from '../../../pages/index.js';
 const BULK_CHUNKS = 400;
 const BULK_LINE = 'x'.repeat(400);
 
-// A switch is judged against two bounds this spec measures itself, on the
-// same machine, in the same test -- never against a constant number of
-// milliseconds.
+// A switch is judged two ways, and only one of them is a clock.
 //
-// It used to be a flat 5s, and a flat budget is a stopwatch on the machine
-// rather than on the product: a contended gate blew through it while the app
-// was doing exactly what it is meant to do, and the run reported a
-// switch-timing regression that had not happened.
+// The clock is the whole click-to-settle time of the measured switch against
+// the same click on the same tab with almost no history behind it, so a slow
+// machine slows both and cancels out of the ratio. It used to be a flat 5s,
+// and a flat budget is a stopwatch on the machine rather than on the product:
+// a contended gate blew through it while the app was doing exactly what it is
+// meant to do, and the run reported a switch-timing regression that had not
+// happened. Both switches carry a fixed cost of their own -- the click, the
+// pane re-attach, the poll that observes the landing -- and the control is
+// that same cost on the same machine.
 //
-// The control is the same click on the same tab with almost no history behind
-// it, so a slow machine slows both measurements together and cancels out of
-// the ratio. The replay bound is sharper and needs no calibration at all: the
-// drain switch below re-feeds the very log the measured switch has to get back
-// to, so a restore that is not meaningfully cheaper than that replay is not
-// restoring anything.
-//
-// Both switches carry a fixed cost of their own -- the click, the pane
-// re-attach, the poll that observes the landing -- and at this corpus size
-// that fixed cost is comparable to the replay itself. Bounding the two totals
-// against each other therefore compares mostly fixed costs, and the ratio is
-// compressed toward 1 by however slow that fixed cost happens to be: the
-// faster the machine, the less the replay stands out above it, to the point
-// where a restore that did nothing wrong reds the bound.
-//
-// The click is the largest and least predictable part of that cost -- a
-// harness round trip whose latency is set by how busy the page is when it
-// lands, and paid once per switch, so it does not cancel between the two. The
-// bound is therefore taken between what each switch did after its click, and
-// against the control's own settle time, because a switch has to be observed
-// to be timed at all and the poll that observes it is every switch's floor.
+// The structural half is what this spec is actually about, and it is not a
+// clock at all: the measured switch has to restore a captured screen in one
+// write rather than re-feed the log behind it, which the pane reports on its
+// own attributes. See the header for why no ratio can stand in for it.
 const SWITCH_CONTROL_MARKER = 'erun-switch-timing-control';
 const SWITCH_BUDGET_TOLERANCE = 6;
 // The convergence steps the scenario hinges on -- the control line, the drain
@@ -87,16 +83,11 @@ const SCENARIO_BUDGET_MS =
 // DRAIN_BUDGET_MS, so the case passes there for the right reason.
 const EMIT_HOLD_MS = 12_000;
 // A ratio against a quantity only a few milliseconds wide is noise, so a quiet
-// machine is held to this floor instead. Both bounds below use it: the control
-// bound when the control itself is that narrow, and the replay bound when the
-// replay is -- a replay too short to stand out above the poll that observes it
-// cannot resolve the margin the replay bound asks it to.
+// machine is held to this floor instead: a control switch that settles in a
+// millisecond or two would otherwise hold the measured switch to that same
+// couple of milliseconds, which is the poll's own resolution rather than a
+// budget.
 const SWITCH_BUDGET_FLOOR_MS = 1_000;
-// The measured switch must beat the equivalent replay of the same log by at
-// least this margin, both measured above the control. Post-fix the restore
-// lands around a third of the replay; a regression back to re-feeding the log
-// makes the two the same work.
-const SWITCH_REPLAY_MARGIN = 0.75;
 
 async function emitBulkOutput(app: AppShell, sessionId: number, marker: string): Promise<void> {
   // One page.evaluate for every chunk in this loop used to cost a separate CDP
@@ -122,32 +113,49 @@ async function terminalAtBottom(page: Page): Promise<boolean> {
   });
 }
 
-interface SwitchTiming {
-  controlMs: number;
-  drainMs: number;
-  switchMs: number;
-  // The measured switch's settle time above the control's: what that switch
-  // did once its click landed, over the floor every switch here pays to be
-  // observed at all. This, not the total, is what the replay bound judges.
-  switchWorkMs: number;
-  replayBoundMs: number;
-  budgetMs: number;
+// What the pane's read model says the last activation did: how many content
+// writes it made into the shared xterm, and which path filled the pane.
+interface SessionActivation {
+  writes: number;
+  source: 'snapshot' | 'replay';
 }
 
-// measureSwitchTiming drives the #1322 scenario once and returns the measured
-// switch alongside the two bounds it is judged against.
+interface SwitchTiming {
+  controlMs: number;
+  switchMs: number;
+  budgetMs: number;
+  activation: SessionActivation;
+}
+
+// sessionActivation reads the pane's own record of the last session activation
+// rather than inferring anything from the rendered screen: the two paths land
+// the same screen, so only the write count separates them. A missing attribute
+// is reported as a count of -1 and a `replay` source, so a pane that stopped
+// publishing reads as a failure rather than as a zero-write restore.
+async function sessionActivation(page: Page): Promise<SessionActivation> {
+  return page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>('.terminal');
+    const raw = root?.dataset.terminalActivationWrites;
+    const writes = raw === undefined ? Number.NaN : Number(raw);
+    return {
+      writes: Number.isFinite(writes) ? writes : -1,
+      source: root?.dataset.terminalActivationSource === 'snapshot' ? 'snapshot' : 'replay',
+    } as const;
+  });
+}
+
+// measureSwitchTiming drives the scenario once and returns the measured switch
+// alongside the control it is judged against and what that switch did.
 //
 // The switch that carries the defect is the one made when nothing has arrived
 // since the snapshot: output buffered while the tab was away is replayed by
 // design (the snapshot only captures what was on screen when the tab was
-// left), so timing a switch that still has that replay queued behind it would
-// measure the replay -- work this fix never claimed to remove -- rather than
-// the restore. That replay is therefore drained first, on DRAIN_BUDGET_MS, and
-// then used as the bound above. It is setup for the measurement rather than a
-// bound itself, which is why it is the one step with a budget of its own that
-// is deliberately not the measurement's: it must be allowed to finish on a slow
-// machine so the switch that follows is measured against the log, not against
-// the machine.
+// left), so a switch that still has that replay queued behind it is doing work
+// this fix never claimed to remove. That replay is therefore drained first, on
+// DRAIN_BUDGET_MS. The drain is staging, not a bound: it leaves the session
+// holding the whole retained log, which is what makes the switch after it one
+// that has to be answered from the snapshot. Its own duration is deliberately
+// not measured -- a slow machine may take as long as it likes there.
 async function measureSwitchTiming(
   app: AppShell,
   page: Page,
@@ -180,32 +188,25 @@ async function measureSwitchTiming(
   await localTab.click();
   const controlStart = Date.now();
   await extraTab.click();
-  const controlSettleStart = Date.now();
   await expect(app.terminalPane.rows()).toContainText(SWITCH_CONTROL_MARKER, {
     timeout: SWITCH_STEP_BUDGET_MS,
   });
   const controlMs = Date.now() - controlStart;
-  const controlSettleMs = Date.now() - controlSettleStart;
 
   // Switch away so the bulk output below accumulates while the tab is not the
-  // one rendering live -- exactly the case #1322 reports (a background
-  // session nobody is looking at).
+  // one rendering live -- a background session nobody is looking at, which is
+  // the case this spec is about.
   await localTab.click();
 
   const marker = 'erun-switch-timing-marker';
   await emitBulkOutput(app, extraSessionId, marker);
 
-  // The drain: everything emitted while the tab was away, replayed. Its cost
-  // is the retained log's own size, which is what makes it the bound the
-  // measured switch has to beat. Unbudgeted on purpose -- it is setup for the
-  // measurement, and a slow machine is slow here for a reason that has nothing
-  // to do with the defect under test.
-  const drainStart = Date.now();
+  // The drain: everything emitted while the tab was away, replayed. Waiting for
+  // the marker is what leaves the session holding the whole retained log, which
+  // is the state the measurement needs. How long that took is not a bound on
+  // anything, so this step is not timed.
   await extraTab.click();
-  const drainSettleStart = Date.now();
   await expect(app.terminalPane.rows()).toContainText(marker, { timeout: DRAIN_BUDGET_MS });
-  const drainMs = Date.now() - drainStart;
-  const drainSettleMs = Date.now() - drainSettleStart;
 
   // The measurement: the session has that whole log behind it now, and nothing
   // has arrived since the snapshot taken on the way out. Re-entering must
@@ -213,13 +214,17 @@ async function measureSwitchTiming(
   await localTab.click();
   const start = Date.now();
   await extraTab.click();
-  const switchSettleStart = Date.now();
   await expect(app.terminalPane.rows()).toContainText(marker, { timeout: SWITCH_STEP_BUDGET_MS });
   const switchMs = Date.now() - start;
-  const switchSettleMs = Date.now() - switchSettleStart;
 
   // The landing state is the live prompt, not mid-scrollback.
   await expect.poll(() => terminalAtBottom(page), { timeout: SWITCH_STEP_BUDGET_MS }).toBe(true);
+
+  // Read the pane's record of the switch only now that both convergence steps
+  // above have landed. It is published synchronously with the click, so no
+  // retry is owed here; it has to be read before the teardown below, which
+  // activates another session and republishes it.
+  const activation = await sessionActivation(page);
 
   // Clean up so the spawned terminal does not leak into the singleton
   // backend's session set.
@@ -231,14 +236,9 @@ async function measureSwitchTiming(
 
   return {
     controlMs,
-    drainMs,
     switchMs,
-    switchWorkMs: switchSettleMs - controlSettleMs,
-    replayBoundMs: Math.max(
-      SWITCH_BUDGET_FLOOR_MS,
-      Math.max(0, drainSettleMs - controlSettleMs) * SWITCH_REPLAY_MARGIN,
-    ),
     budgetMs: Math.max(SWITCH_BUDGET_FLOOR_MS, controlMs * SWITCH_BUDGET_TOLERANCE),
+    activation,
   };
 }
 
@@ -251,7 +251,15 @@ test.describe('terminal switch timing (#1322)', () => {
     test.setTimeout(SCENARIO_BUDGET_MS);
     const timing = await measureSwitchTiming(app, page, seededEnv);
     expect(timing.switchMs).toBeLessThan(timing.budgetMs);
-    expect(timing.switchWorkMs).toBeLessThan(timing.replayBoundMs);
+    // The switch restored a captured screen rather than re-feeding the log.
+    // Two assertions, because they fail on different half-fixes: the source
+    // names the path the switch took, and the count catches a switch that took
+    // the snapshot path but paid for the whole log anyway. A controller that
+    // stopped snapshotting reports `replay` with one write per retained chunk;
+    // one that captures a snapshot but never clears the delta beside it still
+    // reports `snapshot` while the count climbs with the log.
+    expect(timing.activation.source).toBe('snapshot');
+    expect(timing.activation.writes).toBeLessThan(BULK_CHUNKS);
   });
 
   // The red a full-suite gate took on the case above, forced on demand instead
