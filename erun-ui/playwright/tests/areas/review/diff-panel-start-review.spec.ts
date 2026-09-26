@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // Starting a review from the diff panel: the panel already knows the
 // environment and the branch it is diffing against, so opening "Open a
@@ -12,6 +12,16 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 // and erun-ui/tenant_review_write_test.go — these specs cover only the new
 // entry point, its prefill, and its own capability probe
 // (erun-ui/tenant_review_capability_test.go covers that Go method directly).
+//
+// Everything the dialog shows about the environment is the answer to a round
+// trip it issues on open (EnvironmentWorkingIssue for the branch,
+// TenantReviewCreateCapability for the permission, ExecCommit/ExecPush for
+// each write step), and a locator assertion carries no clock of its own:
+// `toContainText`, `toHaveValue` and `toBeDisabled` resolve to expect's 10s
+// default rather than the budget these tests declare. Under contention a step
+// that is merely slow therefore reds with the test's clock unspent — the class
+// fixtures/erunApp.ts's `withTestBudget` exists for, and what the held-read
+// case at the end of this file reproduces.
 
 function invokeBody(request: Request): { method: string } {
   return JSON.parse(request.postData() ?? '{}') as { method: string };
@@ -165,18 +175,22 @@ test.describe('diff panel — starting a review (#1315)', () => {
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
 
-    await expect(startReviewButton(app)).toBeVisible();
+    await expect(startReviewButton(app)).toBeVisible(withTestBudget());
     await startReviewButton(app).click();
 
     const dialog = app.createReviewDialog;
     await dialog.waitForOpen();
     // The environment and its current branch are the diff panel's own
-    // context, read back (EnvironmentWorkingIssue), never typed by this test.
-    await expect(dialog.locator()).toContainText(`${seededEnv.tenant} / ${seededEnv.environment}`);
-    await expect(dialog.locator()).toContainText('feature/777-thing');
+    // context, read back (EnvironmentWorkingIssue), never typed by this test —
+    // so each read waits on the budget this test declared, not expect's 10s.
+    await expect(dialog.locator()).toContainText(
+      `${seededEnv.tenant} / ${seededEnv.environment}`,
+      withTestBudget(),
+    );
+    await expect(dialog.locator()).toContainText('feature/777-thing', withTestBudget());
     // The target branch is the diff's own merge target (reviewBase.branch),
     // prefilled before this test has interacted with the field at all.
-    await expect(dialog.targetBranchInput()).toHaveValue('release/2.0');
+    await expect(dialog.targetBranchInput()).toHaveValue('release/2.0', withTestBudget());
 
     // The review name is the one value the product cannot know on the
     // operator's behalf — everything else in this flow is either read back
@@ -185,7 +199,11 @@ test.describe('diff panel — starting a review (#1315)', () => {
     await dialog.fillCommitMessage('describe the change');
     await dialog.commit();
     await dialog.push();
-    await expect(dialog.locator()).toContainText('Pushed to origin/feature/777-thing');
+    // The push badge is ExecPush's own answer, not a render the click started.
+    await expect(dialog.locator()).toContainText(
+      'Pushed to origin/feature/777-thing',
+      withTestBudget(),
+    );
 
     await dialog.create();
     await dialog.waitForClosed();
@@ -202,7 +220,7 @@ test.describe('diff panel — starting a review (#1315)', () => {
     // dashboard ever having loaded (unlike the Reviews tab's own New review
     // button), so its caller-context resolution needs the tenant threaded
     // through explicitly or it renders "No tenant is open." instead of data.
-    await expect(app.reviewDetailDialog.locator()).toContainText('Add widget');
+    await expect(app.reviewDetailDialog.locator()).toContainText('Add widget', withTestBudget());
     await expect(app.reviewDetailDialog.locator()).not.toContainText('No tenant is open');
   });
 
@@ -239,16 +257,22 @@ test.describe('diff panel — starting a review (#1315)', () => {
     });
 
     await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
-    await expect(startReviewButton(app)).toBeVisible();
+    await expect(startReviewButton(app)).toBeVisible(withTestBudget());
     await startReviewButton(app).click();
 
     const dialog = app.createReviewDialog;
     await dialog.waitForOpen();
-    await expect(dialog.locator()).toContainText('You do not have access to create reviews.');
+    // The denial and its remedy are TenantReviewCreateCapability's answer, so
+    // they land after the dialog opens rather than with it.
+    await expect(dialog.locator()).toContainText(
+      'You do not have access to create reviews.',
+      withTestBudget(),
+    );
     await expect(dialog.locator()).toContainText(
       'erun platform user grant-role --user-id user-1 --role-id role-author',
+      withTestBudget(),
     );
-    await expect(dialog.locator()).toContainText('Author');
+    await expect(dialog.locator()).toContainText('Author', withTestBudget());
   });
 
   test('a push that fails names its own next action', async ({ app, page, seededEnv }) => {
@@ -296,9 +320,14 @@ test.describe('diff panel — starting a review (#1315)', () => {
 
     // The failure is named, not a raw wire error swallowed into a generic
     // message, and Push stays clickable so retrying is the visible next
-    // action rather than a dead end.
-    await expect(dialog.locator().getByRole('alert')).toContainText('non-fast-forward');
-    await expect(dialog.locator().getByRole('button', { name: 'Push' })).toBeEnabled();
+    // action rather than a dead end. The refusal is ExecPush's own answer.
+    await expect(dialog.locator().getByRole('alert')).toContainText(
+      'non-fast-forward',
+      withTestBudget(),
+    );
+    await expect(dialog.locator().getByRole('button', { name: 'Push' })).toBeEnabled(
+      withTestBudget(),
+    );
     await expect(dialog.locator()).not.toContainText('Pushed to origin/');
   });
 
@@ -332,11 +361,75 @@ test.describe('diff panel — starting a review (#1315)', () => {
     await dialog.waitForOpen();
     // The dialog still renders its ordinary content (title, push step,
     // prefilled branch) -- restricted is a state layered on top, not a blank
-    // surface in its place.
-    await expect(dialog.locator()).toContainText('feature/777-thing');
+    // surface in its place. Both the branch and the readiness notice are round
+    // trips the dialog issues on open, and this spec leaves the capability
+    // probe unstubbed, so it is the real backend's answer being waited on.
+    await expect(dialog.locator()).toContainText('feature/777-thing', withTestBudget());
     await expect(dialog.locator().getByRole('status')).toContainText(
       "This tenant's platform connection isn't ready",
+      withTestBudget(),
     );
-    await expect(dialog.createButton()).toBeDisabled();
+    await expect(dialog.createButton()).toBeDisabled(withTestBudget());
+  });
+
+  // The environment and branch the dialog shows are EnvironmentWorkingIssue's
+  // answer, and the assertions on them carry no timeout of their own:
+  // `toContainText` resolves to expect's 10s default rather than the budget
+  // this test declares. A read that is merely slow therefore reds the step
+  // with the test's own clock unspent -- the class
+  // fixtures/erunApp.ts's `withTestBudget` exists for.
+  //
+  // The hold below is deliberately just past that 10s default: the smallest
+  // delay that discriminates. It is injected at a named RPC (this spec's own
+  // EnvironmentWorkingIssue stub) rather than by loading the machine, so the
+  // reproduction is deterministic on a quiet host. Pre-fix this case reds at
+  // exactly 10_000ms with 20s of its own budget unused.
+  //
+  // The hold is armed only once the dialog is about to open, because the panel
+  // reads the same RPC for its own header while it boots; holding that first
+  // read would release this one before the dialog ever asked.
+  test('a branch read that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // 60s, not the suite's 30s default: this case deliberately spends 12s of
+    // its own budget holding the read above, so the default is not a clock for
+    // the scenario -- it is a clock for the scenario minus the delay this case
+    // exists to introduce. Same pairing the sibling held-read cases use.
+    test.setTimeout(60_000);
+    let armHold = false;
+    let holdUntil = 0;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, DIFF);
+        return;
+      }
+      if (body.method === 'EnvironmentWorkingIssue') {
+        if (armHold && holdUntil === 0) {
+          holdUntil = Date.now() + 12_000;
+        }
+        const remaining = holdUntil - Date.now();
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+        await fulfillJSON(route, { available: true, branch: 'feature/777-thing' });
+        return;
+      }
+      if (body.method === 'TenantReviewCreateCapability') {
+        await fulfillJSON(route, { canCreate: true });
+        return;
+      }
+      await route.continue();
+    });
+
+    await openDiffPanel(app, seededEnv.tenant, seededEnv.environment);
+    armHold = true;
+    await startReviewButton(app).click();
+
+    const dialog = app.createReviewDialog;
+    await dialog.waitForOpen();
+    await expect(dialog.locator()).toContainText('feature/777-thing', withTestBudget());
   });
 });
