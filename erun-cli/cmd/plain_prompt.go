@@ -43,10 +43,16 @@ func writerIsTerminal(w io.Writer) bool {
 // runPlainPrompt is the non-TTY fallback for promptui.Prompt, mirroring its
 // semantics. One deterministic line per pipe keeps scripted use and the
 // integration goldens stable.
+//
+// It renders to the stream the prompt was built with, the same one promptui
+// would paint: a prompt routed off stdout (the open --no-shell alias confirm)
+// must not put its question back on stdout, where the eval-able script it is
+// kept away from is written.
 func runPlainPrompt(prompt promptui.Prompt) (string, error) {
+	writer := promptOutputWriter(prompt)
 	reader := plainPromptInput()
 	for {
-		fmt.Print(plainPromptLabel(prompt))
+		_, _ = fmt.Fprint(writer, plainPromptLabel(prompt))
 		line, err := readPlainPromptLine(reader)
 		if err != nil {
 			return "", err
@@ -57,7 +63,7 @@ func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 		}
 		if prompt.Validate != nil {
 			if err := prompt.Validate(input); err != nil {
-				fmt.Println(err.Error())
+				_, _ = fmt.Fprintln(writer, err.Error())
 				continue
 			}
 		}
@@ -98,25 +104,41 @@ func plainPromptLabel(prompt promptui.Prompt) string {
 // sequences. Returns ok=false when there is no usable custom template, so the
 // caller falls back to the default plain label.
 func renderPlainPromptTemplate(prompt promptui.Prompt) (string, bool) {
-	if prompt.Templates == nil || strings.TrimSpace(prompt.Templates.Prompt) == "" {
+	if prompt.Templates == nil {
 		return "", false
 	}
-	identity := func(value any) string { return fmt.Sprintf("%v", value) }
-	parsed, err := template.New("plain-prompt").Funcs(template.FuncMap{
-		"black": identity, "red": identity, "green": identity, "yellow": identity,
-		"blue": identity, "magenta": identity, "cyan": identity, "white": identity,
-		"bgBlack": identity, "bgRed": identity, "bgGreen": identity, "bgYellow": identity,
-		"bgBlue": identity, "bgMagenta": identity, "bgCyan": identity, "bgWhite": identity,
-		"bold": identity, "faint": identity, "italic": identity, "underline": identity,
-	}).Parse(prompt.Templates.Prompt)
+	return renderPromptTemplate(prompt.Templates.Prompt, prompt.Label, plainPromptFuncs())
+}
+
+// renderPromptTemplate renders one of a prompt's templates against its label.
+// The style functions are the caller's choice: identity keeps a plain render
+// free of escape sequences, promptui.FuncMap reproduces the styled render a
+// repaint prompt would have produced. Returns ok=false for an unusable
+// template so the caller can fall back.
+func renderPromptTemplate(text string, label any, funcs template.FuncMap) (string, bool) {
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	parsed, err := template.New("prompt").Funcs(funcs).Parse(text)
 	if err != nil {
 		return "", false
 	}
 	var rendered strings.Builder
-	if err := parsed.Execute(&rendered, prompt.Label); err != nil {
+	if err := parsed.Execute(&rendered, label); err != nil {
 		return "", false
 	}
 	return rendered.String(), true
+}
+
+// plainPromptFuncs is promptui.FuncMap's key set with every style reduced to
+// identity, so a template parses in plain mode while its wording survives.
+func plainPromptFuncs() template.FuncMap {
+	identity := func(value any) string { return fmt.Sprintf("%v", value) }
+	funcs := make(template.FuncMap, len(promptui.FuncMap))
+	for name := range promptui.FuncMap {
+		funcs[name] = identity
+	}
+	return funcs
 }
 
 // runPlainSelect is the non-TTY fallback for promptui.Select. An empty line
