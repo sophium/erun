@@ -1729,6 +1729,64 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_carries_a_hard_wrapped_trailer_whole", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's own commit
+		// declares a "Reproduces:" whose value is hard-wrapped across four
+		// physical lines, each continuation starting at column 0 — how a long
+		// hand-written value is wrapped, and how the value on the landing this was
+		// observed on was written. The carriage read a trailer entry as ending at the
+		// first line that looked like a "Token value", which nearly every
+		// continuation line does, so the branch landed with only the first
+		// physical line: the commit on the target asserted a reproduction that
+		// ended mid-clause, and the truncation was invisible because the shortened
+		// line still matched the trailer pattern.
+		//
+		// The wrap is the whole point of the scenario — without it the branch
+		// lands its trailer intact and the failure this exists for is never
+		// reached. The assertions read the tail of the value, which is the part
+		// the truncation dropped.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		const wrapped = "Reproduces: a hover card closed under a stationary pointer by the boot's own\n" +
+			"default-landing open, read again as if it were still there -- expect's 10s\n" +
+			"default expires with \"element(s) not found\" for the card that answered the\n" +
+			"read before it."
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m",
+			"Re-hover the orchestrator card\n\n"+wrapped+"\n"+
+				"Regression-Test: erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts::a hover card dropped while the boot lands is re-hovered, not read as absent\n")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Re-hover the orchestrator card"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		// The observable behaviour the report is about: the landed commit's
+		// "Reproduces:" is the value its author wrote, whole.
+		body := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B"))
+		if !strings.Contains(body, wrapped) {
+			t.Fatalf("expected the landed commit to carry the branch's wrapped trailer whole, got:\n%s", body)
+		}
+
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 {
+			t.Fatalf("expected one landed source, got %+v", parsed.Landed)
+		}
+		carried := parsed.Landed[0].CarriedTrailers
+		if len(carried) != 2 || carried[0] != wrapped {
+			t.Fatalf("expected the run to report the wrapped trailer whole, got %q", carried)
+		}
+	})
+
 	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
 		// The reported failure: --remote takes a URL, not only a configured
 		// remote name. A URL creates no remote-tracking refs, so the ref the
