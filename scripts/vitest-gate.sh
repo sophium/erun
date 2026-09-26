@@ -1,6 +1,6 @@
 #!/bin/sh
 # Run a vitest workspace's suite as a gate step, telling a worker pool that
-# could not start apart from a test that failed.
+# faulted of its own accord apart from a test that failed.
 #
 # WHY THIS EXISTS
 #
@@ -30,7 +30,9 @@
 # run also produced no test-level failure: vitest prints `Test Files <n> failed`
 # and `Tests <n> failed` for an assertion, a thrown error or a collection
 # failure, so their absence is a positive statement that nothing ran and failed.
-# A run carrying both a pool failure and a test failure is a test failure. So:
+# A run carrying both a pool failure and a test failure is a test failure. The
+# class is wider than the start timeout quoted above: it is every way the pool
+# itself faults, which `pool_start_failure` below enumerates. So:
 #
 #   * test-level failure present, with or without a pool failure ->
 #     the red belongs to the branch. No retry; the run's own output and exit
@@ -72,7 +74,7 @@ usage() {
 Usage: vitest-gate.sh [options] [--] [vitest args...]
 
 Runs `yarn test` in the current directory, telling a vitest worker pool that
-could not start apart from a test that failed.
+faulted of its own accord apart from a test that failed.
 
   --attempts N     Total attempts allowed for the pool-start class (default 2,
                    i.e. one retry). A test-level failure is never retried.
@@ -81,23 +83,38 @@ could not start apart from a test that failed.
   -h, --help       This text.
 
 Exit status: 0 passed; otherwise the runner's own status for a test-level
-failure, or 2 for a pool that could not start on any attempt.
+failure, or 2 for a pool that faulted on every attempt.
 
 Vitest args are forwarded by word splitting, so they must not themselves
 contain quoted whitespace; every caller here passes plain flags.
 EOF
 }
 
-# pool_start_failure <log>: true when vitest's own pool reports that it could
-# not start a worker. Both shapes a gate sees share one owner: `Failed to start
-# <pool> worker for test files <files>.` wraps every way `runner.start()` can
-# reject -- a spawn error and the start timeout alike -- and `Timeout starting
-# <pool> runner.` is the outer bound on the same start. The inner
-# `[vitest-pool-runner]` message is accepted on its own so a later vitest that
-# reports the cause without the wrapper is still recognised.
+# pool_start_failure <log>: true when vitest's own pool reports a fault of its
+# own, meaning no test result was produced. Every shape carries a
+# `[vitest-pool]`/`[vitest-pool-runner]` prefix, which vitest's own pool emits
+# and a test does not.
+#
+# The set is the whole message vocabulary of that pool in vitest 4.1.11, because
+# the pool reaches this state by several independent routes and recognising only
+# one of them blames the branch for the others. `Failed to start <pool> worker
+# for test files <files>.` is a rejected `runner.start()` -- a spawn error -- and
+# `Timeout starting <pool> runner.` is its start timeout, but a worker that
+# started and then died does not pass through `start()` at all: `onTaskError`
+# rejects the queued task directly with `Worker <pool> emitted error.`, so it
+# never carries the `Failed to start` wrapper. Cancellation (`Cannot run tasks
+# while pool is cancelling`) and teardown (`Timeout terminating` and `Failed to
+# terminate`, which the pool logs rather than rejects) are the remaining
+# siblings. The `[vitest-pool-runner]` messages are accepted on their own so a
+# vitest that reports the inner cause without the pool's wrapper is recognised.
+#
+# `Pending methods while closing rpc` (`[vitest-pool-runner]`) is deliberately
+# not here: it is an RPC still in flight at shutdown, which says nothing about
+# whether the suite ran, so admitting it would widen the class past "no test
+# result was produced" for no coverage.
 pool_start_failure() {
-	grep -qE '^[[:space:]]*(Error: )?\[vitest-pool\]: (Failed to start .* worker for test files .*\.|Timeout starting .* runner\.)[[:space:]]*$' "$1" ||
-		grep -qE '^[[:space:]]*(Error: )?\[vitest-pool-runner\]: Timeout waiting for worker to respond[[:space:]]*$' "$1"
+	grep -qE '^[[:space:]]*(Error: )?\[vitest-pool\]: (Failed to start .* worker for test files .*\.|Timeout starting .* runner\.|Worker .* emitted error\.|Timeout terminating .* worker for test files .*\.|Failed to terminate .* worker for test files .*\.|Cannot run tasks while pool is cancelling)[[:space:]]*$' "$1" ||
+		grep -qE '^[[:space:]]*(Error: )?\[vitest-pool-runner\]: (Timeout waiting for worker to respond|Cannot start a stopped runner)[[:space:]]*$' "$1"
 }
 
 # test_level_failure <log>: true when the run reports a test file or a test that
@@ -133,7 +150,7 @@ run_suite() {
 report_environment_fault() {
 	printf '\n'
 	printf '>> %s\n' "$ENVIRONMENT_FAULT_MARKER"
-	printf '>> vitest-gate: no pool worker could be started on any of the %s attempt(s), and no test failed.\n' "$2"
+	printf '>> vitest-gate: the pool reported a fault of its own on all %s attempt(s), and no test failed.\n' "$2"
 	printf '>> vitest-gate: vitest reported:\n'
 	sed -nE 's/.*(\[vitest-pool(-runner)?\]: .*)/>> vitest-gate:   \1/p' "$1"
 	printf '>> vitest-gate: no test result was produced, so this red says nothing about the change under\n'
@@ -222,6 +239,6 @@ while :; do
 		report_environment_fault "$log" "$attempts"
 		exit "$ENVIRONMENT_FAULT_STATUS"
 	fi
-	printf '>> vitest-gate: no pool worker could be started and no test failed -- that is the environment, not the change under test. Retrying (attempt %s of %s).\n' "$((attempt + 1))" "$attempts"
+	printf '>> vitest-gate: the pool faulted of its own accord and no test failed -- that is the environment, not the change under test. Retrying (attempt %s of %s).\n' "$((attempt + 1))" "$attempts"
 	attempt=$((attempt + 1))
 done

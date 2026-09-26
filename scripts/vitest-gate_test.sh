@@ -1,21 +1,31 @@
 #!/bin/sh
-# Tests for vitest-gate.sh, the wrapper that tells a vitest pool which could
-# not start a worker apart from a test that failed.
+# Tests for vitest-gate.sh, the wrapper that tells a vitest pool which faulted
+# on its own apart from a test that failed.
 #
 # The failure this exists to catch is load-dependent -- a forked worker
 # starved past vitest's own start timeout by the CPU contention inside
 # `make check` -- so it is reproduced here on purpose rather than waited for:
-# the pool-start fixtures below are the real lines vitest 4.1.11 emits for
-# that state, captured from a run in which a worker was made unable to answer
+# the pool fixtures below are the real lines vitest 4.1.11 emits for that
+# state, captured from a run in which a worker was made unable to answer
 # `started` (the box-drawing separators and stack frames are dropped; every
 # line the classifier reads is verbatim). The stub runner replays them.
 #
-# The case that matters most is the third one down: a pool-start failure and a
-# real test failure in the SAME run. That is the state a broad "the log
-# mentions a worker, so it is the environment" catch would wave through, and
-# it is a state vitest really produces -- a pool that loses one worker while
-# another runs the suite to a genuine failure. It must be reported as a test
-# failure, must not be retried, and must not be labelled an environment fault.
+# The pool does not only fail at start, and the starved-worker route is not the
+# only one that reaches the class. `pool-spawn-error.log` is a real run in which
+# a worker spawned and then died before it could run anything -- induced on
+# purpose by giving `test.execArgv` a flag node rejects, which is deterministic,
+# so the route is held here rather than waited for -- and the terminate,
+# cancelling and stopped-runner fixtures are the pool's other own-fault
+# messages. Each of those was read as TEST_FAILURE before the class was widened
+# past the start path, which is the defect these cases pin.
+#
+# The cases that matter most are the ones crossing the two: a real test failure
+# in the SAME run as a pool fault -- which vitest really produces, a pool that
+# loses one worker while another runs the suite to a genuine failure -- and a
+# collection failure that carries a recognised pool string while reporting no
+# failed test. A broad "the log mentions a worker, so it is the environment"
+# catch would wave both through. Each must be reported as a test failure, must
+# not be retried, and must not be labelled an environment fault.
 #
 # Run directly, and wired into test-frontend: a classifier that stops
 # distinguishing correctly must fail the gate rather than quietly start
@@ -113,6 +123,129 @@ cat >"$tmp/all-passed.log" <<'EOF'
       Tests  291 passed (291)
 EOF
 
+# --- a worker that SPAWNED and then died: not a start failure -----------
+# The pool does not only fail at start. `runner.start()` rejecting is one route
+# to a pool fault; a worker that started and then died takes another, and it
+# never carries the `Failed to start` wrapper -- vitest's `onTaskError` rejects
+# the queued task directly. Captured from a real vitest 4.1.11 run in which a
+# worker was made unable to load at all (`test.execArgv` given a flag node does
+# not accept), which is the reproduction this fixture exists to hold: that run
+# produced no test result of any kind, so it is the environment.
+cat >"$tmp/pool-spawn-error.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+/usr/local/bin/node: bad option: --this-is-not-a-real-node-flag
+
+Vitest caught 1 unhandled error during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.
+
+Error: [vitest-pool]: Worker forks emitted error.
+Caused by: Error: Worker exited unexpectedly
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+
+error Command failed with exit code 1.
+EOF
+
+# --- the teardown siblings, which the pool logs rather than rejects -----
+# Captured from a real run with a teardown timeout short enough to trip; note
+# the message carries no `Error: ` prefix on this route, which is why the
+# classifier's own prefix is optional.
+cat >"$tmp/pool-terminate-timeout.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+[vitest-pool]: Timeout terminating forks worker for test files /src/erun-console/src/identity/UsersPanel.test.tsx.
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+EOF
+
+cat >"$tmp/pool-terminate-failed.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool]: Failed to terminate forks worker for test files /src/erun-console/src/identity/UsersPanel.test.tsx.
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+EOF
+
+cat >"$tmp/pool-cancelling.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool]: Cannot run tasks while pool is cancelling
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+EOF
+
+cat >"$tmp/pool-runner-stopped.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool-runner]: Cannot start a stopped runner
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+EOF
+
+# --- the boundary: a pool-runner message that is NOT a pool fault -------
+# `Pending methods while closing rpc` is an RPC still in flight at shutdown. It
+# says nothing about whether the suite ran, so it is deliberately not in the
+# class -- this case exists so a later widening has to argue past it rather than
+# absorb it unnoticed. It falls to the safe direction.
+cat >"$tmp/pool-runner-pending-rpc.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool-runner]: Pending methods while closing rpc
+
+ Test Files  no tests
+      Tests  no tests
+     Errors  1 error
+EOF
+
+# --- the two safety cases the widening had to survive -------------------
+# 1. A real test that PRINTS the pool string it knows the classifier looks for,
+#    and then fails on its own assertion. The string is recognised; the run is
+#    still a test failure, because a test-level failure vetoes the class.
+cat >"$tmp/spoofed-pool-string.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool]: Worker forks emitted error.
+
+ FAIL  src/shell/AppShell.test.tsx > AppShell > renders the sidebar
+AssertionError: expected 2 to be 3 // Object.is equality
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+
+error Command failed with exit code 1.
+EOF
+
+# 2. A collection failure -- `Test Files 1 failed`, and NO "failed" on the
+#    `Tests` line because no test ran -- carrying a pool string from the widened
+#    set. This is the crossing the two-condition rule exists for: the widened
+#    pattern IS present, and the run is a test failure anyway. Captured from a
+#    real collection failure (a test file importing a module that does not
+#    exist), with the pool line from the real spawn-error run above.
+cat >"$tmp/pool-plus-collection.log" <<'EOF'
+ RUN  v4.1.11 /src/erun-console
+
+Error: [vitest-pool]: Worker forks emitted error.
+
+ FAIL  src/broken.test.tsx [ src/broken.test.tsx ]
+Error: Cannot find module './does-not-exist.js' imported from /src/erun-console/src/broken.test.tsx
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  1 passed (1)
+
+error Command failed with exit code 1.
+EOF
+
 classify_case() {
 	# classify_case <label> <log> <expected>
 	got=$("${wrapper}" --classify "$2")
@@ -133,6 +266,28 @@ classify_case 'a real test failure on its own is a test failure' \
 	"$tmp/real-failure.log" TEST_FAILURE
 classify_case 'a green run is never the pool-start class' \
 	"$tmp/all-passed.log" TEST_FAILURE
+
+# THE REPRODUCTION: a worker that spawned and died is the environment. Before
+# the pool's non-start routes were recognised this was read as TEST_FAILURE --
+# a real environment fault blamed on the branch, which is the defect.
+classify_case 'a worker that spawned and then died is the environment' \
+	"$tmp/pool-spawn-error.log" WORKER_START
+classify_case 'a worker that timed out terminating is the environment' \
+	"$tmp/pool-terminate-timeout.log" WORKER_START
+classify_case 'a worker that could not be terminated is the environment' \
+	"$tmp/pool-terminate-failed.log" WORKER_START
+classify_case 'a pool cancelled mid-run is the environment' \
+	"$tmp/pool-cancelling.log" WORKER_START
+classify_case 'a runner that was already stopped is the environment' \
+	"$tmp/pool-runner-stopped.log" WORKER_START
+classify_case 'a pool-runner message that is not a pool fault stays a test failure' \
+	"$tmp/pool-runner-pending-rpc.log" TEST_FAILURE
+
+# ...and the safety property, re-taken against the widened set.
+classify_case 'a test spoofing the widened pool string is still a test failure' \
+	"$tmp/spoofed-pool-string.log" TEST_FAILURE
+classify_case 'a widened pool string beside a collection failure is still a test failure' \
+	"$tmp/pool-plus-collection.log" TEST_FAILURE
 
 # --- the wrapper end to end, against a stub runner ----------------------
 scenarios="$tmp/scenarios"
@@ -258,6 +413,25 @@ if grep -q 'Test Files  1 failed | 37 passed (38)' "$tmp/out" && ! grep -q 'vite
 	pass 'a pool failure beside a real failure is blamed on the branch, not the environment'
 else
 	fail 'a real failure sharing a run with a pool fault was reported as the environment'
+fi
+
+# 11. The reproduction end to end, on the route that is not a start failure:
+#     a worker that spawned and died retries once, and a run that never produced
+#     a test result ends as a named environment fault rather than as a silent red
+#     attributed to the branch.
+rm -f "$scenarios"/*.log "$scenarios"/*.status
+scenario 1 1 "$tmp/pool-spawn-error.log"
+scenario 2 1 "$tmp/pool-spawn-error.log"
+run_wrapper --maxWorkers=7
+if [ "$status" -eq 2 ] && [ "$runs" -eq 2 ]; then
+	pass 'a worker that spawned and died retries to the budget and exits 2'
+else
+	fail "expected the spawn-error class to retry and exit 2; got status ${status}, ${runs} run(s)"
+fi
+if grep -q 'vitest-gate: ENVIRONMENT FAULT' "$tmp/out"; then
+	pass 'a worker that spawned and died is named as the environment, not the branch'
+else
+	fail 'a spawn-error pool fault was left to read as a test failure'
 fi
 
 if [ "${failures}" -ne 0 ]; then
