@@ -80,6 +80,36 @@ func AgentJobCommand(tool, prompt string) ([]string, error) {
 	}
 }
 
+// AgentJobCommandPrompt recovers the prompt AgentJobCommand was built from,
+// reading the argv that run's own job record kept (EnvironmentJob.Command).
+// It is the constructor's exact inverse and refuses anything that is not its
+// own output, so a caller never gets a fragment of some other argv read back
+// as if it were the task: the record outlives the erun that wrote it, and an
+// argv a later or older version shaped differently is not this function's to
+// guess at. Empty means "not recoverable", and every caller must treat it
+// that way rather than substituting something plausible.
+//
+// It exists for the bounded reinvocation (job_supervisor.go), which resumes an
+// agent's own session to act on work it left behind. A resumed turn that is
+// told only about the failure answers only the failure — and a one-shot run's
+// final message is the only channel its actual finding has, so a resumption
+// that displaces it destroys the run's whole result. Restating the task the
+// turn was originally given is what keeps the resumed message answering both.
+func AgentJobCommandPrompt(tool string, command []string) string {
+	name := strings.ToLower(strings.TrimSpace(tool))
+	switch name {
+	case agentToolClaude:
+		if len(command) >= 3 && command[1] == "-p" {
+			return strings.TrimSpace(command[2])
+		}
+	case agentToolCodex:
+		if len(command) >= 4 && command[1] == "exec" && command[2] == "--json" {
+			return strings.TrimSpace(command[3])
+		}
+	}
+	return ""
+}
+
 // AgentJobResumeCommand builds the argv for a bounded follow-up turn of a run
 // AgentJobCommand already started, resumed via the session/thread id that turn's
 // own stream reported (AgentJobProgress.SessionID) rather than restated from

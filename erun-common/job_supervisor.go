@@ -1046,12 +1046,32 @@ func environmentJobReinvocationOutcome(reason, startedJobFailed string) string {
 // bound so the model does not treat this as an open-ended loop, and an
 // explicit instruction not to end its own turn assuming another reinvocation
 // will follow once the bound is reached.
+//
+// The task the run was originally given is restated ahead of all of it,
+// recovered from the argv the job record kept (AgentJobCommandPrompt). A
+// resumption that carries only the failure is answered as if it were the whole
+// task: a lane whose reproduction is a probe that fails on purpose — which is
+// what every reproduction is — spends its resumed turn accounting for the
+// red it meant to produce, and a one-shot run's final message is the only
+// channel its finding has, so the finding is gone and the job still reads as a
+// clean exit. Restating the task costs nothing and is what leaves the resumed
+// turn's final message answering the question it was actually asked. When the
+// argv is not recoverable — a record written by a differently-shaped
+// invocation, a job that ran no agent argv at all — the prompt stays exactly
+// as it was, because a guess at what the task was is worse than saying
+// nothing.
 func buildEnvironmentJobReinvocationPrompt(job EnvironmentJob, outcome string) string {
 	max := resolveEnvironmentJobMaxReinvocations()
 	attempt := job.ReinvocationCount + 1
+	task := AgentJobCommandPrompt(job.AgentTool, job.Command)
+	if task == "" {
+		return fmt.Sprintf(
+			"%s This is an automatic, bounded resumption of your own session (attempt %d of %d) so you can act on the real outcome: check the actual current state of what you started, fix or verify it directly, and either resolve this conclusively or explain clearly why it cannot be resolved right now. There is no further resumption once this bound is reached, so do not end this turn assuming another one will follow.",
+			outcome, attempt, max)
+	}
 	return fmt.Sprintf(
-		"%s This is an automatic, bounded resumption of your own session (attempt %d of %d) so you can act on the real outcome: check the actual current state of what you started, fix or verify it directly, and either resolve this conclusively or explain clearly why it cannot be resolved right now. There is no further resumption once this bound is reached, so do not end this turn assuming another one will follow.",
-		outcome, attempt, max)
+		"The task you were given was: %s\n\n%s This is an automatic, bounded resumption of your own session (attempt %d of %d) on top of that task, not a replacement for it, so you can act on the real outcome: check the actual current state of what you started, fix or verify it directly, and either resolve this conclusively or explain clearly why it cannot be resolved right now. Your final message is the only place your answer to the task above is read from, so it must still deliver that answer, not only what you conclude about this resumption. There is no further resumption once this bound is reached, so do not end this turn assuming another one will follow.",
+		task, outcome, attempt, max)
 }
 
 // finishEnvironmentJob records the outcome the supervisor observed. This is the
