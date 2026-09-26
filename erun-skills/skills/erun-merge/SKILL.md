@@ -229,7 +229,48 @@ branch carries several unrelated commits and no single subject captures it.
 
 ```sh
 commit=$(git rev-parse HEAD)
-if erun build --output json > /tmp/erun-merge-build.json; then
+build_err=/tmp/erun-merge-build.err
+# The --platform narrowing described below goes in here, so that the --gate
+# re-run carries it too. Unquoted on purpose: it is a flag list, or empty.
+build_extra=""
+build_ok=0
+failure_detail="erun build failed; see the build log"
+# A build's stderr is captured rather than left on the terminal so that a
+# failure can be classified below. Echo it back at each point it would have
+# reached the terminal anyway, so capturing it hides nothing.
+show_build_stderr() { cat "${build_err}" >&2; }
+
+if erun build ${build_extra} --output json > /tmp/erun-merge-build.json 2>"${build_err}"; then
+  build_ok=1
+  show_build_stderr
+else
+  show_build_stderr
+  # Exactly one build failure has an answer that is another build rather than a
+  # FAILED review: BuildKit served the Dockerfile's whole test stage — the one
+  # that runs make check — from its layer cache, so the gate never ran. erun
+  # refuses that run deliberately, and names --gate as the way out: it
+  # invalidates just that stage's layers, executes it for real, and mints a
+  # version normally like any other build.
+  #
+  # The match is that refusal's own sentinel sentence, which erun-common's
+  # ErrGateTestStageReplayed carries verbatim. It is deliberately a narrow
+  # literal and not "did the build fail": every other failure — a compile
+  # error, a red make check, a missing base image — is a verdict about the
+  # change, and re-running one under --gate would record a green review over a
+  # red build. Those keep the FAILED path below.
+  #
+  # The re-run is spent at most once, and its stderr replaces the refusal's in
+  # the capture file, which has already been echoed above.
+  if grep -qF "build replayed its Dockerfile's test stage from the layer cache" "${build_err}"; then
+    failure_detail="erun build replayed its test stage and the --gate re-run did not pass; see the build log"
+    if erun build ${build_extra} --gate --output json > /tmp/erun-merge-build.json 2>"${build_err}"; then
+      build_ok=1
+    fi
+    show_build_stderr
+  fi
+fi
+
+if [ "${build_ok}" -eq 1 ]; then
   version=$(jq -r .version /tmp/erun-merge-build.json)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}"
 else
@@ -240,7 +281,7 @@ else
   # nothing downstream resolves.
   version=$(erun build --dry-run --output json | jq -r .version)
   erun review record-build "${review_id}" --commit "${commit}" --version "${version}" \
-    --failed --failure-detail "erun build failed; see the build log"
+    --failed --failure-detail "${failure_detail}"
 fi
 ```
 
@@ -248,9 +289,17 @@ A build that watched BuildKit replay a Dockerfile's whole `test` stage — the
 stage `make check` runs in — exits non-zero and refuses to record; see the
 failure detail it prints. That is deliberate: a replay built images without
 running the project's gate, and a green exit over it would read as a gate that
-ran. Re-run the same step as `erun build --gate --output json`, which executes
-just that stage instead of accepting the replay, and record that version
-normally.
+ran. **The block above handles that refusal itself**: it re-runs the same step
+as `erun build --gate`, which executes just that stage instead of accepting the
+replay, and records *that* run's version normally. A replay refusal is therefore
+not a `FAILED` review, and a driver that runs the block and nothing else reaches
+the remedy without having to read this paragraph first.
+
+The re-run is keyed on the refusal's own message and not on the build having
+failed. Every other failure — a compile error, a red `make check`, a missing
+base image — is a verdict about the change, and re-running one under `--gate`
+would record a green review over a red build, which is worse than the bug that
+motivated the re-run. Those still record `FAILED`.
 
 **`READY` asserts "this commit builds", not "a publishable artifact exists
 at version X".** The plain build above mints the version `record-build`
@@ -277,7 +326,10 @@ erun build --platform linux/amd64 --output json   # on a machine that only runs 
 Check what the build resolved from its own trace line — `build: platforms
 configured as <platforms> (.erun/config.yaml <origin>)` — and pass `--platform`
 with the architecture the machine actually runs (`uname -m`) whenever that line
-names more than one.
+names more than one. Set it in the block above rather than editing the command
+in place — `build_extra="--platform linux/amd64"` — so the refusal re-run
+carries the same narrowing; a re-run that fell back to both architectures would
+silently pay the emulation this paragraph exists to avoid.
 
 **Recording the build is the whole transition — there is no separate step
 that sets the review's status.** `erun review record-build` is the only way
@@ -289,9 +341,10 @@ command — it does not exist, deliberately: a `READY` with no build behind it
 means something else entirely to the platform (a stalled review being
 requeued), so faking one with no build would collide with that meaning.
 
-On a failed build, re-running this skill re-runs the build (it does not
-retry on its own) and records a fresh result — nothing here silently retries
-a build for you.
+The one re-run the block performs is the replay refusal's, and it is bounded to
+one attempt. Any other failed build is recorded as it stands; re-running this
+skill re-runs the build and records a fresh result. Nothing else here retries a
+build for you, and no failure is ever retried into a green.
 
 ### 6. Report and stop
 
