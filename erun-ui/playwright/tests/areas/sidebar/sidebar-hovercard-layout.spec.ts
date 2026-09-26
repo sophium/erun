@@ -320,7 +320,7 @@ test.describe('sidebar env hover card layout (#1901)', () => {
         .locator('span')
         .first()
         .evaluate((el) => window.getComputedStyle(el).color, undefined, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
 
     // amber-700/amber-400 both render with a non-trivial red/green gap from
     // blue; the degraded muted-foreground token is a desaturated grey. Assert
@@ -388,7 +388,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       // and a bare "excludes builds" beside it would read as qualifying that
       // row instead of them.
       await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 
   test('usage caption for a runtime environment does not claim it excludes builds', async ({
@@ -406,7 +406,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
         await app.sidebar.hoverEnvironmentRow(SEED_TENANT, environment);
         await expect(card).toBeVisible({ timeout: 1_000 });
         await expect(card).toContainText('As of', { timeout: 1_000 });
-      }).toPass({ timeout: 20_000 });
+      }).toPass();
       await expect(card).not.toContainText('exclude builds');
       await expect(card).not.toContainText('erun-dind sidecar');
     } finally {
@@ -424,11 +424,13 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
     app,
     page,
   }) => {
-    // The toPass retry (20s) nests hoverEnvironmentRow's own retry inside it, so
-    // a single slow hover attempt under contention can consume most of the
+    // The toPass retry nests hoverEnvironmentRow's own retry inside it, so a
+    // single slow hover attempt under contention can consume most of the
     // default 30s test budget before the outer retry gets a second chance —
     // same reason sidebar-environment-usage.spec.ts's driven-hover cases widen
-    // theirs. Widen this test rather than shrinking either nested bound.
+    // theirs. The outer retry is bare so that this declared budget is the one
+    // it spends: a cap of its own would take
+    // `min(this deadline, now + cap)` and make the widening below inert.
     test.setTimeout(60_000);
     const card = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
     await expect(async () => {
@@ -448,7 +450,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       });
       // The caveat still applies to CPU and Memory, which is what it is for.
       await expect(card).toContainText('CPU and memory exclude builds', { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 
   // A sidecar with no cpu.max quota cannot report a percentage, and reporting
@@ -486,7 +488,7 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       // Two strips — CPU and Memory — and none for the sidecar, whose reading
       // has no ceiling to be a fraction of.
       await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 
   // The reported defect. An absent sidecar reading is a real state — an older
@@ -516,6 +518,6 @@ test.describe('sidebar env hover card usage caveat for build-capable environment
       // Not-read is not a reading: no strip for it, unlike the measured CPU and
       // memory above — and still not the zero the card must never fabricate.
       await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 });

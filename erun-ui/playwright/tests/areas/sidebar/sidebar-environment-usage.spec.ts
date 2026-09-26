@@ -85,8 +85,9 @@ async function emitEnvUsage(page: Page, payload: UsageEvent): Promise<void> {
 // The backend's own usage sweep also runs on a timer against the seeded
 // (never-deployed, unreachable) alpha env and can overwrite the injected
 // reading with its own "not running" observation, so every assertion driven
-// by this helper re-drives the event until it converges, bounded by a real
-// timeout rather than a guessed delay — mirrors driveEnvActivity in
+// by this helper re-drives the event until it converges, bounded by the
+// calling test's own deadline rather than a second cap the step picked for
+// itself — mirrors driveEnvActivity in
 // sidebar-orchestrator-hover-card-activity.spec.ts.
 async function driveEnvUsage(
   page: Page,
@@ -96,16 +97,17 @@ async function driveEnvUsage(
   await expect(async () => {
     await emitEnvUsage(page, event);
     await assertions();
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 }
 
 test.describe('environment usage on the hover cards', () => {
   test('the environment hover card renders a fresh reading with its age', async ({ app, page }) => {
-    // driveEnvUsage's own retry (20s) nests hoverEnvironmentRow's own retry
-    // (20s) inside it, so a single slow hover attempt under contention can
-    // consume most of the default 30s test budget before driveEnvUsage gets
-    // a chance to retry the whole thing. Widen the test's own budget rather
-    // than shrinking either nested retry's bound.
+    // driveEnvUsage's retry nests hoverEnvironmentRow's own retry inside it,
+    // so a single slow hover attempt under contention can consume most of the
+    // default 30s test budget before driveEnvUsage gets a chance to retry the
+    // whole thing. driveEnvUsage is bare precisely so that this declared
+    // budget is the one it spends: a cap of its own would take
+    // `min(this deadline, now + cap)` and make the widening below inert.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -157,7 +159,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the preceding test's comment: driveEnvUsage's retry nests
     // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and driveEnvUsage is bare so that this is the
+    // budget it actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -277,7 +280,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the first driveEnvUsage test's comment: its retry nests
     // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and it is bare so that this is the budget it
+    // actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -328,7 +332,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the first driveEnvUsage test's comment: its retry nests
     // hoverOrchestratorRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and it is bare so that this is the budget it
+    // actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -390,6 +395,7 @@ test.describe('environment usage on the hover cards', () => {
     await app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA).waitFor({ state: 'hidden' });
     expect(calls).toBe(0);
   });
+
   // The reservation is a separate read from the cgroup reading, and the two can
   // disagree: the pod spec is read over kubectl and can be refused (RBAC, a
   // pod mid-replacement) while the cgroup figures beside it arrive intact. Both

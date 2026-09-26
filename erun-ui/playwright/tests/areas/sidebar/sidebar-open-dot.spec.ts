@@ -92,7 +92,7 @@ test.describe('sidebar env open dot', () => {
         await emitEnvStatus(page, tenant, environment, status);
         await expect(dot).toHaveAttribute('data-env-state', expectedState, { timeout: 1_000 });
         await expect(dot).toHaveAccessibleName(expectedName, { timeout: 1_000 });
-      }).toPass({ timeout: 20_000 });
+      }).toPass();
     };
 
     await driveEnvStatus(
@@ -159,7 +159,7 @@ test.describe('sidebar env open dot', () => {
       await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 1_000 });
       await expect(dot).toHaveAttribute('data-env-opened', 'false', { timeout: 1_000 });
       await expect(dot).toHaveAccessibleName(/deploy failed/, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
 
     // A passive light, not a control: there is no tab left to close.
     await expect(dot).not.toHaveAccessibleName(new RegExp(`^Close ${tenant} / ${environment}`));

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 test.describe('sidebar', () => {
@@ -46,7 +46,11 @@ test.describe('sidebar', () => {
     const target = `${SEED_TENANT} / ${SEED_ENV_ALPHA}`;
     const openingStatus = await recordOpeningStatus(page, target);
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
-    await expect.poll(openingStatus, { timeout: 15_000 }).not.toBeNull();
+    // `expect.poll` does not resolve to the enclosing test's deadline the way
+    // waitFor/toPass do -- with no timeout it lands on `expect.timeout`'s
+    // separate 10s clock -- so it carries this test's declared budget instead
+    // of a cap picked here (fixtures/erunApp.ts withTestBudget).
+    await expect.poll(openingStatus, withTestBudget()).not.toBeNull();
   });
 });
 
