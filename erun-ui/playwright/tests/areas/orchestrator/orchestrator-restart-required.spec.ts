@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR, SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // erun#1319: re-scoping a running orchestrator changes what it is allowed to
@@ -51,6 +51,77 @@ async function stubOrchestratorList(page: Page, body: unknown): Promise<void> {
 }
 
 test.describe('a running orchestrator whose scope changed under it (erun#1319)', () => {
+  // A hover card's open state belongs to the row that raised it, and a pointer
+  // resting on that row does not raise it again: nothing fires a fresh
+  // mouseenter, so a card closed under a stationary pointer stays closed. The
+  // boot's own default-landing open is a reliable way to close one -- opening
+  // the environment hands its terminal focus and the card goes down with it --
+  // and reboot() deliberately hands control back before that has happened. So
+  // a fact already read off the card can be read against a card that is no
+  // longer there, which is what this case arranges.
+  //
+  // The boot's own first read is gated rather than timed, so the landing -- and
+  // with it the drop -- falls between the two reads by construction and not by
+  // a loaded machine (root AGENTS.md, "A Defect Fix Names Its Reproduction": a
+  // probabilistic failure needs a deterministic reproduction constructed on
+  // purpose). Against the pre-fix shape -- one hover, then two independent
+  // reads -- this case reds on the second read at expect's 10s default with
+  // "element(s) not found" for the card that answered the first; re-hovering
+  // the row recovers, which is what readOrchestratorHoverCard wraps into one
+  // retryable hover-then-read unit.
+  //
+  // The reads carry a short bound of their own because they are the probe
+  // inside that unit: an attempt that finds no card has to fail quickly for
+  // the retry to re-hover while the test still has budget. The unit's own
+  // bound is the test's, which is why it is taken bare.
+  test('a hover card dropped while the boot lands is re-hovered, not read as absent', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    let releaseBoot = (): void => {};
+    const bootGate = new Promise<void>((resolve) => {
+      releaseBoot = resolve;
+    });
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const parsed = JSON.parse(request.postData() ?? '{}') as { method?: string };
+      if (parsed.method === 'ListOrchestrators') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: [runningStaleSnapshot()] }),
+        });
+      }
+      if (parsed.method === 'LoadState') {
+        const response = await route.fetch();
+        await bootGate;
+        return route.fulfill({ response });
+      }
+      await route.continue();
+    });
+
+    await app.reboot();
+    await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeVisible();
+
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toContainText('Running', { timeout: 1_000 });
+    });
+
+    // ...and the boot's own landing takes it down. Asserting the drop is the
+    // point of this case rather than an assumption hidden inside it: it is the
+    // condition the read below has to survive, and it is also what makes the
+    // reproduction deterministic -- the second read starts on the far side of
+    // the drop on any machine, not on a slow one.
+    releaseBoot();
+    await expect(app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR)).toBeHidden(withTestBudget());
+
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toContainText('Running', { timeout: 1_000 });
+      await expect(card).toContainText('Its environments changed while it was running', {
+        timeout: 1_000,
+      });
+    });
+  });
+
   test('the sidebar row and hover card say a restart is required, not plain "running"', async ({
     app,
     page,
@@ -63,11 +134,15 @@ test.describe('a running orchestrator whose scope changed under it (erun#1319)',
     // is what tells the two states apart.
     await expect(app.sidebar.orchestratorRestartRequiredDot(SEED_ORCHESTRATOR)).toBeVisible();
 
-    await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
-    const card = page.getByRole('dialog', { name: `${SEED_ORCHESTRATOR} details` });
-    await expect(card).toBeVisible();
-    await expect(card).toContainText('Running');
-    await expect(card).toContainText('Its environments changed while it was running');
+    // One retryable hover-then-read unit, not a hover followed by two
+    // independent reads: the card can be dropped between them (see the case
+    // above), and a sequence of bare reads has no way back from that.
+    await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
+      await expect(card).toContainText('Running', { timeout: 1_000 });
+      await expect(card).toContainText('Its environments changed while it was running', {
+        timeout: 1_000,
+      });
+    });
   });
 
   test('a clean running orchestrator shows neither the dot nor the notice', async ({
