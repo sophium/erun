@@ -230,23 +230,44 @@ func validateGateMergeSources(sources []GateMergeSource) error {
 // The issue-closing line is spelled without a colon, unlike the others, and
 // its value is required to be an issue reference: a sentence that merely
 // begins with the word cannot be read as a trailer.
-var gateMergeCarriedTrailerLines = []*regexp.Regexp{
-	regexp.MustCompile(`^Closes[ \t]+#[0-9]+(?:[ \t]*,[ \t]*#[0-9]+)*$`),
-	regexp.MustCompile(`^Reproduces:[ \t]+\S.*$`),
-	regexp.MustCompile(`^Regression-Test:[ \t]+\S.*$`),
-	regexp.MustCompile(`^Regression-Test-Existing:[ \t]+\S.*$`),
-	regexp.MustCompile(`^Regression-Test-Exemption:[ \t]+\S.*$`),
+//
+// singleLine records, for the one spelling whose grammar closes on the line it
+// starts, that a line beneath it is never the rest of its value. It is a
+// property of the pattern beside it rather than a second list to keep in step,
+// and it defaults to false because most carried values are prose a hand-wrapped
+// body breaks wherever the author's editor did — reading one of those as ending
+// at its first line is the truncation that carriage exists to prevent.
+var gateMergeCarriedTrailerLines = []gateMergeCarriedTrailerLine{
+	{pattern: regexp.MustCompile(`^Closes[ \t]+#[0-9]+(?:[ \t]*,[ \t]*#[0-9]+)*$`), singleLine: true},
+	{pattern: regexp.MustCompile(`^Reproduces:[ \t]+\S.*$`)},
+	{pattern: regexp.MustCompile(`^Regression-Test:[ \t]+\S.*$`)},
+	{pattern: regexp.MustCompile(`^Regression-Test-Existing:[ \t]+\S.*$`)},
+	{pattern: regexp.MustCompile(`^Regression-Test-Exemption:[ \t]+\S.*$`)},
 }
 
-// gateMergeCarriesTrailer reports whether one line is a trailer this squash
-// preserves.
-func gateMergeCarriesTrailer(line string) bool {
-	for _, pattern := range gateMergeCarriedTrailerLines {
-		if pattern.MatchString(line) {
-			return true
+// gateMergeCarriedTrailerLine is one spelling this squash carries: the pattern
+// a line must match to be it, and whether a value written in that spelling can
+// continue onto the line beneath.
+type gateMergeCarriedTrailerLine struct {
+	pattern *regexp.Regexp
+	// singleLine is true when the spelling's own grammar has no continuation to
+	// write. A "Closes #N" reference list is written on one line — the pattern
+	// above is anchored at both ends and its alternatives are all on that line —
+	// so a line under one is never the rest of its value, and reading it as a
+	// continuation swallows whatever the author wrote next: a sentence of prose,
+	// or the next "Refs #N", into a declaration that was already complete.
+	singleLine bool
+}
+
+// gateMergeCarriedTrailer returns the spelling a line is written in, or nil
+// when it is not a trailer this squash carries.
+func gateMergeCarriedTrailer(line string) *gateMergeCarriedTrailerLine {
+	for i := range gateMergeCarriedTrailerLines {
+		if gateMergeCarriedTrailerLines[i].pattern.MatchString(line) {
+			return &gateMergeCarriedTrailerLines[i]
 		}
 	}
-	return false
+	return nil
 }
 
 // gateMergeTrailerToken is a "Token:" line: a token at the start of the line
@@ -341,6 +362,14 @@ func gateMergeTrailersFromBody(body string) []string {
 // where every commit body puts its prose — and it is decided by the position of
 // the blank lines within the entry's own text, not by any boundary deciding
 // which lines of the body are looked at.
+//
+// A carried line whose own grammar closes on that line opens no entry at all.
+// Where a value has no continuation to write, the lines beneath it are not a
+// reading of the declaration that is merely unlikely to be right; there is
+// nothing for them to be, so the ambiguity a hard-wrapped value carries does not
+// arise and the declaration stands complete on its own line. The continuation
+// rule still governs every spelling that does have one, which is why this
+// narrows what the carrier takes rather than taking more.
 func gateMergeTrailerEntries(lines []string) []string {
 	var carried []string
 	var entry []string
@@ -353,7 +382,11 @@ func gateMergeTrailerEntries(lines []string) []string {
 	for _, line := range lines {
 		if gateMergeStartsTrailerEntry(line) {
 			flush()
-			if gateMergeCarriesTrailer(line) {
+			if trailer := gateMergeCarriedTrailer(line); trailer != nil {
+				if trailer.singleLine {
+					carried = append(carried, line)
+					continue
+				}
 				entry = []string{line}
 			}
 			continue
