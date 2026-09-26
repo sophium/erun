@@ -119,6 +119,21 @@
 # is reserved for a job still genuinely running, and an unreadable record
 # counts as the same non-verdict rather than as a failure.
 #
+# Which `erun` runs all of this is the environment's installed release, not the
+# checkout being gated, and the two are routinely a release or two apart: that
+# binary starts the job below, and it is what runs `erun exec gate-merge` for a
+# landing lane. The skew is invisible otherwise, and it makes a merged fix to
+# this layer look ineffective -- merging changes nothing until the environment
+# is upgraded, so a gate that passes over the old behaviour, or a landing whose
+# trailer still comes back the old way, reads as that fix having failed. So the
+# pod's own version is named before anything else runs -- on stdout, for the
+# same reason the replay banner above goes there: a lane reads a gate's result
+# from its captured output, and a fact announced only where the record does not
+# go is a fact that capture drops. It is stated as a fact about the run and not
+# a verdict about the tree: nothing here can decide whether a particular commit
+# is in that binary, and a line that appeared to would imply a comparison that
+# is not happening.
+#
 # This script's own exit code distinguishes four outcomes, not two: 0 for a
 # clean pass, 0 (with a named warning on stderr) for a pass that exited 0 but
 # left unsupervised background work running behind it, nonzero for a genuine
@@ -149,6 +164,46 @@ fi
 
 : "${ERUN_TENANT:?agent-gate.sh: ERUN_TENANT is not set (expected inside an agent pod)}"
 : "${ERUN_ENVIRONMENT:?agent-gate.sh: ERUN_ENVIRONMENT is not set (expected inside an agent pod)}"
+
+# announce_pod_erun names the `erun` that will actually run the gate below --
+# and, for a landing lane, `erun exec gate-merge`. That binary is the
+# environment's installed release rather than the checkout being gated, so a
+# merged fix to erun's own build/gate/landing layer is inert here until the
+# environment is upgraded, and a gate that passes over the old behaviour, or a
+# landing whose trailer still comes back the old way, reads as that fix having
+# failed when it has not run at all. Naming the version is what lets a reader
+# stop before drawing that conclusion.
+#
+# It is a fact, not a check: this script does not know which commits are in
+# that binary and must not imply it does. Nor does it fail the gate if the
+# version cannot be read -- the gate's job is to gate -- but an unreadable
+# version is reported as exactly that, because staying silent would restore the
+# invisibility this exists to remove. What it does cost is a wrong inference,
+# and that is the whole point.
+#
+# `--no-registry` keeps this off the network (measured ~1.8s -> ~0.1s on the
+# pod, and no dependence on the registry being reachable at all). An
+# environment whose erun predates that flag is precisely the case this line
+# exists for -- an old binary -- so its rejection falls back to the plain form
+# rather than being read as "no version to report".
+announce_pod_erun() {
+	pod_erun_raw=$(erun version --no-registry 2>/dev/null) || pod_erun_raw=""
+	if [ -z "$pod_erun_raw" ]; then
+		pod_erun_raw=$(erun version 2>/dev/null) || pod_erun_raw=""
+	fi
+	# The `erun <version>` line is always erun's own build identity and is the
+	# first line printed; a project VERSION resolved from the working directory
+	# rides a separate `project ...` line, which this anchored match skips.
+	pod_erun_version=$(printf '%s\n' "$pod_erun_raw" | sed -n 's/^erun //p' | head -n 1) || pod_erun_version=""
+
+	if [ -n "$pod_erun_version" ]; then
+		printf 'agent-gate: this gate runs on the pod'\''s erun %s -- that installed binary, not the checkout being gated, is also what runs `erun exec gate-merge`. Nothing here says whether a given commit is in it.\n' "$pod_erun_version"
+		printf 'agent-gate: a fix merged into erun-cli/erun-common is inert until this environment'\''s erun is upgraded, so a gate result after such a merge is not evidence about it -- read it as "not run yet", not as "the fix failed".\n'
+	else
+		printf 'agent-gate: could not read the pod'\''s erun version (`erun version` produced nothing readable) -- an unreadable binary is still what runs this gate and `erun exec gate-merge`, and it may predate the checkout being gated, so a gate result is not evidence about a fix to that layer.\n'
+	fi
+}
+announce_pod_erun
 
 # warn_if_wrapped_in_timeout looks a few hops up the process tree for an
 # ancestor named `timeout`. An outer `timeout` around this script can only

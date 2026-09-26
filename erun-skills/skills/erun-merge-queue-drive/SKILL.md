@@ -126,6 +126,22 @@ stop this drive; do not clear another live lease or schedule probes beside it.
   branch-history review by its owner; patch-equivalence guesses cannot reliably
   detect every multi-commit squash relationship.
 
+**The binary running `erun exec gate-merge` here is the environment's installed
+erun, not the checkout being landed.** It is a release, routinely one or two
+behind, so a fix merged into erun's own landing path — the trailer carrier
+included — is inert until this environment is upgraded, and the skew is
+invisible in every other signal: the composition succeeds, the gate passes, and
+the old behaviour is simply still there. Read the version that actually ran
+before concluding anything about such a fix, and name it in the report rather
+than reporting a merged fix as failed:
+
+```sh
+erun version --no-registry   # the `erun <version>` line is the pod's binary
+```
+
+`scripts/agent-gate.sh` names the same version for `make check`, and
+`erun-merge`'s build rung runs it too.
+
 ## 2. Gate the landed stack
 
 Renew the environment claim, start one `erun exec gate-run start` for the
