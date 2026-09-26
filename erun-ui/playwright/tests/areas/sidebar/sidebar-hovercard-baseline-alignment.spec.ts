@@ -127,8 +127,10 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
     // Two genuine round-trips -- the boot auto-open this waits out, then the
     // hover-and-measure retry below -- whose legitimate combined cost under
     // contention can approach the 30s default even after both converge, so
-    // the test's own budget is widened rather than either convergence capped
-    // below it.
+    // the test's own budget is widened. The retry below is bare so that this
+    // declared budget is the one it spends; a cap of its own would take
+    // `min(this deadline, now + cap)` and make the widening inert, which is
+    // why the sibling test further down already dropped its own.
     test.setTimeout(60_000);
     await app.reboot();
     // reboot() returns before the tenant's default-landing env (this one)
@@ -162,7 +164,7 @@ test.describe('sidebar hover card baseline alignment (#1759)', () => {
       await expect(card).toContainText('Idle', { timeout: 1_000 });
       const geometry = await rowGeometry(card, 'Activity');
       expect(Math.abs(geometry.dtBaseline - geometry.ddBaseline)).toBeLessThan(1.5);
-    }).toPass({ timeout: 25_000 });
+    }).toPass();
   });
 
   test('the environment card no longer stacks the Version row now that `wide` is retired (#1901)', async ({

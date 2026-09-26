@@ -147,7 +147,9 @@ test.describe('sidebar env hover card', () => {
     // The backend's own sweep runs on a timer against this inert (never
     // deployed) env and will legitimately overwrite the injected busy
     // observation with "unreachable" — re-drive it until the assertion holds,
-    // bounded by a real timeout rather than a guessed delay.
+    // bounded by the calling test's own deadline rather than a second cap the
+    // step picked for itself. A bare toPass is what gives it that; see
+    // activitySettlesTo above, which already relies on the same property.
     await expect(async () => {
       await emitEnvActivityEvent(page, {
         tenant,
@@ -162,7 +164,7 @@ test.describe('sidebar env hover card', () => {
       await expect(card).toBeVisible({ timeout: 1_000 });
       await expect(activity).toContainText('holding: gradle-build', { timeout: 1_000 });
       await expect(activity).not.toContainText('Stopped');
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
 
     // Reset the injected state so it doesn't leak into later specs (shared backend).
     await emitEnvActivityEvent(page, {

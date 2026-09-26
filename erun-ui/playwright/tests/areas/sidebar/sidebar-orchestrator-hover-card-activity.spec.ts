@@ -83,7 +83,7 @@ async function withOrchestratorCard(
   await expect(async () => {
     await app.sidebar.hoverOrchestratorRow(SEED_ORCHESTRATOR);
     await read(card(page));
-  }).toPass({ timeout: 25_000 });
+  }).toPass();
 }
 
 // CHECK_FAILED_LINE is the prose the check-failed row renders: a status clause
@@ -210,9 +210,9 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     // checks plus a capture per withOrchestratorCard attempt, versus one or
     // two for its siblings -- so its legitimate per-attempt cost under
     // contention can consume the suite's global 30s per-test timeout before
-    // withOrchestratorCard's own 25s retry budget converges (root AGENTS.md's
-    // "no flaky tests" gate needs this to be a real budget increase, not a
-    // race against the whole-test clock the retry below would still lose).
+    // withOrchestratorCard's own retry converges on this test's deadline -- the
+    // retry is bare, so the budget increase below is what bounds it, not a cap
+    // the helper picked and this test would race against.
     test.setTimeout(60_000);
     await stubOrchestratorList(
       page,
@@ -414,7 +414,8 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     page,
   }) => {
     // Same budget and same reason as the three-environment test above:
-    // withOrchestratorCard's own 25s retry must not race the whole-test clock.
+    // withOrchestratorCard's retry is bare, so it converges on this test's
+    // clock rather than racing it.
     test.setTimeout(60_000);
     await stubOrchestratorList(
       page,
@@ -633,12 +634,10 @@ test.describe('orchestrator hover card environment and pacing state', () => {
     page,
     seededEnv,
   }) => {
-    // Two sequential driveEnvActivity phases below each retry for up to 20s
-    // of their own, so their legitimate combined cost under contention can
-    // approach the suite's global 30s per-test timeout before either
-    // converges (root AGENTS.md's "no flaky tests" gate needs this to be a
-    // real budget increase, not a race against the whole-test clock the
-    // bounded retries below would still lose).
+    // Two sequential driveEnvActivity phases below each converge on this
+    // test's own deadline -- the retries are bare, so their legitimate combined
+    // cost under contention is bounded by the budget increase below rather than
+    // by a cap each phase picked for itself.
     test.setTimeout(90_000);
     const { tenant, environment } = seededEnv;
     await stubOrchestratorList(
@@ -772,7 +771,8 @@ interface EnvActivityEvent {
 // own sweep also runs on a timer against this seeded (inert) env and can
 // overwrite the injected value with its own "unreachable" observation, so
 // every assertion driven by this helper is re-driven until it converges,
-// bounded by a real timeout rather than a guessed delay.
+// bounded by the calling test's own deadline rather than a second cap the
+// step picked for itself.
 async function driveEnvActivity(
   page: Page,
   event: EnvActivityEvent,
@@ -781,7 +781,7 @@ async function driveEnvActivity(
   await expect(async () => {
     await emitEnvActivity(page, event);
     await assertions();
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 }
 
 async function emitEnvActivity(page: Page, payload: EnvActivityEvent): Promise<void> {

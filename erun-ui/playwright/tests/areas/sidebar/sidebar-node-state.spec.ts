@@ -19,8 +19,9 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 // The backend's own cloud sweep runs on a timer against the seeded envs (which
 // have no cloud context, so it reports no node) and can legitimately clear an
 // injected reading, so every assertion is re-driven until it converges, bounded
-// by a real timeout. A genuinely broken indicator never converges and the step
-// still fails.
+// by the calling test's own deadline rather than a second cap the step picked
+// for itself. A genuinely broken indicator never converges and the step still
+// fails.
 
 interface NodeEvent {
   tenant: string;
@@ -47,7 +48,7 @@ async function driveEnvNode(
   await expect(async () => {
     await emitEnvNode(page, event);
     await assertions();
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 }
 
 interface ActivityEvent {
@@ -157,7 +158,7 @@ test.describe('sidebar cloud-node indicator', () => {
       // And the undetermined node stays quiet, because the row is already
       // saying something.
       await expect(app.sidebar.envNodeIndicator(tenant, environment)).toHaveCount(0);
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 
   test('the hover card names the node and its state even when the row stays quiet', async ({
@@ -180,6 +181,6 @@ test.describe('sidebar cloud-node indicator', () => {
       await expect(card).toContainText(NODE.label, { timeout: 1_000 });
       await expect(card).toContainText('Running', { timeout: 1_000 });
       await expect(app.sidebar.envNodeIndicator(tenant, environment)).toHaveCount(0);
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 });

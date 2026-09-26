@@ -116,7 +116,7 @@ test('the env hover card still renders every field: version, branch+issue, activ
     await expect(card.locator('[data-decile-fill]')).toHaveCount(2, { timeout: 1_000 });
     await expect(card).toContainText('Stale', { timeout: 1_000 });
     await expect(card).toContainText('ago', { timeout: 1_000 });
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 });
 
 test('the orchestrator hover card still renders every field: status, doing, linked environments, and nudges', async ({
