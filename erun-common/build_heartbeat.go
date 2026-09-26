@@ -31,7 +31,7 @@ const buildHeartbeatInterval = 30 * time.Second
 // single line naming everything still building.
 //
 // One emitter per run rather than one per image, for two reasons. A concurrent
-// wave can have several images in flight, and a heartbeat per image would make
+// run can have several images in flight, and a heartbeat per image would make
 // the number of lines a function of the degree of parallelism — the opposite of
 // low-noise. And one emitter means one goroutine emitting while the run's own
 // traces are emitted by whichever goroutine is driving it, so the only two

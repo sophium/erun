@@ -86,7 +86,7 @@ func newStepTiming(name string, now func() time.Time) *stepTiming {
 }
 
 // child starts a new named step under s, safe to call from concurrent
-// goroutines (independent image builds run in waves; independent deploy
+// goroutines (independent image builds run concurrently; independent deploy
 // components run in parallel steps).
 func (s *stepTiming) child(name string) *stepTiming {
 	child := newStepTiming(name, s.now)
@@ -188,7 +188,7 @@ func (s *stepTiming) snapshot() stepSnapshot {
 // timingGap is the difference between a step's own duration and the sum of
 // its children's durations. Positive means real time the children don't
 // account for (a phase transition, an uninstrumented sub-step); negative
-// means the children overlapped (a concurrent build wave), which is expected
+// means the children overlapped (a concurrent build), which is expected
 // and reported as such rather than as a misleading negative "unaccounted".
 func timingGap(step stepSnapshot) time.Duration {
 	var childrenTotal time.Duration

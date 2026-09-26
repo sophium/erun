@@ -1824,11 +1824,11 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
-	// Independent images build concurrently, and the schedule that allows it is
+	// Independent images build concurrently, and the ordering that allows it is
 	// a pure function of the Dockerfiles — so it is auditable up front, and the
 	// same on any machine. The degree is pinned here rather than resolved from
 	// the host, or the assertion would depend on the runner's core count.
-	t.Run("dry_run_reports_the_dependency_waves_it_would_build_in", func(t *testing.T) {
+	t.Run("dry_run_reports_the_base_each_image_waits_for", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "wrapper", "Dockerfile"),
@@ -1839,29 +1839,34 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		// The wrapper FROMs api, so it cannot share api's wave.
-		for _, want := range []string{
-			"3 images in 2 waves",
-			"wave 2 (1): ghcr.io/sophium/wrapper",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Fatalf("expected %q in the wave plan:\n%s", want, result.Combined)
+		// The wrapper FROMs api, so it is the one image that has to wait — and
+		// the plan names api rather than a level the wrapper merely shares. The
+		// version is left out of the assertion so it reads the same here as it
+		// does in the golden, where the minted version is normalized.
+		plan := ""
+		for _, line := range strings.Split(result.Combined, "\n") {
+			if strings.HasPrefix(line, "build: ") {
+				plan = line
 			}
+		}
+		if !strings.Contains(plan, "3 images, 1 waiting on a sibling base — ghcr.io/sophium/wrapper:") ||
+			!strings.Contains(plan, " after ghcr.io/sophium/api:") {
+			t.Fatalf("expected the wrapper to be the one image named as waiting on api, got %q:\n%s", plan, result.Combined)
 		}
 	})
 
-	// --jobs 1 is the escape hatch back to the old behaviour, so it must not
+	// --jobs 1 is the escape hatch back to sequential building, so it must not
 	// merely be slower — it must produce what it always produced, including
 	// keeping each image's decision lines beside its own build output.
-	t.Run("dry_run_single_job_announces_no_schedule", func(t *testing.T) {
+	t.Run("dry_run_single_job_announces_no_ordering", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		result := erun.Run(t, []string{"build", "--jobs", "1", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if strings.Contains(result.Combined, "waves") {
-			t.Fatalf("a sequential build has no schedule to announce:\n%s", result.Combined)
+		if strings.Contains(result.Combined, "waiting on a sibling base") {
+			t.Fatalf("a sequential build has no ordering to announce:\n%s", result.Combined)
 		}
 	})
 

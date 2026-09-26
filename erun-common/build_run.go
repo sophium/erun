@@ -33,7 +33,7 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 }
 
 // executeDockerBuild runs one build against the given streams. The streams are
-// a parameter rather than ctx's own so a concurrent wave can buffer each image
+// a parameter rather than ctx's own so a concurrent build can buffer each image
 // separately and replay them in a fixed order.
 //
 // It also starts this image's step-timing child (a no-op when no timing root
@@ -60,7 +60,7 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 	buildInput.cache = cache
 	buildInput.PlatformObserver = ctx.gateTestStage.withGateStageEvidence(buildInput, stepCtx.timingPlatformObserver(cache))
 	// The heartbeat goes to the run's own log stream, not to stdout/stderr: those
-	// are per-image buffers under a concurrent wave, and a liveness line flushed
+	// are per-image buffers under a concurrent build, and a liveness line flushed
 	// after the build it describes finished would report nothing.
 	doneBuilding := ctx.progress.begin(dockerBuildStepName(buildInput))
 	err := build(buildInput, stdout, stderr)
@@ -198,12 +198,12 @@ func describeMissingPlatforms(platforms []string) string {
 // decision lines identical whatever the scheduling, so only timing changes.
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ordered := markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds))
-	waves, err := resolveBuildWaves(ordered)
+	dependencies, err := buildDependencies(ordered)
 	if err != nil {
 		return err
 	}
 	// One heartbeat for the whole run, installed before any image starts so both
-	// the sequential loop below and the concurrent waves share it.
+	// the sequential loop below and the concurrent dispatch share it.
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
 	jobs := resolveBuildJobs(ctx, len(ordered))
@@ -222,14 +222,14 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	// Concurrent: the traces are hoisted ahead of every build, in dependency
 	// order, because interleaved output from images racing each other would be
 	// neither readable nor reproducible.
-	traceBuildWavePlan(ctx, waves)
+	traceBuildDependencyPlan(ctx, ordered, dependencies)
 	for _, buildInput := range ordered {
 		traceDockerBuild(ctx, buildInput)
 	}
 	if ctx.DryRun {
 		return nil
 	}
-	return runBuildWaves(ctx, waves, build, jobs)
+	return runBuildDependencies(ctx, ordered, dependencies, build, jobs)
 }
 
 // runDockerBuildsSequentially is the same two phases with the schedule pinned to
