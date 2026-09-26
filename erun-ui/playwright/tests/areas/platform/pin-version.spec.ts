@@ -1,4 +1,4 @@
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // Changing an environment's erun version rewrites files across the tenant repo,
@@ -90,8 +90,14 @@ test.describe('change erun version (#744)', () => {
 
     // The regression: the Version select's trigger must show its
     // "no explicit choice" option's label, not render blank.
+    // Every content read below is the answer to one of this spec's own stubbed
+    // round trips -- the pinnable versions, the preview, the apply -- rather
+    // than a render that has already happened. `expect(...)` and `expect.poll`
+    // carry expect's 10s default with no explicit timeout, which is a separate
+    // clock from the 30s this test declares; each read therefore names that
+    // budget. See the held-apply case at the end of this file.
     const versionTrigger = dialog.getByRole('combobox', { name: 'Version' });
-    await expect(versionTrigger).toContainText('Latest stable');
+    await expect(versionTrigger).toContainText('Latest stable', withTestBudget());
 
     // Nothing may be applied before a plan exists — that is the whole gate.
     const apply = dialog.getByRole('button', { name: 'Apply', exact: true });
@@ -103,18 +109,88 @@ test.describe('change erun version (#744)', () => {
     // agreeing to specific edits rather than to a version number.
     const plan = dialog.getByRole('table', { name: 'Pending pin changes' });
     await expect(plan).toBeVisible();
-    await expect(plan).toContainText('terraform-team/dev/main.tf');
-    await expect(plan).toContainText('team-api/Chart.yaml (erun-backend-api)');
-    await expect(plan).toContainText('1.0.102');
-    await expect(plan).toContainText('1.0.174');
+    await expect(plan).toContainText('terraform-team/dev/main.tf', withTestBudget());
+    await expect(plan).toContainText('team-api/Chart.yaml (erun-backend-api)', withTestBudget());
+    await expect(plan).toContainText('1.0.102', withTestBudget());
+    await expect(plan).toContainText('1.0.174', withTestBudget());
 
-    await expect(apply).toBeEnabled();
+    await expect(apply).toBeEnabled(withTestBudget());
     await apply.click();
 
-    await expect(dialog.getByRole('status')).toContainText('Nothing is deployed yet');
-    await expect.poll(() => calls).toContain('ApplyPinVersion');
+    await expect(dialog.getByRole('status')).toContainText(
+      'Nothing is deployed yet',
+      withTestBudget(),
+    );
+    await expect.poll(() => calls, withTestBudget()).toContain('ApplyPinVersion');
     // A preview always precedes an apply.
     expect(calls.indexOf('PreviewPinVersion')).toBeLessThan(calls.indexOf('ApplyPinVersion'));
+  });
+
+  // The apply's own answer is what the status read below is about, and a bare
+  // `toContainText` resolves to expect's 10s default rather than to the budget
+  // this test declared. The hold is injected at the RPC this spec already stubs
+  // -- rather than by loading the machine -- so the reproduction is
+  // deterministic on a quiet host, and it sits just past that 10s default: the
+  // smallest delay that discriminates.
+  //
+  // Pre-fix this reds at exactly 10_000ms with 20s of its own budget unspent;
+  // with the read pointed at the budget the test declared it passes at the
+  // apply's real arrival.
+  test('an apply that answers past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    let holdUntil = 0;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      const method = body.method ?? '';
+      if (method === 'ListPinnableVersions') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: AVAILABLE }),
+        });
+      }
+      if (method === 'PreviewPinVersion') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: PLAN }),
+        });
+      }
+      if (method === 'ApplyPinVersion') {
+        // Anchored to the request, so the delay is the same however long the
+        // dialog took to open, and held before the response is written.
+        if (holdUntil === 0) {
+          holdUntil = Date.now() + 12_000;
+        }
+        const remaining = holdUntil - Date.now();
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: PLAN }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.page.getByRole('tab', { name: 'Runtime' }).click();
+    await app.page
+      .getByRole('button', { name: `Change erun version for ${SEED_TENANT} / ${SEED_ENV_ALPHA}` })
+      .click();
+
+    const dialog = app.page.getByTestId('pin-version-dialog');
+    await dialog.getByRole('button', { name: 'Preview changes' }).click();
+    await expect(dialog.getByRole('button', { name: 'Apply', exact: true })).toBeEnabled(
+      withTestBudget(),
+    );
+    await dialog.getByRole('button', { name: 'Apply', exact: true }).click();
+
+    await expect(dialog.getByRole('status')).toContainText(
+      'Nothing is deployed yet',
+      withTestBudget(),
+    );
   });
 
   test('the Version select shows the environment current pin as helper text', async ({

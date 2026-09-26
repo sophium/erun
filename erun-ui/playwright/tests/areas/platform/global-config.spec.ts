@@ -1,7 +1,7 @@
 import type { Request, Route } from '@playwright/test';
 
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 function manyCloudContexts(count: number): Record<string, unknown>[] {
@@ -137,6 +137,58 @@ test.describe('global config dialog', () => {
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
   });
+
+  // The alias actions above are content of the config the dialog loads on open,
+  // so every read of them is the answer to a LoadERunConfig round trip rather
+  // than a render that has already happened. `expect(...)` carries expect's
+  // 10s default when it is given no timeout -- a separate clock from the 30s
+  // this test declares and not moved by `test.setTimeout(...)` -- so a config
+  // that is merely slow on a loaded machine reds the read with the test's own
+  // budget unspent. The hold is injected at the RPC this spec already stubs
+  // rather than by loading the machine, so the reproduction is deterministic on
+  // a quiet host, and it sits just past that 10s default: the smallest delay
+  // that discriminates.
+  //
+  // Pre-fix this reds at exactly 10_000ms, over a config that arrives at 12s,
+  // with 20s of its own budget unused; with the read pointed at the budget the
+  // test declared it passes at the config's real arrival.
+  test('a config that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    let holdUntil = 0;
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as { method?: string };
+      if (body.method !== 'LoadERunConfig') {
+        await route.continue();
+        return;
+      }
+      // Anchored to the request, so the window is the same however long the
+      // dialog took to open.
+      if (holdUntil === 0) {
+        holdUntil = Date.now() + 12_000;
+      }
+      const remaining = holdUntil - Date.now();
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: { defaultTenant: SEED_TENANT, cloudProviders: [], cloudContexts: [] },
+        }),
+      });
+    });
+
+    await app.sidebar.openSettings();
+    await app.globalConfigDialog.waitForOpen();
+
+    await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1, withTestBudget());
+    await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1, withTestBudget());
+
+    await app.globalConfigDialog.cancel();
+    await app.globalConfigDialog.waitForClosed();
+  });
 });
 
 test.describe('global config dialog — cloud aliases add actions and erun provider', () => {
@@ -157,13 +209,20 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     // actions, so a count of 1 holds in either state -- without this the test
     // would pass even if the empty state never rendered, which is exactly how
     // it passed while stubbing the wrong call.
-    await expect(app.globalConfigDialog.locator().getByText('No cloud aliases yet')).toBeVisible();
+    // Every read below is content of the config this test stubbed, and each one
+    // arrives over that round trip rather than already being on screen. A bare
+    // `expect(...)` resolves to expect's 10s default -- a separate clock from
+    // the 30s this test declares -- so each names the budget it declared; see
+    // the held-config case at the end of this describe for the reproduction.
+    await expect(app.globalConfigDialog.locator().getByText('No cloud aliases yet')).toBeVisible(
+      withTestBudget(),
+    );
 
     // Regression guard for the four-buttons-two-actions defect: the header
     // and the empty state must never both render the same add action.
-    await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1);
-    await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1);
-    await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1);
+    await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1, withTestBudget());
+    await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1, withTestBudget());
+    await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1, withTestBudget());
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
@@ -198,15 +257,20 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.waitForOpen();
 
     // With aliases present, the header (not the empty state) is the one
-    // surface offering each add action.
-    await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1);
-    await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1);
-    await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1);
+    // surface offering each add action. Each of these is content of the config
+    // this test stubbed, so each carries the budget the test declared rather
+    // than expect's own 10s default.
+    await expect(app.globalConfigDialog.addAWSButton()).toHaveCount(1, withTestBudget());
+    await expect(app.globalConfigDialog.addCloudflareButton()).toHaveCount(1, withTestBudget());
+    await expect(app.globalConfigDialog.addERunButton()).toHaveCount(1, withTestBudget());
 
     await expect(app.globalConfigDialog.cloudAliasGroupHeading('erun')).toHaveText(
       'Hosted platforms',
+      withTestBudget(),
     );
-    await expect(app.globalConfigDialog.cloudAliasRow('erun+api.acme.test@erun')).toBeVisible();
+    await expect(app.globalConfigDialog.cloudAliasRow('erun+api.acme.test@erun')).toBeVisible(
+      withTestBudget(),
+    );
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
@@ -280,7 +344,7 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.waitForOpen();
 
     const row = app.globalConfigDialog.cloudAliasRow(activeERunAlias.alias);
-    await expect(row.getByText('Connected')).toBeVisible();
+    await expect(row.getByText('Connected')).toBeVisible(withTestBudget());
     await expect(
       app.globalConfigDialog.cloudAliasSwitchIdentityButton(activeERunAlias.alias),
     ).toBeVisible();
@@ -288,8 +352,8 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     await app.globalConfigDialog.logoutCloudAlias(activeERunAlias.alias);
 
     await expect.poll(() => rpc.calls('LogoutCloudProvider')).toBe(1);
-    await expect(row.getByText('Connected')).toHaveCount(0);
-    await expect(row.getByRole('button', { name: 'Login' })).toBeVisible();
+    await expect(row.getByText('Connected')).toHaveCount(0, withTestBudget());
+    await expect(row.getByRole('button', { name: 'Login' })).toBeVisible(withTestBudget());
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
@@ -318,7 +382,7 @@ test.describe('global config dialog — cloud aliases add actions and erun provi
     expect(rpc.calls('LogoutCloudProvider')).toBe(0);
     await expect(
       app.globalConfigDialog.cloudAliasRow(activeERunAlias.alias).getByText('Connected'),
-    ).toBeVisible();
+    ).toBeVisible(withTestBudget());
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
