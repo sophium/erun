@@ -1,15 +1,33 @@
 import type { Page } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // stubRuntimeUsage makes LoadRuntimeUsage return a fixed reading instead of
 // falling through to the harness's stub kubectl (which has no cluster and so
 // cannot exec into a pod). Mirrors env-init.spec.ts's stubDialogCluster
 // pattern for LoadRuntimeResourceStatus.
-async function stubRuntimeUsage(page: Page, body: unknown): Promise<void> {
+async function stubRuntimeUsage(
+  page: Page,
+  body: unknown,
+  options: { holdMs?: number } = {},
+): Promise<void> {
+  let holdUntil = 0;
   await page.route('**/__erun_invoke', async (route, request) => {
     const parsed = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (parsed.method === 'LoadRuntimeUsage') {
+      // holdMs makes this read land a fixed window after the request that
+      // asked for it, so a step that is merely slow can be told apart from a
+      // step that never converges. Anchored to the request (not to the stub's
+      // own registration) so the delay is the same however long the dialog
+      // took to open, and only the first read is held -- a refetch is a
+      // separate step with its own convergence.
+      if (options.holdMs && holdUntil === 0) {
+        holdUntil = Date.now() + options.holdMs;
+      }
+      const remaining = holdUntil - Date.now();
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ data: body }),
@@ -74,22 +92,29 @@ test.describe('manage dialog runtime usage panel', () => {
     await expect(panel).toBeVisible();
     await expect(app.manageDialog.runtimeUsageRefreshButton()).toBeVisible();
 
+    // Every read below is the answer to a LoadRuntimeUsage round trip, which
+    // is a value this spec's own stub owns rather than a render that has
+    // already happened -- so each carries withTestBudget(), the budget its
+    // test declared, instead of expect's own 10s default. See the held-read
+    // case at the end of this file for the reproduction.
+
     // The exact figures a slider decision needs, each beside its own meter.
-    await expect(panel).toContainText('45.0%');
-    await expect(panel).toContainText('of a 2.00 cores quota');
-    await expect(panel).toContainText('1.5 GiB of 2.0 GiB');
-    await expect(panel).toContainText('75% of the limit');
-    await expect(panel).toContainText('1.8 GiB');
-    await expect(panel).toContainText('90.0 GiB of 100.0 GiB');
-    await expect(panel).toContainText('90% used');
+    await expect(panel).toContainText('45.0%', withTestBudget());
+    await expect(panel).toContainText('of a 2.00 cores quota', withTestBudget());
+    await expect(panel).toContainText('1.5 GiB of 2.0 GiB', withTestBudget());
+    await expect(panel).toContainText('75% of the limit', withTestBudget());
+    await expect(panel).toContainText('1.8 GiB', withTestBudget());
+    await expect(panel).toContainText('90.0 GiB of 100.0 GiB', withTestBudget());
+    await expect(panel).toContainText('90% used', withTestBudget());
 
     // A percentage against a limit is a magnitude, so each measured field
     // renders a meter carrying its own value -- CPU, memory and the one disk
     // mount. Asserting the count pins that an unmeasured field adds none.
-    await expect(panel.getByRole('meter')).toHaveCount(3);
+    await expect(panel.getByRole('meter')).toHaveCount(3, withTestBudget());
     await expect(panel.getByRole('meter', { name: 'Memory' })).toHaveAttribute(
       'aria-valuenow',
       '75',
+      withTestBudget(),
     );
 
     // Severity lives in the meter itself, not only in the warning line below,
@@ -99,12 +124,16 @@ test.describe('manage dialog runtime usage panel', () => {
     await expect(panel.getByRole('meter', { name: /Disk .* \(warning\)/ })).toHaveAttribute(
       'aria-valuenow',
       '90',
+      withTestBudget(),
     );
     await expect(panel.getByRole('meter', { name: /Memory \(/ })).toHaveCount(0);
 
     // The disk-usage warning the reader already produces must surface, not
     // just the raw figures — it is what makes the reading actionable.
-    await expect(panel).toContainText('/home/erun is at 90% disk usage (warns at 90%)');
+    await expect(panel).toContainText(
+      '/home/erun is at 90% disk usage (warns at 90%)',
+      withTestBudget(),
+    );
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -156,16 +185,20 @@ test.describe('manage dialog runtime usage panel', () => {
     // cores" — a confident zero would read as "idle" rather than "unknown".
     await expect(panel).toContainText(
       'Unavailable — cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat',
+      withTestBudget(),
     );
     await expect(panel).not.toContainText('0.0%');
 
     // An unlimited container is a real, available reading and must render its
     // current/peak figures, but with no synthesized limit or percentage.
-    await expect(panel).toContainText('512 MiB');
-    await expect(panel).toContainText('no limit set');
+    await expect(panel).toContainText('512 MiB', withTestBudget());
+    await expect(panel).toContainText('no limit set', withTestBudget());
 
     // The unreadable disk mount must say so, never "0%" used.
-    await expect(panel).toContainText('Unavailable — df did not report usage for /home/erun');
+    await expect(panel).toContainText(
+      'Unavailable — df did not report usage for /home/erun',
+      withTestBudget(),
+    );
     await expect(panel).not.toContainText('0% used');
 
     // The sharpest form of the fail-soft contract: not one of these three
@@ -201,7 +234,13 @@ test.describe('manage dialog runtime usage panel', () => {
 
     const panel = app.manageDialog.runtimeUsagePanel();
     await expect(panel).toBeVisible();
-    await expect(panel).toContainText("Cannot read this environment's resource usage");
+    // The failure copy is this read's own outcome, so it waits on the read --
+    // and this one is the unmocked read, the only panel here whose answer is a
+    // real subprocess rather than a fulfilled stub.
+    await expect(panel).toContainText(
+      "Cannot read this environment's resource usage",
+      withTestBudget(),
+    );
 
     await expect(panel).not.toContainText('signal:');
 
@@ -273,24 +312,29 @@ test.describe('manage dialog runtime usage panel', () => {
     const panel = app.manageDialog.runtimeUsagePanel();
     await expect(panel).toBeVisible();
     // The runtime container's own figure is still shown, and still small.
-    await expect(panel).toContainText('0.2%');
+    await expect(panel).toContainText('0.2%', withTestBudget());
 
     // The sidecar is the container the work is actually in, named so the two
     // CPU figures cannot be confused for one another.
-    await expect(panel).toContainText('Builds — the erun-dind sidecar every image build runs in');
-    await expect(panel).toContainText('91.5%');
-    await expect(panel).toContainText('19.4 GiB of 20.0 GiB');
+    await expect(panel).toContainText(
+      'Builds — the erun-dind sidecar every image build runs in',
+      withTestBudget(),
+    );
+    await expect(panel).toContainText('91.5%', withTestBudget());
+    await expect(panel).toContainText('19.4 GiB of 20.0 GiB', withTestBudget());
 
     // Each figure keeps its own meter, under its own label.
     await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveAttribute(
       'aria-valuenow',
       '92',
+      withTestBudget(),
     );
     await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveAttribute(
       'aria-valuenow',
       '97',
+      withTestBudget(),
     );
-    await expect(panel.getByRole('meter')).toHaveCount(4);
+    await expect(panel.getByRole('meter')).toHaveCount(4, withTestBudget());
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -354,21 +398,24 @@ test.describe('manage dialog runtime usage panel', () => {
 
     const panel = app.manageDialog.runtimeUsagePanel();
     await expect(panel).toBeVisible();
-    await expect(panel).toContainText('386 CPU-s');
-    await expect(panel).toContainText('cumulative, no CPU quota to measure a rate against');
+    await expect(panel).toContainText('386 CPU-s', withTestBudget());
+    await expect(panel).toContainText(
+      'cumulative, no CPU quota to measure a rate against',
+      withTestBudget(),
+    );
 
     // A sidecar memory reading with no ceiling is a real reading, stated
     // without a limit rather than rendered as unknown.
-    await expect(panel).toContainText('Build memory');
-    await expect(panel).toContainText('512 MiB');
-    await expect(panel).toContainText('no limit set');
+    await expect(panel).toContainText('Build memory', withTestBudget());
+    await expect(panel).toContainText('512 MiB', withTestBudget());
+    await expect(panel).toContainText('no limit set', withTestBudget());
 
     // Neither of the sidecar's figures had a ceiling, so neither draws a bar:
     // the two meters are the runtime container's own. A zero-width bar here
     // would read as "0%, idle" rather than "no ceiling to measure against".
     await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveCount(0);
     await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveCount(0);
-    await expect(panel.getByRole('meter')).toHaveCount(2);
+    await expect(panel.getByRole('meter')).toHaveCount(2, withTestBudget());
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -418,16 +465,95 @@ test.describe('manage dialog runtime usage panel', () => {
 
     const panel = app.manageDialog.runtimeUsagePanel();
     await expect(panel).toBeVisible();
-    await expect(panel).toContainText('1.3%');
+    await expect(panel).toContainText('1.3%', withTestBudget());
 
     // The zone is present and names the container it could not reach...
-    await expect(panel).toContainText('Builds — the erun-dind sidecar every image build runs in');
-    await expect(panel).toContainText('the sidecar did not answer');
+    await expect(panel).toContainText(
+      'Builds — the erun-dind sidecar every image build runs in',
+      withTestBudget(),
+    );
+    await expect(panel).toContainText('the sidecar did not answer', withTestBudget());
     // ...and carries no figures of its own, so the two meters are the runtime
     // container's: a not-read sidecar must never borrow a bar meaning "measured".
     await expect(panel.getByRole('meter', { name: 'Build CPU' })).toHaveCount(0);
     await expect(panel.getByRole('meter', { name: 'Build memory' })).toHaveCount(0);
-    await expect(panel.getByRole('meter')).toHaveCount(2);
+    await expect(panel.getByRole('meter')).toHaveCount(2, withTestBudget());
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
+
+  // The panel's content is the answer to LoadRuntimeUsage, and an assertion on
+  // it carries no timeout of its own: `toContainText` has no waitFor
+  // equivalent, so it resolves to expect's 10s default rather than the budget
+  // this test declares. Under contention a read that is merely slow therefore
+  // reds the step with the test's own clock unspent, which is how a loaded
+  // machine turns into a failing branch nobody touched. The hold below is
+  // deliberately just past that 10s default: the smallest delay that
+  // discriminates, so the suite pays seconds here rather than the tens a
+  // genuinely loaded machine would.
+  //
+  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused; with the read pointed at that budget it passes at the read's real
+  // arrival. The delay is injected at a named RPC (this spec's own
+  // LoadRuntimeUsage stub) rather than by loading the machine, so the
+  // reproduction is deterministic on a quiet host -- the same shape
+  // sidebar-pom-convergence-budget.spec.ts uses for the POM steps.
+  test('a reading that lands past the step cap is waited out, not cut off', async ({
+    app,
+    seededEnv,
+  }) => {
+    test.setTimeout(60_000);
+    const { tenant, environment } = seededEnv;
+    await stubRuntimeUsage(
+      app.page,
+      {
+        tenant,
+        environment,
+        available: true,
+        message:
+          'This environment: CPU 45.0% of a 2.00-core quota, memory 1.5 GiB of 2.0 GiB (75%).',
+        cpu: {
+          available: true,
+          quotaCores: 2,
+          quota: '2.00 cores',
+          utilizationPercent: 45,
+          utilization: '45.0%',
+        },
+        memory: {
+          available: true,
+          currentBytes: 1610612736,
+          current: '1.5 GiB',
+          peakBytes: 1932735283,
+          peak: '1.8 GiB',
+          limitBytes: 2147483648,
+          limit: '2.0 GiB',
+          percentOfLimit: 75,
+          oomKills: 0,
+        },
+        disk: [
+          {
+            mount: '/home/erun',
+            available: true,
+            totalBytes: 107374182400,
+            total: '100.0 GiB',
+            usedBytes: 96636764160,
+            used: '90.0 GiB',
+            percentUsed: 90,
+            percent: '90.0%',
+          },
+        ],
+        warnings: ['/home/erun is at 90% disk usage (warns at 90%)'],
+      },
+      { holdMs: 12_000 },
+    );
+
+    await app.sidebar.openManageDialogViaKeyboard(tenant, environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+
+    const panel = app.manageDialog.runtimeUsagePanel();
+    await expect(panel).toContainText('45.0%', withTestBudget());
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
