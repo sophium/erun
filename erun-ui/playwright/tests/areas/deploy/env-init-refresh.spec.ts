@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { parseInvoke } from '../../../pages/index.js';
 import {
   removeTenant,
@@ -82,8 +82,12 @@ test.describe('environment init refresh', () => {
       await app.page.clock.install();
       await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
 
-      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible({ timeout: 10_000 });
-      await expect(app.sidebar.envRowButton(tenant, environment)).toBeVisible({ timeout: 10_000 });
+      // Both are the state transition the init handler's reload loop produces
+      // -- the toast and the row it confirms -- so each waits on this test's
+      // own budget rather than a 10s cap nested inside it that the test never
+      // declared. See the held-reload case at the end of this file.
+      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible(withTestBudget());
+      await expect(app.sidebar.envRowButton(tenant, environment)).toBeVisible(withTestBudget());
     } finally {
       removeTenant(tenant);
     }
@@ -144,5 +148,51 @@ test.describe('environment init refresh', () => {
     });
     await app.titlebar.openMessageCenter('error');
     await expect(app.titlebar.messageCenterRow('did not appear in the sidebar')).toBeVisible();
+  });
+
+  // The success half of the same handler: its confirmation is a state
+  // transition too (the reload landing, then the toast), and the step used to
+  // cap it at 10s inside a test that declares 30s. A reload that is merely
+  // slow therefore red the test with two thirds of its own clock unspent --
+  // the same defect the error cases above were converged out of, on the path
+  // that does NOT depend on a machine being loaded enough to lose the race.
+  //
+  // The hold is deliberately just past that 10s cap: the smallest delay that
+  // discriminates, injected at LoadState -- the read the handler waits on --
+  // rather than by loading the machine, so the reproduction is deterministic
+  // on a quiet host.
+  //
+  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused; pointed at the budget the test declares, it passes when the
+  // reload actually lands.
+  test('a confirmation that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const tenant = uniqueEnvironmentName('slow-success-tenant');
+    const environment = 'local';
+    seedTenant(tenant, environment);
+    seedEnvironment(tenant, environment);
+    try {
+      let heldOnce = false;
+      await page.route('**/__erun_invoke', async (route, request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method?: string };
+        if (body.method === 'LoadState' && !heldOnce) {
+          heldOnce = true;
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+        }
+        await route.continue();
+      });
+
+      // Freeze the clock so the transient success icon can't auto-dismiss
+      // before the assertion below observes it.
+      await app.page.clock.install();
+      await emitWailsEvent(app.page, 'environment-initialized', { tenant, environment });
+
+      await expect(app.titlebar.messageCenterIcon('success')).toBeVisible(withTestBudget());
+    } finally {
+      removeTenant(tenant);
+    }
   });
 });
