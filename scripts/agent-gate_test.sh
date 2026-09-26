@@ -475,6 +475,77 @@ stub_erun "${case_dir}/bin"
 	grep -q -- '--timeout 1s' "$STUB_ARGV_FILE" || fail "status finished pass: must await the finished job to learn its real exit status"
 )
 
+# --- a replayed pass must announce itself on STDOUT, the channel the run's own
+# result travels on, not only on stderr. A caller captures, pipes, or records
+# stdout -- that is the log a lane reads a gate's verdict from -- and the
+# replayed record is written to exactly that channel by `erun exec job output`,
+# so a notice on stderr alone left the replay's stdout byte-identical to a real
+# run's. Every lane that hit this had the mechanism right and still could not
+# tell, because the one line naming it was the one line their capture dropped.
+# The reproduction is the first assertion below: on the pre-fix wrapper the
+# replay's stdout EQUALS the fresh run's, byte for byte. It must differ, say
+# "nothing was executed", and still carry the recorded output -- and the fresh
+# run must never carry the banner, since labelling real work a replay would be
+# a worse defect than the silence being fixed.
+case_dir="${work_root}/replay-announced-on-stdout"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	# AGENT_GATE_RERUN is this wrapper's own control and is held out of the
+	# environment key, so setting it here forces the first invocation to be a
+	# real run without changing which run the second invocation is asking for.
+	export AGENT_GATE_RERUN=1
+	set +e
+	fresh_stdout=$("$gate" check "make check" -- sh -c 'echo gate-verdict: GREEN' 2>/dev/null)
+	set -e
+	unset AGENT_GATE_RERUN
+	: >"$STUB_ARGV_FILE"
+
+	set +e
+	replay_stdout=$("$gate" check "make check" -- sh -c 'echo gate-verdict: GREEN' 2>/dev/null)
+	replay_status=$?
+	set -e
+	[ "$replay_status" -eq 0 ] || fail "replay-announced-on-stdout: expected exit 0 from the replay, got $replay_status"
+
+	case "$fresh_stdout" in
+	*"gate-verdict: GREEN"*) ;;
+	*) fail "replay-announced-on-stdout: the fresh run must actually run and print its output, got: $fresh_stdout" ;;
+	esac
+	case "$fresh_stdout" in
+	*REPLAYED*) fail "replay-announced-on-stdout: must never label a genuinely fresh run a replay, got: $fresh_stdout" ;;
+	*) ;;
+	esac
+
+	if [ "$replay_stdout" = "$fresh_stdout" ]; then
+		fail "replay-announced-on-stdout: the replay's stdout is byte-identical to a real run's -- nothing on the channel a lane reads says it did not execute"
+	fi
+	case "$replay_stdout" in
+	*"NOTHING WAS EXECUTED"*) ;;
+	*) fail "replay-announced-on-stdout: stdout must say in as many words that nothing was executed, got: $replay_stdout" ;;
+	esac
+	case "$replay_stdout" in
+	*"gate-verdict: GREEN"*) ;;
+	*) fail "replay-announced-on-stdout: the replay must still carry the recorded output, got: $replay_stdout" ;;
+	esac
+	# Both ends, because the verdict is read at the bottom of a long log and a
+	# banner at the head of it scrolls away.
+	case "$replay_stdout" in
+	*"END OF REPLAYED RECORD"*) ;;
+	*) fail "replay-announced-on-stdout: the replay must also be named after the record it replayed, got: $replay_stdout" ;;
+	esac
+	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
+		fail "replay-announced-on-stdout: a replayed pass must not start a fresh run"
+	fi
+)
+
 # --- a recorded pass carrying no environment marker is not attributable to any
 # environment, so it is not replayed either. Records written before the marker
 # existed stay readable for the store's own retention window, and a pass no one

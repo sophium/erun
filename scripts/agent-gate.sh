@@ -67,9 +67,18 @@
 # replayed.
 #
 # A replayed result is never silently indistinguishable from a fresh one: it
-# is always announced on stderr, naming the job id it came from (queryable
-# again with `erun exec job status`) and the exact recorded outcome. And a
-# replay only ever stands in for another *passing* run -- a recorded failure,
+# is always announced on *both* the channels a caller reads -- stdout and
+# stderr -- naming the job id it came from (queryable again with `erun exec
+# job status`) and the exact recorded outcome, and saying in as many words
+# that nothing was executed. stderr alone was not enough. A lane reads a
+# gate's result from its captured output, and the replayed record goes to
+# stdout (`erun exec job output`), so a replay announced only on stderr left
+# stdout byte-identical to a real run -- every capture, pipe or `2>/dev/null`
+# dropped the one line that distinguished them, and the verdict is read at
+# the bottom of the log, not its head. Hence the banner before the record
+# *and* the trailer after it.
+#
+# A replay only ever stands in for another *passing* run -- a recorded failure,
 # an abandoned job, or anything else short of a clean exit is never replayed,
 # since a stale failure is cheap to re-check and a stale record of anything
 # other than success has no value. Only a stale pass could plausibly be
@@ -320,6 +329,16 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 				printf 'agent-gate: refusing to replay the cached PASS for %s from job %s -- %s. A pass recorded under one environment is not a pass under another, so %s runs fresh instead.\n' "$job_name" "$resolved_job_id" "$env_mismatch" "$job_name" >&2
 			else
 				printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree, command and environment unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
+				# The record below goes to stdout, and stdout is the channel a
+				# caller captures, pipes, or records -- so the fact that nothing
+				# ran has to be on that channel too, or the replay is
+				# byte-identical to a real run everywhere its result is actually
+				# read. Twice over: a banner before the record, and the same
+				# statement again after it, because the verdict is what a reader
+				# scrolls to at the bottom of a long log and a head line alone
+				# scrolls away. Neither line is printed by the fresh-run path
+				# below, so their presence is itself the tell.
+				printf 'agent-gate: REPLAYED a recorded PASS for %s from job %s -- NOTHING WAS EXECUTED by this invocation. The output below is the recorded result of an earlier run of this same command over this same tree in this same environment; the work itself did not run again. Set AGENT_GATE_RERUN=1 to force a real run.\n' "$job_name" "$resolved_job_id"
 				replay_status=0
 				erun exec job await \
 					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
@@ -327,6 +346,7 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 				erun exec job output \
 					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
 					--id "$resolved_job_id" --max-bytes 16777216
+				printf '\nagent-gate: END OF REPLAYED RECORD for %s from job %s -- NOTHING WAS EXECUTED by this invocation; everything above is a recorded result, not work this invocation did. Set AGENT_GATE_RERUN=1 to force a real run.\n' "$job_name" "$resolved_job_id"
 				exit "$replay_status"
 			fi
 			;;
