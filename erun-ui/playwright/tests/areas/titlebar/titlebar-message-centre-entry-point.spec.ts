@@ -1,4 +1,4 @@
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // The message centre's entry point is a property of the whole titlebar, not of
 // the entry a spec just raised: Titlebar.MessageCenter.tsx renders the
@@ -41,26 +41,32 @@ test.describe('message centre entry point', () => {
   }) => {
     const otherClass = 'Left unread by another spec: the edge is not answering right now.';
     await emit(page, { kind: 'error', message: otherClass });
-    await expect(app.titlebar.messageCenterIcon('error')).toBeVisible();
+    // Each of these converges on a transition an emit or a toggle produces, so
+    // each waits on the state rather than on expect's separate 10s clock: an
+    // emit still settling under a loaded gate is a slow step, not a wrong one,
+    // and this test declared room for it. toHaveCount has no waitFor
+    // equivalent, so it carries the same budget explicitly. A step that never
+    // converges still fails -- at the deadline this test chose.
+    await app.titlebar.messageCenterIcon('error').waitFor({ state: 'visible' });
 
     const message = 'Info entry that must survive into history.';
     await emit(page, { kind: 'info', message });
-    await expect(app.titlebar.messageCenterIcon('info')).toBeVisible();
+    await app.titlebar.messageCenterIcon('info').waitFor({ state: 'visible' });
 
     // The info entry auto-dismisses into history, leaving the error unread --
     // the exact titlebar shape the failing gate reached.
-    await expect(app.titlebar.messageCenterIcon('info')).toHaveCount(0);
+    await expect(app.titlebar.messageCenterIcon('info')).toHaveCount(0, withTestBudget());
 
     // The component's documented gating, pinned: while another class is
     // unread the fallback is not offered at all. This is why a spec cannot
     // assert it after clearing only its own entry.
-    await expect(app.titlebar.messageCenterHistoryButton()).toHaveCount(0);
+    await expect(app.titlebar.messageCenterHistoryButton()).toHaveCount(0, withTestBudget());
 
     // What does hold: the centre is still reachable, and the dismissed entry
     // is still readable once reached.
-    await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
+    await app.titlebar.messageCenterEntryPoint().waitFor({ state: 'visible' });
     await app.titlebar.openMessageCenterFromTitlebar();
-    await expect(app.titlebar.messageCenterRow(message)).toBeVisible();
+    await app.titlebar.messageCenterRow(message).waitFor({ state: 'visible' });
   });
 
   // The other titlebar shape, same invariant: with nothing left unread the
@@ -74,7 +80,7 @@ test.describe('message centre entry point', () => {
   }) => {
     const message = 'Info entry with a quiet titlebar around it.';
     await emit(page, { kind: 'info', message });
-    await expect(app.titlebar.messageCenterIcon('info')).toBeVisible();
+    await app.titlebar.messageCenterIcon('info').waitFor({ state: 'visible' });
 
     await app.titlebar.openMessageCenter('info');
     await app.titlebar.messageCenterMarkAllReadButton().click();
@@ -82,8 +88,12 @@ test.describe('message centre entry point', () => {
     // so it must close before any titlebar-icon locator is trusted.
     await app.titlebar.closeMessageCenter();
 
-    await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
+    // The case's own subject: with nothing unread the titlebar offers the
+    // history fallback. It appears as the mark-all-read and the dialog's close
+    // land, so it carries the budget this test declared rather than the
+    // separate clock an assertion would otherwise get.
+    await expect(app.titlebar.messageCenterHistoryButton()).toHaveCount(1, withTestBudget());
     await app.titlebar.openMessageCenterFromTitlebar();
-    await expect(app.titlebar.messageCenterRow(message)).toBeVisible();
+    await app.titlebar.messageCenterRow(message).waitFor({ state: 'visible' });
   });
 });
