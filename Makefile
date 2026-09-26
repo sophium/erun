@@ -550,6 +550,20 @@ FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota);
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# The bound above says how many workers each vitest job may start, not that
+# each one can. Under the oversubscription the whole of `make check` is built
+# on -- this fan-out inside a check-gate target, inside check-gate's own `-j`
+# fan-out -- a forked worker can be starved past vitest's own start timeout,
+# and the pool then exits 1 with a message that reads exactly like a failing
+# assertion while naming a different file each time. The bound is not the
+# lever for that: vitest 4 exposes no knob for the timeout, and no worker
+# count makes a starved start impossible. scripts/vitest-gate.sh runs both
+# vitest jobs instead, keeps the bound reaching vitest unchanged, and
+# separates the two outcomes so only the pool-start class is retried or
+# reported as an environment fault. Its self-test runs below, so a classifier
+# that stops distinguishing correctly fails the gate rather than quietly
+# absorbing reds.
+
 # ERUN_PLAYWRIGHT_WORKERS is the desktop suite's worker count, and it is
 # resolved here -- beside every other quota-derived gate width -- rather than
 # in the erun-devops Dockerfile, which used to compute it as DIND_CPU_LIMIT/2
@@ -620,6 +634,8 @@ test-frontend:
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
 	@./scripts/timed-step.sh "regression-coverage gate self-test" \
 		node --test scripts/check-regression-coverage.test.mjs
+	@./scripts/timed-step.sh "vitest worker-start classifier self-test" \
+		sh scripts/vitest-gate_test.sh
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
 		./erun-ui/generate-wailsjs.sh
 	@( \
@@ -632,12 +648,12 @@ test-frontend:
 		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
 		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
 		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
-		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && $(CURDIR)/scripts/vitest-gate.sh --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
 		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
 		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
 		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
 		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
-		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
+		printf 'erun-console-test\terun-console test\tcd erun-console && $(CURDIR)/scripts/vitest-gate.sh --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
