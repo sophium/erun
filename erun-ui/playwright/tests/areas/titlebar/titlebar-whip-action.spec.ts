@@ -394,6 +394,7 @@ test('every group shortcut’s accessible name contains the label its tooltip sh
   app,
 }) => {
   await app.titlebar.openWhipPanel();
+  let previous: import('@playwright/test').Locator | undefined;
   for (const label of [
     'Select all orchestrators',
     'Select all environments',
@@ -403,22 +404,47 @@ test('every group shortcut’s accessible name contains the label its tooltip sh
     await expect(button).toBeVisible();
 
     // A tooltip exists only while the pointer rests on its trigger, and the
-    // three shortcuts sit side by side: moving straight from one to the next
-    // leaves the first one's tooltip up and the next one's unraised, because
-    // the switch happens inside the trigger's own close delay. Parking the
-    // pointer off the picker first makes each shortcut a fresh open, and the
-    // hover+read is one re-drivable unit -- the same convergence the sidebar's
-    // hover-card specs use, and deterministic without a wall-clock wait.
+    // three shortcuts sit side by side -- so moving between them is not a
+    // fresh open, it is a handover, and Radix makes the handover take two
+    // hovers rather than one.
+    //
+    // The tooltip's content is hoverable, so leaving the trigger does not
+    // close it (Tooltip's `onTriggerLeave` only cancels the open timer). The
+    // close is deferred to TooltipContentHoverable, which keeps the tooltip
+    // up while the pointer is inside a grace area spanning the exit point and
+    // the trigger, and closes it from a document-level pointermove once the
+    // pointer is outside. Leaving that grace area also sets the provider's
+    // pointer-in-transit latch, and the trigger's own pointermove refuses to
+    // open while that latch is set. One move off the shortcut does both jobs
+    // at once and in that order: the trigger sees the latch still set and
+    // stays shut, and only then does the tracker close the previous tooltip
+    // and clear the latch. Hovering once therefore dismisses the previous
+    // tooltip and never opens this one -- the tooltip does not mount slowly,
+    // it does not mount at all, and with the pointer stationary nothing else
+    // moves the pointer to clear the latch. That is what made this block burn
+    // its whole expect clock on every shortcut after the first and pass on
+    // the retry, two full 10s expiries inside this test's 30s budget.
+    //
+    // So the first hover is the dismissal and the second is the open, with a
+    // convergence on the previous tooltip actually having reached `hidden`
+    // between them -- that state is what clearing the latch is observable as.
+    // Both waits defer to the test's own budget rather than expect's separate
+    // clock, and the hover+read stays one re-drivable unit.
     const tooltip = app.page.getByRole('tooltip', { name: label, exact: true });
     await expect(async () => {
       await app.page.mouse.move(0, 0);
       await button.hover();
-      await expect(tooltip).toBeVisible();
-    }).toPass();
+      if (previous) {
+        await previous.waitFor({ state: 'hidden' });
+      }
+      await button.hover();
+      await tooltip.waitFor({ state: 'visible' });
 
-    const visibleLabel = ((await tooltip.textContent()) ?? '').trim();
-    const accessibleName = (await button.getAttribute('aria-label')) ?? '';
-    expect(accessibleName).toContain(visibleLabel);
+      const visibleLabel = ((await tooltip.textContent()) ?? '').trim();
+      const accessibleName = (await button.getAttribute('aria-label')) ?? '';
+      expect(accessibleName).toContain(visibleLabel);
+    }).toPass();
+    previous = tooltip;
   }
 });
 
