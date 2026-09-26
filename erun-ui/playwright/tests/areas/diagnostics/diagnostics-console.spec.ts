@@ -1,4 +1,42 @@
 import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
+import type { AppShell } from '../../../pages/index.js';
+
+// clearUITrace observes the reset the UI trace's Clear produces.
+//
+// The pane does not rest empty. The UI trace records every action the app
+// dispatches — including the idle-status poll, which re-arms about once a
+// second — and the pane folds that buffer in on its own 500ms tick. The
+// "No UI activity recorded yet." copy is therefore real for about one tick, and
+// then the app's own traffic is back in it, with nothing having touched the
+// pane in between.
+//
+// That makes the observer's *creation time* the race. A click followed by an
+// assertion creates the observer in the gap between the two, and on a loaded
+// machine the click's own round trip can outlast the window: the observer then
+// starts against a pane that has already refilled and waits out the whole test
+// budget for a state that was real and is now gone. That is the failure this
+// case records — a 30s red whose received text begins with the idle poll's
+// entries rather than with the clear.
+//
+// So install the observer first and make the click the second step.
+// page.waitForFunction polls from inside the page (the idiom the smoke suite
+// and tests/areas/shell/layout.spec.ts use for a DOM value with no locator to
+// wait on), so it is already running when the Clear is dispatched and cannot be
+// locked out by that round trip. It carries no explicit timeout, so it
+// converges against the budget this test declared rather than expect's 10s
+// default.
+async function clearUITraceAndWaitForReset(app: AppShell): Promise<void> {
+  const paneHandle = await app.debugPanel.uiTracePane().elementHandle();
+  if (paneHandle === null) {
+    throw new Error('UI trace output pane is not rendered');
+  }
+  const resetSeen = app.page.waitForFunction(
+    (pane) => (pane.textContent ?? '').includes('No UI activity recorded yet.'),
+    paneHandle,
+  );
+  await app.debugPanel.clearButton().click();
+  await resetSeen;
+}
 
 // Diagnostics console: a viewer over the selected env's erun trace log and the
 // in-app UI (Redux) trace. It replaced the old raw-PTY mirror that filled with
@@ -71,11 +109,7 @@ test.describe('diagnostics console', () => {
       .poll(async () => (await app.debugPanel.uiTracePane().textContent()) ?? '', withTestBudget())
       .toMatch(/layout/);
 
-    await app.debugPanel.clearButton().click();
-    await expect(app.debugPanel.uiTracePane()).toContainText(
-      'No UI activity recorded yet.',
-      withTestBudget(),
-    );
+    await clearUITraceAndWaitForReset(app);
   });
 
   test('panel surfaces contain no raw ANSI escape sequences', async ({ app }) => {
