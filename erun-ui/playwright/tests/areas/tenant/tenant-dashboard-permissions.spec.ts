@@ -1,7 +1,7 @@
 import type { Route, Request } from '@playwright/test';
 
 import { artifactPath } from '../../../fixtures/artifacts.js';
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -298,14 +298,20 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
       const signIn = app.tenantDashboard.signInButton();
       await expect(signIn).toBeVisible();
       await signIn.click();
-      await expect.poll(() => loginAlias).toBe('pw-aws');
+      // Every poll in this file waits on a value this spec's own route handler
+      // owns, and `expect.poll` carries no timeout of its own: with none it
+      // resolves to expect's 10s default rather than the 30s this test
+      // declares, so a sign-in whose answer is merely slow reds the step with
+      // the test's own clock unspent. Pointed at that budget instead; the
+      // held-answer case at the end of this file is the reproduction.
+      await expect.poll(() => loginAlias, withTestBudget()).toBe('pw-aws');
 
       // The panel must recover: the not-signed-in state and its Log in
       // button are gone, replaced by the freshly re-fetched dashboard.
       await expect(app.tenantDashboard.notSignedInHeading()).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
       await app.tenantDashboard.waitForOpen();
-      await expect.poll(() => dashboardLoads).toBe(2);
+      await expect.poll(() => dashboardLoads, withTestBudget()).toBe(2);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
@@ -363,7 +369,7 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
       // The not-signed-in state is still there — the operator can try again —
       // but no extra dashboard re-fetch happened.
       await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
-      await expect.poll(() => dashboardLoads).toBe(1);
+      await expect.poll(() => dashboardLoads, withTestBudget()).toBe(1);
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
@@ -398,6 +404,69 @@ test.describe('tenant dashboard — a stale identity blocks the whole dashboard 
 
       await expect(app.tenantDashboard.noPermissionHeading()).toBeVisible();
       await expect(page.getByRole('button', { name: 'Log in' })).toHaveCount(0);
+    } finally {
+      removeEnvironment(SEED_TENANT, environment);
+    }
+  });
+
+  // The sign-in's own answer is what the poll above waits on, and `expect.poll`
+  // carries no timeout of its own: with none it resolves to expect's 10s
+  // default rather than the budget this test declares. Under contention an
+  // answer that is merely slow therefore reds the step with the test's own
+  // clock unspent, which is how a loaded machine turns into a failing branch
+  // nobody touched. The hold below is deliberately just past that 10s default
+  // -- the smallest delay that discriminates -- so the suite pays seconds here
+  // rather than the tens a genuinely loaded machine would.
+  //
+  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused; with the poll pointed at that budget it passes at the answer's real
+  // arrival. The delay is injected at a named RPC (this spec's own
+  // LoginCloudProvider stub) rather than by loading the machine, so the
+  // reproduction is deterministic on a quiet host -- the same shape
+  // tests/areas/manage/manage-runtime-sizing.spec.ts uses for the panel reads.
+  test('a sign-in answer that lands past the poll cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const environment = seedDashboardEnvironment('identity-stale-hold');
+    try {
+      let loginAlias = '';
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string; args?: string[] };
+        if (body.method === 'LoadTenantDashboard') {
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                tenant: SEED_TENANT,
+                platformState: 'not-signed-in',
+                platformAlias: 'pw-aws',
+              },
+            }),
+          });
+          return;
+        }
+        if (body.method === 'LoginCloudProvider') {
+          // Held past expect's 10s default and recorded only when it lands, so
+          // the poll's own clock is what decides this step.
+          await new Promise((resolve) => setTimeout(resolve, 12_000));
+          loginAlias = body.args?.[0] ?? '';
+          await route.fulfill({
+            contentType: 'application/json',
+            body: JSON.stringify({ data: { alias: 'pw-aws', provider: 'aws', status: 'active' } }),
+          });
+          return;
+        }
+        await route.continue();
+      });
+
+      await waitForSeededRow(app, SEED_TENANT, environment);
+      await app.sidebar.openTenantDashboard(SEED_TENANT);
+      await expect(app.tenantDashboard.notSignedInHeading()).toBeVisible();
+
+      await app.tenantDashboard.signInButton().click();
+      await expect.poll(() => loginAlias, withTestBudget()).toBe('pw-aws');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
