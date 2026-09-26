@@ -18,6 +18,7 @@ import { scrollSelectedTreeNodeIntoView, visibleDiffFile } from './reviewDiffNav
 import { diffPathKey, setSelectedDiffPath } from './slices/reviewSlice';
 import { loadSavedTerminalScreenReaderMode } from './storage';
 import { store } from './store';
+import { publishTerminalActivation } from './terminalActivationReadModel';
 import {
   bufferCursorVisibility,
   type CursorVisibilityState,
@@ -516,12 +517,14 @@ export class TerminalController {
   activateSession(sessionId: number): void {
     const snapshot = this.sessions.snapshot(sessionId);
     let cursorHidden: boolean;
+    // The writes this activation makes, resolved before any of them run so
+    // their number is the whole of what the switch costs (see
+    // publishTerminalActivation). The trailing empty write that only schedules
+    // the scroll to the bottom is not content and is not among them.
+    let writes: TerminalWriteData[];
     if (snapshot !== undefined) {
-      this.writeToTerminal(sessionId, snapshot, true);
       const delta = this.sessions.displayBuffer(sessionId);
-      for (const chunk of delta) {
-        this.writeToTerminal(sessionId, chunk, true);
-      }
+      writes = [snapshot, ...delta];
       // A snapshot's own trailing state (whether its cursor was hidden) isn't
       // re-derived here -- only the delta is scanned, from a "visible cursor"
       // baseline. The alt-screen verdict below instead comes straight from
@@ -543,14 +546,15 @@ export class TerminalController {
       // whole. This cold path only runs once per session per window lifetime
       // (its first display), since every later switch-back has a snapshot.
       const finalState = bufferCursorVisibility(chunks);
-      const replayChunks = finalState.altScreen
+      writes = finalState.altScreen
         ? chunks
         : trimChunksToBudget(chunks, MAX_RETAINED_LINES, MAX_RETAINED_BYTES);
-      for (const chunk of replayChunks) {
-        this.writeToTerminal(sessionId, chunk, true);
-      }
       cursorHidden = finalState.cursorHidden;
     }
+    for (const chunk of writes) {
+      this.writeToTerminal(sessionId, chunk, true);
+    }
+    publishTerminalActivation(this.terminalRoot, writes.length, snapshot !== undefined);
     this.liveCursorState = {
       cursorHidden,
       altScreen: this.terminal?.buffer.active.type === 'alternate',
