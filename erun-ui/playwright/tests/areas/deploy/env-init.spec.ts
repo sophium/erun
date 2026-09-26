@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // stubDialogCluster makes the env-init dialog behave as if a real cluster were
@@ -27,7 +27,9 @@ async function stubDialogCluster(
   page: Page,
   clusterRegistryFailure?: string,
   hostedRegistryAvailable?: boolean,
+  holdResourceStatusMs?: number,
 ): Promise<void> {
+  let holdUntil = 0;
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method: string };
     if (body.method === 'LoadKubernetesContexts') {
@@ -37,6 +39,18 @@ async function stubDialogCluster(
       });
     }
     if (body.method === 'LoadRuntimeResourceStatus') {
+      // holdResourceStatusMs makes the capacity reading land a fixed window
+      // after the context selection that asked for it, so a step that is
+      // merely slow can be told apart from a step that never converges. Held
+      // on the first read only -- a refetch is a separate step with its own
+      // convergence.
+      if (holdResourceStatusMs && holdUntil === 0) {
+        holdUntil = Date.now() + holdResourceStatusMs;
+      }
+      const remaining = holdUntil - Date.now();
+      if (remaining > 0) {
+        await new Promise((resolve) => setTimeout(resolve, remaining));
+      }
       // Mirrors the backend's contract: a reading always names the node it came
       // from and carries two readings, each stating which question it answers --
       // the scheduler's (it places by requests) and the worst case's (what is
@@ -296,12 +310,19 @@ test.describe('environment init dialog', () => {
     const reason = app.envInitDialog.submitReason();
 
     // The stub populates one context but the dialog does not preselect it — the
-    // trigger sits on its placeholder, reproducing the reported state.
-    await expect(app.envInitDialog.locator().getByText('No Kubernetes contexts found')).toHaveCount(
-      0,
-    );
+    // trigger sits on its placeholder, reproducing the reported state. The
+    // load itself is the first thing to converge on: asserted after the
+    // trigger has resolved, "No Kubernetes contexts found" is absent because
+    // the list arrived, not because nothing had been read yet. Every read
+    // below is the answer to a Kubernetes-context or capacity round trip, so
+    // each waits on the budget this test declares rather than expect's 10s
+    // default — see the held-read case at the end of this file.
     await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
       'Select Kubernetes context',
+      withTestBudget(),
+    );
+    await expect(app.envInitDialog.locator().getByText('No Kubernetes contexts found')).toHaveCount(
+      0,
     );
 
     // Empty environment name is the first blocker; Create is disabled and says why.
@@ -312,19 +333,19 @@ test.describe('environment init dialog', () => {
     // names the missing selection instead of silently doing nothing on click.
     await app.envInitDialog.fillEnvironment('review');
     await expect(createButton).toBeDisabled();
-    await expect(reason).toHaveText('Select a Kubernetes context.');
+    await expect(reason).toHaveText('Select a Kubernetes context.', withTestBudget());
 
     // Selecting the context advances to the container registry — the required
     // field the old gate never checked, which is what left Create wrongly active.
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await expect(createButton).toBeDisabled();
-    await expect(reason).toHaveText('Select a container registry.');
+    await expect(reason).toHaveText('Select a container registry.', withTestBudget());
 
     // Providing the registry clears the last value blocker, so Create activates
     // and the reason line goes quiet.
     await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
-    await expect(createButton).toBeEnabled();
-    await expect(reason).toHaveText('');
+    await expect(createButton).toBeEnabled(withTestBudget());
+    await expect(reason).toHaveText('', withTestBudget());
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -349,12 +370,15 @@ test.describe('environment init dialog', () => {
     // One context is available but not preselected — so no capacity is shown.
     await expect(app.envInitDialog.kubernetesContextTrigger()).toContainText(
       'Select Kubernetes context',
+      withTestBudget(),
     );
     await expect(capacity).toHaveCount(0);
 
-    // Selecting the context fetches and reveals its capacity.
+    // Selecting the context fetches and reveals its capacity: a state
+    // transition the dialog reaches from the capacity read, so it converges on
+    // that state rather than racing the render.
     await app.envInitDialog.selectKubernetesContext('orbstack');
-    await expect(capacity).toBeVisible();
+    await capacity.waitFor({ state: 'visible' });
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -411,12 +435,14 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForOpen();
 
     // Visible directly, without ever opening the (now correctly disabled,
-    // nothing-to-pick) popover.
-    await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled();
+    // nothing-to-pick) popover. The notices are the answer to the
+    // LoadVersionSuggestions read, so they converge on arriving rather than on
+    // expect's 10s default.
+    await expect(app.envInitDialog.versionChoicesButton()).toBeDisabled(withTestBudget());
     const notices = app.envInitDialog.versionNotices();
-    await expect(notices).toBeVisible();
-    await expect(notices).toContainText('ghcr.io/acme/erun-devops is private');
-    await expect(notices).toContainText('docker login ghcr.io');
+    await notices.waitFor({ state: 'visible' });
+    await expect(notices).toContainText('ghcr.io/acme/erun-devops is private', withTestBudget());
+    await expect(notices).toContainText('docker login ghcr.io', withTestBudget());
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -501,9 +527,45 @@ test.describe('environment init dialog', () => {
     // Selecting the context fires refreshDialogClusterRegistry, which fails.
     await app.envInitDialog.selectKubernetesContext('orbstack');
 
+    // The failure is the probe's own answer arriving after the selection.
     await expect(app.envInitDialog.locator().getByRole('alert')).toContainText(
       'CLUSTER_REGISTRY_PROBE_UNREACHABLE_MARKER',
+      withTestBudget(),
     );
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
+  // The dialog's reads are answers to round trips this spec's own stub owns,
+  // and an assertion on one carries no timeout of its own: `toContainText`,
+  // `toBeEnabled` and a bare `toBeVisible` have no waitFor equivalent that
+  // outlives expect's default, so each resolved to a 10s clock the test never
+  // declared. Under contention a read that is merely slow therefore reds the
+  // test with its own clock unspent, which is how a loaded builder turns a
+  // green branch red. The hold below is deliberately just past that 10s
+  // default: the smallest delay that discriminates, so the suite pays seconds
+  // here rather than the tens a genuinely loaded machine would. It is injected
+  // at LoadRuntimeResourceStatus -- the read this step waits on -- rather than
+  // by loading the machine, so the reproduction is deterministic on a quiet
+  // host.
+  //
+  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused; converged on the state the read produces, it passes when the
+  // reading actually lands.
+  test('a capacity reading that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await stubDialogCluster(page, undefined, undefined, 12_000);
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const capacity = app.envInitDialog.locator().getByText(/Right now on /);
+    await app.envInitDialog.selectKubernetesContext('orbstack');
+    await capacity.waitFor({ state: 'visible' });
+    await expect(capacity).toContainText('Right now on node-a', withTestBudget());
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -521,15 +583,18 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
+    // The checkbox's state is the hosted-registry probe's answer — a real
+    // outbound call, the slowest read on this dialog — so it waits on the
+    // budget this test declares rather than expect's 10s default.
     const hosted = app.envInitDialog.hostedRegistryCheckbox();
-    await expect(hosted).toBeVisible();
-    await expect(hosted).toBeDisabled();
-    await expect(app.envInitDialog.locator()).toContainText('does not resolve');
+    await hosted.waitFor({ state: 'visible' });
+    await expect(hosted).toBeDisabled(withTestBudget());
+    await expect(app.envInitDialog.locator()).toContainText('does not resolve', withTestBudget());
 
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await app.envInitDialog.fillEnvironment('review');
     await app.envInitDialog.fillContainerRegistry('ghcr.io/sophium');
-    await expect(app.envInitDialog.createButton()).toBeEnabled();
+    await expect(app.envInitDialog.createButton()).toBeEnabled(withTestBudget());
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -543,18 +608,19 @@ test.describe('environment init dialog', () => {
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
+    // Enabled here is the same probe's answer, this time a reachable one.
     const hosted = app.envInitDialog.hostedRegistryCheckbox();
-    await expect(hosted).toBeEnabled();
+    await expect(hosted).toBeEnabled(withTestBudget());
 
     await app.envInitDialog.selectKubernetesContext('orbstack');
     await app.envInitDialog.fillEnvironment('review');
     // No container registry is filled in — the hosted registry needs none.
-    await expect(app.envInitDialog.createButton()).toBeDisabled();
+    await expect(app.envInitDialog.createButton()).toBeDisabled(withTestBudget());
 
     await hosted.click();
-    await expect(hosted).toBeChecked();
-    await expect(app.envInitDialog.createButton()).toBeEnabled();
-    await expect(app.envInitDialog.submitReason()).toHaveText('');
+    await expect(hosted).toBeChecked(withTestBudget());
+    await expect(app.envInitDialog.createButton()).toBeEnabled(withTestBudget());
+    await expect(app.envInitDialog.submitReason()).toHaveText('', withTestBudget());
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
