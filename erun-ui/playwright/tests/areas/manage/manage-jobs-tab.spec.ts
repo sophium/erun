@@ -1,8 +1,9 @@
-import type { Page, Request, Route } from '@playwright/test';
+import type { Locator, Page, Request, Route } from '@playwright/test';
 
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
+import type { AppShell } from '../../../pages/index.js';
 
 // The desktop writes into the job store — Investigate starts a job there — and
 // could not display the job it had just created. The job store itself is the
@@ -99,10 +100,28 @@ async function stubJobs(
   page: Page,
   jobs: unknown[],
   extra?: Record<string, unknown>,
+  options?: { holdMs?: number },
 ): Promise<void> {
+  // holdMs makes the tab's own read land a fixed window after the request that
+  // asked for it, so a panel that is merely slow to answer can be told apart
+  // from one that never converges. Anchored to the request (not to the stub's
+  // own registration) so the delay is the same however long the dialog took to
+  // open, and only the first read is held -- a refetch is a separate step with
+  // its own convergence. See the held-read case at the end of this file for why
+  // it exists.
+  let holdUntil = 0;
   await page.route('**/__erun_invoke', async (route, request) => {
     const method = invokeMethod(request);
     if (method === 'LoadEnvironmentJobs') {
+      if (options?.holdMs) {
+        if (holdUntil === 0) {
+          holdUntil = Date.now() + options.holdMs;
+        }
+        const remaining = holdUntil - Date.now();
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+      }
       return fulfillJSON(route, jobs);
     }
     if (extra && method in extra) {
@@ -112,12 +131,29 @@ async function stubJobs(
   });
 }
 
+// convergeOnJobsTab settles the tab's own read before anything inside it is
+// asserted on.
+//
+// Every assertion below reads a value the LoadEnvironmentJobs route handler
+// owns, and `expect(...)` carries no timeout of its own: with no explicit one
+// it resolves to expect.timeout (playwright.config.ts sets 10s on POSIX),
+// which is independent of the 30s the test itself declared. A tab whose read is
+// merely slow under a loaded builder therefore reds the step with two thirds of
+// the test's budget unspent. `waitFor` is the idiom that defers to the test on
+// its own (erun-ui/playwright/AGENTS.md, "No flaky tests"), so the tab is
+// waited to its loaded state here and the assertions that follow then read
+// already-rendered DOM rather than racing the read.
+async function convergeOnJobsTab(app: AppShell, loaded: Locator): Promise<void> {
+  await app.manageDialog.jobsTabTrigger().click();
+  await loaded.waitFor({ state: 'visible' });
+}
+
 test.describe('manage dialog jobs tab', () => {
   test('an empty store explains what the surface is for', async ({ app, page }) => {
     await stubJobs(page, []);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobsEmptyState());
 
     await expect(app.manageDialog.jobsEmptyState()).toContainText('No jobs yet');
     await expect(app.manageDialog.jobRows()).toHaveCount(0);
@@ -132,7 +168,9 @@ test.describe('manage dialog jobs tab', () => {
     await stubJobs(page, [RUNNING_JOB, FAILED_JOB, UNKNOWN_JOB]);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    // The third row is the read's own completion signal: the handler answers
+    // all three at once, so its appearance is what says the tab has loaded.
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().nth(2));
 
     await expect(app.manageDialog.jobRows()).toHaveCount(3);
     await expect(app.manageDialog.jobOutcome(0)).toContainText('Running');
@@ -159,7 +197,7 @@ test.describe('manage dialog jobs tab', () => {
     await stubJobs(page, [ABANDONED_JOB, GATE_INCOMPLETE_JOB]);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().nth(1));
 
     await expect(app.manageDialog.jobRows()).toHaveCount(2);
 
@@ -196,11 +234,14 @@ test.describe('manage dialog jobs tab', () => {
     });
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().first());
 
     await expect(app.manageDialog.jobOutput()).toHaveCount(0);
     await app.manageDialog.jobShowOutputButton('build').click();
-    // Distinct from "not read yet" and from an error.
+    // Distinct from "not read yet" and from an error. The empty-output line is
+    // the ReadEnvironmentJobOutput round trip's own answer, so it is waited to
+    // its rendered state rather than raced on expect's 10s clock.
+    await app.manageDialog.jobOutputEmpty().waitFor({ state: 'visible' });
     await expect(app.manageDialog.jobOutputEmpty()).toContainText('produced no output');
 
     await app.manageDialog.cancel();
@@ -218,7 +259,7 @@ test.describe('manage dialog jobs tab', () => {
     await stubJobs(page, [{ ...RUNNING_JOB, name: longName }]);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobRowName(0));
 
     const name = app.manageDialog.jobRowName(0);
     await expect(name).toBeVisible();
@@ -245,7 +286,7 @@ test.describe('manage dialog jobs tab', () => {
     await stubJobs(page, [AGENT_JOB_WITH_LONG_PROMPT]);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().nth(0));
 
     const row = app.manageDialog.jobRows().nth(0);
     await expect(row).toBeVisible();
@@ -270,7 +311,7 @@ test.describe('manage dialog jobs tab', () => {
     await stubJobs(page, [UNKNOWN_JOB]);
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobOutcome(0));
 
     await expect(app.manageDialog.jobOutcome(0)).toHaveClass(/\btext-amber-700\b/);
     await expect(app.manageDialog.jobOutcome(0)).not.toHaveClass(/\btext-amber-600\b/);
@@ -302,9 +343,9 @@ test.describe('manage dialog jobs tab', () => {
 
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
-
     const unreachable = app.manageDialog.jobsUnreachable();
+    await convergeOnJobsTab(app, unreachable);
+
     await expect(unreachable).toBeVisible();
     await expect(unreachable).toContainText('Cannot reach the environment runtime');
     await expect(app.manageDialog.jobsUnreachableReconnectButton()).toContainText('Reconnect…');
@@ -337,7 +378,7 @@ test.describe('manage dialog jobs tab', () => {
 
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobsReadFailure());
 
     // "Could not read" is not "No jobs": nothing is known here, so the empty
     // state must not appear behind it.
@@ -350,6 +391,9 @@ test.describe('manage dialog jobs tab', () => {
     await app.manageDialog.jobsReadFailureRetry().click();
 
     await expect(app.manageDialog.jobsReadFailure()).toHaveCount(0);
+    // The retry must be seen to have re-issued the read, so wait on the row the
+    // second read returns rather than on a bare count.
+    await app.manageDialog.jobRows().first().waitFor({ state: 'visible' });
     await expect(app.manageDialog.jobRows()).toHaveCount(1);
     expect(reads).toBeGreaterThan(1);
 
@@ -377,13 +421,17 @@ test.describe('manage dialog jobs tab', () => {
 
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobsReadFailure());
 
     await expect(app.manageDialog.jobsReadFailure()).toContainText('context deadline exceeded');
 
     await app.manageDialog.jobsReadFailureRetry().click();
 
-    await expect(app.manageDialog.jobsReadFailure()).toContainText('bad gateway');
+    // The fresh cause is the second read's own answer, so it waits on the
+    // budget this test declared rather than on expect's 10s default: the old
+    // cause is still on screen until the new one arrives, and a retry that is
+    // merely slow must not read as a retry that reported the stale cause.
+    await expect(app.manageDialog.jobsReadFailure()).toContainText('bad gateway', withTestBudget());
     await expect(app.manageDialog.jobsReadFailure()).not.toContainText('context deadline exceeded');
 
     await app.manageDialog.cancel();
@@ -409,17 +457,53 @@ test.describe('manage dialog jobs tab', () => {
 
     await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
-    await app.manageDialog.jobsTabTrigger().click();
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().first());
 
     await app.manageDialog.jobCancelButton('repo gate').click();
     // Cancelling work in flight takes a deliberate second press.
-    await expect(app.manageDialog.jobConfirmCancelButton('repo gate')).toBeVisible();
-    await app.manageDialog.jobConfirmCancelButton('repo gate').click();
+    const confirm = app.manageDialog.jobConfirmCancelButton('repo gate');
+    await confirm.waitFor({ state: 'visible' });
+    await confirm.click();
 
+    // The refusal is CancelEnvironmentJob's own answer, which arrives over a
+    // round trip the route handler above owns -- so it carries this test's
+    // clock rather than expect's 10s default.
     await expect(app.manageDialog.locator().getByRole('alert')).toContainText(
       'the job is no longer running',
+      withTestBudget(),
     );
     await expect(app.manageDialog.jobRows()).toHaveCount(1);
+
+    await app.manageDialog.cancel();
+  });
+
+  // The contention class this suite keeps paying for, constructed
+  // deterministically rather than waited for on a loaded builder: the tab's own
+  // read answering past Playwright's `expect.timeout` default (10s on POSIX --
+  // playwright.config.ts) while sitting well inside the budget the test
+  // declares.
+  //
+  // Pre-fix the first read of this tab's content is a bare `toHaveCount(3)`,
+  // bounded by that 10s default, so it reds at "Timeout 10000ms exceeded" with
+  // two thirds of the test's own budget unspent -- the step is merely slow, not
+  // wrong. The delay is this spec's own, held on the route handler `stubJobs`
+  // already installs, so the case behaves identically on an idle machine and a
+  // throttled one.
+  test('a jobs read that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    // Past expect's 10s default, with the rest of the scenario well inside the
+    // declared budget.
+    await stubJobs(page, [RUNNING_JOB, FAILED_JOB, UNKNOWN_JOB], undefined, { holdMs: 12_000 });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await convergeOnJobsTab(app, app.manageDialog.jobRows().nth(2));
+
+    await expect(app.manageDialog.jobRows()).toHaveCount(3);
+    await expect(app.manageDialog.jobOutcome(1)).toContainText('Failed (exit 2)');
 
     await app.manageDialog.cancel();
   });
