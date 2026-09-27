@@ -118,8 +118,13 @@ func erunPlatformStubServer(t testing.TB) *httptest.Server {
 			"contexts":     []any{},
 		})
 	})
-	server := httptest.NewServer(mux)
-	issuer = server.URL
+	// Assign the issuer before Start: httptest.NewServer begins serving before
+	// it returns, so writing server.URL afterwards has no happens-before edge
+	// with the handler goroutines that read it. The listener address is fixed
+	// when it is allocated, so this is the same URL NewServer would report.
+	server := httptest.NewUnstartedServer(mux)
+	issuer = "http://" + server.Listener.Addr().String()
+	server.Start()
 	t.Cleanup(server.Close)
 	return server
 }
@@ -609,9 +614,12 @@ func TestCloud(t *testing.T) {
 			mux.HandleFunc("GET /v1/whoami", func(w http.ResponseWriter, _ *http.Request) {
 				http.Error(w, http.StatusText(statusCase.status), statusCase.status)
 			})
-			server := httptest.NewServer(mux)
+			// Assigned before Start so it happens-before every handler
+			// goroutine that reads it; see erunPlatformStubServer.
+			server := httptest.NewUnstartedServer(mux)
+			issuer = "http://" + server.Listener.Addr().String()
+			server.Start()
 			t.Cleanup(server.Close)
-			issuer = server.URL
 
 			initResult := erun.Run(t, []string{"cloud", "init", "erun", "--api-url", server.URL}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 			if initResult.ExitCode != 0 {
