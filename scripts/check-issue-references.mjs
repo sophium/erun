@@ -217,7 +217,6 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/app/idleThunks.ts': 1,
   'erun-ui/frontend/src/app/manageHiddenSessionThunks.ts': 1,
   'erun-ui/frontend/src/app/mergeQueueThunks.ts': 1,
-  'erun-ui/frontend/src/app/middleware/terminalDisplayMiddleware.ts': 1,
   'erun-ui/frontend/src/app/model/whipTargetSelection.ts': 2,
   'erun-ui/frontend/src/app/orchestratorBusyLabel.test.ts': 1,
   'erun-ui/frontend/src/app/orchestratorBusyLabel.ts': 2,
