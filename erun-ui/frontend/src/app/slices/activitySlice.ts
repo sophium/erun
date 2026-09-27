@@ -18,11 +18,32 @@ function sortEntries(entries: ActivityQueueEntry[]): ActivityQueueEntry[] {
   return copy;
 }
 
-// lastUpdatedMs reads the store's own write time for an entry. The store
-// stamps it under the same lock that takes the ListDeploys snapshot, so it
-// orders the two writers against each other: of two copies of one id, the
-// higher stamp is always the later write. A missing or unparsable stamp
-// yields NaN, which reads as "cannot tell" rather than as an ordering.
+// lastUpdatedKey reads the store's own write time for an entry at the
+// resolution it is actually stamped. The store stamps it under the same lock
+// that takes the ListDeploys snapshot, so it orders the two writers against
+// each other: of two copies of one id, the higher stamp is always the later
+// write -- but only at the resolution the stamp carries. The store emits
+// RFC3339Nano, which keeps sub-millisecond digits (and omits the fraction
+// outright for a whole second), while Date.parse floors every stamp to a whole
+// millisecond, so two writes to one id inside one millisecond tie as numbers
+// and hand the pair to whichever copy the reducer falls back to. Compare the
+// stamp's own digits instead, with the fraction right-padded to nanoseconds --
+// Go trims trailing zeros, so '.5Z' and '.5001Z' would otherwise compare as
+// '5' against '5001'. A stamp outside that shape (another zone, an unparsable
+// value) yields null, and the caller falls back to whole milliseconds.
+const RFC3339_UTC = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$/;
+
+function lastUpdatedKey(entry: ActivityQueueEntry): string | null {
+  const [, second, fraction] = RFC3339_UTC.exec(entry.lastUpdated) ?? [];
+  if (second === undefined) {
+    return null;
+  }
+  return `${second}.${(fraction ?? '').padEnd(9, '0').slice(0, 9)}`;
+}
+
+// lastUpdatedMs is the coarse fallback for an entry lastUpdatedKey cannot
+// order. A missing or unparsable stamp yields NaN, which reads as "cannot
+// tell" rather than as an ordering.
 function lastUpdatedMs(entry: ActivityQueueEntry): number {
   return Date.parse(entry.lastUpdated);
 }
@@ -61,6 +82,14 @@ export const activitySlice = createSlice({
         const current = currentById.get(entry.id);
         if (current === undefined) {
           return entry;
+        }
+        const currentKey = lastUpdatedKey(current);
+        const incomingKey = lastUpdatedKey(entry);
+        if (currentKey !== null && incomingKey !== null) {
+          // Two identical keys are the same instant, not a race the digits can
+          // settle, so the payload keeps the tie -- the direction this reducer
+          // already gives a fresh copy of an id it holds.
+          return currentKey > incomingKey ? current : entry;
         }
         const currentMs = lastUpdatedMs(current);
         const incomingMs = lastUpdatedMs(entry);

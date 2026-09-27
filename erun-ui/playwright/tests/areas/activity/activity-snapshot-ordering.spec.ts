@@ -26,14 +26,36 @@ import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 const SPEC_TENANT = 'snapshot-order';
 const SPEC_ENV = 'spec-env';
-const SPEC_ENTRY_ID = 'snapshot-order-1';
 const SPEC_TARGET = `${SPEC_TENANT}/${SPEC_ENV}`;
 
-// Fixed stamps, not `new Date()`: the fix orders the two writers by
-// lastUpdated, so the payload has to be unambiguously older than the finish
-// rather than merely written earlier in the same millisecond.
-const RUNNING_AT = '2026-08-24T00:00:00.000Z';
-const FINISHED_AT = '2026-08-24T00:00:05.000Z';
+// Every copy of the staged entry carries the same startedAt: it identifies the
+// run, not the write, and lastUpdated is what the ordering under test reads.
+const STARTED_AT = '2026-08-24T00:00:00.000Z';
+
+// Fixed stamps, not `new Date()`: the ordering has to come from the stamps
+// alone, so both writers are pinned rather than taken from the clock.
+//
+// Two cases, because the resolution the reducer reads the stamps at is what
+// decides the outcome. `lastUpdated` is the Go store's own write time in
+// RFC3339Nano, so it can carry sub-millisecond digits; the second pair below
+// is 800 microseconds apart, and Date.parse floors both of them onto the same
+// millisecond. A reducer that compares parsed milliseconds ties there and
+// hands the win to whichever copy it falls back to -- the stale snapshot --
+// so the two writers have to be ordered by the stamp's own digits.
+const CASES = [
+  {
+    label: 'orders a snapshot seconds behind the finish',
+    entryId: 'snapshot-order-apart',
+    runningAt: '2026-08-24T00:00:00.000Z',
+    finishedAt: '2026-08-24T00:00:05.000Z',
+  },
+  {
+    label: 'orders a snapshot inside the same millisecond as the finish',
+    entryId: 'snapshot-order-tied',
+    runningAt: '2026-08-24T00:00:00.000100000Z',
+    finishedAt: '2026-08-24T00:00:00.000900000Z',
+  },
+];
 
 interface StagedEntry {
   id: string;
@@ -49,14 +71,14 @@ interface StagedEntry {
   summary: string;
 }
 
-function stagedEntry(status: 'running' | 'succeeded', at: string): StagedEntry {
+function stagedEntry(id: string, status: 'running' | 'succeeded', at: string): StagedEntry {
   return {
-    id: SPEC_ENTRY_ID,
+    id,
     command: 'deploy',
     tenant: SPEC_TENANT,
     environment: SPEC_ENV,
     status,
-    startedAt: RUNNING_AT,
+    startedAt: STARTED_AT,
     lastUpdated: at,
     endedAt: status === 'succeeded' ? at : undefined,
     source: 'action',
@@ -83,51 +105,56 @@ function isListDeploys(route: Route): boolean {
   }
 }
 
-test('a ListDeploys snapshot taken before an entry finished cannot revert it to running', async ({
-  app,
-  page,
-}) => {
-  const now = page.getByRole('region', { name: 'Now' });
-  const recent = page.getByRole('region', { name: 'Recent' });
-  // Scoped to this entry's own card: the seeded baseline already populates
-  // "Recent", so a section-wide text or button locator would match its rows.
-  const cardIn = (section: Locator) => section.locator('article').filter({ hasText: SPEC_TARGET });
-  let staleSnapshotServed = false;
+for (const { label, entryId, runningAt, finishedAt } of CASES) {
+  test(`a ListDeploys snapshot taken before an entry finished cannot revert it to running -- ${label}`, async ({
+    app,
+    page,
+  }) => {
+    const now = page.getByRole('region', { name: 'Now' });
+    const recent = page.getByRole('region', { name: 'Recent' });
+    // Scoped to this entry's own card: the seeded baseline already populates
+    // "Recent", so a section-wide text or button locator would match its rows.
+    // Each case stages its own id because the worker's backend is shared
+    // across the specs in a file.
+    const cardIn = (section: Locator) =>
+      section.locator('article').filter({ hasText: SPEC_TARGET });
+    let staleSnapshotServed = false;
 
-  await app.activityDrawer.open();
+    await app.activityDrawer.open();
 
-  // The store reports the entry running.
-  await emitActivityState(page, stagedEntry('running', RUNNING_AT));
-  await cardIn(now).waitFor({ state: 'visible' });
+    // The store reports the entry running.
+    await emitActivityState(page, stagedEntry(entryId, 'running', runningAt));
+    await cardIn(now).waitFor({ state: 'visible' });
 
-  // The store finishes it. This is the newer of the two writes.
-  await emitActivityState(page, stagedEntry('succeeded', FINISHED_AT));
-  await cardIn(recent).waitFor({ state: 'visible' });
-  await expect(cardIn(now)).toBeHidden();
+    // The store finishes it. This is the newer of the two writes.
+    await emitActivityState(page, stagedEntry(entryId, 'succeeded', finishedAt));
+    await cardIn(recent).waitFor({ state: 'visible' });
+    await expect(cardIn(now)).toBeHidden();
 
-  // Now the snapshot taken while it was still running resolves. Dismissing the
-  // entry is the real trigger -- it invalidates the Deploys tag -- and the
-  // route stands in for the response with the older copy. DismissDeploy finds
-  // nothing to remove in the backend, so the entry stays on screen and the only
-  // thing that can change its status is the snapshot being applied.
-  await page.route('**/__erun_invoke', async (route) => {
-    if (!isListDeploys(route)) {
-      await route.continue();
-      return;
-    }
-    staleSnapshotServed = true;
-    await route.fulfill({ json: { data: [stagedEntry('running', RUNNING_AT)] } });
+    // Now the snapshot taken while it was still running resolves. Dismissing the
+    // entry is the real trigger -- it invalidates the Deploys tag -- and the
+    // route stands in for the response with the older copy. DismissDeploy finds
+    // nothing to remove in the backend, so the entry stays on screen and the only
+    // thing that can change its status is the snapshot being applied.
+    await page.route('**/__erun_invoke', async (route) => {
+      if (!isListDeploys(route)) {
+        await route.continue();
+        return;
+      }
+      staleSnapshotServed = true;
+      await route.fulfill({ json: { data: [stagedEntry(entryId, 'running', runningAt)] } });
+    });
+    await cardIn(recent).getByRole('button', { name: 'Dismiss', exact: true }).click();
+
+    // The overlap itself is an observed condition, not assumed: the refetch has
+    // to have been answered with the older copy before anything below can say
+    // the snapshot was harmless. Without this the case would pass by never
+    // applying a snapshot at all.
+    await expect.poll(() => staleSnapshotServed, withTestBudget()).toBe(true);
+
+    // The card must still read finished: same section, and no phantom entry left
+    // in "Now". A revert shows up here as the card moving back to "Now".
+    await expect(cardIn(recent)).toBeVisible(withTestBudget());
+    await expect(cardIn(now)).toBeHidden();
   });
-  await cardIn(recent).getByRole('button', { name: 'Dismiss', exact: true }).click();
-
-  // The overlap itself is an observed condition, not assumed: the refetch has
-  // to have been answered with the older copy before anything below can say
-  // the snapshot was harmless. Without this the case would pass by never
-  // applying a snapshot at all.
-  await expect.poll(() => staleSnapshotServed, withTestBudget()).toBe(true);
-
-  // The card must still read finished: same section, and no phantom entry left
-  // in "Now". A revert shows up here as the card moving back to "Now".
-  await expect(cardIn(recent)).toBeVisible(withTestBudget());
-  await expect(cardIn(now)).toBeHidden();
-});
+}

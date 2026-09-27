@@ -122,6 +122,106 @@ test('a ListDeploys snapshot taken before an entry finished cannot revert it to 
   assert.equal(resyncedEntry.endedAt, '2026-08-24T00:00:05.000Z');
 });
 
+// lastUpdated is stamped by the Go store as RFC3339Nano, so two writes to one
+// id can carry sub-millisecond digits; values from the frontend and from
+// fixtures carry whole milliseconds. Date.parse keeps only whole milliseconds,
+// so comparing the two copies as parsed numbers TIES any pair written inside
+// one millisecond -- and a tie hands the win to the payload, which here is the
+// stale snapshot. The tie is manufactured by the reader, not by the writers:
+// the store's own digits order the pair, and the reduction exists precisely to
+// honour that order. Without this, the revert-to-running defect above survives
+// intact whenever the snapshot and the finish land in the same millisecond,
+// which is exactly the window the two writers race in.
+test('a snapshot and a finish stamped inside one millisecond still order by the store digits', () => {
+  const running = clusterEntry({
+    id: 'deploy-1',
+    status: 'running',
+    lastUpdated: '2026-08-24T00:00:05.000100000Z',
+  });
+  const finished = clusterEntry({
+    id: 'deploy-1',
+    status: 'succeeded',
+    lastUpdated: '2026-08-24T00:00:05.000900000Z',
+    endedAt: '2026-08-24T00:00:05.000900000Z',
+  });
+  // The premise of the case: as milliseconds these two tie.
+  assert.equal(
+    Date.parse(running.lastUpdated),
+    Date.parse(finished.lastUpdated),
+    'expected the two stamps to tie once truncated to milliseconds',
+  );
+
+  const afterFinish = activityReducer(
+    { entries: [], locksBySession: {} },
+    upsertActivityEntry(finished),
+  );
+  const resynced = activityReducer(afterFinish, setActivityEntries([running]));
+  const [resyncedEntry] = resynced.entries;
+  assert.ok(resyncedEntry, 'expected the entry to survive the resync');
+  assert.equal(
+    resyncedEntry.status,
+    'succeeded',
+    'a same-millisecond snapshot must not overwrite the finish the store ordered after it',
+  );
+  assert.equal(resyncedEntry.endedAt, '2026-08-24T00:00:05.000900000Z');
+});
+
+// The other side of the same rule: sub-millisecond digits must not weld a
+// genuinely newer snapshot to an older stream write. A Go stamp with no
+// fraction at all ("...:05Z") and one that trims trailing zeros ("...:05.5Z")
+// both have to order against a whole-millisecond frontend stamp.
+test('a snapshot stamped later inside the same millisecond still carries its update', () => {
+  const running = clusterEntry({
+    id: 'deploy-1',
+    status: 'running',
+    lastUpdated: '2026-08-24T00:00:05.000100000Z',
+  });
+  const progressed = clusterEntry({
+    id: 'deploy-1',
+    status: 'running',
+    lastUpdated: '2026-08-24T00:00:05.000900000Z',
+    containers: [
+      { name: 'runtime', image: 'erun-runtime:1', phase: 'Running', ready: true, restarts: 0 },
+    ],
+  });
+  const resynced = activityReducer(
+    activityReducer({ entries: [], locksBySession: {} }, upsertActivityEntry(running)),
+    setActivityEntries([progressed]),
+  );
+  const [resyncedEntry] = resynced.entries;
+  assert.ok(resyncedEntry);
+  assert.equal(resyncedEntry.containers?.length, 1);
+  assert.equal(resyncedEntry.lastUpdated, '2026-08-24T00:00:05.000900000Z');
+});
+
+test('a fractionless store stamp and a trimmed-fraction store stamp order correctly', () => {
+  const wholeSecond = clusterEntry({
+    id: 'deploy-1',
+    status: 'running',
+    lastUpdated: '2026-08-24T00:00:05Z',
+  });
+  const trimmed = clusterEntry({
+    id: 'deploy-1',
+    status: 'succeeded',
+    lastUpdated: '2026-08-24T00:00:05.5Z',
+    endedAt: '2026-08-24T00:00:05.5Z',
+  });
+
+  // "...:05Z" is whole milliseconds, "...:05.5Z" is half a second past it, and
+  // comparing the raw text gets this backwards -- 'Z' sorts after '.'.
+  const resynced = activityReducer(
+    activityReducer({ entries: [], locksBySession: {} }, upsertActivityEntry(trimmed)),
+    setActivityEntries([wholeSecond]),
+  );
+  const [resyncedEntry] = resynced.entries;
+  assert.ok(resyncedEntry);
+  assert.equal(
+    resyncedEntry.status,
+    'succeeded',
+    'a fractionless stamp is earlier than a fractioned one in the same second',
+  );
+});
+
 test('a ListDeploys snapshot still carries a genuine update of a running entry', () => {
   const running = clusterEntry({
     id: 'deploy-1',
