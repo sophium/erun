@@ -228,6 +228,35 @@ export class Sidebar {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-node-indicator');
   }
 
+  // envCloseControl is the row's close affordance. The indicator renders under
+  // one testid in two shapes: this control while the row reports the env as
+  // opened here (data-env-opened="true"), and a passive status light when it
+  // does not (Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). "No dot" is
+  // therefore ambiguous, and a caller lands in it by accident: openEnvironment
+  // is a bare click with no convergence of its own, and the selection it sets
+  // is visible to the caller before the row's own isOpen follows -- that reads
+  // the desktop's tabs for the env, created once openSelection's StartSession
+  // resolves. A close issued in that window matched zero on its first pass and
+  // declared itself done without pressing anything, leaving the env open; the
+  // caller's next assertion then watched a state that could not arrive.
+  envCloseControl(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env)
+      .locator('..')
+      .locator('[data-testid="env-open-dot"][data-env-opened="true"]');
+  }
+
+  // activateEnvCloseControl presses that control exactly once, for the specs
+  // that hold the close RPC open and so cannot use the converging close below:
+  // with the RPC held the row stays open by design, and a loop that converges
+  // on it closing would spend the whole test budget pressing. The caller owns
+  // converging on whatever the close's own effects are.
+  async activateEnvCloseControl(tenant: string, env: string): Promise<void> {
+    const control = this.envCloseControl(tenant, env);
+    await control.waitFor({ state: 'visible' });
+    await control.focus();
+    await control.press('Enter');
+  }
+
   // closeEnvironment activates the row's indicator until the env's tabs are
   // actually gone.
   //
@@ -251,23 +280,10 @@ export class Sidebar {
   // it picked for itself.
   async closeEnvironment(tenant: string, env: string): Promise<void> {
     const dot = this.envOpenDot(tenant, env);
-    // The indicator renders under this one testid in two shapes: the close
-    // control while the row reports the env as opened here
-    // (data-env-opened="true"), and a passive status light when it does not
-    // (Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). "No dot" is therefore
-    // ambiguous, and a caller lands in it by accident: openEnvironment above is
-    // a bare click with no convergence of its own, and the selection it sets is
-    // visible to the caller before the row's own isOpen follows -- that reads
-    // the desktop's tabs for the env, created once openSelection's StartSession
-    // resolves. A close issued in that window matched zero on its first pass and
-    // declared itself done without pressing anything, leaving the env open; the
-    // caller's next assertion then watched a state that could not arrive.
-    //
-    // So press the control, and accept a quiet row as a finished close only
-    // once this step has actually seen the control it was asked to press.
-    const control = this.envRowButton(tenant, env)
-      .locator('..')
-      .locator('[data-testid="env-open-dot"][data-env-opened="true"]');
+    // Accept a quiet row as a finished close only once this step has actually
+    // seen the control it was asked to press (see envCloseControl above for why
+    // "no dot" alone is ambiguous).
+    const control = this.envCloseControl(tenant, env);
     let sawControl = false;
     await expect(async () => {
       if ((await control.count()) > 0) {

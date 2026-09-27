@@ -1051,7 +1051,7 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	// Dropping it means reopening the env starts from a fresh reading rather
 	// than one taken before the close (or before a deploy replaced the pod).
 	a.forgetSessionHeartbeats(selection)
-	return closeManagedTerminals(targets)
+	return a.closeManagedTerminals(targets)
 }
 
 // collectAndMarkClosedForSelection gathers the env's live sessions and marks
@@ -1076,21 +1076,23 @@ func (a *App) collectAndMarkClosedForSelection(selection uiSelection) []*managed
 		if managed.selection.Environment != selection.Environment {
 			continue
 		}
-		managed.closed = true
+		markClosedByTeardownLocked(managed)
 		a.releaseIdleBlockLocked(managed)
 		targets = append(targets, managed)
 	}
 	return targets
 }
 
-func closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
+func (a *App) closeManagedTerminals(targets []*managedTerminal) ([]int, error) {
 	closed := make([]int, 0, len(targets))
 	var firstErr error
 	for _, managed := range targets {
 		if managed.session == nil {
 			continue
 		}
-		if err := managed.session.Close(); err != nil {
+		err := managed.session.Close()
+		a.withdrawExitOwnership(managed, err)
+		if err != nil {
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -1148,13 +1150,13 @@ func (a *App) EndAISessions(selection uiSelection) (bool, error) {
 		// tryReconnect both refuse this session while it is torn down; the
 		// frontend respawn that follows must create a fresh session, not
 		// reattach to the dying one.
-		managed.closed = true
+		markClosedByTeardownLocked(managed)
 		a.releaseIdleBlockLocked(managed)
 		targets = append(targets, managed)
 	}
 	a.mu.Unlock()
 	for _, managed := range targets {
-		_ = managed.session.Close()
+		a.withdrawExitOwnership(managed, managed.session.Close())
 	}
 	// End the pod-side persistent sessions only after the desktop PTYs are
 	// gone: ending first would remove the owner file under an attached
@@ -1453,6 +1455,17 @@ func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool
 func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	a.finalizeAIActivity(managed)
 	a.mu.Lock()
+	// Read before the write below, which makes every exit look deliberate.
+	// teardownOwnsExit is what the teardown paths (collectAndMarkClosedForSelection,
+	// closeManagedLocked, EndAISessions) set under this same lock before they
+	// touch the PTY — and what a teardown whose Close reported the process
+	// outlived the kill takes back again — so a session it is true for ended
+	// because the desktop ended it, and one it is false for either died on its
+	// own or outlived a close that asked. The read is per managed session rather
+	// than per env because that is the whole question the frontend has to answer
+	// about an exit, and it is the only answer that survives a session killed
+	// before the frontend ever saw it.
+	deliberate := managed.teardownOwnsExit
 	managed.closed = true
 	if existing := a.sessions[managed.key]; existing == managed {
 		delete(a.sessions, managed.key)
@@ -1460,8 +1473,9 @@ func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	a.releaseIdleBlockLocked(managed)
 	a.mu.Unlock()
 	a.emitEvent(terminalExitEvent, terminalExitPayload{
-		SessionID: managed.serial,
-		Reason:    reason,
+		SessionID:  managed.serial,
+		Reason:     reason,
+		Deliberate: deliberate,
 	})
 	// Release any action runner waiting on this session's ready
 	// signal. If the session never reached its setup-complete
@@ -2131,15 +2145,46 @@ func (a *App) emitEvent(name string, payload any) {
 // session for the caller to tear down. The `closed` field (and `session`,
 // which callers read alongside it) is read everywhere else in this file under
 // a.mu — currentSessionFor, tryReconnect, finalizeSessionExit, and more all
-// take the lock before touching either. This is the one place that mutates
-// them, so it must take the same lock rather than grow a second one; every
-// caller here already holds a.mu.
+// take the lock before touching either — so mutating them takes the same lock
+// rather than growing a second one; every caller here already holds a.mu.
 func (a *App) closeManagedLocked(managed *managedTerminal) terminalSession {
 	if managed == nil || managed.session == nil {
 		return nil
 	}
-	managed.closed = true
+	markClosedByTeardownLocked(managed)
 	return managed.session
+}
+
+// markClosedByTeardownLocked records that the desktop is ending this session on
+// purpose, and is the only way a teardown path may mark one: the two facts are
+// one decision. Callers hold a.mu and must call it before touching the PTY —
+// see managedTerminal.teardownOwnsExit for why the claim cannot wait for the
+// kill's outcome.
+func markClosedByTeardownLocked(managed *managedTerminal) {
+	managed.closed = true
+	managed.teardownOwnsExit = true
+}
+
+// withdrawExitOwnershipLocked takes that claim back when a teardown's own Close
+// reports it did not kill the process. Withdrawing is not the same as not
+// having claimed: the claim is what carries a session killed before the frontend
+// ever saw it, and it can only be made before the outcome exists. The session
+// is still running when this lands, so its exit is still ahead of it.
+//
+// Callers hold a.mu, and must call this before anything can wake the session's
+// reader: the claim has to be gone by the time the survivor's exit is finalized.
+func withdrawExitOwnershipLocked(managed *managedTerminal, closeErr error) {
+	if managed != nil && errors.Is(closeErr, errKillDidNotLand) {
+		managed.teardownOwnsExit = false
+	}
+}
+
+// withdrawExitOwnership is withdrawExitOwnershipLocked for callers that do not
+// already hold a.mu.
+func (a *App) withdrawExitOwnership(managed *managedTerminal, closeErr error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	withdrawExitOwnershipLocked(managed, closeErr)
 }
 
 // closeManaged is closeManagedLocked for callers that do not already hold
@@ -2154,13 +2199,15 @@ func (a *App) closeManaged(managed *managedTerminal) error {
 	if session == nil {
 		return nil
 	}
-	return session.Close()
+	err := session.Close()
+	a.withdrawExitOwnership(managed, err)
+	return err
 }
 
 func (a *App) closeAllSessionsLocked() {
 	for _, managed := range a.sessions {
 		if session := a.closeManagedLocked(managed); session != nil {
-			_ = session.Close()
+			withdrawExitOwnershipLocked(managed, session.Close())
 		}
 	}
 	a.sessions = make(map[string]*managedTerminal)
@@ -2193,20 +2240,35 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 			continue
 		}
 		if session := a.closeManagedLocked(managed); session != nil {
-			_ = session.Close()
+			withdrawExitOwnershipLocked(managed, session.Close())
 		}
 		delete(a.sessions, key)
 	}
 }
 
 type managedTerminal struct {
-	session                terminalSession
-	selection              uiSelection
-	key                    string
-	serial                 int
-	slot                   int
-	kind                   sessionKind
-	closed                 bool
+	session   terminalSession
+	selection uiSelection
+	key       string
+	serial    int
+	slot      int
+	kind      sessionKind
+	closed    bool
+	// teardownOwnsExit is the claim that this session's exit is the desktop's
+	// own doing, and it is what finalizeSessionExit turns into the exit's
+	// Deliberate flag. Only markClosedByTeardownLocked sets it, under a.mu, and
+	// only before the teardown touches the PTY: a killed reader can reach
+	// finalizeSessionExit before Close returns, so the claim has to be in place
+	// before the kill rather than after it.
+	//
+	// Withdrawn, not never-set, is what that order forces: the claim can only be
+	// made before the outcome exists, so the outcome has to be able to take it
+	// back. withdrawExitOwnershipLocked does exactly that when the teardown's
+	// Close reports the process outlived the kill — a survivor's own later death
+	// is then reported rather than read back as a close that already finished.
+	// It is deliberately not `closed`, which records the desktop being done with
+	// a session whatever the teardown managed to do to it.
+	teardownOwnsExit       bool
 	blocksIdleStop         bool
 	clearIdleBlockOnOutput bool
 	respawn                func() (terminalSession, error)

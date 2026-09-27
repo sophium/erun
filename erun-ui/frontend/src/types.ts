@@ -613,6 +613,11 @@ export interface TerminalOutputPayload {
 export interface TerminalExitPayload {
   sessionId: number;
   reason?: string;
+  // deliberate marks an exit the desktop itself caused — the session was
+  // already torn down (env close, tab close, AI-session end) when its read
+  // ended, so its reason describes that kill rather than a failure. Set by the
+  // backend per session; absent on an exit nothing deliberate caused.
+  deliberate?: boolean;
 }
 
 export interface PastedFileResult {
