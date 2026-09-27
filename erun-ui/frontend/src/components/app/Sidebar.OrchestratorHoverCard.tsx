@@ -52,7 +52,8 @@ export function OrchestratorHoverCard({
   orchestrator: OrchestratorInfo;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave } = useHoverCardOpenState();
+  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave, refuseDismissWhileHeld } =
+    useHoverCardOpenState();
 
   const running = orchestrator.status === 'running';
 
@@ -84,6 +85,9 @@ export function OrchestratorHoverCard({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
+        // Same routing as EnvHoverCard's: see useHoverCardOpenState's
+        // refuseDismissWhileHeld.
+        onFocusOutside={refuseDismissWhileHeld}
         onMouseEnter={hoverEnter}
         onMouseLeave={hoverLeave}
         className="w-90 p-0"

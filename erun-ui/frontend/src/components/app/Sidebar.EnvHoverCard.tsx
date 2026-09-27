@@ -93,7 +93,8 @@ export function EnvHoverCard({
   usageExcludesBuilds: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave } = useHoverCardOpenState();
+  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave, refuseDismissWhileHeld } =
+    useHoverCardOpenState();
 
   const issue = useWorkingIssue(selection, open);
   const erunVersionSummary = summarizeErunVersion(runtimeVersion.trim() !== '', erunVersion);
@@ -123,6 +124,10 @@ export function EnvHoverCard({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
+        // The layer's own dismissal on focus moving out of the popover -- see
+        // refuseDismissWhileHeld: it must not outrank a holder that is still
+        // holding the card.
+        onFocusOutside={refuseDismissWhileHeld}
         onMouseEnter={hoverEnter}
         onMouseLeave={hoverLeave}
         className="w-72 p-0"

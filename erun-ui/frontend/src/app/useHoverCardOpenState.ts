@@ -25,6 +25,14 @@ const HOVER_CARD_CLOSE_GRACE_MS = 120;
 // period expires rather than when a release arrives: a leave that is followed
 // by the other holder still holding on (or by the pointer reaching the card)
 // simply never reaches the close.
+//
+// That coordination only governs the releases the two holders themselves
+// report. The popover carries a dismiss path of its own -- its layer closes on
+// a `focusin` anywhere outside it, which is how Radix reads focus leaving --
+// and that one calls setOpen(false) outright, without asking either holder.
+// refuseDismissWhileHeld below is that path routed through the same decision;
+// without it the card closes on whichever focus move the layer happens to see,
+// no matter who is still holding it.
 export function useHoverCardOpenState(): {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -32,6 +40,7 @@ export function useHoverCardOpenState(): {
   hoverLeave: () => void;
   focusEnter: () => void;
   focusLeave: () => void;
+  refuseDismissWhileHeld: (event: { preventDefault: () => void }) => void;
 } {
   const [open, setOpen] = React.useState(false);
   const closeTimer = React.useRef(0);
@@ -73,5 +82,30 @@ export function useHoverCardOpenState(): {
     leave('focus');
   }, [leave]);
 
-  return { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave };
+  // The layer's focus-outside dismissal -- a `focusin` anywhere outside the
+  // popover while it is open -- is the same focus release focusLeave above
+  // coordinates, arriving by a second road that asks no holder first. Focus
+  // moving from the row to any other control therefore closed a card the
+  // pointer was still resting on, and nothing reopened it: reopening takes a
+  // fresh mouseenter, and the pointer had not moved.
+  //
+  // So refuse it while a holder remains. This is the whole of the routing: the
+  // layer's other dismissals (Escape, pointer-down outside) are untouched, and
+  // focus leaving with the pointer gone still closes the card, through the
+  // grace period above.
+  const refuseDismissWhileHeld = React.useCallback((event: { preventDefault: () => void }) => {
+    if (held.current.hover || held.current.focus) {
+      event.preventDefault();
+    }
+  }, []);
+
+  return {
+    open,
+    setOpen,
+    hoverEnter,
+    hoverLeave,
+    focusEnter,
+    focusLeave,
+    refuseDismissWhileHeld,
+  };
 }
