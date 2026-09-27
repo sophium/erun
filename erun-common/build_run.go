@@ -292,29 +292,41 @@ func ensureGateBuildActuallyBuilt(execution BuildExecutionSpec) error {
 // run exited zero. The plan looked right, the exit code looked right, and the
 // gate's entire claim -- that this tree was tested -- is false.
 //
-// It refuses that for every build, not only for one that declared itself a gate
-// with --gate: the flows that read a build's exit code as a verdict run plain
-// builds, so keying the refusal on the flag left the runs it was written for
-// unguarded (see traceBuildUmbrella). What a caller means to do with the exit code
-// does not change what the run did, and this guard only ever fires on work the
-// build itself reported as not done. A run that declared itself a gate does not
-// reach here at all: ForceGateTestStage has its docker build invalidate the stage
-// and execute it (see dockerBuildGateStageArgs), so this stays the backstop for a
-// daemon or a build path that replayed anyway.
+// It refuses that only for a run that declared itself the merge queue's gate with
+// --gate, because that declaration is what makes the replay a false verdict.
+// `erun review record-build --gate` reads a gate run's exit status and nothing
+// else, so a gate that read a memoized answer on byte-identical content would be
+// recorded as this run's verdict on this tree. A build that declared nothing
+// claims nothing of the sort: its rung -- the erun-merge skill's READY step, or
+// any other plain `erun build` -- asserts that the commit builds, and a wholly
+// replayed stage still establishes exactly that, since the layer cache cannot hit
+// on anything but byte-identical inputs. Refusing those was refusing a promise no
+// rung made, and it refused them wholesale: in a plan with two gate-bearing
+// images, a diff that left either one's inputs untouched replayed that one and
+// failed the whole run.
 //
-// This is the only seam that can tell those apart, because it is the only one
-// that reads what the builder said it did rather than what the plan intended.
-// It is judged from the run's recorded provenance (see
-// build_gate_test_stage_evidence.go), so it is silent when the builder reported
-// nothing: a build that never reached its test stage, output this parser cannot
-// read, or a run with no gate image at all. An absence of evidence stays an
-// absence -- only a stage this run watched the builder replay is refused.
+// A declared gate is covered twice, and neither mechanism is optional.
+// ForceGateTestStage has its docker build invalidate the stage and execute it
+// (see dockerBuildGateStageArgs), which is the narrow instrument; this guard is
+// the backstop for a daemon or a build path that replayed anyway, and it is the
+// only seam that can tell, because it is the only one that reads what the builder
+// said it did rather than what the plan intended. It is judged from the run's
+// recorded provenance (see build_gate_test_stage_evidence.go), so it is silent
+// when the builder reported nothing: a build that never reached its test stage,
+// output this parser cannot read, or a run with no gate image at all. An absence
+// of evidence stays an absence -- only a stage this run watched the builder
+// replay is refused. A plain run still *reports* a replay (see
+// gateTestStageProvenanceLines); reporting what the builder did and refusing it
+// are separate decisions.
 //
 // A promoted image is skipped rather than judged: it never reaches a docker
 // build, so it has no provenance to read, and applyIncrementalPromotion already
 // refuses to promote a gate image at all (errGateTestStagePromoted). Its outcome
 // is the plan-level guard's case, not this one's.
-func ensureGateTestStageExecuted(builds []DockerBuildSpec, evidence *gateTestStageProvenance) error {
+func ensureGateTestStageExecuted(builds []DockerBuildSpec, evidence *gateTestStageProvenance, gate bool) error {
+	if !gate {
+		return nil
+	}
 	var replayed []string
 	for _, buildInput := range builds {
 		if !buildInput.GateTestStage || buildInput.Promote {
@@ -410,18 +422,18 @@ func gateTestStageProvenanceLines(builds []DockerBuildSpec, evidence *gateTestSt
 // a JSON record) when the bracket closes. Skipped in dry-run, which does no
 // work and must keep the integration goldens stable.
 //
-// The refusal a replayed test stage earns is decided by this run and not by the
-// flag it was given. `--gate` used to arm it, on the reasoning that a replay is a
-// cache working as designed for an ordinary build; the flag turned out not to be
-// load-bearing anywhere the verdict is read. Both documented gate flows -- the
-// merge queue's `erun exec gate-merge` -> `erun build` -> `erun review
-// record-build --gate`, and the erun-merge skill's READY rung -- run a plain
-// `erun build`, so the run whose exit code becomes the verdict was exactly the run
-// the guard was not armed for. The flag does not decide what a replay *claims*
-// either: a build that watched BuildKit replay a Dockerfile's whole test stage
-// built images without running the project's gate, and nothing about the caller
-// makes that green mean something it did not do. See ensureGateTestStageExecuted.
-func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*error)) {
+// gate is the run's own declaration that it is the merge queue's gate (`--gate`),
+// and it decides one thing here: whether a replayed test stage is refused. A gate
+// run's exit status is the verdict `erun review record-build --gate` records, so
+// a replay is a false verdict for it and must fail; a plain run asserts only that
+// the commit builds, and a replay -- a cache hit on byte-identical inputs --
+// establishes that. See ensureGateTestStageExecuted.
+//
+// The provenance lines are printed for every build either way. What the builder
+// did with the stage is a fact about the run, and a plain run that replayed one
+// is a fact its operator should see; only "should this run have failed" turns on
+// the declaration.
+func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec, gate bool) (Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
@@ -442,7 +454,7 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 		// the actionable one, and a second, weaker story attached to it would only
 		// be noise.
 		if err == nil {
-			err = ensureGateTestStageExecuted(builds, ctx.gateTestStage)
+			err = ensureGateTestStageExecuted(builds, ctx.gateTestStage, gate)
 			if err != nil && errp != nil {
 				// The named return is what RunBuildExecution reports and what the
 				// platform self-report reads, so the refusal has to travel back
@@ -473,7 +485,7 @@ func traceBuildUmbrella(ctx Context, builds []DockerBuildSpec) (Context, func(*e
 // changes its own output because reporting is unavailable).
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds, execution.gate)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, nil, runScript, build, push, nil)
 }
@@ -482,7 +494,7 @@ func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript Buil
 // see its doc comment for store/deps.
 func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
-	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds)
+	ctx, finish := traceBuildUmbrella(ctx, execution.dockerBuilds, execution.gate)
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, deploySpecs, nil, runScript, build, push, deploy)
 }

@@ -116,10 +116,10 @@ func gateBuildFixture(tag string) DockerBuildSpec {
 // different questions and both are asserted: a wholly replayed test stage is
 // refused (the umbrella's error) as well as reported (the trace), while a stage
 // that executed is neither.
-func runGateBuildThroughTheRealPath(t *testing.T, build DockerBuildSpec, buildOutput string) (string, error) {
+func runGateBuildThroughTheRealPath(t *testing.T, build DockerBuildSpec, buildOutput string, gate bool) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
-	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build})
+	ctx, finish := traceBuildUmbrella(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}, []DockerBuildSpec{build}, gate)
 
 	buildErr := RunDockerBuild(ctx, build, func(input DockerBuildSpec, stdout, stderr io.Writer) error {
 		if input.PlatformObserver == nil {
@@ -146,7 +146,7 @@ func runGateBuildThroughTheRealPath(t *testing.T, build DockerBuildSpec, buildOu
 // image, so the plan said a real docker build would run, and nothing below the
 // plan could see that BuildKit answered it from the second cache underneath.
 func TestGateBuildWhoseTestStageTheLayerCacheReplayedDoesNotReportLive(t *testing.T) {
-	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), cachedTestStageBuildOutput)
+	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), cachedTestStageBuildOutput, true)
 
 	// The exit status is the half the merge queue reads, so the replay has to
 	// reach it and not only the trace.
@@ -165,7 +165,7 @@ func TestGateBuildWhoseTestStageTheLayerCacheReplayedDoesNotReportLive(t *testin
 // reproduction: the new outcome must not swallow the ordinary one. A build that
 // really executed the gate still says LIVE, and must not be labelled a replay.
 func TestGateBuildWhoseTestStageRanStillReportsLive(t *testing.T) {
-	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), liveTestStageBuildOutput)
+	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), liveTestStageBuildOutput, true)
 	if err != nil {
 		t.Fatalf("a build that executed its test stage must not be refused: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestGateBuildWhoseTestStageRanStillReportsLive(t *testing.T) {
 // called any cached step a replay would report the exact builds the gate exists
 // to measure as unrun.
 func TestGateBuildWithOnlyItsEarlyTestStageStepsCachedStillReportsLive(t *testing.T) {
-	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), partialTestStageBuildOutput)
+	rendered, err := runGateBuildThroughTheRealPath(t, gateBuildFixture("ghcr.io/sophium/erun-devops:1.0.284"), partialTestStageBuildOutput, true)
 	if err != nil {
 		t.Fatalf("a test stage whose gate step ran must not be refused: %v", err)
 	}

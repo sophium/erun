@@ -179,11 +179,20 @@ demonstrated:
   (`ForceGateTestStage`, set from `--gate`) makes its own `docker build`
   invalidate just that stage (`--no-cache-filter`, `dockerBuildGateStageArgs`), so
   declaring a gate costs the gate and not a cold rebuild of the shared cache. A
-  wholly replayed stage is otherwise **refused by every build, not only by
-  `--gate`** (`ensureGateTestStageExecuted`): both documented gate flows — the
-  merge queue's `gate-merge` → build → `record-build --gate`, and the erun-merge
-  skill's READY rung — run plain builds, so a guard the flag arms never covered
-  the run it was written for. Do not re-key that refusal on a flag.
+  wholly replayed stage is otherwise **refused by the run that declared itself
+  the merge queue's gate** (`ensureGateTestStageExecuted`): the merge queue
+  gates with `erun build --gate` (erun-merge-queue-drive § 2), and a gate's exit
+  status is the entirety of what `erun review record-build --gate` records, so a
+  memoized verdict cannot stand in for it. A plain `erun build` still **reports**
+  the replay — the `test stage (…): REPLAYED` outcome line is printed for every
+  build — but it does not fail on one: its rung (the erun-merge skill's READY
+  step, and every other plain build) claims only that the commit builds, which a
+  layer-cache hit on byte-identical inputs establishes as well as the run that
+  first executed the stage. Refusing those failed a promise no rung made, and
+  failed it wholesale — in a plan with two gate-bearing images, a diff that left
+  either one's inputs untouched replayed that one and failed the whole run
+  (#2718). Do not widen that refusal back to every build; keep it keyed on the
+  declaration.
   `gateTestStagePlanLines` announces the
   plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
   reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
