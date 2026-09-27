@@ -1024,7 +1024,13 @@ func (a *App) CloseSession(sessionID int) error {
 	if endRemote {
 		go a.endRemoteAppSession(endSelection, endID)
 	}
-	return managed.session.Close()
+	// Route the teardown through closeManaged so this session is marked closed
+	// under a.mu before its PTY is touched, the same way every other deliberate
+	// teardown in this file does. The stale-shell detector reads that mark: the
+	// process is already reaped the moment the close lands, so without it a
+	// session the operator just closed is reported as a shell that exited
+	// unexpectedly until the reader gets around to finalizing the exit.
+	return a.closeManaged(managed)
 }
 
 // CloseEnvironmentSessions tears down every managed PTY bound to the
