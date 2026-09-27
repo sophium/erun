@@ -354,6 +354,14 @@ function reachedBodies(bodies, root) {
 
 const skipCallPattern = /\bt\.Skip(?:f|Now)?\s*\(([^)]*)\)/g;
 const envNamePattern = /ERUN_[A-Z0-9_]+/g;
+const envNameOnlyPattern = /^ERUN_[A-Z0-9_]+$/;
+// A gate is a variable the body reads, not one it happens to spell: an
+// ERUN_-shaped name inside a string literal -- a shell fragment, a fixture
+// path, a t.Setenv -- is not a gate on it. Falling back to mentions accuses
+// such a case of skipping without a variable it never reads, and this half of
+// the check exists for the opposite reason: a missed gate is a silence, never
+// a false accusation.
+const envReadPattern = /\bos\.(?:Getenv|LookupEnv)\s*\(\s*"([^"]*)"/g;
 
 // optInGatesFor answers which opt-in variables the named test case skips
 // without. Empty means "not gated, or not a shape this can read" -- both are
@@ -373,7 +381,10 @@ export function optInGatesFor(spec, io) {
       // writes that line to say exactly what to set -- and fall back to the
       // ones the enclosing function reads only when it names none.
       const messageNames = [...skip[1].matchAll(envNamePattern)].map((m) => m[0]);
-      const candidates = messageNames.length > 0 ? messageNames : [...body.matchAll(envNamePattern)].map((m) => m[0]);
+      const readNames = [...body.matchAll(envReadPattern)]
+        .map((m) => m[1])
+        .filter((name) => envNameOnlyPattern.test(name));
+      const candidates = messageNames.length > 0 ? messageNames : readNames;
       for (const name of candidates) {
         if (!io.getEnv(name)) unset.add(name);
       }
