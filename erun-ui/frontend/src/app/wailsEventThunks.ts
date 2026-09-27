@@ -50,10 +50,10 @@ import {
   setPendingOpenAfterDeploy,
   setSelected,
 } from './slices/selectionSlice';
-import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
+import { envClosing, recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
-import { removeTab } from './tabsThunks';
+import { envKeyForSession, removeTab } from './tabsThunks';
 import { failedTerminalOutput } from './terminalBuffers';
 import {
   classifiedTerminalFailure,
@@ -487,28 +487,34 @@ export const handleSSHDInitCompleted =
     );
   };
 
+// dropExitedSessionFromTabs returns the env key the exit belonged to, or
+// undefined when the exit carried no tracked selection. handleTerminalExit
+// needs that same key — the deliberate-close guard it applies is the one
+// below, not a re-derivation of it — so the key is handed back rather than
+// computed twice from the same payload.
 const dropExitedSessionFromTabs =
-  (sessionId: number, openExitSelection: UISelection | undefined): AppThunk =>
+  (sessionId: number, openExitSelection: UISelection | undefined): AppThunk<string | undefined> =>
   (dispatch, getState) => {
     if (!openExitSelection) {
-      return;
+      return undefined;
     }
     const key = selectionKey(openExitSelection);
     const remaining = dispatch(removeTab(key, sessionId));
     if (getState().terminal.sessionId !== sessionId) {
-      return;
+      return key;
     }
-    if (getState().sessions.closingEnvs[key]) {
+    if (envClosing(getState().sessions, key)) {
       // closeEnvironment is tearing this env's tabs down; its own default
       // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
       // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
       // would respawn a tab the user just deliberately closed.
-      return;
+      return key;
     }
     const next = remaining[remaining.length - 1];
     if (next) {
       dispatch(selectTerminalTab(next.sessionId));
     }
+    return key;
   };
 
 const computeTerminalExitReason = (
@@ -531,9 +537,31 @@ export const handleTerminalExit =
     const reason = computeTerminalExitReason(payload, selections);
     const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
 
-    dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
+    const closingKey = dispatch(
+      dropExitedSessionFromTabs(payload.sessionId, selections.openSelection),
+    );
 
     if (payload.sessionId !== getState().terminal.sessionId) {
+      return;
+    }
+    // A close the operator asked for is not a failure to report. The desktop's
+    // deliberate teardown kills the PTY, so a reader already parked in Read
+    // comes back with a non-empty reason ("signal: killed") and this handler
+    // would render it as "Failed to open ..." for a close that worked. The
+    // guard is the same env-mid-teardown test the sibling above applies: an
+    // exit that belongs to an env being closed is that close's own exit,
+    // however it reads, and it says nothing to the operator about a close they
+    // have already seen happen. A session that dies with no close in flight
+    // still falls through to the feedback below.
+    //
+    // The sibling resolves that env from the exited session's openSelection,
+    // which the env's ERun tab carries and its Local and AI tabs register none
+    // of (spawnDefaultTab) — and those exits reach this branch too, as the
+    // reason on its own rather than as a failure. So a session without one has
+    // its env read off the tab strip instead, which the sibling has left
+    // untouched on exactly that path.
+    const exitKey = closingKey ?? envKeyForSession(getState(), payload.sessionId);
+    if (exitKey !== undefined && envClosing(getState().sessions, exitKey)) {
       return;
     }
     dispatchTerminalExitFeedback(dispatch, payload, selections, reason, failedOutput);

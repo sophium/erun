@@ -5,7 +5,7 @@ import {
   setTabsForEnv,
 } from './slices/terminalSlice';
 import type { TerminalTab, TerminalTabKind } from './state';
-import type { AppThunk } from './store';
+import type { AppThunk, RootState } from './store';
 import { selectionKey } from './versionSuggestions';
 
 const TAB_KIND_ORDER: Record<TerminalTabKind, number> = {
@@ -36,6 +36,19 @@ export const recordTab =
     }
     dispatch(setTabsForEnv({ key, tabs }));
   };
+
+// envKeyForSession names the env whose tab strip still lists a session. Only
+// the env's ERun tab carries a tracked openSelection; its Local and AI tabs
+// register none, so a caller that needs the env of an arbitrary session reads
+// it here rather than from the sessions slice.
+export function envKeyForSession(state: RootState, sessionId: number): string | undefined {
+  for (const [key, tabs] of Object.entries(state.terminal.tabsByEnv)) {
+    if (tabs.some((tab) => tab.sessionId === sessionId)) {
+      return key;
+    }
+  }
+  return undefined;
+}
 
 // Returns the remaining tabs so the caller can pick a new active session.
 export const removeTab =
