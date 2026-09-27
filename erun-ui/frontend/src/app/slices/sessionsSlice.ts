@@ -15,12 +15,22 @@ export interface SessionsState {
   // Drives a per-env "opening" spinner in the sidebar, independent of the
   // user's current selection or the terminal busy overlay.
   openingByEnv: Record<string, true>;
-  // Envs (selectionKey-keyed) mid-teardown from a deliberate closeEnvironment.
-  // Its own default-tab sessions still exit asynchronously once torn down,
-  // and those terminal-exit events race the thunk's own tab-clearing dispatch
-  // — see dropExitedSessionFromTabs in wailsEventThunks.ts for why that race
-  // must not auto-select (and thereby respawn) a sibling default tab.
-  closingEnvs: Record<string, true>;
+  // Envs (selectionKey-keyed) mid-teardown from a deliberate closeEnvironment,
+  // as a count of the closes currently in flight rather than a flag. Its own
+  // default-tab sessions still exit asynchronously once torn down, and those
+  // terminal-exit events race the thunk's own tab-clearing dispatch — see
+  // dropExitedSessionFromTabs in wailsEventThunks.ts for why that race must not
+  // auto-select (and thereby respawn) a sibling default tab. Overlapping closes
+  // of one env (a double-triggered close) each mark and clear it; a flag would
+  // let the first close to finish turn the guard off while the second's
+  // sessions are still exiting.
+  //
+  // This hold is for that tab race alone. It says nothing about whose exit a
+  // terminal-exit event is: that is answered by the exit itself (see
+  // terminalExitPayload.Deliberate), because only the session knows whether the
+  // desktop ended it, and a close that comes back an error has still killed
+  // whatever it reached on the way down.
+  closingEnvs: Record<string, number>;
 }
 
 const initialState: SessionsState = {
@@ -35,6 +45,14 @@ const initialState: SessionsState = {
 
 export function envKey(tenant: string, environment: string): string {
   return `${tenant} ${environment}`;
+}
+
+// envClosing is the one truth test for "this env has a deliberate teardown in
+// flight right now", shared by every reader so a close-in-flight is never
+// re-derived from the count by hand: a key at zero or absent reads as
+// not-closing.
+export function envClosing(state: SessionsState, key: string): boolean {
+  return (state.closingEnvs[key] ?? 0) > 0;
 }
 
 export const sessionsSlice = createSlice({
@@ -90,9 +108,14 @@ export const sessionsSlice = createSlice({
       state.openingByEnv = {};
     },
     markEnvClosing(state, action: PayloadAction<string>) {
-      state.closingEnvs[action.payload] = true;
+      state.closingEnvs[action.payload] = (state.closingEnvs[action.payload] ?? 0) + 1;
     },
     clearEnvClosing(state, action: PayloadAction<string>) {
+      const remaining = (state.closingEnvs[action.payload] ?? 0) - 1;
+      if (remaining > 0) {
+        state.closingEnvs[action.payload] = remaining;
+        return;
+      }
       Reflect.deleteProperty(state.closingEnvs, action.payload);
     },
   },

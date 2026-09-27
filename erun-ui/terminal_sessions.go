@@ -1453,6 +1453,15 @@ func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool
 func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	a.finalizeAIActivity(managed)
 	a.mu.Lock()
+	// Read before the write below, which makes every exit look deliberate:
+	// `closed` is what the teardown paths (collectAndMarkClosedForSelection,
+	// closeManagedLocked, EndAISessions) set under this same lock before they
+	// touch the PTY, so a session it was already true for ended because the
+	// desktop ended it, and one it was false for died on its own. The read is
+	// per managed session rather than per env because that is the whole
+	// question the frontend has to answer about an exit, and it is the only
+	// answer that survives a session killed before the frontend ever saw it.
+	deliberate := managed.closed
 	managed.closed = true
 	if existing := a.sessions[managed.key]; existing == managed {
 		delete(a.sessions, managed.key)
@@ -1460,8 +1469,9 @@ func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
 	a.releaseIdleBlockLocked(managed)
 	a.mu.Unlock()
 	a.emitEvent(terminalExitEvent, terminalExitPayload{
-		SessionID: managed.serial,
-		Reason:    reason,
+		SessionID:  managed.serial,
+		Reason:     reason,
+		Deliberate: deliberate,
 	})
 	// Release any action runner waiting on this session's ready
 	// signal. If the session never reached its setup-complete

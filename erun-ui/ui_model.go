@@ -1692,6 +1692,16 @@ type terminalOutputPayload struct {
 type terminalExitPayload struct {
 	SessionID int    `json:"sessionId"`
 	Reason    string `json:"reason,omitempty"`
+	// Deliberate reports that the desktop had already ended this session — an
+	// env close, a tab close, an AI-session end — when its read ended. Every
+	// one of those teardowns kills the PTY, so the reader that wakes on it
+	// carries a non-empty Reason ("signal: killed") that describes the kill the
+	// operator asked for rather than a failure. The flag travels on the exit
+	// itself because the session is the only thing that can answer the
+	// question: the set the desktop set out to tear down is not the set it
+	// reached, and a session it kills before the frontend has heard of it has
+	// no other record anywhere. Absent on an exit nothing deliberate caused.
+	Deliberate bool `json:"deliberate,omitempty"`
 }
 
 // aiActivityPayload carries the AI-session "busy" signal the sidebar uses to
