@@ -24,7 +24,31 @@ export interface SessionsState {
   // clear it; a flag would let the first close to finish turn the guard off
   // while the second's sessions are still exiting, so those exits would read
   // as unexpected deaths.
+  //
+  // That count holds the env only while a close is in flight. It cannot hold it
+  // once one has settled, because settling is not the same as being done: see
+  // closingSessions for the part of the hold that outlives the RPC.
   closingEnvs: Record<string, number>;
+  // Sessions a close set out to tear down, sessionId -> the env that close was
+  // for. Adopted when the close starts, from the env's tab strip — the desktop
+  // kills an env's sessions as it finds them, which is the same set its own
+  // collectAndMarkClosedForSelection snapshots under a lock.
+  //
+  // This is the hold that survives the RPC, and it is per session on purpose.
+  // The desktop's close continues past a session whose Close reports an error,
+  // so an RPC that comes back an error says the walk stopped early, not that
+  // nothing was torn down: whatever it had already reached is dead and its exit
+  // is still on its way, and those exits have to be recognisable as this
+  // close's own. The RPC cannot say which ones they are — it returns the closed
+  // serials alongside the error and a rejected transport drops them — so the
+  // close names them itself, before it starts.
+  //
+  // Each mark is consumed by its own session's exit and covers nothing else, so
+  // the silence a close buys is exactly the exits it caused, one per session it
+  // aimed at. That is what keeps it from being a second env-wide hold: a
+  // session the close never touched, and any session opened afterwards, is free
+  // to report its death the moment the close settles.
+  closingSessions: Record<number, string>;
 }
 
 const initialState: SessionsState = {
@@ -35,6 +59,7 @@ const initialState: SessionsState = {
   exitOutputs: {},
   openingByEnv: {},
   closingEnvs: {},
+  closingSessions: {},
 };
 
 export function envKey(tenant: string, environment: string): string {
@@ -44,8 +69,23 @@ export function envKey(tenant: string, environment: string): string {
 // envClosing is the one truth test for "this env is mid-teardown right now",
 // shared by every reader so a close-in-flight is never re-derived from the
 // count by hand: a key at zero or absent reads as not-closing.
+//
+// This is the hold a close that has not settled yet puts on its whole env —
+// its exits have not necessarily started arriving, so nothing narrower can
+// speak for them. Once a close settles it is closingSessions that carries the
+// hold, one session at a time, and deliberately not this: a settled close has
+// no way to know how much of the teardown is still in flight, and holding the
+// whole env for a guess would silence sessions it never touched.
 export function envClosing(state: SessionsState, key: string): boolean {
   return (state.closingEnvs[key] ?? 0) > 0;
+}
+
+// closingSessionEnv names the env whose close owns this session's exit, or
+// undefined when no close does. Ownership is per session and asked directly,
+// never inferred from the tab strip: the exit it has to answer for is the one
+// the close killed, and that session may already be gone from the strip.
+export function closingSessionEnv(state: SessionsState, sessionId: number): string | undefined {
+  return state.closingSessions[sessionId];
 }
 
 export const sessionsSlice = createSlice({
@@ -111,6 +151,22 @@ export const sessionsSlice = createSlice({
       }
       Reflect.deleteProperty(state.closingEnvs, action.payload);
     },
+    adoptClosingSessions(state, action: PayloadAction<{ key: string; sessionIds: number[] }>) {
+      const { key, sessionIds } = action.payload;
+      for (const sessionId of sessionIds) {
+        state.closingSessions[sessionId] = key;
+      }
+    },
+    consumeClosingSession(state, action: PayloadAction<number>) {
+      Reflect.deleteProperty(state.closingSessions, action.payload);
+    },
+    releaseClosingSessions(state, action: PayloadAction<string>) {
+      for (const [sessionId, key] of Object.entries(state.closingSessions)) {
+        if (key === action.payload) {
+          Reflect.deleteProperty(state.closingSessions, Number(sessionId));
+        }
+      }
+    },
   },
 });
 
@@ -125,5 +181,8 @@ export const {
   resetEnvOpening,
   markEnvClosing,
   clearEnvClosing,
+  adoptClosingSessions,
+  consumeClosingSession,
+  releaseClosingSessions,
 } = sessionsSlice.actions;
 export default sessionsSlice.reducer;

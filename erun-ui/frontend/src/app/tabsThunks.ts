@@ -50,6 +50,15 @@ export function envKeyForSession(state: RootState, sessionId: number): string | 
   return undefined;
 }
 
+// envSessionIds lists the sessions an env's tab strip currently holds: the
+// desktop's sessions for that env, as the frontend knows them. A close that
+// wants to know what it is about to tear down reads them here rather than
+// guessing, and the desktop's own close snapshots the same set — every session
+// bound to the (tenant, env) pair — under its lock.
+export function envSessionIds(state: RootState, key: string): number[] {
+  return (state.terminal.tabsByEnv[key] ?? []).map((tab) => tab.sessionId);
+}
+
 // Returns the remaining tabs so the caller can pick a new active session.
 export const removeTab =
   (key: string, sessionId: number): AppThunk<TerminalTab[]> =>

@@ -82,6 +82,17 @@ function seedOpenEnv(kind: 'erun' | 'local' = 'erun'): {
     // refreshIdleStatus re-arms its own poll through the controller; the app's
     // real one would schedule a timer this test would then have to chase.
     scheduleIdleStatusPoll: () => undefined,
+    // terminalDisplayMiddleware drives the pane off every setSessionId, so a
+    // stub without these throws inside the dispatch it is listening to and
+    // buries whatever the test was actually asserting under a listener error.
+    snapshotSession: () => undefined,
+    resetTerminal: () => undefined,
+    activateSession: () => undefined,
+    resizeActiveSession: () => undefined,
+    // An exit that leaves the exit handler on the auto-select path (@see
+    // selectTerminalTab) focuses the pane it lands on.
+    focusTerminalSoon: () => undefined,
+    queueTerminalResize: () => undefined,
   } as unknown as TerminalController;
   return { selection, key, sessionId };
 }
@@ -143,6 +154,65 @@ test('a close that settles first does not release the hold a second close is sti
 
   calls[1]?.resolve([sessionId]);
   await second;
+});
+
+// A close does not have to succeed to have killed things. The desktop's
+// closeManagedTerminals walks the env's sessions and `continue`s past one whose
+// Close reports an error, so the RPC returning an error says only that the walk
+// gave up part-way — every session it had already reached is dead or dying and
+// its exit is still on its way here. The failure therefore cannot release the
+// hold: doing so renders the close's own kills as failures, which is the report
+// this whole guard exists to answer. The exit below is the reported shape —
+// after the RPC settled, on the env's ERun tab.
+test('a close that fails still owns the exits it killed on the way down', async () => {
+  const calls = stubCloseRpc();
+  const { selection, sessionId } = seedOpenEnv();
+
+  const closing = dispatch(closeEnvironment(selection));
+  calls[0]?.reject(new Error('CLOSE_ENVIRONMENT_PARTIAL'));
+  await closing;
+
+  dispatch(handleTerminalExit({ sessionId, reason: 'signal: killed' }));
+
+  assert.doesNotMatch(
+    notice().message,
+    /signal: killed/,
+    `a close that failed part-way must not report the exits it killed on the way (got ${JSON.stringify(notice())})`,
+  );
+});
+
+// The other side of that hold, and the one that decides its shape: it may only
+// ever cover the sessions the close aimed at. A failed close leaves the env's
+// tabs standing, the operator keeps working in them, and the desktop never says
+// how much of the teardown it got through — so an env-wide hold would silence
+// sessions this close never touched, for as long as any one of its marks is
+// outstanding. Here the close adopted two sessions, one has reported and the
+// other has not, and the third was opened afterwards. Its death is its own, and
+// an outstanding mark for someone else's session must not swallow it.
+test('a failed close holds only the sessions it aimed at, not the whole env', async () => {
+  const calls = stubCloseRpc();
+  const { selection, key, sessionId } = seedOpenEnv();
+  const alsoClosed = nextSessionId;
+  nextSessionId += 1;
+  dispatch(recordTab(key, alsoClosed, 1, 'local', 'Local'));
+
+  const closing = dispatch(closeEnvironment(selection));
+  calls[0]?.reject(new Error('CLOSE_ENVIRONMENT_PARTIAL'));
+  await closing;
+  // One of the two the close was killing lands; the other is still coming.
+  dispatch(handleTerminalExit({ sessionId, reason: 'signal: killed' }));
+
+  const reopened = nextSessionId;
+  nextSessionId += 1;
+  dispatch(recordTab(key, reopened, 7, 'extra', 'Extra'));
+  dispatch(setSessionId(reopened));
+  dispatch(handleTerminalExit({ sessionId: reopened, reason: 'exit status 1' }));
+
+  assert.match(
+    notice().message,
+    /exit status 1/,
+    `a close holds the exits it aimed at, never the env (got ${JSON.stringify(notice())})`,
+  );
 });
 
 // The env's ERun tab is not the only session a close kills, and it is not the

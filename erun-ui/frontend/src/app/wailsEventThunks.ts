@@ -50,7 +50,13 @@ import {
   setPendingOpenAfterDeploy,
   setSelected,
 } from './slices/selectionSlice';
-import { envClosing, recordExitOutput, recordExitReason } from './slices/sessionsSlice';
+import {
+  closingSessionEnv,
+  consumeClosingSession,
+  envClosing,
+  recordExitOutput,
+  recordExitReason,
+} from './slices/sessionsSlice';
 import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
 import { envKeyForSession, removeTab } from './tabsThunks';
@@ -560,8 +566,26 @@ export const handleTerminalExit =
     // reason on its own rather than as a failure. So a session without one has
     // its env read off the tab strip instead, which the sibling has left
     // untouched on exactly that path.
-    const exitKey = closingKey ?? envKeyForSession(getState(), payload.sessionId);
-    if (exitKey !== undefined && envClosing(getState().sessions, exitKey)) {
+    //
+    // The session itself is asked first, and the env only as the fallback. A
+    // close names the sessions it is tearing down before it starts, because
+    // that naming has to outlive the RPC: the desktop's close continues past a
+    // session whose Close failed and comes back an error with the rest of the
+    // env already killed, and those are precisely the exits this branch would
+    // otherwise render as "Failed to open ..." for a close that did its job.
+    // The RPC cannot hand them back — a rejected transport drops the closed
+    // serials that came with the error — so the marks are the only record of
+    // which exits were the close's.
+    //
+    // Asking per session rather than per env is what keeps the hold honest: it
+    // can only ever silence the exit of a session this close aimed at, it is
+    // spent by that exit, and a session the close never touched reports the
+    // moment a settled close stops holding the env wholesale.
+    const state = getState();
+    const ownedByClose = closingSessionEnv(state.sessions, payload.sessionId) !== undefined;
+    const exitKey = closingKey ?? envKeyForSession(state, payload.sessionId);
+    if (ownedByClose || (exitKey !== undefined && envClosing(state.sessions, exitKey))) {
+      dispatch(consumeClosingSession(payload.sessionId));
       return;
     }
     dispatchTerminalExitFeedback(dispatch, payload, selections, reason, failedOutput);
