@@ -22,6 +22,11 @@ interface RetainedDisplayBuffer {
   // on the common (under-budget) path -- see appendDisplayBuffer.
   lines: number;
   bytes: number;
+  // How many chunks have ever been appended to this session, monotonic: a trim
+  // drops chunks from the head of `chunks` and never touches this. It is what
+  // makes "the chunks that arrived after X" answerable across a trim, which a
+  // length -- an index into an array whose head can move -- is not.
+  appended: number;
 }
 
 function totals(chunks: TerminalWriteData[]): { lines: number; bytes: number } {
@@ -86,10 +91,15 @@ export class TerminalSessionRegistry {
       chunks: [],
       lines: 0,
       bytes: 0,
+      appended: 0,
     };
     existing.chunks.push(data);
     existing.lines += countNewlines(data);
     existing.bytes += data.length;
+    // Counted before the trim below, and never decremented by it: this is the
+    // session's output in append order, which the retained array only ever
+    // shows the tail of.
+    existing.appended += 1;
     if (existing.lines > MAX_RETAINED_LINES || existing.bytes > MAX_RETAINED_BYTES) {
       const trimmed = trimChunksToBudget(existing.chunks, MAX_RETAINED_LINES, MAX_RETAINED_BYTES);
       if (trimmed !== existing.chunks) {
@@ -104,6 +114,12 @@ export class TerminalSessionRegistry {
     return this.sessionDisplayBuffers.get(sessionId)?.chunks ?? [];
   }
 
+  // How many chunks this session has ever been given, for a caller that needs
+  // to name a point in its output later -- see captureSnapshot.
+  displayAppendedCount(sessionId: number): number {
+    return this.sessionDisplayBuffers.get(sessionId)?.appended ?? 0;
+  }
+
   snapshot(sessionId: number): string | undefined {
     return this.sessionSnapshots.get(sessionId);
   }
@@ -114,11 +130,19 @@ export class TerminalSessionRegistry {
   // buffer holds only the delta a future switch-back needs to replay on top of
   // it.
   //
-  // `keepFrom` is the index at which output that arrived after the switch was
-  // dispatched begins. Those chunks were never written to the pane -- a session
-  // the store no longer names buffers without writing -- so they are not in
-  // `serialized` and are kept, not dropped with the captured prefix. The
-  // default keeps nothing, which is what a caller with no such window wants.
+  // `appendedAtDispatch` is where output that arrived after the switch was
+  // dispatched begins, named in the append sequence rather than as an index
+  // into `chunks`. Those chunks were never written to the pane -- a session the
+  // store no longer names buffers without writing -- so they are not in
+  // `serialized` and are kept, not dropped with the captured prefix. They are
+  // also the newest output there is, so they are the tail of the array and a
+  // trim can only have dropped chunks from the head, in front of them: counting
+  // back that many from the tail lands on the same chunks whatever the array's
+  // length has become in the meantime. An index taken at dispatch does not --
+  // a session sitting at the budget trims its head on every later append, and
+  // the index then points past the end or at output the snapshot already
+  // carries. The default says nothing arrived in any window, which is what a
+  // caller with no such window wants.
   //
   // An empty capture is the one case where that premise does not hold, and it
   // is reachable whenever the session being switched away from has not painted
@@ -145,19 +169,31 @@ export class TerminalSessionRegistry {
   captureSnapshot(
     sessionId: number,
     serialized: string,
-    keepFrom = Number.POSITIVE_INFINITY,
+    appendedAtDispatch = Number.POSITIVE_INFINITY,
   ): void {
     if (serialized === '') {
       return;
     }
     this.sessionSnapshots.set(sessionId, serialized);
     const buffered = this.sessionDisplayBuffers.get(sessionId);
-    const chunks = buffered ? buffered.chunks.slice(keepFrom) : [];
-    if (chunks.length === 0) {
-      this.sessionDisplayBuffers.delete(sessionId);
-      return;
+    if (buffered) {
+      // What arrived after the boundary. More of it than the buffer still holds
+      // means a trim reached into the window itself, and what survived is all
+      // there is to keep.
+      const arrived = buffered.appended - appendedAtDispatch;
+      const keep = Number.isFinite(arrived)
+        ? buffered.chunks.slice(Math.max(0, buffered.chunks.length - arrived))
+        : [];
+      if (keep.length > 0) {
+        this.sessionDisplayBuffers.set(sessionId, {
+          chunks: keep,
+          appended: buffered.appended,
+          ...totals(keep),
+        });
+        return;
+      }
     }
-    this.sessionDisplayBuffers.set(sessionId, { chunks, ...totals(chunks) });
+    this.sessionDisplayBuffers.delete(sessionId);
   }
 
   exitReason(sessionId: number): string {

@@ -541,12 +541,17 @@ export class TerminalController {
   // The empty write below is the ordering guarantee, not a wait: its callback is
   // invoked from xterm's own queue once every chunk queued ahead of it has been
   // parsed, so the snapshot is taken of a screen that already carries that
-  // output and the reset cannot run ahead of it. The chunk count taken here is
-  // the boundary that keeps the ordering from costing anything: chunks up to it
-  // have their writes queued (so they are on the screen the snapshot captures),
-  // and anything appended after this call has no write at all, because
-  // handleTerminalOutput buffers without writing for a session the store no
-  // longer names.
+  // output and the reset cannot run ahead of it. The boundary taken here is what
+  // keeps the ordering from costing anything: chunks up to it have their writes
+  // queued (so they are on the screen the snapshot captures), and anything
+  // appended after this call has no write at all, because handleTerminalOutput
+  // buffers without writing for a session the store no longer names.
+  //
+  // That boundary is the session's append sequence number, not the buffer's
+  // length: the buffer trims its own head at the retention budget, once per
+  // append for a session sitting at it, so a length taken now can have stopped
+  // naming the same chunks by the time the callback reads it (see
+  // captureSnapshot).
   //
   // A no-op when there is no terminal to move; `sessionId <= 0` resets the pane
   // without activating anything, which is how a close clears it.
@@ -558,11 +563,11 @@ export class TerminalController {
     if (!terminal) {
       return;
     }
-    const renderedChunks = this.sessions.displayBuffer(previousSessionId).length;
+    const appendedAtDispatch = this.sessions.displayAppendedCount(previousSessionId);
     this.switchInFlight = true;
     terminal.write('', () => {
       this.switchInFlight = false;
-      this.snapshotSession(previousSessionId, renderedChunks);
+      this.snapshotSession(previousSessionId, appendedAtDispatch);
       this.resetTerminal();
       if (sessionId > 0) {
         this.activateSession(sessionId);
@@ -583,14 +588,14 @@ export class TerminalController {
   // since last visit) instead of O(session's total history). A no-op for
   // sessionId <= 0 (no prior session was actually showing).
   //
-  // `renderedChunks` bounds which buffer entries that is: see switchSession,
+  // `appendedAtDispatch` bounds which buffer entries that is: see switchSession,
   // which is the only caller that has output it must not drop. Called on its
   // own, it captures everything the buffer holds.
-  snapshotSession(sessionId: number, renderedChunks = Number.POSITIVE_INFINITY): void {
+  snapshotSession(sessionId: number, appendedAtDispatch = Number.POSITIVE_INFINITY): void {
     if (sessionId <= 0 || !this.terminal || !this.serializeAddon) {
       return;
     }
-    this.sessions.captureSnapshot(sessionId, this.serializeAddon.serialize(), renderedChunks);
+    this.sessions.captureSnapshot(sessionId, this.serializeAddon.serialize(), appendedAtDispatch);
   }
 
   // activateSession renders `sessionId` into the (already-reset) shared
