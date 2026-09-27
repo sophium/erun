@@ -649,7 +649,7 @@ func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review
 		return model.Review{}, &MergeNotVerifiedError{Reason: err.Error()}
 	}
 	if !contained {
-		return model.Review{}, &MergeNotVerifiedError{Reason: fmt.Sprintf("branch %s adds nothing that is already in %s", review.SourceBranch, review.TargetBranch)}
+		return model.Review{}, &MergeNotVerifiedError{Reason: fmt.Sprintf("branch %s adds changes that are not already in %s", review.SourceBranch, review.TargetBranch)}
 	}
 
 	review.Status = model.ReviewStatusMerged

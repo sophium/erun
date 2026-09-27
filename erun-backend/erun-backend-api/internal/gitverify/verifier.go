@@ -293,12 +293,28 @@ func commitCarriesChange(candidate, base *object.Commit, wanted string) (bool, e
 }
 
 // changeFingerprint is a stable identity for the set of changes between two
-// commits' trees: every added, removed, and modified path with the blob it
-// moved to or from. Two fingerprints matching means the same content changed
-// in the same way, whatever graph produced it — which is what lets a squash
-// commit be recognized as a branch's work when none of the branch's commits
-// are ancestors of the target. An empty fingerprint means the two commits
-// hold the same tree.
+// commits' trees: every added, removed, and modified path with the lines the
+// change moved to or from. Two fingerprints matching means the same content
+// changed in the same way, whatever graph produced it — which is what lets a
+// squash commit be recognized as a branch's work when none of the branch's
+// commits are ancestors of the target. An empty fingerprint means the two
+// commits hold the same tree.
+//
+// The identity is the lines a change adds and removes, not the blobs it moved
+// between. A blob names a whole file, so it also carries every unrelated edit
+// that file received between the two sides' own baselines: when the target
+// edits a file the branch is also editing, between where the branch forked and
+// the squash's parent, that file's "before" blob differs on the two sides
+// while the change to it does not — and one change then reads as two
+// different ones. Where a hunk sits is not part of what it says, so line
+// content survives the file moving underneath it.
+//
+// Content is a weaker identity than a blob, the trade `git patch-id` also
+// makes: two unrelated edits that add and remove the same lines in the same
+// paths are indistinguishable here. What bounds it is that the whole change
+// set is compared at once — matching one means reproducing every path and
+// every line of the branch's work — and that a change whose sides are not both
+// readable text keeps the blob identity, where the blob really is the change.
 func changeFingerprint(from, to *object.Commit) (string, error) {
 	fromTree, err := from.Tree()
 	if err != nil {
@@ -318,15 +334,173 @@ func changeFingerprint(from, to *object.Commit) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		removed, added, err := changeLineChange(change)
+		if err != nil {
+			return "", err
+		}
 		lines = append(lines, fmt.Sprintf("%s %s %s %s %s %s %s",
 			action,
-			change.From.Name, change.From.TreeEntry.Mode, change.From.TreeEntry.Hash,
-			change.To.Name, change.To.TreeEntry.Mode, change.To.TreeEntry.Hash))
+			change.From.Name, change.From.TreeEntry.Mode, removed,
+			change.To.Name, change.To.TreeEntry.Mode, added))
 	}
 	// Sorted, so the fingerprint identifies the change set and not the order
-	// the diff happened to emit it in.
+	// the diff happened to emit it in. An empty change set joins to "", so an
+	// empty fingerprint keeps meaning the two commits hold the same tree.
 	sort.Strings(lines)
 	return strings.Join(lines, "\n"), nil
+}
+
+// changeLineChange is one path's own contribution to a change, as two opaque
+// tokens: the lines the change removes and the lines it adds.
+//
+// A change whose sides are not both readable text has no lines to compare — a
+// binary blob, a gitlink, a change of mode alone. There the blob pair it moved
+// between is the whole story, so the identity stays exactly what it was.
+func changeLineChange(change *object.Change) (removed, added string, err error) {
+	fromFile, toFile, err := change.Files()
+	if err != nil {
+		return "", "", err
+	}
+	if fromFile == nil && toFile == nil {
+		return change.From.TreeEntry.Hash.String(), change.To.TreeEntry.Hash.String(), nil
+	}
+	fromLines, fromText, err := textLines(fromFile)
+	if err != nil {
+		return "", "", err
+	}
+	toLines, toText, err := textLines(toFile)
+	if err != nil {
+		return "", "", err
+	}
+	if !fromText || !toText {
+		return change.From.TreeEntry.Hash.String(), change.To.TreeEntry.Hash.String(), nil
+	}
+	removedLines, addedLines := lineDelta(fromLines, toLines)
+	return lineIdentity(removedLines), lineIdentity(addedLines), nil
+}
+
+// textLines is a file's lines, or no lines at all for a side that has no file
+// (an added or deleted path). ok is false when the file is not readable text,
+// which is the binary case a line comparison has nothing to say about.
+func textLines(file *object.File) (lines []string, ok bool, err error) {
+	if file == nil {
+		return nil, true, nil
+	}
+	isBinary, err := file.IsBinary()
+	if err != nil {
+		return nil, false, err
+	}
+	if isBinary {
+		return nil, false, nil
+	}
+	content, err := file.Contents()
+	if err != nil {
+		return nil, false, err
+	}
+	return strings.Split(content, "\n"), true, nil
+}
+
+// lineIdentity is a set of lines as one token. Sorted, so it is the lines that
+// changed and not the order the diff reported them in, and quoted, so a line's
+// own bytes cannot be read as the separators around it.
+func lineIdentity(lines []string) string {
+	sorted := append([]string(nil), lines...)
+	sort.Strings(sorted)
+	return fmt.Sprintf("%q", strings.Join(sorted, "\n"))
+}
+
+// maxAlignedLines caps the line-by-line alignment lineDelta does. Past it the
+// changed span is reported whole on both sides instead, which is stricter than
+// aligning it — it can refuse a landing that aligning would have accepted,
+// never accept one aligning would have refused — and a span that large is
+// being rewritten rather than edited.
+const maxAlignedLines = 4_000_000
+
+// lineDelta reports which of from's lines to drops and which of to's lines
+// from lacks: a diff's removed and added lines, without the positions the diff
+// reported them at. The common head and tail are stripped first, which is
+// where the positions go — an insertion a later edit pushed down the file
+// still leaves exactly the lines it added.
+func lineDelta(from, to []string) (removed, added []string) {
+	head := commonHeadLines(from, to)
+	from, to = from[head:], to[head:]
+	tail := commonTailLines(from, to)
+	from, to = from[:len(from)-tail], to[:len(to)-tail]
+
+	switch {
+	case len(from) == 0:
+		return nil, append([]string(nil), to...)
+	case len(to) == 0:
+		return append([]string(nil), from...), nil
+	case int64(len(from))*int64(len(to)) > maxAlignedLines:
+		return append([]string(nil), from...), append([]string(nil), to...)
+	}
+	return alignLines(from, to)
+}
+
+// alignLines is lineDelta's line-by-line case: the lines the two sides share,
+// longest run first, are kept and the rest is what the change removed and
+// what it added.
+func alignLines(from, to []string) (removed, added []string) {
+	width := len(to) + 1
+	shared := sharedLineCounts(from, to)
+	i, j := 0, 0
+	for i < len(from) && j < len(to) {
+		switch {
+		case from[i] == to[j]:
+			i++
+			j++
+		case shared[(i+1)*width+j] >= shared[i*width+j+1]:
+			removed = append(removed, from[i])
+			i++
+		default:
+			added = append(added, to[j])
+			j++
+		}
+	}
+	removed = append(removed, from[i:]...)
+	added = append(added, to[j:]...)
+	return removed, added
+}
+
+// sharedLineCounts is the longest common subsequence of every pair of suffixes
+// of from and to, at shared[i*width+j] for width len(to)+1 — the table
+// alignLines walks from the front to recover which lines those are.
+func sharedLineCounts(from, to []string) []int32 {
+	width := len(to) + 1
+	shared := make([]int32, (len(from)+1)*width)
+	for i := len(from) - 1; i >= 0; i-- {
+		for j := len(to) - 1; j >= 0; j-- {
+			switch {
+			case from[i] == to[j]:
+				shared[i*width+j] = shared[(i+1)*width+j+1] + 1
+			case shared[(i+1)*width+j] >= shared[i*width+j+1]:
+				shared[i*width+j] = shared[(i+1)*width+j]
+			default:
+				shared[i*width+j] = shared[i*width+j+1]
+			}
+		}
+	}
+	return shared
+}
+
+// commonHeadLines is how many lines from and to open with in common.
+func commonHeadLines(from, to []string) int {
+	shared := 0
+	for shared < len(from) && shared < len(to) && from[shared] == to[shared] {
+		shared++
+	}
+	return shared
+}
+
+// commonTailLines is how many lines from and to close with in common.
+func commonTailLines(from, to []string) int {
+	shared := 0
+	for shared < len(from) && shared < len(to) &&
+		from[len(from)-1-shared] == to[len(to)-1-shared] {
+		shared++
+	}
+	return shared
 }
 
 // fetchBranch clones branch from remoteURL into a fresh in-memory repository,
