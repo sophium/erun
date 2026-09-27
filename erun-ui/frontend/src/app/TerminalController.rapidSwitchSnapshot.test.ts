@@ -158,9 +158,8 @@ async function measureRapidPair(
   // `local` has its own output, buffered while another tab is on screen.
   driver.emit(local, LOCAL_SCREEN);
 
-  // The first click of the pair, and the screen `extra` is remembered by.
+  // The first click of the pair, and the switch that remembers `extra`'s screen.
   store.dispatch(setSessionId(local));
-  const rememberedExtra = driver.controller.sessions.snapshot(extra);
   if (gapMs > 0) {
     await new Promise((resolve) => setTimeout(resolve, gapMs));
   }
@@ -169,6 +168,13 @@ async function measureRapidPair(
   store.dispatch(setSessionId(extra));
   const rememberedLocal = driver.controller.sessions.snapshot(local);
   await driver.settled();
+  // Read once the pair has settled rather than at the dispatch that causes it: a
+  // switch captures the outgoing screen from xterm's own queue, so `extra`'s
+  // capture is written after every write queued at the first click has parsed --
+  // later than that dispatch returns, and always before here. Waiting costs the
+  // case nothing, because the second click captures `local`, so this still names
+  // the first click's capture and still fails if there is none.
+  const rememberedExtra = driver.controller.sessions.snapshot(extra);
   // The reader lands on `extra`; then goes back to `local`, which is where the
   // blank screen the pair remembered gets restored.
   store.dispatch(setSessionId(local));
