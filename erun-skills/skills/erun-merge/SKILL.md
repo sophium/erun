@@ -250,7 +250,13 @@ else
   # that runs make check — from its layer cache, so the gate never ran. erun
   # refuses that run deliberately, and names --gate as the way out: it
   # invalidates just that stage's layers, executes it for real, and mints a
-  # version normally like any other build.
+  # version normally like any other build. That refusal belongs to a run that
+  # declared itself the merge queue's gate (--gate) on a current erun, and to
+  # every build on a binary older than that split — see the prose below. The
+  # plain build this block runs is neither: on a current erun it prints the
+  # replay in its trace and builds the commit. The branch stays because an
+  # older installed binary still takes it, and it costs a current one nothing:
+  # a run that does not refuse never writes the sentinel this greps for.
   #
   # The match is that refusal's own sentinel sentence, which erun-common's
   # ErrGateTestStageReplayed carries verbatim. It is deliberately a narrow
@@ -299,14 +305,20 @@ erun version --no-registry   # the `erun <version>` line is the pod's binary
 ```
 
 A build that watched BuildKit replay a Dockerfile's whole `test` stage — the
-stage `make check` runs in — exits non-zero and refuses to record; see the
-failure detail it prints. That is deliberate: a replay built images without
-running the project's gate, and a green exit over it would read as a gate that
-ran. **The block above handles that refusal itself**: it re-runs the same step
-as `erun build --gate`, which executes just that stage instead of accepting the
-replay, and records *that* run's version normally. A replay refusal is therefore
-not a `FAILED` review, and a driver that runs the block and nothing else reaches
-the remedy without having to read this paragraph first.
+stage `make check` runs in — is refused by the run that declared itself the
+merge queue's gate, `erun build --gate`, and by no other run on a current erun:
+a gate's exit status is the entirety of what `erun review record-build --gate`
+records, and a replay built images without running the project's gate, so a green
+exit over it would read as a gate that ran. The plain build this rung runs is
+not refused — it prints `test stage (…): REPLAYED (BuildKit served every step
+…)` in its trace and builds the commit, which is all this rung's `READY` claims.
+**The block above handles a refusal for a binary that still makes one**: an erun
+older than that split exits non-zero on the same replay and refuses to record,
+and the block re-runs the same step as `erun build --gate`, which executes just
+that stage instead of accepting the replay, and records *that* run's version
+normally. A replay refusal is therefore not a `FAILED` review, and a driver that
+runs the block and nothing else reaches the remedy without having to read this
+paragraph first.
 
 The re-run is keyed on the refusal's own message and not on the build having
 failed. Every other failure — a compile error, a red `make check`, a missing
