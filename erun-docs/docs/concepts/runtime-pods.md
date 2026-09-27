@@ -246,7 +246,10 @@ node's disk in GiB, and `buildCacheCoTenants`, how many build caches share it. W
 bound is tightened to 80% of `(buildCacheNodeGi − the disk-headroom reserve) ÷ buildCacheCoTenants`,
 where the reserve is the floor every build already keeps clear — 20 GiB or 10% of the node, whichever
 is larger, and `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` overrides both. The tighter of the two ceilings
-wins, so the node's share can only lower the bound and never raise it.
+wins, so the node's share can only lower the bound and never raise it — unless that share is itself
+too small to hold a cache a build is served from, in which case it is refused rather than installed:
+the volume ceiling stays in force, and the build log says the sum across the node went unbounded by
+the declared one.
 
 Both values default to `0`, which passes nothing to the pod and leaves an environment bounded by its
 own docker volume exactly as before — a deployment that says nothing about its node is not given a
@@ -258,6 +261,13 @@ all describing the volume — a declaration that reads like a bound in force whi
 at all. The build log's own line names the bound actually applied, and names the node's share and the
 co-tenant count it divided by only once that share is the one in use. A runtime env has no build cache
 to bound, so the pair does nothing there.
+
+There is a second gate on the same count, in the other direction: the share is refused wherever no
+co-tenant count makes it usable. The reserve is divided by the count the node's room is, so the share
+only applies from `2.25 ×` the reserve up — with the reserve at its flat 20 GiB, every node under
+200 GiB, that is 45 GiB. A 21 GiB node therefore refuses the share at one co-tenant as surely as at a
+million, and setting the pair on such a node changes nothing; the build log says the node's share was
+unusable rather than passing the declaration over in silence.
 
 The **go build cache** is the other half of that, and it lives on the home volume rather than the
 docker one. It has a bound of its own because the go command's own rule is not one: go evicts entries

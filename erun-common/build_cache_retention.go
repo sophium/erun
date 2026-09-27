@@ -117,25 +117,37 @@ const (
 // falls back to the volume share alone rather than reclaiming against an
 // invented number.
 //
-// Every way this can fail to produce a share is an error and none of them is a
-// zero allowance, because the two are not the same thing to the caller that
-// acts on the result: an allowance of zero is passed to `resolveBuildCacheBounds`,
-// comes back as a ceiling of no bytes, and is reclaimed to as
-// `--max-used-space 0`. That is not a small bound. It drops every earned layer
-// on every build and the ceiling never rises afterwards, because a cache
-// holding nothing is never over a ceiling of nothing — so a node whose figures
-// leave no room to divide leaves the volume share in force and says so, rather
-// than reaching that state through arithmetic that returned a real-looking
-// number.
+// Every way this can fail to produce a usable share is an error and none of
+// them is a ceiling a cache is installed under, because the two are not the
+// same thing to the caller that acts on the result: the ceiling is handed to
+// `docker buildx prune --max-used-space` as the size the cache is reclaimed
+// down to on every build. A ceiling too small to hold a working set is not a
+// small bound. It reclaims the cache under what a build is served from every
+// time it fires, so the layers the next build would have used are dropped just
+// as they are at a ceiling of nothing — the difference is only how long it
+// takes to get there. So a node whose figures leave no room to divide, or leave
+// this environment too little of what they do leave, leaves the volume share in
+// force and says so, rather than reaching that state through arithmetic that
+// returned a real-looking number.
 //
-// The floor is not a value this can be clamped up to. A byte floor here would
-// not be the honest analogue of RuntimeDindCPULimit's MinimumRuntimeDindCPU: a
-// CPU limit is a ceiling the kernel shares fairly, so raising a small one costs
-// nothing when the node is idle, while a disk ceiling is space the environment
-// then holds against every other tenant of that node. Inventing room a node has
-// told us it does not have is the aggregate defect this bound exists to
-// prevent, so the unusable case falls back to the bound that was already in
-// force instead of to a number nobody measured.
+// What is unusable is read off the division the allowance itself came from, so
+// no byte floor is stated here and none has to be measured: the node's room
+// above its reserve is divided among the caches that share it, and the reserve
+// it was taken from is divided the same way. The second term is what this
+// environment holds of the node's own reserve — the images, containers and
+// volumes a cache prune cannot reach, sitting on the same disk as the cache —
+// and a ceiling under it is a cache bounded below the state beside it, which is
+// below any working set at any node size, because both terms scale together.
+//
+// The threshold is a refusal, not a value to clamp up to. A byte floor *added*
+// here would not be the honest analogue of RuntimeDindCPULimit's
+// MinimumRuntimeDindCPU: a CPU limit is a ceiling the kernel shares fairly, so
+// raising a small one costs nothing when the node is idle, while a disk ceiling
+// is space the environment then holds against every other tenant of that node.
+// Inventing room a node has told us it does not have is the aggregate defect
+// this bound exists to prevent. Refusing to apply a share the node cannot make
+// usable invents nothing — the environment keeps the bound that was already in
+// force, and the run is told the sum across the node went unbounded by it.
 func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) (uint64, error) {
 	if coTenants < 1 {
 		return 0, fmt.Errorf("%w: %d is not a count of the caches that share the node", errBuildCacheNodeBudgetUnusable, coTenants)
@@ -145,13 +157,30 @@ func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) (uint64, er
 		return 0, fmt.Errorf("%w: a %s node reserves %s of its own disk for everything a cache prune cannot reach, which is all of it", errBuildCacheNodeBudgetUnusable, formatGiB(nodeBytes), formatGiB(floor))
 	}
 	allowance := (nodeBytes - floor) / uint64(coTenants)
+	ceiling := resolveBuildCacheBounds(allowance).ceiling
 	// The share survives the division but not the ceiling it is a share of:
 	// resolveBuildCacheBounds divides before it multiplies, so a share under a
 	// hundred bytes has a ceiling of zero however much room the node had. That
 	// is the same no-bound state by the same argument, and it is reached
-	// without the node ever being at or below its floor.
-	if resolveBuildCacheBounds(allowance).ceiling == 0 {
+	// without the node ever being at or below its floor. It stays its own case
+	// rather than folding into the one below: a count can outrun the reserve
+	// (so the share of it rounds to nothing) while the ceiling the allowance
+	// resolves to does not, and a ceiling of no bytes is the state this bound
+	// exists to keep out.
+	if ceiling == 0 {
 		return 0, fmt.Errorf("%w: the %s a %s node holds above its %s floor, divided among %d caches, leaves this one a ceiling of no bytes", errBuildCacheNodeBudgetUnusable, formatGiB(nodeBytes-floor), formatGiB(nodeBytes), formatGiB(floor), coTenants)
+	}
+	// The reserve is divided the same way the room above it is, so the two terms
+	// are one division's halves: this environment's share of the node is
+	// (nodeBytes - floor) / coTenants to build in, and floor / coTenants of the
+	// reserve beside it. A ceiling under the second term is a cache held smaller
+	// than the non-cache state next to it on the same disk, which no build is
+	// served from — and because both terms divide the same node by the same
+	// count, the line moves with the node instead of being a size asserted for
+	// every node alike.
+	if usable := floor / uint64(coTenants); usable > 0 && ceiling < usable {
+		return 0, fmt.Errorf("%w: the %s a %s node holds above its %s floor, divided among %d caches, leaves this one a ceiling of %s — under the %s it would share of the node's reserve, so it is a cache bounded smaller than the state beside it and holds no working set",
+			errBuildCacheNodeBudgetUnusable, formatGiB(nodeBytes-floor), formatGiB(nodeBytes), formatGiB(floor), coTenants, formatGiB(ceiling), formatGiB(usable))
 	}
 	return allowance, nil
 }
@@ -166,7 +195,8 @@ var errNoBuildCacheNodeBudget = errors.New("this environment declares no node bu
 // errBuildCacheNodeBudgetUnusable is the state of a deployment that has
 // described its node but whose description leaves this environment no usable
 // share of it — a node at or below the disk floor the build refuses against, or
-// a share that divides down to no ceiling at all. It is separate from
+// a share that resolves to a ceiling below what this environment would hold of
+// the node's own reserve. It is separate from
 // errNoBuildCacheNodeBudget because it is the opposite silence: a bound that
 // looks like it is in force and is not, so it is traced rather than passed
 // over. It is never resolved by inventing a share.

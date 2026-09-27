@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"io"
 	"strconv"
 	"strings"
 	"testing"
@@ -42,9 +43,25 @@ type nodeBoundCase struct {
 	// wantPrunedTo is the ceiling the reclaim must be bounded to. Zero means no
 	// reclaim is expected at all.
 	wantPrunedTo uint64
+
+	// wantNodeShareUnusable records that the node's figures leave this
+	// environment a ceiling no build is served from, so the node bound must not
+	// be applied and the volume share holds alone. Such a case is the one
+	// state where the sum invariant below does not apply — no node-derived
+	// ceiling is in force, so there is no sum to add up — and it is the state
+	// the run has to trace rather than pass over, which is what it is asserted
+	// on instead.
+	wantNodeShareUnusable bool
 }
 
 func nodeBoundCases() []nodeBoundCase {
+	return append(append(nodeBoundAggregateCases(), nodeBoundUnusableShareCases()...), nodeBoundControlCases()...)
+}
+
+// nodeBoundAggregateCases are the aggregate defect and the two states a node at
+// or below its own disk floor reaches: the reproduction this bound was written
+// for, and the two halves of the zero ceiling it had to stop producing.
+func nodeBoundAggregateCases() []nodeBoundCase {
 	return []nodeBoundCase{
 		{
 			// The reproduction. Four environments on a 120 GiB node, each
@@ -144,21 +161,118 @@ func nodeBoundCases() []nodeBoundCase {
 			cacheGi:      45,
 			wantPrunedTo: 40 << 30,
 		},
+	}
+}
+
+// nodeBoundUnusableShareCases are the chart-reachable declarations whose node
+// figures leave a ceiling no build is served from: a node too small, or shared
+// by too many caches, for the share to resolve to anything a build is served
+// from. Each is a state the zero alone did not catch.
+func nodeBoundUnusableShareCases() []nodeBoundCase {
+	return []nodeBoundCase{
 		{
-			// The control for those two: a node just above its floor still has
-			// room to divide, and the bound must still tighten. Without this the
-			// fix could satisfy the cases above by disabling the node bound
-			// outright, which is the opposite of what it is for.
-			// 21 GiB less the flat 20 GiB floor is 1 GiB of room, a quarter of
-			// it is 268435456 bytes, and 80% of that is the ceiling below —
-			// stated as the number rather than as the formula, so the case pins
-			// the rendered ceiling instead of restating the code it measures.
-			name:         "a node just above its floor still tightens the ceiling",
-			nodeGi:       21,
+			// The reproduction of the residue the zero alone did not catch, and
+			// the smallest node a deployment can declare and still reach this
+			// bound: 21 GiB is one integer GiB above the flat 20 GiB floor, so
+			// `buildCacheNodeGi` cannot carry a node closer to it. Four caches
+			// divide that GiB and the ceiling is 80% of the quarter —
+			// 214748320 bytes, a fifth of a gigabyte.
+			//
+			// That is not a small bound; it is a bound no build is served from.
+			// A warm build is served out of a cache measured in gibibytes, and
+			// the layers one build earns do not fit in a fifth of one — so the
+			// reclaim holds the cache under it on every build and drops what the
+			// next build would have used, which is the zero's outcome reached by
+			// arithmetic that never lands on zero. The old guard asked only
+			// whether the arithmetic had landed on exactly zero, so this
+			// installed.
+			name:                  "a node one GiB above its floor does not install a sub-gigabyte ceiling",
+			nodeGi:                21,
+			coTenants:             4,
+			volumeGi:              50,
+			cacheGi:               45,
+			wantPrunedTo:          40 << 30,
+			wantNodeShareUnusable: true,
+		},
+		{
+			// The same node divided further. The share here is 67108864 bytes
+			// and its ceiling 53687040 — under the rounding `formatGiB` does to
+			// one decimal, the line that reports it says "0.0 GiB allowed",
+			// which is the ceiling the trace itself could not distinguish from
+			// nothing while it was being installed.
+			name:                  "a node one GiB above its floor divided sixteen ways does not install a fifty-megabyte ceiling",
+			nodeGi:                21,
+			coTenants:             16,
+			volumeGi:              50,
+			cacheGi:               45,
+			wantPrunedTo:          40 << 30,
+			wantNodeShareUnusable: true,
+		},
+		{
+			// And divided by a count no node that size holds, where the share
+			// survives the division but the ceiling it resolves to is 800 bytes.
+			// Nothing here bounds anything at that size, and a count this far
+			// from the node it is declared on is the drift the trace names the
+			// count for — but it must not be answered with a ceiling.
+			name:                  "a node one GiB above its floor divided a million ways does not install a byte-scale ceiling",
+			nodeGi:                21,
+			coTenants:             1000000,
+			volumeGi:              50,
+			cacheGi:               45,
+			wantPrunedTo:          40 << 30,
+			wantNodeShareUnusable: true,
+		},
+		{
+			// The same residue on a node with more room to divide, where it
+			// takes more co-tenants to reach it: 12 GiB of room over the floor,
+			// divided sixty-four ways, is a ceiling of 161061200 bytes.
+			name:                  "a thirty-two GiB node divided sixty-four ways does not install a hundred-megabyte ceiling",
+			nodeGi:                32,
+			coTenants:             64,
+			volumeGi:              50,
+			cacheGi:               45,
+			wantPrunedTo:          40 << 30,
+			wantNodeShareUnusable: true,
+		},
+	}
+}
+
+// nodeBoundControlCases are the states that must not move when the bound above
+// does: a share the node still tightens, and a cache every mark leaves alone.
+func nodeBoundControlCases() []nodeBoundCase {
+	return []nodeBoundCase{
+		{
+			// The control the four cases above need: without it, the fix could
+			// satisfy them by disabling the node bound outright, which is the
+			// opposite of what it is for. A 60 GiB node has 40 GiB above its
+			// floor, a quarter of it is 10737418240 bytes, and 80% of that is
+			// the ceiling below — stated as the number rather than as the
+			// formula, so the case pins the rendered ceiling instead of
+			// restating the code it measures.
+			//
+			// What separates this from the rejected cases is not the size of the
+			// node but the size of the share: a cache held to 8 GiB is held to
+			// more than the working set a build is served from, which the cases
+			// above are not.
+			name:         "a node whose share still holds a working set tightens the ceiling",
+			nodeGi:       60,
 			coTenants:    4,
 			volumeGi:     50,
 			cacheGi:      45,
-			wantPrunedTo: 214748320,
+			wantPrunedTo: 8589934560,
+		},
+		{
+			// A large, heavily co-tenanted node: 400 GiB with 8 caches has 360
+			// GiB to divide and installs a 36 GiB ceiling. The case pins that the
+			// usability floor does not grow with the node it is measured on —
+			// a floor stated as a share of the node would reject this share of a
+			// node this size, which is a ceiling nothing is wrong with.
+			name:         "a large node divided many ways still tightens the ceiling",
+			nodeGi:       400,
+			coTenants:    8,
+			volumeGi:     50,
+			cacheGi:      45,
+			wantPrunedTo: 38654705600,
 		},
 		{
 			// A cache inside every mark is left alone, node declared or not:
@@ -269,7 +383,11 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	}
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	// Every loggable line, not only what this verbosity would print: the state
+	// a rejected node budget leaves the run in is reported as a trace, and a
+	// trace nothing captures is the silent fallback this asserts against. The
+	// terminal writers are discarded so each line is captured once.
+	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard).WithTraceSink(logs)}
 	ensureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy,
 		func() (uint64, error) { return tc.volumeGi << 30, nil },
 		func(time.Duration) (uint64, error) { return tc.cacheGi << 30, nil },
@@ -280,6 +398,18 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 			formatGiB(prunedTo), formatGiB(tc.wantPrunedTo), logs.String())
 	}
 	if tc.wantPrunedTo == 0 {
+		return
+	}
+
+	// The state where a node share is in force has one property; the state
+	// where one was refused has another. A refused share is disclosed — the run
+	// says nothing bounds the sum across the node's environments — and that is
+	// the whole of what it may do: the volume share holds, and no ceiling is
+	// invented for it.
+	if tc.wantNodeShareUnusable {
+		if !strings.Contains(logs.String(), "nothing on this run bounds the sum across the node's environments") {
+			t.Fatalf("a node budget that yields no usable share was passed over without saying so; output was %q", logs.String())
+		}
 		return
 	}
 

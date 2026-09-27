@@ -234,15 +234,24 @@ demonstrated:
   `release_disk_headroom.go`.
 - A build cache is bounded per environment by one shape: this environment's share
   of its own docker volume, tightened by its share of the node and never replaced
-  by it (`resolveBuildCacheBound`). A node share that resolves to a ceiling of no
-  bytes is not a small bound — it is `--max-used-space 0`, dropping every earned
-  layer on every build with the ceiling never rising afterwards — so an unusable
-  node budget leaves the volume share in force and is traced rather than acted on.
-  There is deliberately no byte floor to clamp up to: a CPU limit is shared fairly
-  by the kernel, so `RuntimeDindCPULimit` can floor one, while a disk ceiling is
-  space the environment then holds against every other tenant of that node, so
-  inventing room a node has said it does not have re-creates the aggregate defect
-  the node bound exists to remove.
+  by it (`resolveBuildCacheBound`). A node share that resolves to a ceiling too
+  small to hold a working set is not a small bound — the ceiling is what
+  `docker buildx prune --max-used-space` reclaims the cache down to on every
+  build, so a cache held under what a build is served from drops the layers the
+  next build would have used every time it fires, exactly as it does at a ceiling
+  of no bytes — so an unusable node budget leaves the volume share in force and
+  is traced rather than acted on. What is unusable is read off the division the
+  allowance itself came from rather than asserted as a size: the node's room above
+  its reserve is divided among the caches that share it, and that reserve is
+  divided the same way, so a ceiling under this environment's share of the reserve
+  is a cache bounded smaller than the non-cache state beside it on the same disk
+  (`resolveBuildCacheNodeAllowance`). The threshold is a refusal, not a floor to
+  clamp up to: a CPU limit is shared fairly by the kernel, so
+  `RuntimeDindCPULimit` can floor one, while a disk ceiling is space the
+  environment then holds against every other tenant of that node, so inventing
+  room a node has said it does not have re-creates the aggregate defect the node
+  bound exists to remove. Refusing invents nothing; it leaves in force the bound
+  that was already there.
 - The node's co-tenant count is a declared chart value nothing cross-checks: the
   pod's RBAC is namespace-scoped, so it cannot count its own co-tenants. The trace
   reporting a node-derived ceiling names the count it divided by, which is the only
@@ -272,6 +281,14 @@ demonstrated:
   the node, the floor and the volume in hand rather than a fixed number — work out
   which side of it a node falls on before setting the pair, rather than reading the
   declaration itself as a bound in force.
+- A share is also refused where no co-tenant count can make it usable. The floor is
+  divided by the same count the node's room is, so the share is applied only from
+  `2.25 × floor` up, and nowhere below it: while the floor is the flat 20 GiB — every
+  node under 200 GiB — that is 45 GiB, and a node at 21 GiB refuses the share at a
+  count of 1 as surely as at a million. The refusal is the disposal argument above
+  and not the undeclared case: the volume share holds, and the run says the sum
+  across the node went unbounded by it rather than passing over the declaration in
+  silence (`errBuildCacheNodeBudgetUnusable`).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher
