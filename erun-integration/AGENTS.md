@@ -54,6 +54,16 @@ cross-repository structural gates, not production helpers.
 - On Windows, preserve the executable stub runner, NUL-delimited argv transfer,
   and absolute `ERUN_STUB_SH` (the scrubbed PATH cannot discover a shell).
   Keep golden files LF via the narrowly scoped `.gitattributes` entry.
+- A fixture stub server assigns every value its handlers read **before**
+  `Start()`, never from `NewServer`'s return: `NewServer` begins serving before
+  it returns, so a write after it has no happens-before edge to a handler read
+  (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). Only
+  `-race` reports that pair and `scripts/integration-test.sh` does not run with
+  it, so a probe pinning it drives the request from a separate `curl` process --
+  an in-process client's own netpoll round trip orders the two accesses and
+  hides the race. That makes `curl` a host prerequisite of this suite, in the
+  image test stage's base like git and tar. See
+  `exec_test.go::TestGithubRulesetStubServerAssignsItsURLBeforeItServes`.
 - For shared fixture/harness changes, validate on Linux as well as the local host;
   local success must not depend on tools absent from the image test stage.
 

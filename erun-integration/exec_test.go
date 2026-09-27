@@ -2914,10 +2914,55 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 	mux.HandleFunc("GET /repos/sophium/erun/collaborators/{login}/permission", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"permission":"` + opts.QueuePermission + `"}`))
 	})
-	server := httptest.NewServer(mux)
+	// Assign the URL before Start: httptest.NewServer begins serving before it
+	// returns, so writing server.URL afterwards has no happens-before edge with
+	// the handler goroutines that read it. The listener address is fixed when it
+	// is allocated, so this is the same URL NewServer would report.
+	server := httptest.NewUnstartedServer(mux)
+	serverURL = "http://" + server.Listener.Addr().String()
+	server.Start()
 	t.Cleanup(server.Close)
-	serverURL = server.URL
 	return server
+}
+
+// TestGithubRulesetStubServerAssignsItsURLBeforeItServes pins the ordering
+// githubRulesetStubServer's page-1 handler depends on: it builds the Link header
+// out of the captured serverURL, and httptest.NewServer returns only after its
+// serving goroutine exists, so assigning serverURL from server.URL afterwards
+// has no happens-before edge to that handler's read. Run with -race the two
+// accesses are reported as a data race -- read at the Link header line, previous
+// write at the assignment -- which is the state this test exists to catch. The
+// merge gate's integration suite does not run -race; this test runs there for
+// its behavioral half and needs `go test -race` for its race half.
+//
+// The probe's client is deliberately a process of its own. An in-process client
+// is ordered by the netpoll round trip that carries the request -- the test
+// goroutine writes serverURL and then blocks in the same poller that wakes the
+// server's accept -- and every in-process shape of this probe is silent, which
+// is why the scenarios that use this stub never surfaced the race either. A
+// foreign process shares no such edge.
+//
+// The pair of requests is deliberate too: as the first stub a process builds
+// the probe is silent even with an out-of-process client, and from the second
+// on it reports the pair deterministically. Both requests are asserted, so the
+// probe cannot pass by never reaching the read, and pinning the Link header to
+// the server's own URL is also what establishes that the address the fix
+// assigns from is the URL NewServer would have reported.
+func TestGithubRulesetStubServerAssignsItsURLBeforeItServes(t *testing.T) {
+	curl, err := osexec.LookPath("curl")
+	if err != nil {
+		t.Fatalf("this probe needs curl as an out-of-process HTTP client: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		server := githubRulesetStubServer(t, githubRulesetStubOptions{})
+		out, err := harnessexec.Command(curl, "-sS", "-i", server.URL+"/repos/sophium/erun/rulesets/rule-suites").CombinedOutput()
+		if err != nil {
+			t.Fatalf("request %d: %v\n%s", attempt, err, out)
+		}
+		if want := "Link: <" + server.URL + "/repos/sophium/erun/rulesets/rule-suites?page=2>"; !strings.Contains(string(out), want) {
+			t.Fatalf("request %d: response does not carry %q:\n%s", attempt, want, out)
+		}
+	}
 }
 
 // gateRunsStubServer answers the one platform call reconcile-bypass makes:
