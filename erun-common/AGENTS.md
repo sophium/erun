@@ -289,6 +289,19 @@ demonstrated:
   and not the undeclared case: the volume share holds, and the run says the sum
   across the node went unbounded by it rather than passing over the declaration in
   silence (`errBuildCacheNodeBudgetUnusable`).
+- That gate bounds the node and not the ceiling, so it is a floor on the node rather
+  than on the bound: above `2.25 × floor` no co-tenant count is refused, however
+  small the ceiling it resolves to, because the comparison is between the ceiling and
+  `floor / coTenants` and both are divided by the same count. A 100 GiB node
+  declaring 1000 co-tenants installs a 68,719,440-byte ceiling — between the
+  53,687,040 and 214,748,320 bytes the cases above refuse as holding no working set —
+  since the gate weighs it against 21,474,836 bytes and it is the larger. Closing
+  that would need a measured working-set floor, which the design deliberately does
+  not assert, and refusing the share instead leaves every declared co-tenant
+  unbounded by the node — the aggregate defect this bound exists to remove. The
+  operator's remedy is the declaration: a count that shrinks the share that far is a
+  count the node cannot be holding, and nothing in the pod can check it
+  (`build_cache_node_bound_test.go`).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher
