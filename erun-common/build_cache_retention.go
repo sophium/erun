@@ -79,6 +79,139 @@ func resolveBuildCacheBounds(volumeBytes uint64) buildCacheBounds {
 	}
 }
 
+// A share of one environment's own volume is not a bound on the node. Four
+// environments each honouring their own 80% of a declared 50 GiB volume hold
+// 160 GiB between them, and every one of them is inside its own ceiling while
+// the node fills: the sum is what crosses the eviction threshold, and nothing
+// here ever looked at it. The volume share says how much of *what this
+// environment was sized for* it may keep; it cannot say how much of the node
+// that is.
+//
+// So the ceiling is additionally bounded by the node's disk, divided among the
+// environments whose caches share it. Both inputs travel as environment
+// variables for the same reason the volume's does, and neither is discoverable
+// from inside the pod: the node's tenants are invisible to it — its RBAC is
+// namespace-scoped, so it cannot list the other environments, let alone count
+// them — and a node-local, quota-less claim reports the node's capacity rather
+// than its own size. The count has to be stated by whoever knows the node, not
+// inferred by each tenant guessing at the others.
+const (
+	buildCacheNodeBytesEnv = "ERUN_BUILD_CACHE_NODE_BYTES"
+	buildCacheCoTenantsEnv = "ERUN_BUILD_CACHE_CO_TENANTS"
+)
+
+// resolveBuildCacheNodeAllowance is the most one environment's build cache may
+// hold once the node's own disk floor is set aside and what is left is divided
+// among the environments whose caches share it.
+//
+// The reserve it withholds is the disk-headroom floor's own answer, taken from
+// the same function that decides when a build refuses and when a prune runs, so
+// a cache cannot be bounded to a size that walks the node onto the threshold
+// that floor exists to hold it off. Dividing what is left is the whole point: a
+// per-environment bound that does not account for how many environments share
+// the node bounds nothing, because the sum of the parts is the only figure
+// kubelet ever evicts on.
+//
+// A node at or below its own floor has nothing left to divide, and a co-tenant
+// count below one is not a count. Neither yields an allowance, and the caller
+// falls back to the volume share alone rather than reclaiming against an
+// invented number.
+func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) uint64 {
+	if coTenants < 1 {
+		return 0
+	}
+	floor := resolveMinDiskHeadroomBytes(nodeBytes)
+	if nodeBytes <= floor {
+		return 0
+	}
+	return (nodeBytes - floor) / uint64(coTenants)
+}
+
+// errNoBuildCacheNodeBudget is the state of an environment whose deployment has
+// said nothing about the node it lives on. It is the one failure here that is
+// not news: it is how every environment ran before this bound existed, and the
+// volume share above still applies to it unchanged. Only a declaration that is
+// present and unusable is a deployment mistake worth tracing.
+var errNoBuildCacheNodeBudget = errors.New("this environment declares no node build-cache budget")
+
+// declaredBuildCacheNodeAllowance reads the node's disk and the number of
+// environments sharing it.
+//
+// Both are plain environment reads, so unlike the docker-daemon readings they
+// are taken directly rather than injected — the same reason the disk floor
+// reads its own override where it resolves it. There is no daemon behind them
+// and nothing non-deterministic to substitute.
+//
+// A node size with no co-tenant count is an incomplete declaration, not a count
+// of one. Assuming one would hand a single environment the node's whole cache
+// budget, which is precisely the unbounded shape this bound exists to remove.
+func declaredBuildCacheNodeAllowance() (uint64, error) {
+	nodeRaw := strings.TrimSpace(os.Getenv(buildCacheNodeBytesEnv))
+	coTenantsRaw := strings.TrimSpace(os.Getenv(buildCacheCoTenantsEnv))
+	if nodeRaw == "" && coTenantsRaw == "" {
+		return 0, fmt.Errorf("%w (%s is unset)", errNoBuildCacheNodeBudget, buildCacheNodeBytesEnv)
+	}
+	nodeBytes, err := strconv.ParseUint(nodeRaw, 10, 64)
+	if err != nil || nodeBytes == 0 {
+		return 0, fmt.Errorf("%s=%q is not a positive byte count", buildCacheNodeBytesEnv, nodeRaw)
+	}
+	coTenants, err := strconv.Atoi(coTenantsRaw)
+	if err != nil || coTenants < 1 {
+		return 0, fmt.Errorf("%s=%q is not a positive co-tenant count", buildCacheCoTenantsEnv, coTenantsRaw)
+	}
+	return resolveBuildCacheNodeAllowance(nodeBytes, coTenants), nil
+}
+
+// buildCacheBound is the ceiling this environment's build cache is held to,
+// together with the wording that names what it was derived from. The two
+// wordings are carried rather than re-derived at each message because a ceiling
+// that came from the node and one that came from the volume's declared size are
+// different bounds with different remedies, and an operator reading either line
+// has to be able to tell which one is in force.
+type buildCacheBound struct {
+	bounds buildCacheBounds
+	// allowedOn names the source of the ceiling, as the subject of a sentence.
+	allowedOn string
+	// reclaimedFrom is the possessive that follows it.
+	reclaimedFrom string
+}
+
+// resolveBuildCacheBound is the ceiling for this environment: a share of the
+// docker volume it was given, tightened by its share of the node its co-tenants
+// also build on.
+//
+// The node's bound is applied on top of the volume's and never instead of it,
+// so it can only tighten the ceiling. An environment that declares no node
+// budget, or whose share of the node is still larger than the volume it was
+// given, keeps exactly the bound it had before — which is why the volume's own
+// wording is returned unchanged for that case.
+func resolveBuildCacheBound(ctx Context, policy diskHeadroomPolicy, volumeBytes uint64) buildCacheBound {
+	volume := resolveBuildCacheBounds(volumeBytes)
+	bound := buildCacheBound{
+		bounds:        volume,
+		allowedOn:     fmt.Sprintf("this environment's %s docker volume", formatGiB(volumeBytes)),
+		reclaimedFrom: "that volume's",
+	}
+	allowance, err := declaredBuildCacheNodeAllowance()
+	if err != nil {
+		// A node budget declared but unusable is a deployment mistake: it leaves
+		// the aggregate unbounded by the node while looking like it is bounded,
+		// so it is named rather than passed over. No declaration at all is the
+		// state every environment was in before this bound existed, and stays
+		// quiet.
+		if !errors.Is(err, errNoBuildCacheNodeBudget) {
+			ctx.Trace(fmt.Sprintf("%s: this environment's share of the node's disk is unusable (%s); its build cache is bounded by its docker volume alone, and nothing on this run bounds the sum across the node's environments", policy.label, err))
+		}
+		return bound
+	}
+	if fromNode := resolveBuildCacheBounds(allowance); fromNode.ceiling < volume.ceiling {
+		bound.bounds = fromNode
+		bound.allowedOn = fmt.Sprintf("the %s this environment is allowed of the node, divided among the build caches that share it", formatGiB(allowance))
+		bound.reclaimedFrom = "that share's"
+	}
+	return bound
+}
+
 // errNoDockerVolume is the expected state of an environment that has no docker
 // volume to bound: a runtime env runs no dind sidecar, and a host build runs
 // against a daemon nobody declared a size for. It is separated from the other
@@ -188,17 +321,18 @@ func ensureBuildCacheRetentionWith(
 		return
 	}
 
-	bounds := resolveBuildCacheBounds(volume)
-	ctx.Trace(fmt.Sprintf("%s: the build cache holds %s of the %s allowed on this environment's %s docker volume",
-		policy.label, formatGiB(cacheBytes), formatGiB(bounds.ceiling), formatGiB(volume)))
+	bound := resolveBuildCacheBound(ctx, policy, volume)
+	bounds := bound.bounds
+	ctx.Trace(fmt.Sprintf("%s: the build cache holds %s of the %s allowed on %s",
+		policy.label, formatGiB(cacheBytes), formatGiB(bounds.ceiling), bound.allowedOn))
 
 	if cacheBytes < bounds.warning {
 		return
 	}
 	if cacheBytes < bounds.ceiling {
-		ctx.Info(fmt.Sprintf("warning: the build cache holds %s, past the %s mark on this environment's %s docker volume; "+
-			"it is reclaimed down to that volume's %s ceiling automatically, and until then it is space this environment holds against every other tenant of the node",
-			formatGiB(cacheBytes), formatGiB(bounds.warning), formatGiB(volume), formatGiB(bounds.ceiling)))
+		ctx.Info(fmt.Sprintf("warning: the build cache holds %s, past the %s mark on %s; "+
+			"it is reclaimed down to %s %s ceiling automatically, and until then it is space this environment holds against every other tenant of the node",
+			formatGiB(cacheBytes), formatGiB(bounds.warning), bound.allowedOn, bound.reclaimedFrom, formatGiB(bounds.ceiling)))
 		return
 	}
 
