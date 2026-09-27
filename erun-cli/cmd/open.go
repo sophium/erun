@@ -903,6 +903,11 @@ type nopWriteCloser struct{ io.Writer }
 
 func (nopWriteCloser) Close() error { return nil }
 
+// UnwrapWriter exposes the adapted stream so a check that has to know what the
+// bytes land on -- the prompt's echo suppression -- can see past the adapter to
+// the file underneath it.
+func (w nopWriteCloser) UnwrapWriter() io.Writer { return w.Writer }
+
 // promptStderr targets the confirm render at the process's real stderr (the same
 // TTY as stdout), wrapped so promptui cannot close it.
 func promptStderr() io.WriteCloser { return nopWriteCloser{os.Stderr} }
