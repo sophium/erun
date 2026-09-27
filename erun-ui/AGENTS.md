@@ -196,6 +196,19 @@ Keep dialog focus restoration, narrow live announcements, and consistent sidebar
 activity/status indicators. Expected blocks are status notices; attempted failures
 are alerts.
 
+**The diff panel's line-comment affordance belongs to the line the reader
+pointed at, not to the pixels under the pointer.** The panel re-reads `LoadDiff`
+on its own timer, and an answer that renders the change differently moves that
+row out from under a stationary reader. The reveal is therefore held as state in
+`DiffEnvSectionBody` (`DiffList.tsx`), keyed by the line's own environment, file
+and number, and released by `pointermove` — never by the row's `pointerout` /
+`pointerleave`. Measured: a re-read that moves the row fires `pointerleave`
+(4 on the nested elements) with **zero** `pointermove`, so a boundary-event
+release reproduces the strand exactly. `review-diff-line-comment.spec.ts` pins
+it ("the affordance the reader revealed survives a re-read of the diff"); that
+case performs one pointer movement and must never re-hover to recover, since
+re-issuing the hover passes on the unfixed code.
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.

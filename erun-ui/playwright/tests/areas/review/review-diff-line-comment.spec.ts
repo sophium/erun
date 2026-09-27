@@ -212,21 +212,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // persistent per-line icon would compete with the code it discusses.
     const action = app.page.getByRole('button', { name: 'Comment on line 1 of main.go' });
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
-    // Hover and read in ONE re-drivable block. The reveal is the row's own
-    // `:hover`, so it lives exactly as long as the pointer overlaps that row:
-    // the panel re-reads the diff on its own timer, and a re-render that moves
-    // the row out from under the pointer takes the reveal with it, leaving
-    // nothing on the page to converge on -- see the grown-diff case below,
-    // which pins that. Re-issuing the hover is what recovers it, so the block
-    // re-drives the pointer instead of only re-reading its result. Bare
-    // toPass(): the block converges for as long as this test says it may,
-    // never on a second bound of its own. The inner caps are not that bound --
-    // they only return a failed attempt to the block promptly so it can try
-    // again, the shape the sidebar's own hover blocks use.
-    await expect(async () => {
-      await app.page.getByText('package main').hover({ timeout: 2_000 });
-      await expect(action).toHaveCSS('opacity', '1', { timeout: 2_000 });
-    }).toPass();
+    await app.page.getByText('package main').hover();
+    // The reveal is the hover's own render, so it converges on this test's
+    // declared budget rather than on expect's 10s default.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
     await action.click();
     await expect(
@@ -405,24 +394,26 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     }
   });
 
-  // The reveal is produced by the pointer being over the row, not by anything
-  // the test can wait on after the fact: it is the row's own `:hover`, so it
-  // lives exactly as long as the pointer overlaps that row. The panel re-reads
-  // LoadDiff on its own timer -- that is what the refresh is for, the diff it
-  // is showing can change while it is on screen -- and an answer that renders
-  // the change differently carries the row out from under a resting pointer.
-  // The reveal is then gone, and there is nothing left on the page for a clock
-  // to converge on: the pointer is simply somewhere else. An observation taken
-  // by a single one-shot hover() followed by a bounded read is stranded there,
-  // which is the rule playwright/AGENTS.md § "Working Rules" already states for
-  // hover-produced state ("keep observations in one re-drivable toPass block"),
-  // applied to this panel's own affordance.
+  // The reveal belongs to the line the reader pointed at, not to whatever
+  // pixels the pointer happens to be over: the panel re-reads LoadDiff on its
+  // own timer -- that is what the refresh is for, the diff it is showing can
+  // change while it is on screen -- and an answer that renders the change
+  // differently carries that row somewhere else. A reveal that tracked only the
+  // pointer's position is gone there, and nothing on the page brings it back:
+  // the pointer has not moved, so there is no second hover to produce it and no
+  // clock that converges on it. The invariant this pins is the operator's --
+  // the affordance the reader revealed survives the re-read -- so the case
+  // performs exactly one pointer movement and never re-issues the hover after
+  // the panel has re-read. Re-driving the pointer is the recovery the app is
+  // supposed to supply by itself, and asserting through it would pass on the
+  // pre-fix code for the wrong reason.
   //
   // The shift is injected by this spec's own LoadDiff stub answering a grown
   // diff, rather than by loading the machine, so the reproduction is
-  // deterministic on a quiet host. Pre-fix this case reds at the budget with
-  // the pointer resting over the hunk the panel has just grown above the row.
-  test('the affordance is re-observed when the panel re-renders under the pointer', async ({
+  // deterministic on a quiet host. Pre-fix this case reds with the reveal
+  // stranded at "0" while the pointer rests over the hunk the panel has just
+  // rendered above the row.
+  test('the affordance the reader revealed survives a re-read of the diff', async ({
     app,
     page,
     seededEnv,
@@ -445,6 +436,10 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
 
     const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
+
+    // The reader reveals the affordance. This is the only pointer movement in
+    // this case; every assertion below it reads a state the app produced on its
+    // own.
     await page.getByText('package main').hover();
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
 
@@ -452,21 +447,62 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // hunk above this row and carries the row out from under the pointer.
     grown = true;
     await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
-    // Assert the stranded state before recovering from it, rather than assuming
-    // it: the reveal was hovering when the row moved, and it decays to nothing
-    // once the pointer no longer overlaps it. Converging here is what makes the
-    // case deterministic -- the state it converges on is permanent, so the read
-    // cannot catch a mid-transition frame and call it a pass.
+
+    // The pointer is still where the reader left it, and the affordance the
+    // reader revealed is still revealed -- on the line it was revealed for.
+    // Converging here is what makes the case deterministic: the read follows the
+    // reflow that moved the row, so it cannot catch a mid-transition frame.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+  });
+
+  // The other half of the same contract, and the reason the reveal is held as
+  // panel state rather than left to the row's own `:hover`: a reveal that
+  // outlived the reader's own pointer for good would be its own defect, so the
+  // pointer moving is what re-derives it -- from whatever is under it now, not
+  // from where it used to be. After a re-read has moved the row that means the
+  // line under the pointer decides, which is the state the panel starts from
+  // and the one the reader can act on. The case reads `1` across the re-read
+  // before it moves at all, so it fails on the unfixed code for the reason the
+  // case above fails, and then pins what recovery from there looks like.
+  test('the affordance is re-observed when the panel re-renders under the pointer', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    let grown = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, grown ? DIFF_GROWN : DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await page.getByText('package main').waitFor({ state: 'visible' });
+
+    const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    grown = true;
+    await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    // The reader moves onto the hunk the re-read rendered above the row. The
+    // reveal is released, because the line under the pointer now offers no
+    // affordance at all -- held state, but never held against the reader.
+    await page.getByText('index 1111111..2222222').hover();
     await expect(action).toHaveCSS('opacity', '0', withTestBudget());
 
-    // One re-drivable block: re-issue the hover and read the state it produces.
-    // Nothing on the page re-applies the reveal by itself -- the row reports
-    // opacity 0 for as long as the pointer is not over it -- so re-driving the
-    // pointer is the only thing that makes this observation recoverable.
-    await expect(async () => {
-      await page.getByText('package main').hover({ timeout: 2_000 });
-      await expect(action).toHaveCSS('opacity', '1', { timeout: 2_000 });
-    }).toPass();
+    // And moving back re-derives it for the line under the pointer, which the
+    // re-read left at the number it had.
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
   });
 
   // The line-comment affordance exists only once the panel has rendered the

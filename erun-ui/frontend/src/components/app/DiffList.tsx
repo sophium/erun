@@ -2,12 +2,7 @@ import { Button, cn } from 'erun-kit';
 import { AlertCircle, CheckCircle2, Copy, Info, Play, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
-import {
-  compactDiffError,
-  diffLineMark,
-  diffReviewCommitCount,
-  visibleDiffFilePaths,
-} from '@/app/diffUtils';
+import { compactDiffError, diffReviewCommitCount, visibleDiffFilePaths } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reachabilityCopy, type ReachabilityKind, reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect, selectReviewRange } from '@/app/reviewThunks';
@@ -17,8 +12,8 @@ import { useEnvDiffSlot } from '@/app/useEnvDiffSlot';
 import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import type { DiffFile, DiffHunk, DiffResult } from '@/types';
 
-import { DiffLineCommentAction } from './DiffList.CommentAction';
 import { DiffEnvSectionHeader } from './DiffList.EnvSectionHeader';
+import { DiffLineRow } from './DiffList.LineRow';
 
 export function DiffList(): React.ReactElement {
   const targets = useAppSelector(selectReviewTargets);
@@ -100,6 +95,14 @@ function DiffEnvSectionBody({
   selectedDiffPath: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
+  // The line whose comment affordance the reader has revealed. It lives here,
+  // not in the row, because the row is not what the reveal belongs to: the
+  // panel re-reads the diff on its own timer and an answer that renders the
+  // change differently moves that row. Held by the line's own identity it
+  // survives the re-read; this is the nearest owner that stays mounted across
+  // one, since the rows below it are re-keyed by content and can remount.
+  const [revealedLine, setRevealedLine] = React.useState('');
+  useRevealTracking(setRevealedLine);
   if (slot.loading) {
     return <ReviewStatus>Loading diff...</ReviewStatus>;
   }
@@ -152,10 +155,34 @@ function DiffEnvSectionBody({
           selected={diffPathKey(target.envKey, file.path) === selectedDiffPath}
           commitHash={commitHash}
           tenant={targetTenant(target)}
+          revealedLine={revealedLine}
         />
       ))}
     </>
   );
+}
+
+// useRevealTracking keeps the revealed line following the reader's pointer, and
+// only the reader's pointer. It listens for pointer *movement* rather than for
+// the boundary events of the row the pointer is over, because a re-read that
+// renders the change differently moves that row out from under a stationary
+// pointer and the browser synthesises pointerout/pointerleave for it while no
+// pointermove ever fires. Releasing on those boundary events is exactly the
+// loss this state exists to prevent, so the reveal outlives them; the next
+// genuine movement re-derives it from whatever is under the pointer, which is
+// the line the native hover is showing too.
+function useRevealTracking(setRevealedLine: (key: string) => void): void {
+  React.useEffect(() => {
+    const track = (event: PointerEvent): void => {
+      const under =
+        event.target instanceof Element ? event.target.closest('[data-reveal-key]') : null;
+      setRevealedLine(under?.getAttribute('data-reveal-key') ?? '');
+    };
+    window.addEventListener('pointermove', track);
+    return () => {
+      window.removeEventListener('pointermove', track);
+    };
+  }, [setRevealedLine]);
 }
 
 // targetTenant is the tenant a target's platform affordances anchor to, and "" for
@@ -375,12 +402,14 @@ function DiffFileView({
   selected,
   commitHash,
   tenant,
+  revealedLine,
 }: {
   file: DiffFile;
   envKey: string;
   selected: boolean;
   commitHash: string;
   tenant: string;
+  revealedLine: string;
 }): React.ReactElement {
   return (
     <section
@@ -409,6 +438,8 @@ function DiffFileView({
             filePath={file.path}
             commitHash={commitHash}
             tenant={tenant}
+            envKey={envKey}
+            revealedLine={revealedLine}
           />
         ))
       )}
@@ -421,11 +452,15 @@ function DiffHunkView({
   filePath,
   commitHash,
   tenant,
+  envKey,
+  revealedLine,
 }: {
   hunk: DiffHunk;
   filePath: string;
   commitHash: string;
   tenant: string;
+  envKey: string;
+  revealedLine: string;
 }): React.ReactElement {
   const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
   const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
@@ -443,43 +478,15 @@ function DiffHunkView({
         style={style}
       >
         {(hunk.lines ?? []).map((line, index) => (
-          <div
+          <DiffLineRow
             key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
-            className={cn(
-              'group grid min-h-5 w-max min-w-full grid-cols-[22px_48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
-              line.kind === 'add' && 'bg-diff-add',
-              line.kind === 'delete' && 'bg-diff-delete',
-              line.kind === 'meta' && 'bg-muted text-muted-foreground',
-            )}
-          >
-            {/* Leads the row: a trailing column sits past the content width, so
-                on any diff wider than the panel the affordance was only
-                reachable by scrolling right. */}
-            {/* A line comment anchors to a hosted review record on the tenant's
-                platform, so it is offered only where there is a tenant to anchor
-                to. A directory has none (that is what makes it a directory
-                rather than an environment), and an affordance that opened a
-                tenant-scoped dialog with no tenant would be worse than its
-                absence. */}
-            {tenant === '' ? null : (
-              <DiffLineCommentAction
-                filePath={filePath}
-                line={line}
-                commitHash={commitHash}
-                tenant={tenant}
-              />
-            )}
-            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.oldLine ?? ''}
-            </span>
-            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.newLine ?? ''}
-            </span>
-            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit text-center text-foreground">
-              {diffLineMark(line.kind)}
-            </span>
-            <span className="min-w-0 whitespace-pre pr-4">{line.content || ' '}</span>
-          </div>
+            line={line}
+            filePath={filePath}
+            commitHash={commitHash}
+            tenant={tenant}
+            envKey={envKey}
+            revealedLine={revealedLine}
+          />
         ))}
       </div>
     </div>
