@@ -3,6 +3,7 @@ package main
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -22,6 +23,56 @@ func newStaleShellTestApp() *App {
 // what keeps the assertions deterministic instead of won against the reader.
 func addStaleShellSession(app *App, serial int, startedAt time.Time) (*managedTerminal, *stubTerminalSession) {
 	session := newStubTerminalSession()
+	session.pid = serial
+	managed := &managedTerminal{
+		session:   session,
+		key:       "extra\x00" + strconv.Itoa(serial),
+		serial:    serial,
+		kind:      sessionKindCommand,
+		startedAt: startedAt,
+	}
+	app.mu.Lock()
+	app.sessions[managed.key] = managed
+	app.mu.Unlock()
+	return managed, session
+}
+
+// reapedShellSession is a terminalSession whose process is already gone while
+// its PTY is still open and the session is still registered — the state the
+// detector exists to surface, and the state the drawer offers Kill against. A
+// shell reaches it by being signalled, OOM-killed, or losing its exec stream
+// without any desktop close path claiming the exit. The shared stub's only lever
+// for a dead process is Close, which cannot express "dead before anything closed
+// it", so the probe's answer is pinned directly here.
+type reapedShellSession struct {
+	*stubTerminalSession
+	mu    sync.Mutex
+	alive bool
+}
+
+// newReapedShellSession starts already dead: the reaping happened before any
+// close path ran, which is what makes the session stale.
+func newReapedShellSession() *reapedShellSession {
+	return &reapedShellSession{stubTerminalSession: newSilentStubTerminalSession()}
+}
+
+func (s *reapedShellSession) Alive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.alive
+}
+
+// Close tears the PTY down without resurrecting the process: a close on a
+// session whose process is already reaped does not change the probe's answer.
+func (s *reapedShellSession) Close() error {
+	return s.stubTerminalSession.Close()
+}
+
+// addReapedShellSession registers a session whose process is already gone, with
+// a caller-chosen start time so the freshly-started grace window is a parameter
+// rather than a sleep.
+func addReapedShellSession(app *App, serial int, startedAt time.Time) (*managedTerminal, *reapedShellSession) {
+	session := newReapedShellSession()
 	session.pid = serial
 	managed := &managedTerminal{
 		session:   session,
@@ -117,5 +168,66 @@ func TestAFreshlyStartedSessionIsHeldOutOfTheStaleDetector(t *testing.T) {
 
 	if snapshots := app.collectStaleSessionSnapshots(); len(snapshots) != 0 {
 		t.Fatalf("a freshly started session was reported stale: %+v", snapshots)
+	}
+}
+
+// TestKillingAStaleSessionDoesNotQueueItAgain covers the detector's own button.
+// KillSession is what the drawer puts in front of the operator for a shell the
+// detector reports as dead, and it closed that PTY without marking the session
+// closed or removing it from the registry — the same unmarked close the tab
+// close was fixed for. By the time the button lands the process is already
+// reaped, so the next detector pass found the same registered session, asked the
+// probe, read "not alive", and re-queued the entry the button had just
+// dismissed: the row the operator killed came straight back.
+func TestKillingAStaleSessionDoesNotQueueItAgain(t *testing.T) {
+	app := newStaleShellTestApp()
+	managed, session := addReapedShellSession(app, 51, aStaleShellSessionAge())
+
+	// The entry the Kill button belongs to, produced the way production produces
+	// it: one detector pass over the reaped shell.
+	app.reconcileStaleShellsOnce()
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+		t.Fatalf("precondition: the detector must report the reaped shell before Kill is offered")
+	}
+
+	if !app.KillSession(managed.serial) {
+		t.Fatalf("KillSession(%d) found no session to kill", managed.serial)
+	}
+	if session.Alive() {
+		t.Fatalf("the session read alive after KillSession")
+	}
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); ok {
+		t.Fatalf("KillSession did not dismiss the entry it was pressed on")
+	}
+
+	// The next pass is the reproduction: the session the operator just killed is
+	// reaped and still registered, which is precisely what the detector reports
+	// on, so without the close claiming it the row comes straight back.
+	app.reconcileStaleShellsOnce()
+	if entry, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); ok {
+		t.Fatalf("a session the operator killed was re-queued as stale: %q", entry.Error)
+	}
+}
+
+// TestKillSessionForAnUnknownSerialLeavesTheDetectorAlone is the control for the
+// test above: the mark the fix adds must be what suppresses the report, and a
+// Kill that finds no session must claim nothing. The dead shell stays reported
+// through a Kill aimed at another serial, so a dead shell nothing has claimed is
+// still surfaced.
+func TestKillSessionForAnUnknownSerialLeavesTheDetectorAlone(t *testing.T) {
+	app := newStaleShellTestApp()
+	managed, _ := addReapedShellSession(app, 52, aStaleShellSessionAge())
+
+	app.reconcileStaleShellsOnce()
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+		t.Fatalf("precondition: the detector must report the dead shell")
+	}
+	if app.KillSession(9999) {
+		t.Fatalf("KillSession reported a session for a serial it holds none for")
+	}
+
+	app.reconcileStaleShellsOnce()
+	if _, ok := app.activityQueue.findByID(staleShellActivityID(managed.serial)); !ok {
+		t.Fatalf("a dead shell no Kill landed on must stay reported as stale")
 	}
 }

@@ -132,6 +132,15 @@ func (a *App) removeRecoveredStaleShellActivities(stillStale map[string]struct{}
 
 // KillSession backs the activity drawer's Kill button: it terminates a stale
 // session and dismisses its queue entry.
+//
+// The session is marked closed under a.mu before its PTY is touched, the same
+// discipline every other deliberate teardown follows. Kill is the operator
+// ending this session on purpose, and the process is generally already reaped
+// by the time the button lands: without the mark the detector's next pass finds
+// the session still registered, asks the probe, reads "not alive", and surfaces
+// the entry the button just dismissed. The reader still finalizes the exit,
+// because a marked close reports its exit rather than going quiet
+// (finalizeDeliberateClose).
 func (a *App) KillSession(serial int) bool {
 	if serial <= 0 {
 		return false
@@ -144,12 +153,14 @@ func (a *App) KillSession(serial int) bool {
 			break
 		}
 	}
-	a.mu.Unlock()
 	if managed == nil {
+		a.mu.Unlock()
 		return false
 	}
-	if managed.session != nil {
-		_ = managed.session.Close()
+	session := a.closeManagedLocked(managed)
+	a.mu.Unlock()
+	if session != nil {
+		_ = session.Close()
 	}
 	id := staleShellActivityID(serial)
 	if a.activityQueue != nil {
