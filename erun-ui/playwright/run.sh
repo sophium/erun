@@ -411,16 +411,40 @@ binary_age() {
 }
 
 # Mirrors what build.sh actually reads to produce $BIN_PATH: this module's
-# own Go sources (top-level + headlessserver), erun-common (unioned in via
+# own Go sources and the Windows resource objects linked into it, the release
+# version stamped in from erun-devops/VERSION, erun-common (unioned in via
 # go.work and imported directly, including the assets it go:embeds), and
 # the frontend project's source plus the build config `wails generate
-# module` / `yarn build` consume. Each find is guarded so a missing
+# module` / `yarn build` consume.
+#
+# The rule is "every tree compiled into the binary", not "every path in the
+# repository". That makes this module's own half a whole-tree walk rather
+# than a hand-list of packages: a package under erun-ui/ joins the module the
+# moment it exists, while a list naming only the packages someone happened to
+# list the day they wrote it stops covering the module in silence. The walk
+# is pruned where the tree is not compiled into erun-app — installed
+# node_modules, and the suite's own project, whose fixtures live in their own
+# Go module (playwright/fixtures/winstub) and are built by nothing this script
+# builds. Where the walk is wider than the compiler — a package nothing
+# imports yet — the cost is one rebuild, which is the direction this scan
+# errs in: never a reused binary.
+#
+# wails.json and frontend/vite-env.d.ts are deliberately not listed: the
+# former only keys generate-wailsjs.sh's binding cache, which re-emits the
+# same bindings from unchanged Go types, and the latter is a type-only
+# reference `tsc --noEmit` reads and `vite build` does not, so neither changes
+# a byte of what the binary embeds. Each find is guarded so a missing
 # directory can't trip `set -e` and abort the whole script.
 find_stale_binary_sources() {
-	find "$ERUN_UI_DIR" -maxdepth 1 -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
-	find "$ERUN_UI_DIR/headlessserver" -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR" \
+		\( -name node_modules -o -name playwright \) -prune -o \
+		\( -name '*.go' -o -name '*.syso' \) -type f -newer "$BIN_PATH" -print 2>/dev/null || true
 	find "$ERUN_UI_DIR/../erun-common" -name '*.go' -newer "$BIN_PATH" -print 2>/dev/null || true
 	find "$ERUN_UI_DIR/../erun-common/assets" -type f -newer "$BIN_PATH" -print 2>/dev/null || true
+	# build.sh stamps erun-devops/VERSION into the binary as main.buildVersion,
+	# so a rebase onto a release bump rewrites this file while the binary keeps
+	# the version it was built with.
+	find "$ERUN_UI_DIR/../erun-devops/VERSION" -newer "$BIN_PATH" -print 2>/dev/null || true
 	find "$ERUN_UI_DIR/frontend/src" -type f -newer "$BIN_PATH" -print 2>/dev/null || true
 	find "$ERUN_UI_DIR/frontend/index.html" "$ERUN_UI_DIR/frontend/vite.config.ts" \
 		"$ERUN_UI_DIR/frontend/package.json" "$ERUN_UI_DIR/frontend/tsconfig.json" \
