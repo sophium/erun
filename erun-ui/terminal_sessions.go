@@ -1024,7 +1024,15 @@ func (a *App) CloseSession(sessionID int) error {
 	if endRemote {
 		go a.endRemoteAppSession(endSelection, endID)
 	}
-	return managed.session.Close()
+	// Route the teardown through closeManaged so this session is marked closed
+	// under a.mu before its PTY is touched, the same way every other deliberate
+	// teardown in this file does. The stale-shell detector reads that mark: the
+	// process is already reaped the moment the close lands, so without it a
+	// session the operator just closed is offered to the detector and reported
+	// as a shell that exited unexpectedly. The mark claims the exit, it does not
+	// swallow it — the reader still emits the terminal-exit and deregisters the
+	// session, from whichever arm it reaches first (see finalizeDeliberateClose).
+	return a.closeManaged(managed)
 }
 
 // CloseEnvironmentSessions tears down every managed PTY bound to the
@@ -1246,6 +1254,15 @@ func (a *App) streamSession(managed *managedTerminal) {
 	for {
 		current := a.currentSessionFor(managed)
 		if current == nil {
+			// A deliberate teardown marks the session closed before it touches
+			// the PTY (closeManaged), so this is where a reader lands when that
+			// mark lands between iterations rather than during a Read — which
+			// is certain when the close is re-entered from inside
+			// handleSessionOutput. The mark is not a claim that there is
+			// nothing to report: the close is an exit like any other, and it
+			// still owes the terminal-exit event, the deregistration, and the
+			// ready release. See finalizeDeliberateClose.
+			a.finalizeDeliberateClose(managed)
 			return
 		}
 		count, err := current.Read(buffer)
@@ -1450,6 +1467,36 @@ func (a *App) resizeSessionIfLive(managed *managedTerminal, cols, rows int) bool
 	}
 	_ = session.Resize(cols, rows)
 	return true
+}
+
+// finalizeDeliberateClose finalizes the exit of a session whose reader found
+// the deliberate-close mark instead of a read error: the close landed between
+// iterations, or before the reader's first Read. streamSession calls it from the
+// arm that used to return silently, so marking a session closed stays what keeps
+// it out of the stale-shell detector without also silencing its exit.
+//
+// Only the registration's own live entry is finalized. finalizeSessionExit
+// deregisters the session, so an entry no longer under its own key has already
+// been finalized by its reader — or was replaced at that key on a respawn — and
+// reporting it again would emit a second terminal-exit for a session the
+// frontend has already dropped. A close that was never registered has no reader
+// to report its exit.
+//
+// The reason comes from the session's own Wait, the same source the read-error
+// arm reads, so a deliberately closed session reports the reason it reported
+// before the mark existed.
+func (a *App) finalizeDeliberateClose(managed *managedTerminal) {
+	a.mu.Lock()
+	var session terminalSession
+	registered := managed != nil && managed.closed && a.sessions[managed.key] == managed
+	if registered {
+		session = managed.session
+	}
+	a.mu.Unlock()
+	if session == nil {
+		return
+	}
+	a.finalizeSessionExit(managed, terminalSessionExitReason(session, nil))
 }
 
 func (a *App) finalizeSessionExit(managed *managedTerminal, reason string) {
