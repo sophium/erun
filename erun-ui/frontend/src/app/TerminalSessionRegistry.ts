@@ -121,8 +121,20 @@ export class TerminalSessionRegistry {
   // that was just switched to. Storing that would replace the session's
   // remembered screen with nothing and clear the display buffer that was the
   // only other copy of it, so every later switch back would render blank.
-  // Refuse it: the session keeps whatever snapshot it already had, the buffer
-  // stays whole, and the next activation replays it instead.
+  // Refuse it: the session keeps whatever snapshot it already had, and the
+  // buffer stays whole. That is what stops the blank -- it is not a promise
+  // that the screen is replayed from the buffer, because the two activation
+  // paths differ. A session with no snapshot falls back to activateSession's
+  // cold path and replays the retained buffer, which is the screen the capture
+  // could not reach. A session that already has a non-empty snapshot takes the
+  // snapshot path instead -- [snapshot, ...delta] -- so it comes back on that
+  // older screen plus whatever arrived since; output the reset or the refused
+  // capture dropped stays dropped, and the pane is stale rather than blank.
+  // That stale case is latent, not live: it needs the shared terminal reset
+  // without a capture in between, and every reset caller runs either on
+  // session 0 or on a session id just minted, which Go allocates
+  // monotonically (a.nextSerial++) and never reuses. A future caller that
+  // resets an active session or reuses an id would have to revisit this guard.
   captureSnapshot(sessionId: number, serialized: string): void {
     if (serialized === '') {
       return;
