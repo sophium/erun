@@ -74,6 +74,10 @@ export class TerminalController {
       this.publishTerminalDims();
     },
   });
+  // True from the moment a switch is dispatched until the callback xterm
+  // invokes from its own queue has run. While it is set the switch owns the
+  // pane's reset (switchSession), so a direct resetTerminal() defers to it.
+  private switchInFlight = false;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -283,8 +287,12 @@ export class TerminalController {
     this.fitAddon = null;
     this.serializeAddon = null;
     // xterm drops pending write-completion callbacks on dispose, so reset the
-    // source queue to avoid carrying a stale head into the next mount.
+    // source queue to avoid carrying a stale head into the next mount -- and
+    // clear the switch flag with it, or a switch disposed mid-flight would
+    // leave every later resetTerminal() deferring to a callback that will never
+    // run and the pane would never clear again.
     this.writeSources.clear();
+    this.switchInFlight = false;
   }
 
   private removeClipboardHandlers(): void {
@@ -320,7 +328,20 @@ export class TerminalController {
     }, delay);
   }
 
+  // Reset is not always the caller's to run. A switch in flight runs it itself,
+  // from inside xterm's own queue and after it has snapshotted the outgoing
+  // session, so a reset landing in the switch's tick can only run in front of
+  // that snapshot and hand it a blank screen -- the outgoing session then
+  // switch-backs to nothing. Both direct callers (globalConfigCloudThunks'
+  // startCloudInitSession, manageDeleteThunks' submitManageDelete) call this on
+  // the statement after their setSessionId dispatch, in the same synchronous
+  // run of the thunk body, so that is exactly where it would land. Deferring to
+  // the switch keeps the post-condition -- the pane ends up reset -- and drops
+  // only the duplicate.
   resetTerminal(): void {
+    if (this.switchInFlight) {
+      return;
+    }
     this.terminal?.reset();
     this.terminal?.clear();
     this.cancelCursorRestoreTimer();
@@ -529,13 +550,18 @@ export class TerminalController {
   //
   // A no-op when there is no terminal to move; `sessionId <= 0` resets the pane
   // without activating anything, which is how a close clears it.
+  //
+  // While this hand-off is in flight it also owns the reset: see
+  // switchInFlight and resetTerminal.
   switchSession(previousSessionId: number, sessionId: number): void {
     const terminal = this.terminal;
     if (!terminal) {
       return;
     }
     const renderedChunks = this.sessions.displayBuffer(previousSessionId).length;
+    this.switchInFlight = true;
     terminal.write('', () => {
+      this.switchInFlight = false;
       this.snapshotSession(previousSessionId, renderedChunks);
       this.resetTerminal();
       if (sessionId > 0) {
