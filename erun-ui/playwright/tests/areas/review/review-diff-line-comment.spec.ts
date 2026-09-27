@@ -94,6 +94,40 @@ const DIFF_GROWN = {
   ],
 };
 
+// DIFF_OTHER_FIRST is the same change after the panel's re-read has picked up a
+// second file ahead of it, whose own added line renders above main.go's. The
+// row that carried 'package main' is pushed down exactly as DIFF_GROWN pushes
+// it, but the row that lands under the stationary pointer is an ordinary
+// commentable line -- in a file the reader revealed nothing for. That is the
+// half of this contract the injected hunk line cannot reach: a `meta` row
+// offers no affordance at all, so it can only show that the reveal is lost; a
+// real line shows whether the reveal is instead handed to whatever the pointer
+// happens to be over.
+const DIFF_OTHER_FIRST = {
+  ...DIFF,
+  summary: { fileCount: 2, additions: 2, deletions: 0 },
+  files: [
+    {
+      path: 'util.go',
+      status: 'added',
+      additions: 1,
+      deletions: 0,
+      binary: false,
+      hunks: [
+        {
+          header: '@@ -0,0 +1,1 @@',
+          lines: [{ kind: 'add', oldLine: null, newLine: 1, content: 'package util' }],
+        },
+      ],
+    },
+    ...DIFF.files,
+  ],
+  tree: [
+    { name: 'util.go', path: 'util.go', type: 'file', depth: 0 },
+    { name: 'main.go', path: 'main.go', type: 'file', depth: 0 },
+  ],
+};
+
 const REVIEW = {
   reviewId: 'review-1',
   tenantId: 't1',
@@ -503,6 +537,72 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     // re-read left at the number it had.
     await page.getByText('package main').hover();
     await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+  });
+
+  // The injected hunk line above is one shape of the reflow, and the benign
+  // one: a `meta` row carries no affordance (`DiffLineCommentAction` renders
+  // nothing for `kind === 'meta'`), so nothing there can be lit and the case
+  // can only show the reveal being lost. A reflow that brings an ordinary
+  // commentable line of another file under the stationary pointer is the other
+  // shape, and it has to answer both halves at once: the reveal the reader
+  // made stays on the line the reader made it for, and the line the pointer now
+  // covers reveals itself the way any hovered row does. Those are two
+  // mechanisms, and the case pins that holding one does not suppress the other
+  // -- the row the reflow moved under the pointer is not the row the reader
+  // revealed, so it is neither the one the held reveal lights nor the one it
+  // takes anything from.
+  //
+  // Measured, so the case does not overclaim: on the unfixed code the first
+  // half is deterministically red -- the revealed section is carried down by
+  // the file above it and its row loses `:hover` -- which is the strand this
+  // branch exists to fix, in the shape that puts a real added line where the
+  // pointer is resting rather than a `meta` row.
+  test('the affordance the reader revealed survives a reflow that brings another file under the pointer', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    let grown = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, grown ? DIFF_OTHER_FIRST : DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await page.getByText('package main').waitFor({ state: 'visible' });
+
+    const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
+
+    // The reader reveals main.go's line. This is the only pointer movement in
+    // this case; nothing below re-issues it.
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    grown = true;
+    await page.getByText('package util').waitFor({ state: 'visible' });
+
+    // The pointer rests over util.go's added line now. The affordance the
+    // reader revealed is still revealed, and it is still main.go's line 1 --
+    // the reveal followed the line, not the row the reflow moved under the
+    // pointer.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+    // And the row that did move under the pointer reveals itself normally, the
+    // way any hovered row does: holding the reader's reveal neither suppresses
+    // the hover the pointer is making now nor hands it the reveal it is not
+    // over. Two lines are lit, and each is lit for its own reason.
+    await expect(page.getByRole('button', { name: 'Comment on line 1 of util.go' })).toHaveCSS(
+      'opacity',
+      '1',
+      withTestBudget(),
+    );
   });
 
   // The line-comment affordance exists only once the panel has rendered the

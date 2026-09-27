@@ -206,10 +206,22 @@ and number, and released by `pointermove` — never by the row's `pointerout` /
 and its `mouseout`/`mouseover` counterpart on the row that moved, with **zero**
 `pointerleave`, `pointerenter` and **zero** `pointermove` — so a boundary-event
 release reproduces the strand exactly, and a `pointermove` is the only honest
-release signal. `review-diff-line-comment.spec.ts` pins it ("the affordance the
-reader revealed survives a re-read of the diff"); that case performs one pointer
-movement and must never re-hover to recover, since re-issuing the hover passes on
-the unfixed code.
+release signal. `review-diff-line-comment.spec.ts` pins it in the two shapes a
+reflow takes: an injected `meta` hunk line, which carries no affordance at all
+("the affordance the reader revealed survives a re-read of the diff"), and an
+ordinary commentable line of another file arriving under the pointer ("the
+affordance the reader revealed survives a reflow that brings another file under
+the pointer"). Both perform one pointer movement and must never re-hover to
+recover, since re-issuing the hover passes on the unfixed code. The second also
+pins that holding the reveal does not suppress the row the pointer is over now:
+that row reveals itself natively, so two lines are lit, each for its own reason.
+The row key (`${oldLine}:${newLine}:${index}`, `DiffList.tsx`) is what makes the
+held reveal safe — a node React reuses keeps its line's own number, so a reveal
+keyed by that number can never be carried onto a different logical line. The
+unfixed panel's red in the injected `meta` shape is *not* stable — measured
+15/15 serially but only 4/5 under the suite's parallel load — which is a reason
+to read a run of either case as evidence per attempt rather than as a single
+verdict; the fixed panel is deterministic in both.
 
 The hold is released by the reader's next `pointermove` and by nothing else, and
 a wheel scroll fires none. Recorded residual, measured: hovering a line, then
