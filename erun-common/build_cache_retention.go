@@ -116,15 +116,44 @@ const (
 // count below one is not a count. Neither yields an allowance, and the caller
 // falls back to the volume share alone rather than reclaiming against an
 // invented number.
-func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) uint64 {
+//
+// Every way this can fail to produce a share is an error and none of them is a
+// zero allowance, because the two are not the same thing to the caller that
+// acts on the result: an allowance of zero is passed to `resolveBuildCacheBounds`,
+// comes back as a ceiling of no bytes, and is reclaimed to as
+// `--max-used-space 0`. That is not a small bound. It drops every earned layer
+// on every build and the ceiling never rises afterwards, because a cache
+// holding nothing is never over a ceiling of nothing — so a node whose figures
+// leave no room to divide leaves the volume share in force and says so, rather
+// than reaching that state through arithmetic that returned a real-looking
+// number.
+//
+// The floor is not a value this can be clamped up to. A byte floor here would
+// not be the honest analogue of RuntimeDindCPULimit's MinimumRuntimeDindCPU: a
+// CPU limit is a ceiling the kernel shares fairly, so raising a small one costs
+// nothing when the node is idle, while a disk ceiling is space the environment
+// then holds against every other tenant of that node. Inventing room a node has
+// told us it does not have is the aggregate defect this bound exists to
+// prevent, so the unusable case falls back to the bound that was already in
+// force instead of to a number nobody measured.
+func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) (uint64, error) {
 	if coTenants < 1 {
-		return 0
+		return 0, fmt.Errorf("%w: %d is not a count of the caches that share the node", errBuildCacheNodeBudgetUnusable, coTenants)
 	}
 	floor := resolveMinDiskHeadroomBytes(nodeBytes)
 	if nodeBytes <= floor {
-		return 0
+		return 0, fmt.Errorf("%w: a %s node reserves %s of its own disk for everything a cache prune cannot reach, which is all of it", errBuildCacheNodeBudgetUnusable, formatGiB(nodeBytes), formatGiB(floor))
 	}
-	return (nodeBytes - floor) / uint64(coTenants)
+	allowance := (nodeBytes - floor) / uint64(coTenants)
+	// The share survives the division but not the ceiling it is a share of:
+	// resolveBuildCacheBounds divides before it multiplies, so a share under a
+	// hundred bytes has a ceiling of zero however much room the node had. That
+	// is the same no-bound state by the same argument, and it is reached
+	// without the node ever being at or below its floor.
+	if resolveBuildCacheBounds(allowance).ceiling == 0 {
+		return 0, fmt.Errorf("%w: the %s a %s node holds above its %s floor, divided among %d caches, leaves this one a ceiling of no bytes", errBuildCacheNodeBudgetUnusable, formatGiB(nodeBytes-floor), formatGiB(nodeBytes), formatGiB(floor), coTenants)
+	}
+	return allowance, nil
 }
 
 // errNoBuildCacheNodeBudget is the state of an environment whose deployment has
@@ -133,6 +162,15 @@ func resolveBuildCacheNodeAllowance(nodeBytes uint64, coTenants int) uint64 {
 // volume share above still applies to it unchanged. Only a declaration that is
 // present and unusable is a deployment mistake worth tracing.
 var errNoBuildCacheNodeBudget = errors.New("this environment declares no node build-cache budget")
+
+// errBuildCacheNodeBudgetUnusable is the state of a deployment that has
+// described its node but whose description leaves this environment no usable
+// share of it — a node at or below the disk floor the build refuses against, or
+// a share that divides down to no ceiling at all. It is separate from
+// errNoBuildCacheNodeBudget because it is the opposite silence: a bound that
+// looks like it is in force and is not, so it is traced rather than passed
+// over. It is never resolved by inventing a share.
+var errBuildCacheNodeBudgetUnusable = errors.New("the declared node yields no usable share")
 
 // declaredBuildCacheNodeAllowance reads the node's disk and the number of
 // environments sharing it.
@@ -145,21 +183,33 @@ var errNoBuildCacheNodeBudget = errors.New("this environment declares no node bu
 // A node size with no co-tenant count is an incomplete declaration, not a count
 // of one. Assuming one would hand a single environment the node's whole cache
 // budget, which is precisely the unbounded shape this bound exists to remove.
-func declaredBuildCacheNodeAllowance() (uint64, error) {
+//
+// The count is returned alongside the allowance so the trace can name it. It is
+// a declared value nothing cross-checks — the pod's RBAC is namespace-scoped,
+// so it cannot count its own co-tenants to compare against — and a declaration
+// that has drifted from the node is exactly the state that puts the aggregate
+// back where it started. Naming the number in the line that reports the ceiling
+// is what makes that drift visible to whoever reads the log, since nothing on
+// this path can detect it.
+func declaredBuildCacheNodeAllowance() (uint64, int, error) {
 	nodeRaw := strings.TrimSpace(os.Getenv(buildCacheNodeBytesEnv))
 	coTenantsRaw := strings.TrimSpace(os.Getenv(buildCacheCoTenantsEnv))
 	if nodeRaw == "" && coTenantsRaw == "" {
-		return 0, fmt.Errorf("%w (%s is unset)", errNoBuildCacheNodeBudget, buildCacheNodeBytesEnv)
+		return 0, 0, fmt.Errorf("%w (%s is unset)", errNoBuildCacheNodeBudget, buildCacheNodeBytesEnv)
 	}
 	nodeBytes, err := strconv.ParseUint(nodeRaw, 10, 64)
 	if err != nil || nodeBytes == 0 {
-		return 0, fmt.Errorf("%s=%q is not a positive byte count", buildCacheNodeBytesEnv, nodeRaw)
+		return 0, 0, fmt.Errorf("%s=%q is not a positive byte count", buildCacheNodeBytesEnv, nodeRaw)
 	}
 	coTenants, err := strconv.Atoi(coTenantsRaw)
 	if err != nil || coTenants < 1 {
-		return 0, fmt.Errorf("%s=%q is not a positive co-tenant count", buildCacheCoTenantsEnv, coTenantsRaw)
+		return 0, 0, fmt.Errorf("%s=%q is not a positive co-tenant count", buildCacheCoTenantsEnv, coTenantsRaw)
 	}
-	return resolveBuildCacheNodeAllowance(nodeBytes, coTenants), nil
+	allowance, err := resolveBuildCacheNodeAllowance(nodeBytes, coTenants)
+	if err != nil {
+		return 0, 0, err
+	}
+	return allowance, coTenants, nil
 }
 
 // buildCacheBound is the ceiling this environment's build cache is held to,
@@ -192,7 +242,7 @@ func resolveBuildCacheBound(ctx Context, policy diskHeadroomPolicy, volumeBytes 
 		allowedOn:     fmt.Sprintf("this environment's %s docker volume", formatGiB(volumeBytes)),
 		reclaimedFrom: "that volume's",
 	}
-	allowance, err := declaredBuildCacheNodeAllowance()
+	allowance, coTenants, err := declaredBuildCacheNodeAllowance()
 	if err != nil {
 		// A node budget declared but unusable is a deployment mistake: it leaves
 		// the aggregate unbounded by the node while looking like it is bounded,
@@ -204,9 +254,19 @@ func resolveBuildCacheBound(ctx Context, policy diskHeadroomPolicy, volumeBytes 
 		}
 		return bound
 	}
-	if fromNode := resolveBuildCacheBounds(allowance); fromNode.ceiling < volume.ceiling {
+	fromNode := resolveBuildCacheBounds(allowance)
+	// A share that resolved to the volume's own number is not a node bound, and
+	// saying the cache is allowed it "of the node" would attribute a bound the
+	// node did not set. The comparison is on the ceiling rather than on the
+	// share so the wording follows the bound that is actually in force.
+	if fromNode.ceiling < volume.ceiling {
 		bound.bounds = fromNode
-		bound.allowedOn = fmt.Sprintf("the %s this environment is allowed of the node, divided among the build caches that share it", formatGiB(allowance))
+		// The co-tenant count is named because nothing here can check it: it is
+		// a chart value, the pod cannot count its own co-tenants, and a count
+		// that has drifted from the node is the one way this bound silently
+		// stops bounding the sum. Naming it puts the drift in the log that
+		// reports the ceiling it produced.
+		bound.allowedOn = fmt.Sprintf("the %s this environment is allowed of the node, divided among the %d build caches the deployment declares share it", formatGiB(allowance), coTenants)
 		bound.reclaimedFrom = "that share's"
 	}
 	return bound

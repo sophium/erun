@@ -116,6 +116,51 @@ func nodeBoundCases() []nodeBoundCase {
 			wantPrunedTo: 40 << 30,
 		},
 		{
+			// The reproduction of the zero. erun's disk-headroom floor is a flat
+			// 20 GiB for every node below ten times that, so a node of 16 GiB
+			// reserves more than it has and leaves nothing above the floor to
+			// divide. The arithmetic that reaches that conclusion must not come
+			// back as an allowance of zero: zero is not a small bound, it is a
+			// ceiling of no bytes at all, and the reclaim bounded by it is
+			// `--max-used-space 0` — every earned layer dropped on every build,
+			// with the ceiling never rising afterwards, because a cache holding
+			// nothing is never over a ceiling of nothing.
+			name:         "a node at or below its own disk floor does not bound the cache to nothing",
+			nodeGi:       16,
+			coTenants:    4,
+			volumeGi:     50,
+			cacheGi:      45,
+			wantPrunedTo: 40 << 30,
+		},
+		{
+			// The same state on the boundary itself: the floor is the largest a
+			// node may be and still have nothing above it, and a ceiling that
+			// flips between the volume's share and nothing at all across that
+			// line is the defect, not the line.
+			name:         "a node exactly at its disk floor does not bound the cache to nothing",
+			nodeGi:       20,
+			coTenants:    4,
+			volumeGi:     50,
+			cacheGi:      45,
+			wantPrunedTo: 40 << 30,
+		},
+		{
+			// The control for those two: a node just above its floor still has
+			// room to divide, and the bound must still tighten. Without this the
+			// fix could satisfy the cases above by disabling the node bound
+			// outright, which is the opposite of what it is for.
+			// 21 GiB less the flat 20 GiB floor is 1 GiB of room, a quarter of
+			// it is 268435456 bytes, and 80% of that is the ceiling below —
+			// stated as the number rather than as the formula, so the case pins
+			// the rendered ceiling instead of restating the code it measures.
+			name:         "a node just above its floor still tightens the ceiling",
+			nodeGi:       21,
+			coTenants:    4,
+			volumeGi:     50,
+			cacheGi:      45,
+			wantPrunedTo: 214748320,
+		},
+		{
 			// A cache inside every mark is left alone, node declared or not:
 			// the node bound changes where the ceiling sits, never whether
 			// growth below it is reclaimed.
@@ -151,6 +196,46 @@ func TestBuildCacheCeilingsStayBoundedAcrossTheNodesEnvironments(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			runNodeBoundCase(t, tc)
 		})
+	}
+}
+
+// TestBuildCacheRetentionDoesNotBoundToANodeShareOfNoBytes covers the other way
+// a node share resolves to a ceiling of zero bytes, and the one the node's own
+// floor does not explain: a node with room above its floor whose share divides
+// down to nothing. `resolveBuildCacheBounds` divides before it multiplies, as
+// the disk floor does, so a share of anything under a hundred bytes has a
+// ceiling of zero however much room the node had.
+//
+// The numbers are byte-scale rather than gigabyte-scale on purpose — a share
+// that lands here is of the same order as the floor and the count, which no
+// node anyone declares is — and the floor travels as its override for the same
+// reason. What is asserted is the same property as the cases above: a ceiling
+// the reclaim would be bounded to is either the volume share or a bound
+// something can live under, never zero.
+func TestBuildCacheRetentionDoesNotBoundToANodeShareOfNoBytes(t *testing.T) {
+	const (
+		floorBytes  = 100
+		nodeBytes   = 250
+		coTenants   = 4
+		volumeGi    = 50
+		volumeBytes = volumeGi << 30
+		cacheBytes  = 45 << 30
+	)
+	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(floorBytes, 10))
+	t.Setenv(nodeBytesVar, strconv.FormatUint(nodeBytes, 10))
+	t.Setenv(coTenantsVar, strconv.FormatUint(coTenants, 10))
+
+	var prunedTo uint64
+	logs := &strings.Builder{}
+	ensureBuildCacheRetentionWith(Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
+		func() (uint64, error) { return volumeBytes, nil },
+		func(time.Duration) (uint64, error) { return cacheBytes, nil },
+		func(ceiling uint64, _ time.Duration) error { prunedTo = ceiling; return nil })
+
+	want := resolveBuildCacheBounds(volumeBytes).ceiling
+	if prunedTo != want {
+		t.Fatalf("a node share with a ceiling of no bytes was reclaimed to %s, want the volume ceiling %s; output was %q",
+			formatGiB(prunedTo), formatGiB(want), logs.String())
 	}
 }
 
@@ -202,13 +287,14 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	// inside its own ceiling is not the property that matters — the sum of
 	// every co-tenant's ceiling against what the node has left after its own
 	// reserve is.
-	if tc.coTenants == 0 {
+	// A node at or below its own reserve has nothing to divide, so no share of
+	// it is in force and there is no sum of node-derived ceilings to add up.
+	// The ceiling assertion above is the whole check for those cases; the
+	// invariant below is about the cases where a share did apply.
+	if tc.coTenants == 0 || tc.nodeGi <= nodeReserveGi(tc.nodeGi) {
 		return
 	}
 	reserve := nodeReserveGi(tc.nodeGi)
-	if tc.nodeGi <= reserve {
-		t.Fatalf("a node of %d GiB has no room above its %d GiB reserve to divide", tc.nodeGi, reserve)
-	}
 	budget := (tc.nodeGi - reserve) << 30
 	if spent := prunedTo * tc.coTenants; spent > budget {
 		t.Fatalf("the %d environments' ceilings sum to %s, past the %s a %d GiB node has above its %d GiB reserve: each environment is inside its own bound and the node fills anyway",

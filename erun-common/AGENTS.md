@@ -232,6 +232,22 @@ demonstrated:
   pruning and refusal on a measured shortage, but no invented refusal when the
   daemon's filesystem cannot be observed. The default/tuning live in
   `release_disk_headroom.go`.
+- A build cache is bounded per environment by one shape: this environment's share
+  of its own docker volume, tightened by its share of the node and never replaced
+  by it (`resolveBuildCacheBound`). A node share that resolves to a ceiling of no
+  bytes is not a small bound — it is `--max-used-space 0`, dropping every earned
+  layer on every build with the ceiling never rising afterwards — so an unusable
+  node budget leaves the volume share in force and is traced rather than acted on.
+  There is deliberately no byte floor to clamp up to: a CPU limit is shared fairly
+  by the kernel, so `RuntimeDindCPULimit` can floor one, while a disk ceiling is
+  space the environment then holds against every other tenant of that node, so
+  inventing room a node has said it does not have re-creates the aggregate defect
+  the node bound exists to remove.
+- The node's co-tenant count is a declared chart value nothing cross-checks: the
+  pod's RBAC is namespace-scoped, so it cannot count its own co-tenants. The trace
+  reporting a node-derived ceiling names the count it divided by, which is the only
+  surface where a declaration that has drifted from the node is visible
+  (`build_cache_retention.go`, `build_cache_node_bound_test.go`).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher
