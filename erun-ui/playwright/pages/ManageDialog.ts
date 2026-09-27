@@ -431,6 +431,13 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-empty');
   }
 
+  // The reading placeholder, which is not the empty state: it is what the tab
+  // renders until its read has been answered, and it carries its own id so a
+  // wait for the empty state cannot settle on it.
+  jobsLoadingState(): Locator {
+    return this.locator().getByTestId('manage-jobs-loading');
+  }
+
   jobsUnreachable(): Locator {
     return this.locator().getByTestId('manage-jobs-unreachable');
   }
