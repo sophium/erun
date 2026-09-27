@@ -42,15 +42,21 @@ const STARTED_AT = '2026-08-24T00:00:00.000Z';
 // millisecond. A reducer that compares parsed milliseconds ties there and
 // hands the win to whichever copy it falls back to -- the stale snapshot --
 // so the two writers have to be ordered by the stamp's own digits.
+//
+// The titles are spelled out rather than assembled from the label, because a
+// defect fix names this case in its commit trailers and a title built by
+// interpolation is a string no reviewer can find in the file.
 const CASES = [
   {
-    label: 'orders a snapshot seconds behind the finish',
+    title:
+      'a ListDeploys snapshot taken before an entry finished cannot revert it to running -- orders a snapshot seconds behind the finish',
     entryId: 'snapshot-order-apart',
     runningAt: '2026-08-24T00:00:00.000Z',
     finishedAt: '2026-08-24T00:00:05.000Z',
   },
   {
-    label: 'orders a snapshot inside the same millisecond as the finish',
+    title:
+      'a ListDeploys snapshot taken before an entry finished cannot revert it to running -- orders a snapshot inside the same millisecond as the finish',
     entryId: 'snapshot-order-tied',
     runningAt: '2026-08-24T00:00:00.000100000Z',
     finishedAt: '2026-08-24T00:00:00.000900000Z',
@@ -105,11 +111,8 @@ function isListDeploys(route: Route): boolean {
   }
 }
 
-for (const { label, entryId, runningAt, finishedAt } of CASES) {
-  test(`a ListDeploys snapshot taken before an entry finished cannot revert it to running -- ${label}`, async ({
-    app,
-    page,
-  }) => {
+for (const { title, entryId, runningAt, finishedAt } of CASES) {
+  test(title, async ({ app, page }) => {
     const now = page.getByRole('region', { name: 'Now' });
     const recent = page.getByRole('region', { name: 'Recent' });
     // Scoped to this entry's own card: the seeded baseline already populates
