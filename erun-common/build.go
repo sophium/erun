@@ -69,11 +69,12 @@ func newGateBuildNotRunError(promotedTags []string) error {
 // and `review record-build --gate` reads only that exit code, so the two are
 // indistinguishable to the queue that consumes it.
 //
-// It is refused for every build and not only for `erun build --gate`, because the
-// flows that do read a build's exit code as a verdict -- the merge queue's, and
-// the erun-merge skill's READY rung -- run a plain `erun build`: a guard the flag
-// arms is a guard that never covers the run it was written for (see
-// traceBuildUmbrella).
+// It is refused by the run that declared itself the merge queue's gate,
+// `erun build --gate`, and by no other run on a current erun: a gate's exit
+// status is the entirety of what `review record-build --gate` records, so a
+// memoized verdict cannot stand in for it. A plain `erun build` -- the erun-merge
+// skill's READY rung, and every other one -- reports the replay in its trace and
+// builds the commit, which is all its rung claims (see traceBuildUmbrella).
 //
 // The remedy follows from which cache is at fault. --no-incremental is the right
 // answer to ErrGateBuildNotRun and the wrong one here: it bypasses erun's
