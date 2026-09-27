@@ -112,6 +112,17 @@ composition and release invariants belong to root/shared logic, not chart policy
 - Declare dind requests/limits explicitly, not through ambient LimitRange defaults.
   Under embedded BuildKit, build steps can escape the sidecar's memory cgroup:
   its configured memory remains capacity guidance, not a proven aggregate ceiling.
+- A bound on the node's build cache travels only when the deployment declares the
+  node. `buildCacheNodeGi` and `buildCacheCoTenants` both default to `0` and render
+  only as a pair, and only for an environment that has the dind sidecar, so a
+  deployment that says nothing about its node emits neither variable and keeps the
+  docker-volume ceiling unchanged. Neither is discoverable from inside the pod —
+  the environment's RBAC is namespace-scoped, so it cannot count its co-tenants,
+  and a node-local, quota-less claim reports the node's capacity rather than its
+  own size — and nothing in erun's own deploy plan sets them, so they are an
+  operator's declaration alone. What they resolve to, and the co-tenant count at
+  which they stop changing any ceiling, is `erun-common/AGENTS.md` § "Release
+  recovery".
 - Size the runtime container's own default for the gate it runs, not for a serving
   app: agents run `make check-gate` in it — the same ten-target gate the sidecar
   runs during an image build. `DefaultRuntimePodMemory` and the chart's

@@ -248,6 +248,30 @@ demonstrated:
   reporting a node-derived ceiling names the count it divided by, which is the only
   surface where a declaration that has drifted from the node is visible
   (`build_cache_retention.go`, `build_cache_node_bound_test.go`).
+- That node bound has two inputs, both opt-in, and both environment variables
+  because neither is readable from inside the pod: `ERUN_BUILD_CACHE_NODE_BYTES`
+  is the node's disk in bytes, `ERUN_BUILD_CACHE_CO_TENANTS` is how many build
+  caches share it, and the chart renders the pair from its `buildCacheNodeGi` and
+  `buildCacheCoTenants`, both defaulting to zero so neither variable is emitted.
+  Unset is not a node budget of zero bytes: it is no node budget at all, and the
+  environment keeps byte-for-byte the docker-volume ceiling it had, untraced,
+  because that is the state every environment was in before this bound existed
+  (`errNoBuildCacheNodeBudget`). A node size without a count is an incomplete
+  declaration rather than a count of one — the chart emits the pair together, and
+  `declaredBuildCacheNodeAllowance` refuses the count-less form instead of handing
+  one environment the node.
+- The node's share is `(node − floor) / coTenants`, where the floor is
+  `resolveMinDiskHeadroomBytes` of the node itself — 20 GiB or 10% of it, whichever
+  is larger, overridable by `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` — and its
+  ceiling is 80% of that (`resolveBuildCacheBounds`). It replaces the volume share
+  only where that ceiling is the lower of the two, so declaring both inputs at a
+  co-tenant count whose share still exceeds the environment's declared docker
+  volume installs a declaration that changes no ceiling and is never named as one:
+  the trace, and the co-tenant count in it, appear only once the node's share is
+  what is applied. That count is `(node − floor) / volume`, and it is a function of
+  the node, the floor and the volume in hand rather than a fixed number — work out
+  which side of it a node falls on before setting the pair, rather than reading the
+  declaration itself as a bound in force.
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher

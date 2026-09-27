@@ -239,6 +239,26 @@ share of that volume is a limit no single environment can exceed on the others' 
 cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
 *the node's* space, so every other environment's next build repays its layers from cold.
 
+A share of one environment's volume does not bound the node, though. Four environments each honouring
+80% of a declared 50 GiB volume hold up to 160 GiB between them, every one of them inside its own
+ceiling, and the sum is what fills the node. Two more values describe that: `buildCacheNodeGi`, the
+node's disk in GiB, and `buildCacheCoTenants`, how many build caches share it. When both are set the
+bound is tightened to 80% of `(buildCacheNodeGi − the disk-headroom reserve) ÷ buildCacheCoTenants`,
+where the reserve is the floor every build already keeps clear — 20 GiB or 10% of the node, whichever
+is larger, and `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` overrides both. The tighter of the two ceilings
+wins, so the node's share can only lower the bound and never raise it.
+
+Both values default to `0`, which passes nothing to the pod and leaves an environment bounded by its
+own docker volume exactly as before — a deployment that says nothing about its node is not given a
+share of one. Work out whether the pair bites before setting it; it does only above
+`(node − reserve) ÷ the environment's docker volume` co-tenants. On a 120 GiB node with the default
+50 GiB volume that count is 3: at 2 co-tenants the node's share is still the larger figure
+(`(120 − 20) ÷ 2 = 50 GiB`), so setting both would leave the ceiling, the 70% warning and the log line
+all describing the volume — a declaration that reads like a bound in force while changing no ceiling
+at all. The build log's own line names the bound actually applied, and names the node's share and the
+co-tenant count it divided by only once that share is the one in use. A runtime env has no build cache
+to bound, so the pair does nothing there.
+
 The **go build cache** is the other half of that, and it lives on the home volume rather than the
 docker one. It has a bound of its own because the go command's own rule is not one: go evicts entries
 nothing has touched in five days, which is a rule about *recency* with no ceiling, and the five-day
