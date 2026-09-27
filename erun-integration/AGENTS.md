@@ -60,16 +60,22 @@ cross-repository structural gates, not production helpers.
   (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). That
   covers every captured value, not only the URL -- a handler that read a
   page-path variable assigned after the server started had the same shape.
-- `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is what keeps
-  that invariant true, and it is the gate that reds: an AST sweep of the whole
-  module's source, so the ordering is a property of the source rather than of a
-  schedule, and the ordinary `go test ./...` at `scripts/integration-test.sh`'s
-  compare-mode line fails on the pre-fix tree with no `-race` anywhere. It
-  reports the handler's read, the offending assignment and the line serving
-  began. It also carries its own fixture test, so the shapes it must catch and
-  the legitimate ones it must leave alone are pinned independently of this
-  module's real stubs.
-- The sweep is a shape detector with real limits, stated in the file: a handler
+- `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is the gate that
+  reds for that invariant: an AST sweep of the whole module's source, so the
+  ordering is a property of the source rather than of a schedule, and the
+  ordinary `go test ./...` at `scripts/integration-test.sh`'s compare-mode line
+  fails on the pre-fix tree with no `-race` anywhere. It reports the handler's
+  read, the offending assignment and the line serving began. It also carries its
+  own fixture test, so the shapes it must catch and the legitimate ones it must
+  leave alone are pinned independently of this module's real stubs.
+- The shapes it catches are the handler registered before its scope begins
+  serving **and** the handler handed straight to the constructor,
+  `NewServer(http.HandlerFunc(func(...){...}))`. The second is not a special
+  case to skip: its literal is registered before the constructor returns, so it
+  is running-eligible the moment it does, and skipping it by position alone
+  left the fixes in this module's own `version_test.go` unpoliced while the
+  sweep reported the module clean.
+- It is still a shape detector with real limits, stated in the file: a handler
   reached through a variable or helper, a captured value written from another
   function, and a variable used as a map-literal key are all missed. It is a
   floor under the invariant, not a proof of it.

@@ -19,11 +19,15 @@ package integration
 //
 // What it covers: every handler literal passed to mux.Handle, mux.HandleFunc
 // or http.HandlerFunc in a scope that begins serving, read against every name
-// that scope assigns at or after the point serving begins. What it cannot
-// cover, and does not claim to: a handler reached indirectly through a
-// variable or a helper, a captured value written from another function or
-// goroutine, and a variable used as a map-literal key. Those are false
-// negatives; none of them is a shape this module has had.
+// that scope assigns at or after the point serving begins. That includes the
+// literal handed straight to the constructor -- `NewServer(http.HandlerFunc(
+// func(...){...}))` -- which is registered before the constructor returns and
+// therefore reachable the moment it does; a literal in a later statement is
+// not, and is left alone. What it cannot cover, and does not claim to: a
+// handler reached indirectly through a variable or a helper, a captured value
+// written from another function or goroutine, and a variable used as a
+// map-literal key. Those are false negatives; none of them is a shape this
+// module has had.
 //
 // The scope is the module's own source, test and helper alike, and it reads
 // .go files rather than only what is compiled into the test binary, so it must
@@ -106,17 +110,44 @@ func handlerRegistration(call *ast.CallExpr) []*ast.FuncLit {
 type stubScope struct {
 	servingPos  token.Pos // token.NoPos when this scope never begins serving
 	servingLine int
+	servings    []servingSpan
 	handlers    []*ast.FuncLit
 	writes      map[string][]token.Pos
 	writeLines  map[string][]int
 }
 
-func (s *stubScope) markServing(pos token.Pos, line int) {
+// servingSpan is one construct that begins serving, as an interval of source
+// positions. The interval is what tells a handler literal that *is* the arg of
+// the serving call -- `NewServer(http.HandlerFunc(func(...){...}))`, registered
+// before the constructor returns and reachable the moment it does -- apart
+// from a handler registered in a later statement, which cannot have been
+// running yet.
+type servingSpan struct {
+	pos token.Pos // start of the serving expression, for write comparison
+	end token.Pos
+}
+
+func (s *stubScope) markServing(pos, end token.Pos, line int) {
 	// Keep the earliest serving site: it is the one bounding which handlers
 	// can already be running.
 	if s.servingPos == token.NoPos || pos < s.servingPos {
 		s.servingPos, s.servingLine = pos, line
 	}
+	s.servings = append(s.servings, servingSpan{pos: pos, end: end})
+}
+
+// insideServing reports whether lit is contained in one of this scope's
+// serving constructs. Such a literal is the handler the server starts serving
+// with, so it is running-eligible as soon as the constructor returns -- the
+// opposite of the "registered after serving began" shape a later statement
+// has, and the reason it is not skipped by position alone.
+func (s *stubScope) insideServing(lit *ast.FuncLit) bool {
+	for _, span := range s.servings {
+		if lit.Pos() > span.pos && lit.End() < span.end {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *stubScope) recordWrite(name string, pos token.Pos, line int) {
@@ -168,8 +199,8 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 			for _, name := range names {
 				scope.recordWrite(name, node.Pos(), line(node.Pos()))
 			}
-			if newServerCall(node.Rhs) != nil {
-				scope.markServing(node.Pos(), line(node.Pos()))
+			if serving := newServerCall(node.Rhs); serving != nil {
+				scope.markServing(node.Pos(), serving.End(), line(node.Pos()))
 			}
 			for i, name := range names {
 				if i < len(node.Rhs) && isNewUnstartedServerCall(node.Rhs[i]) {
@@ -178,7 +209,7 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 			}
 		case *ast.ExprStmt:
 			if call, ok := node.X.(*ast.CallExpr); ok && isStartCall(call, unstarted) {
-				scope.markServing(node.Pos(), line(node.Pos()))
+				scope.markServing(node.Pos(), node.End(), line(node.Pos()))
 			}
 		}
 		return true
@@ -312,8 +343,12 @@ func stubOrderingViolationsInFile(fset *token.FileSet, file *ast.File) []stubOrd
 		}
 		for _, lit := range scope.handlers {
 			// A handler registered at or after the serving site cannot have
-			// been running before it.
-			if lit.Pos() >= scope.servingPos {
+			// been running before it -- unless the literal *is* an argument of
+			// the construct that began serving. That one is not registered
+			// afterwards; it is what the server starts with, so it can run
+			// from the moment the constructor returns and any value the
+			// constructor assigns is unordered against it.
+			if !scope.insideServing(lit) && lit.Pos() >= scope.servingPos {
 				continue
 			}
 			for name, readLine := range handlerReads(fset, lit) {
@@ -448,6 +483,67 @@ func stub(t testing.TB) *httptest.Server {
 }
 `,
 			names: []string{"issuer"},
+		},
+		"handler_is_the_constructor_argument_reading_the_constructor_binding": {
+			// The literal is not registered after the constructor returned; it
+			// is what the server starts with, so the binding NewServer performs
+			// on its way out is unordered against the handler's read of it.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(server.URL))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: []string{"server"},
+		},
+		"handler_is_the_constructor_argument_reading_a_later_assignment": {
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	var issuer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	}))
+	issuer = server.URL
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: []string{"issuer"},
+		},
+		"handler_is_the_constructor_argument_reading_only_prior_values": {
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	issuer := "http://example.invalid"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: nil,
 		},
 		"assigns_before_start": {
 			src: `package fixture
