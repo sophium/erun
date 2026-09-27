@@ -166,7 +166,7 @@ function DiffEnvSectionBody({
 // only the reader's pointer. It listens for pointer *movement* rather than for
 // the boundary events of the row the pointer is over, because a re-read that
 // renders the change differently moves that row out from under a stationary
-// pointer and the browser synthesises pointerout/pointerleave for it while no
+// pointer and the browser synthesises pointerout/pointerover for it while no
 // pointermove ever fires. Releasing on those boundary events is exactly the
 // loss this state exists to prevent, so the reveal outlives them; the next
 // genuine movement re-derives it from whatever is under the pointer, which is

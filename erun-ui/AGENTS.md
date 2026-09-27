@@ -202,12 +202,25 @@ on its own timer, and an answer that renders the change differently moves that
 row out from under a stationary reader. The reveal is therefore held as state in
 `DiffEnvSectionBody` (`DiffList.tsx`), keyed by the line's own environment, file
 and number, and released by `pointermove` — never by the row's `pointerout` /
-`pointerleave`. Measured: a re-read that moves the row fires `pointerleave`
-(4 on the nested elements) with **zero** `pointermove`, so a boundary-event
-release reproduces the strand exactly. `review-diff-line-comment.spec.ts` pins
-it ("the affordance the reader revealed survives a re-read of the diff"); that
-case performs one pointer movement and must never re-hover to recover, since
-re-issuing the hover passes on the unfixed code.
+`pointerover`. Measured across that reflow: one `pointerout`/`pointerover` pair
+and its `mouseout`/`mouseover` counterpart on the row that moved, with **zero**
+`pointerleave`, `pointerenter` and **zero** `pointermove` — so a boundary-event
+release reproduces the strand exactly, and a `pointermove` is the only honest
+release signal. `review-diff-line-comment.spec.ts` pins it ("the affordance the
+reader revealed survives a re-read of the diff"); that case performs one pointer
+movement and must never re-hover to recover, since re-issuing the hover passes on
+the unfixed code.
+
+The hold is released by the reader's next `pointermove` and by nothing else, and
+a wheel scroll fires none. Recorded residual, measured: hovering a line, then
+scrolling so that line moves down still fully visible, leaves its affordance lit
+while the pointer rests on the line the scroll brought under it — which reveals
+itself normally, so two affordances are on screen and one is not under the
+pointer. Releasing when the revealed line leaves the panel does not reach that
+case (that one is the invisible half); the reachable half is the reader's pointer
+leaving the line, which is the same geometry a re-read produces. Cosmetic and
+self-clearing on the next movement, so it is left as recorded rather than
+released on scroll.
 
 ## Build And Packaging
 
