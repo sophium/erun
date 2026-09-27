@@ -127,6 +127,30 @@ func promptAnswerEchoed(prompt promptui.Prompt, writer io.Writer) bool {
 	if !ok || !term.IsTerminal(int(stdin.Fd())) {
 		return false
 	}
-	stdout, ok := writer.(*os.File)
+	stdout, ok := writerFile(writer)
 	return ok && term.IsTerminal(int(stdout.Fd()))
+}
+
+// unwrappingWriter is a writer that only adapts another writer. The alias
+// confirm hands its prompt the nopWriteCloser promptStderr builds -- promptui
+// takes an io.WriteCloser and must not be able to close the process's real
+// stderr -- so the writer promptAnswerEchoed is handed is an adapter, not the
+// stream the bytes land on.
+type unwrappingWriter interface{ UnwrapWriter() io.Writer }
+
+// writerFile resolves w to the *os.File its bytes land on, following such
+// adapters. Without this the alias confirm's writer is never recognized as a
+// terminal, so an answer the terminal has already echoed is written a second
+// time and the prompt settles on three lines instead of one.
+func writerFile(w io.Writer) (*os.File, bool) {
+	for {
+		if file, ok := w.(*os.File); ok {
+			return file, true
+		}
+		adapter, ok := w.(unwrappingWriter)
+		if !ok {
+			return nil, false
+		}
+		w = adapter.UnwrapWriter()
+	}
 }
