@@ -73,6 +73,31 @@ test('captureSnapshot records the snapshot and clears the display buffer', () =>
   assert.equal(sessions.snapshot(1), 'SERIALIZED_SCREEN');
 });
 
+// A capture can come back empty from a session that was never painted -- a
+// switch away dispatched before the outgoing session's writes have parsed.
+// That is not a screen: recording it would blank the session's remembered
+// screen and drop the buffer that was the only other copy of it.
+test('an empty capture neither becomes the snapshot nor clears the buffer', () => {
+  const sessions = new TerminalSessionRegistry();
+  sessions.appendDisplayBuffer(1, 'line 1\n');
+
+  sessions.captureSnapshot(1, '');
+
+  assert.equal(sessions.snapshot(1), undefined);
+  assert.deepEqual(sessions.displayBuffer(1), ['line 1\n']);
+});
+
+test('an empty capture leaves an existing snapshot alone', () => {
+  const sessions = new TerminalSessionRegistry();
+  sessions.captureSnapshot(1, 'SERIALIZED_SCREEN');
+  sessions.appendDisplayBuffer(1, 'line 2\n');
+
+  sessions.captureSnapshot(1, '');
+
+  assert.equal(sessions.snapshot(1), 'SERIALIZED_SCREEN');
+  assert.deepEqual(sessions.displayBuffer(1), ['line 2\n']);
+});
+
 test('snapshots and buffers are independent per session', () => {
   const sessions = new TerminalSessionRegistry();
   sessions.captureSnapshot(1, 'ONE');

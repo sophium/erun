@@ -112,7 +112,33 @@ export class TerminalSessionRegistry {
   // clears the display buffer in the same step: everything up to now is
   // captured in `serialized`, so from here the buffer holds only the delta a
   // future switch-back needs to replay on top of it.
+  //
+  // An empty capture is the one case where that premise does not hold, and it
+  // is reachable whenever the session being switched away from has not painted
+  // yet: xterm parses writes asynchronously, so a second switch dispatched
+  // before the outgoing session's activation writes have flushed serializes a
+  // terminal whose buffer those writes have not reached -- "" for a session
+  // that was just switched to. Storing that would replace the session's
+  // remembered screen with nothing and clear the display buffer that was the
+  // only other copy of it, so every later switch back would render blank.
+  // Refuse it: the session keeps whatever snapshot it already had, and the
+  // buffer stays whole. That is what stops the blank -- it is not a promise
+  // that the screen is replayed from the buffer, because the two activation
+  // paths differ. A session with no snapshot falls back to activateSession's
+  // cold path and replays the retained buffer, which is the screen the capture
+  // could not reach. A session that already has a non-empty snapshot takes the
+  // snapshot path instead -- [snapshot, ...delta] -- so it comes back on that
+  // older screen plus whatever arrived since; output the reset or the refused
+  // capture dropped stays dropped, and the pane is stale rather than blank.
+  // That stale case is latent, not live: it needs the shared terminal reset
+  // without a capture in between, and every reset caller runs either on
+  // session 0 or on a session id just minted, which Go allocates
+  // monotonically (a.nextSerial++) and never reuses. A future caller that
+  // resets an active session or reuses an id would have to revisit this guard.
   captureSnapshot(sessionId: number, serialized: string): void {
+    if (serialized === '') {
+      return;
+    }
     this.sessionSnapshots.set(sessionId, serialized);
     this.sessionDisplayBuffers.delete(sessionId);
   }
