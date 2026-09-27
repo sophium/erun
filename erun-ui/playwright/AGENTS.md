@@ -38,7 +38,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
   ```sh
   ./run.sh
   ```
-  Defaults: headless browser, preferred port `34123` (each worker prefers base + its index and serves the address its backend announced). Uses the existing `../bin/erun-app` if present; builds it only when missing. Packaging pipelines that produced the binary in an earlier step skip the build cost.
+  Defaults: headless browser, preferred port `34123` (each worker prefers base + its index and serves the address its backend announced). Uses the existing `../bin/erun-app` when it is present **and** not stale; builds it when missing or stale. Packaging pipelines that produced a current binary in an earlier step skip the build cost.
 - Equivalent through Yarn (every script delegates to `run.sh`):
   ```sh
   yarn test         # default headless
@@ -55,8 +55,8 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 
 `run.sh` flags:
 
-- `--build` force a desktop-binary rebuild even when `../bin/erun-app` exists. Use this after editing Go code.
-- `--skip-build` deprecated no-op kept for older callers; the default behaviour already avoids building when the binary is present.
+- `--build` force a desktop-binary rebuild even when `../bin/erun-app` looks current. Use this after editing Go code.
+- `--skip-build` explicit opt-out: never rebuild a present-but-stale binary. A missing binary is always built — there is nothing to run otherwise — and a stale one that is reused anyway prints a loud warning naming its age and what it predates, so the run is never silently wrong.
 - `--skip-lint` skip typecheck/lint/format:check for this invocation only, forwarding the same skip to `build.sh` when a rebuild runs. Per-invocation only — it cannot arrive from an environment variable, and a skipped run always prints `>> SKIPPING ...` so the skip is never silent. Use only when iterating locally; never in CI.
 - `--port N` override the preferred backend port. Defaults to `34123` to avoid clashing with `wails dev`'s `34115`. Exported as `ERUN_PLAYWRIGHT_PORT` so `playwright.config.ts` stays in sync. It is a preference only: each worker's real port is the one its backend announced.
 - `--headed` run the browser with a visible window. Otherwise headless.
@@ -64,6 +64,8 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 - Any unrecognised flag is also forwarded to `playwright test`, so `yarn test --grep sidebar` works even though Yarn 1 strips its own `--` separator before reaching the script.
 
 `run.sh` is the canonical entry point from desktop build/packaging flows — `build.sh`-style automation should call `erun-ui/playwright/run.sh` rather than chaining the underlying `yarn` and `playwright` commands by hand. Packaging pipelines that produce `bin/erun-app` themselves can call `./run.sh` directly; the script will reuse the binary.
+
+- **The staleness scan is a correctness boundary, not an optimization.** `run.sh`'s `find_stale_binary_sources` decides whether `../bin/erun-app` is rebuilt, so any tree compiled into that binary which the scan does not read lets a branch switch silently run the previous revision — and every verdict the suite returns from that run is about the wrong source. Its coverage set is every tree the binary is compiled from, and the manifests they are resolved through: this module's Go sources and `headlessserver` with its `go.mod`/`go.sum`/`go.work`/`go.work.sum`, `erun-common` (unioned through `go.work`) with its own module files and the assets it go:embeds, everything the frontend build compiles into the `frontend/dist` that `assets_production.go` go:embeds — `erun-ui/frontend/src` and its build config, `erun-kit/src` and its manifest, reached through the `@kit` alias, the `theme.css` import and Tailwind's `@source` scan — and the repo-root workspace `package.json`/`yarn.lock` the bundle's dependencies resolve through. `erun-console` is deliberately outside it: the desktop neither links nor bundles it, and scanning it would rebuild on unrelated work. A new tree the bundle reaches belongs in the scan; `playwright_staleness_test.go` fails until the scan reports a change confined to every path in that set, and fails again if the scan widens onto a module the desktop does not build.
 
 ## Reporting a browser that dies at launch
 
