@@ -798,6 +798,79 @@ func TestReviewNameRoundTrips(t *testing.T) {
   assert.ok(!result.notes.some((note) => note.startsWith('NOT RUN:')), 'an ungated test was reported as skipped');
 });
 
+test('a body that only spells an ERUN_ name is not accused of a gate on it', () => {
+  // The regression: a case whose harness builds shell text naming ERUN_UI_DIR
+  // -- and which reads no environment at all -- was reported as skipping
+  // unless ERUN_UI_DIR was set, with an instruction to go and set it. A false
+  // accusation is the one outcome this half of the check must never produce.
+  const source = `package main
+
+import (
+	"runtime"
+	"testing"
+)
+
+func scanHarness(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the scan is POSIX shell")
+	}
+	script := "ERUN_UI_DIR=/tmp/x"
+	return script + runtime.GOOS
+}
+
+func TestStalenessScanCoversEveryInput(t *testing.T) {
+	if scanHarness(t) == "" {
+		t.Fatal("no script was staged")
+	}
+}
+`;
+  const path = 'erun-ui/staleness_coverage_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange([`Regression-Test: ${path}::TestStalenessScanCoversEveryInput`], [{ status: 'A', path }]),
+    io({ [path]: source }),
+  );
+  assert.equal(result.classification, 'declared');
+  assert.ok(
+    !result.notes.some((note) => note.startsWith('NOT RUN:')),
+    `a case that reads no environment was accused of a gate: ${JSON.stringify(result.notes)}`,
+  );
+});
+
+test('a skip naming no variable still falls back to the one the body reads', () => {
+  // The other direction: narrowing the fallback to reads must not lose the
+  // gate whose message says "%s is required" while its body is the thing that
+  // actually reads the variable.
+  const source = `package repository
+
+import (
+	"os"
+	"testing"
+)
+
+func tenantsDatabase(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("ERUN_E2E_TENANTS_DATABASE_URL")
+	if url == "" {
+		t.Skipf("%s is required", "the tenants database")
+	}
+	return url
+}
+
+func TestTenantRenamePersists(t *testing.T) {
+	_ = tenantsDatabase(t)
+}
+`;
+  const path = 'erun-backend/erun-backend-api/tenants_gate_test.go';
+  const result = evaluateRegressionCoverage(
+    optInChange([`Regression-Test: ${path}::TestTenantRenamePersists`], [{ status: 'A', path }]),
+    io({ [path]: source }),
+  );
+  const caveat = result.notes.find((note) => note.startsWith('NOT RUN:'));
+  assert.ok(caveat, `expected a "NOT RUN:" caveat, got notes: ${JSON.stringify(result.notes)}`);
+  assert.match(caveat, /ERUN_E2E_TENANTS_DATABASE_URL/);
+});
+
 test('braces inside a string or a comment do not hide the gate', () => {
   // A case body that ends early reads as ungated, which is the silent
   // direction this whole change exists to remove -- so the scanner has to
