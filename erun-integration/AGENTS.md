@@ -60,13 +60,28 @@ cross-repository structural gates, not production helpers.
   (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). That
   covers every captured value, not only the URL -- a handler that read a
   page-path variable assigned after the server started had the same shape.
-- Only `-race` reports that pair, and **no gated venue runs `-race` for this
-  module**: `scripts/integration-test.sh`'s own `go test` -- the suite behind
-  both `make integration-test` and `make check-gate` -- passes `-count=1`,
-  `-parallel` and `-timeout` and nothing else, and the Makefile wires `-race`
-  for `erun-common` and `erun-ui` alone. A green gate is therefore evidence for
-  a probe's behavioral half and says nothing about its ordering half; run the
-  ordering half explicitly with `go test -race -count=1 -run <probe> .`.
+- `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is what keeps
+  that invariant true, and it is the gate that reds: an AST sweep of the whole
+  module's source, so the ordering is a property of the source rather than of a
+  schedule, and the ordinary `go test ./...` at `scripts/integration-test.sh`'s
+  compare-mode line fails on the pre-fix tree with no `-race` anywhere. It
+  reports the handler's read, the offending assignment and the line serving
+  began. It also carries its own fixture test, so the shapes it must catch and
+  the legitimate ones it must leave alone are pinned independently of this
+  module's real stubs.
+- The sweep is a shape detector with real limits, stated in the file: a handler
+  reached through a variable or helper, a captured value written from another
+  function, and a variable used as a map-literal key are all missed. It is a
+  floor under the invariant, not a proof of it.
+- The **behavioral half is still not gated**: only `-race` reports the actual
+  read/write pair, and **no gated venue runs `-race` for this module** --
+  `scripts/integration-test.sh`'s own `go test` (the suite behind both
+  `make integration-test` and `make check-gate`) passes `-count=1`, `-parallel`
+  and `-timeout` and nothing else, and the Makefile wires `-race` for
+  `erun-common` and `erun-ui` alone. The ordering probes below are therefore
+  green in the gate on the pre-fix tree too; they are evidence that the pair is
+  real, and the sweep above is the gate. Run the probes explicitly with
+  `go test -race -count=1 -run <probe> .`.
 - A probe pinning the ordering drives its request from a separate `curl`
   process: an in-process client's own netpoll round trip orders the two accesses
   and hides the race, so an in-process probe stays silent even under `-race`.
