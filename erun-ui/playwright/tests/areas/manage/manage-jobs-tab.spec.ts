@@ -161,6 +161,32 @@ test.describe('manage dialog jobs tab', () => {
     await app.manageDialog.cancel();
   });
 
+  // The empty store's own version of the held-read case at the end of this
+  // file, and the one state the convergence pass left behind: `convergeOnJobsTab`
+  // waits on the locator its caller names, and the settled empty state shared
+  // its test id with the loading placeholder, so the wait settled on "Loading
+  // jobs…" and the assertion that followed raced the read on expect's 10s
+  // default -- the budget the convergence exists to take it off. Held past that
+  // default, the pair only passes if the wait is tied to the read it names.
+  test('an empty store is waited out, not read off the loading placeholder', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    // Past expect's 10s default with room to spare, so the read is still
+    // outstanding when the assertion below would otherwise give up on it.
+    await stubJobs(page, [], undefined, { holdMs: 14_000 });
+
+    await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.manageDialog.waitForOpen();
+    await convergeOnJobsTab(app, app.manageDialog.jobsEmptyState());
+
+    await expect(app.manageDialog.jobsEmptyState()).toContainText('No jobs yet');
+    await expect(app.manageDialog.jobRows()).toHaveCount(0);
+
+    await app.manageDialog.cancel();
+  });
+
   test('each outcome reads distinctly, and a missing one is never a success', async ({
     app,
     page,
