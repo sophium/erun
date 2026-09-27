@@ -2929,11 +2929,22 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 // githubRulesetStubServer's page-1 handler depends on: it builds the Link header
 // out of the captured serverURL, and httptest.NewServer returns only after its
 // serving goroutine exists, so assigning serverURL from server.URL afterwards
-// has no happens-before edge to that handler's read. Run with -race the two
-// accesses are reported as a data race -- read at the Link header line, previous
-// write at the assignment -- which is the state this test exists to catch. The
-// merge gate's integration suite does not run -race; this test runs there for
-// its behavioral half and needs `go test -race` for its race half.
+// has no happens-before edge to that handler's read.
+//
+// The ordering that fixes is not observable without -race, and no gated venue
+// runs -race for this module: scripts/integration-test.sh's own `go test` --
+// the integration suite both `make integration-test` and `make check-gate`
+// run -- passes -count=1, -parallel and -timeout and nothing else, and -race
+// is wired in the Makefile for erun-common and erun-ui alone. So this test is
+// green in the gate on the pre-fix tree as well as the post-fix one, and a
+// green gate is evidence for its behavioral half only. Run the ordering half
+// explicitly with:
+//
+//	cd erun-integration && go test -race -count=1 -run \
+//	  '^TestGithubRulesetStubServerAssignsItsURLBeforeItServes$' .
+//
+// which reports the pair as a data race -- read at the Link header line,
+// previous write at the assignment -- on the pre-fix tree, and is silent after.
 //
 // The probe's client is deliberately a process of its own. An in-process client
 // is ordered by the netpoll round trip that carries the request -- the test

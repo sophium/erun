@@ -57,13 +57,24 @@ cross-repository structural gates, not production helpers.
 - A fixture stub server assigns every value its handlers read **before**
   `Start()`, never from `NewServer`'s return: `NewServer` begins serving before
   it returns, so a write after it has no happens-before edge to a handler read
-  (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). Only
-  `-race` reports that pair and `scripts/integration-test.sh` does not run with
-  it, so a probe pinning it drives the request from a separate `curl` process --
-  an in-process client's own netpoll round trip orders the two accesses and
-  hides the race. That makes `curl` a host prerequisite of this suite, in the
-  image test stage's base like git and tar. See
-  `exec_test.go::TestGithubRulesetStubServerAssignsItsURLBeforeItServes`.
+  (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). That
+  covers every captured value, not only the URL -- a handler that read a
+  page-path variable assigned after the server started had the same shape.
+- Only `-race` reports that pair, and **no gated venue runs `-race` for this
+  module**: `scripts/integration-test.sh`'s own `go test` -- the suite behind
+  both `make integration-test` and `make check-gate` -- passes `-count=1`,
+  `-parallel` and `-timeout` and nothing else, and the Makefile wires `-race`
+  for `erun-common` and `erun-ui` alone. A green gate is therefore evidence for
+  a probe's behavioral half and says nothing about its ordering half; run the
+  ordering half explicitly with `go test -race -count=1 -run <probe> .`.
+- A probe pinning the ordering drives its request from a separate `curl`
+  process: an in-process client's own netpoll round trip orders the two accesses
+  and hides the race, so an in-process probe stays silent even under `-race`.
+  `curl` is consequently a host prerequisite of this suite, present in the image
+  test stage's base beside git and tar; a probe fails loudly rather than
+  skipping when it is missing.
+- See `exec_test.go::TestGithubRulesetStubServerAssignsItsURLBeforeItServes` and
+  `list_control_planes_test.go::TestControlPlaneStubAssignsItsServerBeforeItServes`.
 - For shared fixture/harness changes, validate on Linux as well as the local host;
   local success must not depend on tools absent from the image test stage.
 
