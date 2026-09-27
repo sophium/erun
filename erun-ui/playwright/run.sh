@@ -429,6 +429,12 @@ binary_age() {
 # imports yet — the cost is one rebuild, which is the direction this scan
 # errs in: never a reused binary.
 #
+# The walk above is rooted at ERUN_UI_DIR, so it cannot reach a compiled-in
+# tree that is a sibling of erun-ui rather than a child of it, and matching
+# `*.go` cannot see a build the module graph re-resolved around it. erun-kit,
+# the Go module graph, and the workspace manifests build.sh installs from are
+# each covered by their own find below for those two reasons.
+#
 # wails.json and frontend/vite-env.d.ts are deliberately not listed: the
 # former only keys generate-wailsjs.sh's binding cache, which re-emits the
 # same bindings from unchanged Go types, and the latter is a type-only
@@ -449,6 +455,33 @@ find_stale_binary_sources() {
 	find "$ERUN_UI_DIR/frontend/index.html" "$ERUN_UI_DIR/frontend/vite.config.ts" \
 		"$ERUN_UI_DIR/frontend/package.json" "$ERUN_UI_DIR/frontend/tsconfig.json" \
 		-newer "$BIN_PATH" -print 2>/dev/null || true
+	# erun-kit is the frontend's counterpart to erun-common: a sibling
+	# workspace module whose source the bundle compiles from three ways — the
+	# `@kit` vite alias (frontend/vite.config.ts), the `erun-kit/theme.css`
+	# import and Tailwind's `@source` scan (frontend/src/styles/index.css) —
+	# and whose `exports` is what resolves a bare `erun-kit` import to that
+	# source. erun-kit is a sibling of erun-ui, not a child of it, so the walk
+	# above cannot reach it however wide it goes: without this, a branch that
+	# only touches erun-kit silently runs the previous binary against the new
+	# source. Its own `dist/` is not listed because nothing resolves to it —
+	# the package's `exports` names `./src/index.ts`.
+	find "$ERUN_UI_DIR/../erun-kit/src" -type f -newer "$BIN_PATH" -print 2>/dev/null || true
+	find "$ERUN_UI_DIR/../erun-kit/package.json" -newer "$BIN_PATH" -print 2>/dev/null || true
+	# The module graph those Go sources are compiled against, and the extra
+	# module go.work unions in. The finds above match `*.go` only, so a
+	# dependency bump re-resolves the build with no Go file moving. A build
+	# never writes these back, so this cannot make a run rebuild against its
+	# own output.
+	find "$ERUN_UI_DIR/go.mod" "$ERUN_UI_DIR/go.sum" "$ERUN_UI_DIR/go.work" "$ERUN_UI_DIR/go.work.sum" \
+		"$ERUN_UI_DIR/../erun-common/go.mod" "$ERUN_UI_DIR/../erun-common/go.sum" \
+		-newer "$BIN_PATH" -print 2>/dev/null || true
+	# The workspace manifests the frontend installs from: build.sh installs
+	# from the repo-root lockfile rather than a per-module one (see its own
+	# note), so a dependency change re-resolves the packages the bundle is
+	# built against even when no source file moves. `--frozen-lockfile` never
+	# writes the lockfile back, so this cannot make a run rebuild against its
+	# own output.
+	find "$ERUN_UI_DIR/../package.json" "$ERUN_UI_DIR/../yarn.lock" -newer "$BIN_PATH" -print 2>/dev/null || true
 }
 
 # Build the desktop binary so the webServer fixture has something to spawn.

@@ -121,11 +121,42 @@ func (h *coverageScanHarness) stage(t *testing.T) {
 		filepath.Join(h.erunUIDir, "frontend", "package.json"),
 		filepath.Join(h.erunUIDir, "frontend", "tsconfig.json"),
 
+		// erun-kit, the frontend's counterpart to erun-common: a sibling
+		// workspace module, not a child of erun-ui, whose source the bundle
+		// compiles from and whose manifest resolves a bare `erun-kit` import
+		// to that source.
+		filepath.Join(h.root, "erun-kit", "src", "components", "StatusBadge.tsx"),
+		filepath.Join(h.root, "erun-kit", "src", "styles", "theme.css"),
+		filepath.Join(h.root, "erun-kit", "package.json"),
+
+		// The module graph the Go sources above are compiled against, plus the
+		// extra module go.work unions in. None is a `.go` file, so the walks
+		// that match `*.go` see a dependency bump re-resolve the build while
+		// nothing they read has moved.
+		filepath.Join(h.erunUIDir, "go.mod"),
+		filepath.Join(h.erunUIDir, "go.sum"),
+		filepath.Join(h.erunUIDir, "go.work"),
+		filepath.Join(h.erunUIDir, "go.work.sum"),
+		filepath.Join(h.root, "erun-common", "go.mod"),
+		filepath.Join(h.root, "erun-common", "go.sum"),
+
+		// The workspace manifests the root `yarn install --frozen-lockfile`
+		// resolves the bundle's packages from.
+		filepath.Join(h.root, "package.json"),
+		filepath.Join(h.root, "yarn.lock"),
+
 		// Trees the desktop does not compile from, staged so a walk that
 		// widened into them is visible as a rebuild on unrelated work.
 		filepath.Join(h.erunUIDir, "playwright", "fixtures", "winstub", "main.go"),
 		filepath.Join(h.erunUIDir, "playwright", "node_modules", "flatted", "golang", "pkg", "flatted", "flatted.go"),
 		filepath.Join(h.erunUIDir, "frontend", "node_modules", "dep", "bindings.go"),
+
+		// erun-kit's own untracked build output and its installed
+		// dependencies: neither is what a bare `erun-kit` import resolves to
+		// (that package's `exports` names ./src/index.ts), so reaching into
+		// them would spend a rebuild on files no desktop build reads.
+		filepath.Join(h.root, "erun-kit", "dist", "index.js"),
+		filepath.Join(h.root, "erun-kit", "node_modules", "dep", "index.ts"),
 	}
 	for _, path := range files {
 		h.touch(t, path, coverageSettledAt)
@@ -199,6 +230,27 @@ var coverageInputCases = []struct {
 	{"the release version build.sh stamps in", "erun-devops/VERSION"},
 	{"erun-common go source (control)", "erun-common/common.go"},
 	{"frontend source (control)", "erun-ui/frontend/src/main.tsx"},
+
+	// erun-kit is a sibling of erun-ui, so the walk rooted at ERUN_UI_DIR
+	// cannot reach it however wide that walk goes. A change confined to it is
+	// exactly the false verdict this scan exists to prevent.
+	{"erun-kit source the bundle compiles from", "erun-kit/src/components/StatusBadge.tsx"},
+	{"erun-kit theme css the bundle imports", "erun-kit/src/styles/theme.css"},
+	{"the manifest resolving a bare erun-kit import", "erun-kit/package.json"},
+
+	// A dependency bump re-resolves the build with no `.go` file moving, so
+	// the `*.go` walks above see nothing while the compiled result changes.
+	{"the module graph go.mod re-resolves", "erun-ui/go.mod"},
+	{"the module graph go.sum re-resolves", "erun-ui/go.sum"},
+	{"the go.work unioning erun-common in", "erun-ui/go.work"},
+	{"the go.work.sum for that union", "erun-ui/go.work.sum"},
+	{"erun-common's module graph", "erun-common/go.mod"},
+	{"erun-common's module graph checksums", "erun-common/go.sum"},
+
+	// build.sh installs from the repo-root lockfile, so a dependency change
+	// re-resolves the packages the bundle is built against.
+	{"the root workspace manifest yarn installs from", "package.json"},
+	{"the root workspace lockfile build.sh installs from", "yarn.lock"},
 }
 
 // TestPlaywrightStalenessScanCoversEveryInputTheBinaryIsBuiltFrom is the
@@ -230,6 +282,11 @@ func TestPlaywrightStalenessScanCoversEveryInputTheBinaryIsBuiltFrom(t *testing.
 // project — whose fixtures are their own Go module, built by nothing this
 // script builds — or into installed dependencies would spend a desktop rebuild
 // on files no desktop build reads.
+//
+// The erun-kit rows guard the direction the coverage case could most easily
+// overshoot: erun-kit is now read, and reading it as a whole tree rather than
+// as the source its `exports` names would sweep in an untracked dist/ and an
+// installed node_modules/ that no desktop build consumes.
 func TestPlaywrightStalenessScanLeavesTreesTheBinaryIsNotBuiltFromAlone(t *testing.T) {
 	harness := newCoverageScanHarness(t)
 	harness.stage(t)
@@ -237,6 +294,8 @@ func TestPlaywrightStalenessScanLeavesTreesTheBinaryIsNotBuiltFromAlone(t *testi
 		"erun-ui/playwright/fixtures/winstub/main.go",
 		"erun-ui/playwright/node_modules/flatted/golang/pkg/flatted/flatted.go",
 		"erun-ui/frontend/node_modules/dep/bindings.go",
+		"erun-kit/dist/index.js",
+		"erun-kit/node_modules/dep/index.ts",
 	} {
 		harness.move(t, filepath.Join(harness.root, filepath.FromSlash(path)))
 	}
