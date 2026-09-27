@@ -268,33 +268,51 @@ co-tenant count it divided by only once that share is the one in use. A runtime 
 to bound, so the pair does nothing there.
 
 There is a second gate on the same count, in the other direction: the share is refused wherever no
-co-tenant count makes it usable. The reserve is divided by the count the node's room is, so the share
-only applies from `2.25 ×` the reserve up — with the reserve at its flat 20 GiB, every node under
-200 GiB, that is 45 GiB. A 21 GiB node therefore refuses the share at one co-tenant as surely as at a
-million, and setting the pair on such a node changes nothing; the build log says the node's share was
-unusable rather than passing the declaration over in silence.
+co-tenant count makes it usable. Both terms it compares are divided by that same count, so on a node
+below `2.25 ×` its reserve no count makes the share usable and the declaration is refused — with the
+reserve at its flat 20 GiB, every node under 200 GiB, that is a node under 45 GiB. A 21 GiB node
+therefore refuses the share at one co-tenant as surely as at a million, and setting the pair on such
+a node changes nothing; the build log says the node's share was unusable rather than passing the
+declaration over in silence.
 
 **That gate bounds the node, not the ceiling, and it does not catch every share too small to serve a
-build.** Its arithmetic reduces to `node < 2.25 × reserve`: below that line no count makes the share
-usable and the declaration is refused; above it the refusal does not fire on the ceiling's size at
-all, however small the ceiling the declaration produces. (A share that divides down to no bytes is
-still refused, but on a node this size that takes hundreds of millions of co-tenants.) The comparison
-is between the ceiling and this environment's share of the reserve, and both of those are divided by
-the same count — so on a node above the line the two scale together and the comparison can never fire,
-even when the ceiling is far below anything a build is served from.
+build.** Strictly above that line the untruncated comparison can never refuse — `80%` of the room
+divided by the count stays above the reserve divided by the same count, however small the absolute
+numbers get — but the line itself is exactly where those two quantities are equal, and the division
+on both sides is integer division. At the line it is therefore the co-tenant count that decides, not
+the node. On a 45 GiB node — exactly `2.25 ×` the reserve — a count of 1, 2, 4, 8, 16, 32
+or 64 installs the share, and 3, 5, 6, 7 or 1000 refuses it, every one of those refusals landing
+between 16 and 53 bytes short of the tie. The same rounding refuses shares above the line wherever the
+two sides are close enough for it to matter: a 46 GiB node declaring 50 million co-tenants resolves to
+a 400-byte ceiling against a 429-byte share of the reserve, and is refused. So the refusal is not a
+function of the node alone — it moves with the co-tenant count and the node's exact byte size — and no
+count-independent description of it holds at the edge.
 
-The sizes this leaves installed are real ones. The 21 GiB node above refuses a share at 204.8 MiB
-(four co-tenants) and one at 51.2 MiB (sixteen), and the code describes both as a cache holding no
-working set. A 100 GiB node declaring 1000 co-tenants has 80 GiB above its reserve, and 80% of a
-thousandth of that is 68,719,440 bytes — 65.5 MiB, inside the same band — and that share *is*
-installed, because the gate compares it against 20.5 MiB (this environment's thousandth of the same
-reserve) and 65.5 is the larger of the two. The environment then reclaims its cache down to 65.5 MiB
-on every build and drops the layers the next build would have used, which is exactly the outcome the
-refusal exists to prevent.
+**The refusal has no lower edge, and the sizes it refuses are not a band.** Nothing here defines a
+byte floor for a working set: what the guard tests is whether the ceiling came out below this
+environment's own share of the node's reserve, and that is a question about the division rather than
+about size. Its refusals are consequently not ordered by size — the 21 GiB node refuses a 204.8 MiB
+ceiling at four co-tenants and a 51.2 MiB one at sixteen, and the 45 GiB node above refuses a 6.7 GiB
+ceiling at three — while the 65.5 MiB share below is installed. The message calls those refusals a
+cache holding no working set, but that is the message's word for the relation, not a size test a
+reader can locate a threshold in: the largest ceiling refused on these figures is over a hundred times
+the smallest one installed. That is why the count stays the operator's responsibility — the guard can
+refuse a share its arithmetic leaves unusable, and it cannot tell you that the share it installs is
+big enough to serve a build.
 
-The remedy is the declaration and not the bound: a `buildCacheCoTenants` large enough to shrink the
-share below a working set on a node that size is a count the node cannot be holding, so lower it — or
-leave the pair unset and keep the volume ceiling. Nothing on erun's side can catch the drift for you —
+The sizes this leaves installed are real ones. A 100 GiB node declaring 1000 co-tenants has 80 GiB
+above its reserve, and 80% of a thousandth of that is 68,719,440 bytes — 65.5 MiB — and that share
+*is* installed, because the gate compares it against 20.5 MiB (this environment's thousandth of the
+same reserve) and 65.5 is the larger of the two. The environment then reclaims its cache down to
+65.5 MiB on every build and drops the layers the next build would have used, which is exactly the
+outcome the refusal exists to prevent. No test covers that state: the refusals are exercised on 21 GiB
+and 32 GiB nodes only, so a node above 32 GiB resolving to a ceiling this small installs with nothing
+asserting either way.
+
+The remedy is the declaration and not the bound: since no byte floor is defined above, the judgement
+of what a build is served from is yours to make, and a `buildCacheCoTenants` large enough to divide
+the node's room down below it is a count the node cannot be holding — so lower it, or leave the pair
+unset and keep the volume ceiling. Nothing on erun's side can catch the drift for you —
 the pod's RBAC is namespace-scoped, so it cannot count its co-tenants and check the number against
 reality, which is why the build log names the count it divided by.
 

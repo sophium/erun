@@ -282,26 +282,34 @@ demonstrated:
   which side of it a node falls on before setting the pair, rather than reading the
   declaration itself as a bound in force.
 - A share is also refused where no co-tenant count can make it usable. The floor is
-  divided by the same count the node's room is, so the share is applied only from
-  `2.25 × floor` up, and nowhere below it: while the floor is the flat 20 GiB — every
-  node under 200 GiB — that is 45 GiB, and a node at 21 GiB refuses the share at a
-  count of 1 as surely as at a million. The refusal is the disposal argument above
-  and not the undeclared case: the volume share holds, and the run says the sum
-  across the node went unbounded by it rather than passing over the declaration in
-  silence (`errBuildCacheNodeBudgetUnusable`).
+  divided by the same count the node's room is, so below `2.25 × floor` no count makes
+  the share usable: while the floor is the flat 20 GiB — every node under 200 GiB —
+  that is a node under 45 GiB, and a node at 21 GiB refuses the share at a count of 1
+  as surely as at a million. The refusal is the disposal argument above and not the
+  undeclared case: the volume share holds, and the run says the sum across the node
+  went unbounded by it rather than passing over the declaration in silence
+  (`errBuildCacheNodeBudgetUnusable`).
 - That gate bounds the node and not the ceiling, so it is a floor on the node rather
-  than on the bound: above `2.25 × floor` no co-tenant count is refused, however
-  small the ceiling it resolves to, because the comparison is between the ceiling and
-  `floor / coTenants` and both are divided by the same count. A 100 GiB node
-  declaring 1000 co-tenants installs a 68,719,440-byte ceiling — between the
-  53,687,040 and 214,748,320 bytes the cases above refuse as holding no working set —
-  since the gate weighs it against 21,474,836 bytes and it is the larger. Closing
-  that would need a measured working-set floor, which the design deliberately does
-  not assert, and refusing the share instead leaves every declared co-tenant
-  unbounded by the node — the aggregate defect this bound exists to remove. The
-  operator's remedy is the declaration: a count that shrinks the share that far is a
-  count the node cannot be holding, and nothing in the pod can check it
-  (`build_cache_node_bound_test.go`).
+  than on the bound — but the floor is not a clean node-only threshold. At exactly
+  `2.25 × floor` the two compared quantities are equal and the division on both sides
+  is integer division, so at the line the co-tenant count decides and not the node: a
+  45 GiB node installs the share at counts of 1, 2, 4, 8, 16, 32 and 64 and refuses it
+  at 3, 5, 6, 7 and 1000, each refusal 16–53 bytes short of the tie. The same rounding
+  refuses shares above the line where the sides are close, so a 46 GiB node with 5e7
+  co-tenants refuses a 400-byte ceiling against a 429-byte reserve share. Do not
+  restate the guard as `node < 2.25 × floor`. Above that noisy edge the guard does
+  stop bounding the ceiling: a 100 GiB node declaring 1000 co-tenants installs a
+  68,719,440-byte ceiling, larger than the 21,474,836 bytes it is weighed against.
+  Closing that would need a measured working-set floor, which the design deliberately
+  does not assert — so the guard's refusals are not a size band and none of the byte
+  counts in them is a floor; the sizes refused (up to 7,158,278,800 bytes on a 45 GiB
+  node at three co-tenants) and the size installed are not ordered by magnitude.
+  Refusing the share instead leaves every declared co-tenant unbounded by the node —
+  the aggregate defect this bound exists to remove. The operator's remedy is the
+  declaration: a count that shrinks the share that far is a count the node cannot be
+  holding, and nothing in the pod can check it
+  (`build_cache_node_bound_test.go`, whose refusals are exercised on 21 GiB and 32 GiB
+  nodes only — the 45 GiB and 46 GiB edges above are measured, not pinned).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher
