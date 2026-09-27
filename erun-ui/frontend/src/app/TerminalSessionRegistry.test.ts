@@ -98,6 +98,23 @@ test('an empty capture leaves an existing snapshot alone', () => {
   assert.deepEqual(sessions.displayBuffer(1), ['line 2\n']);
 });
 
+// A switch is dispatched while the outgoing session's last output is still in
+// xterm's write queue, so lines for that session keep arriving after the switch
+// but before the capture that clears the buffer. They are not on the screen the
+// snapshot carries, so they have to survive it -- dropping them loses output for
+// a session nobody re-activates until the next switch back.
+test('captureSnapshot keeps output that arrived after the switch was dispatched', () => {
+  const sessions = new TerminalSessionRegistry();
+  sessions.appendDisplayBuffer(1, 'rendered\n');
+  // `1` is where the post-dispatch output begins.
+  sessions.appendDisplayBuffer(1, 'still queued\n');
+
+  sessions.captureSnapshot(1, 'SERIALIZED_SCREEN', 1);
+
+  assert.equal(sessions.snapshot(1), 'SERIALIZED_SCREEN');
+  assert.deepEqual(sessions.displayBuffer(1), ['still queued\n']);
+});
+
 test('snapshots and buffers are independent per session', () => {
   const sessions = new TerminalSessionRegistry();
   sessions.captureSnapshot(1, 'ONE');

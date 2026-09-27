@@ -109,9 +109,16 @@ export class TerminalSessionRegistry {
   }
 
   // captureSnapshot records the serialized screen a switch-away captured and
-  // clears the display buffer in the same step: everything up to now is
-  // captured in `serialized`, so from here the buffer holds only the delta a
-  // future switch-back needs to replay on top of it.
+  // drops the display buffer entries that screen already carries, in the same
+  // step: everything up to the capture is in `serialized`, so from here the
+  // buffer holds only the delta a future switch-back needs to replay on top of
+  // it.
+  //
+  // `keepFrom` is the index at which output that arrived after the switch was
+  // dispatched begins. Those chunks were never written to the pane -- a session
+  // the store no longer names buffers without writing -- so they are not in
+  // `serialized` and are kept, not dropped with the captured prefix. The
+  // default keeps nothing, which is what a caller with no such window wants.
   //
   // An empty capture is the one case where that premise does not hold, and it
   // is reachable whenever the session being switched away from has not painted
@@ -119,7 +126,7 @@ export class TerminalSessionRegistry {
   // before the outgoing session's activation writes have flushed serializes a
   // terminal whose buffer those writes have not reached -- "" for a session
   // that was just switched to. Storing that would replace the session's
-  // remembered screen with nothing and clear the display buffer that was the
+  // remembered screen with nothing and drop the display buffer that was the
   // only other copy of it, so every later switch back would render blank.
   // Refuse it: the session keeps whatever snapshot it already had, and the
   // buffer stays whole. That is what stops the blank -- it is not a promise
@@ -135,12 +142,22 @@ export class TerminalSessionRegistry {
   // session 0 or on a session id just minted, which Go allocates
   // monotonically (a.nextSerial++) and never reuses. A future caller that
   // resets an active session or reuses an id would have to revisit this guard.
-  captureSnapshot(sessionId: number, serialized: string): void {
+  captureSnapshot(
+    sessionId: number,
+    serialized: string,
+    keepFrom = Number.POSITIVE_INFINITY,
+  ): void {
     if (serialized === '') {
       return;
     }
     this.sessionSnapshots.set(sessionId, serialized);
-    this.sessionDisplayBuffers.delete(sessionId);
+    const buffered = this.sessionDisplayBuffers.get(sessionId);
+    const chunks = buffered ? buffered.chunks.slice(keepFrom) : [];
+    if (chunks.length === 0) {
+      this.sessionDisplayBuffers.delete(sessionId);
+      return;
+    }
+    this.sessionDisplayBuffers.set(sessionId, { chunks, ...totals(chunks) });
   }
 
   exitReason(sessionId: number): string {

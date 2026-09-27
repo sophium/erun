@@ -23,19 +23,9 @@ startListening({
     if (sessionId === previousSessionId) {
       return;
     }
-    // Snapshot the outgoing session's rendered screen BEFORE resetting the
-    // shared xterm instance -- reset clears exactly the state a snapshot
-    // needs to capture (#1322).
-    controller.snapshotSession(previousSessionId);
-    if (sessionId <= 0) {
-      controller.resetTerminal();
-      return;
-    }
-    controller.resetTerminal();
-    controller.activateSession(sessionId);
-    // Push the pane geometry to the newly-active PTY so a session spawned at a
-    // default size (an orchestrator starts at 80x24) redraws at the real width
-    // instead of rendering its UI clipped.
-    controller.resizeActiveSession();
+    // One hand-off, not a reset and a write composed by the caller: the switch
+    // has to run after everything already written for the outgoing session has
+    // parsed, or its bytes land in the incoming session's pane (switchSession).
+    controller.switchSession(previousSessionId, sessionId);
   },
 });
