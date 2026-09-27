@@ -52,7 +52,7 @@ export function OrchestratorHoverCard({
   orchestrator: OrchestratorInfo;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { open, setOpen, openNow, closeSoon } = useHoverCardOpenState();
+  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave } = useHoverCardOpenState();
 
   const running = orchestrator.status === 'running';
 
@@ -61,10 +61,10 @@ export function OrchestratorHoverCard({
       <PopoverAnchor asChild>
         <div
           className={className}
-          onMouseEnter={openNow}
-          onMouseLeave={closeSoon}
-          onFocusCapture={openNow}
-          onBlurCapture={closeSoon}
+          onMouseEnter={hoverEnter}
+          onMouseLeave={hoverLeave}
+          onFocusCapture={focusEnter}
+          onBlurCapture={focusLeave}
         >
           {children}
         </div>
@@ -84,8 +84,8 @@ export function OrchestratorHoverCard({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
-        onMouseEnter={openNow}
-        onMouseLeave={closeSoon}
+        onMouseEnter={hoverEnter}
+        onMouseLeave={hoverLeave}
         className="w-90 p-0"
         role="dialog"
         aria-label={`${orchestrator.name} details`}

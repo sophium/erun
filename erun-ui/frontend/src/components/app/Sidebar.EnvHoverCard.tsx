@@ -93,7 +93,7 @@ export function EnvHoverCard({
   usageExcludesBuilds: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { open, setOpen, openNow, closeSoon } = useHoverCardOpenState();
+  const { open, setOpen, hoverEnter, hoverLeave, focusEnter, focusLeave } = useHoverCardOpenState();
 
   const issue = useWorkingIssue(selection, open);
   const erunVersionSummary = summarizeErunVersion(runtimeVersion.trim() !== '', erunVersion);
@@ -101,12 +101,15 @@ export function EnvHoverCard({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
+        {/* Pointer and focus are distinct holders of `open` -- see
+            useHoverCardOpenState. Wiring them to one pair of callbacks is what
+            let a blur close a card the pointer was still resting on. */}
         <div
           className={className}
-          onMouseEnter={openNow}
-          onMouseLeave={closeSoon}
-          onFocusCapture={openNow}
-          onBlurCapture={closeSoon}
+          onMouseEnter={hoverEnter}
+          onMouseLeave={hoverLeave}
+          onFocusCapture={focusEnter}
+          onBlurCapture={focusLeave}
         >
           {children}
         </div>
@@ -120,8 +123,8 @@ export function EnvHoverCard({
         onOpenAutoFocus={(event) => {
           event.preventDefault();
         }}
-        onMouseEnter={openNow}
-        onMouseLeave={closeSoon}
+        onMouseEnter={hoverEnter}
+        onMouseLeave={hoverLeave}
         className="w-72 p-0"
         role="dialog"
         aria-label={`${tenantName} / ${environmentName} details`}

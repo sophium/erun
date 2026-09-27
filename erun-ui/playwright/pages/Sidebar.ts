@@ -167,12 +167,16 @@ export class Sidebar {
   // the card is actually up.
   //
   // A bare hover() proves nothing. The card's open state lives in the hovered
-  // row's own React state, so anything that re-renders that row drops it --
-  // most reliably the boot-time auto-open of the default environment landing
-  // while a spec is already hovering, since reboot() deliberately returns
-  // before that has happened. Nothing reopens it either: the pointer never
-  // left the row, so no fresh mouseenter fires. That is why a card lost this
-  // way does not fail the spec quickly but stalls it until its own timeout.
+  // row's own React state, and a release closes it with nothing left to reopen
+  // it: the pointer never left the row, so no fresh mouseenter fires. That is
+  // why a card lost this way does not fail the spec quickly but stalls it
+  // until its own timeout.
+  //
+  // A re-render is not what releases it. The row's two holders are the pointer
+  // and focus, tracked apart in useHoverCardOpenState, and focus leaving the
+  // row was the release that dropped a card out from under a parked pointer
+  // (sidebar-hovercard-focus-loss.spec.ts). The re-hover below is kept as a
+  // convergence device, not as the workaround for that release.
   //
   // Moving the pointer away first and re-hovering until the card is visible
   // converges on the observable condition instead. A row that genuinely raises
@@ -193,14 +197,12 @@ export class Sidebar {
   // `read` as one retryable unit, instead of a bare hover followed by a
   // sequence of independent assertions.
   //
-  // The card's open state belongs to the hovered row's own React state, so a
-  // re-render can drop it while the pointer still rests there -- and nothing
-  // reopens it, since the pointer never left (see hoverEnvironmentRow above).
-  // That re-render is not rare: besides the boot-time auto-open of a
-  // default-landing env, the periodic activity/usage sweep can touch any
-  // environment, not just that one. A sequence of separate `expect(card)...`
-  // calls after a single hover has no way back from a mid-sequence drop;
-  // retrying the whole hover-then-read as one unit recovers by re-hovering.
+  // The card's open state belongs to the hovered row's own React state, so it
+  // can be released while the pointer still rests there -- and nothing reopens
+  // it, since the pointer never left (see hoverEnvironmentRow above). A
+  // sequence of separate `expect(card)...` calls after a single hover has no
+  // way back from a mid-sequence release; retrying the whole hover-then-read as
+  // one unit recovers by re-hovering.
   async readEnvHoverCard(
     tenant: string,
     env: string,
