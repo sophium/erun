@@ -28,6 +28,42 @@ func ignoreAlreadyClosed(err error) error {
 	return err
 }
 
+// errKillDidNotLand is what a session's Close reports when it asked the platform
+// to end the session's process and the process was still running afterwards. It
+// says something about the process, and it is the only Close failure that does:
+// every other one says the desktop could not release its own end of the session
+// — a pty file, a handle — which leaves the process's fate exactly where it was.
+// A teardown that gets this error back did not end the session it was asked to,
+// so it must not claim the exit the survivor will eventually produce.
+var errKillDidNotLand = errors.New("process outlived the kill")
+
+// killProcessTree runs a teardown's process kill and reports whether it ended
+// the process. It is the decision, not the mechanics: the kill command and the
+// liveness probe are the platform's, and a session that already holds its
+// process handle can answer the probe without an OpenProcess an EDR denies.
+//
+// The command's own exit status is the attempt and is deliberately not read as
+// the outcome: it answers neither way by itself. Windows' taskkill exits
+// non-zero for a process that has already exited — a kill that needed no doing,
+// not one that failed — and a status of success is a claim about a tree this
+// session cannot see. The process handle answers the question the caller
+// actually has, which is whether the process is gone.
+//
+// That report is what a teardown's caller turns into ownership of the exit: a
+// close that returns errKillDidNotLand did not end its session, and the
+// survivor's eventual real death is then reported rather than read back as the
+// close the operator already watched finish.
+func killProcessTree(pid int, kill func() error, alive func() bool) error {
+	if pid <= 0 {
+		return nil
+	}
+	_ = kill()
+	if alive() {
+		return fmt.Errorf("%w: pid %d", errKillDidNotLand, pid)
+	}
+	return nil
+}
+
 type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
