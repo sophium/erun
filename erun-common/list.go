@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type ListStore interface {
@@ -135,11 +136,22 @@ type ListEnvironmentResult struct {
 	Idle               EnvironmentIdleConfig   `json:"idle,omitempty"`
 	Deploy             EnvironmentDeployConfig `json:"deploy,omitempty"`
 	IsActive           bool                    `json:"isActive,omitempty"`
-	LocalPorts         EnvironmentLocalPorts   `json:"localPorts,omitempty"`
-	IsDefault          bool                    `json:"isDefault,omitempty"`
-	IsEffective        bool                    `json:"isEffective,omitempty"`
-	SSH                ListSSHResult           `json:"ssh,omitempty"`
-	AutoStart          *bool                   `json:"autoStart,omitempty"`
+	// Lifecycle is this environment's lifecycle state as the surface that
+	// emitted this entry could resolve it -- the same enum as
+	// EnvironmentReadModel.State, and always present, so a client can rely on
+	// the key rather than on its absence.
+	//
+	// On the list surface it is resolved from config and stored activity only
+	// (ResolveListEnvironmentLifecycle), so it never reports deploy-failed or
+	// stopped; on the read model, whose environment object this is, it carries
+	// that payload's resolved state. A client that needs the two states the
+	// list cannot observe reads the environment's detail instead.
+	Lifecycle   EnvironmentLifecycleState `json:"lifecycle"`
+	LocalPorts  EnvironmentLocalPorts     `json:"localPorts,omitempty"`
+	IsDefault   bool                      `json:"isDefault,omitempty"`
+	IsEffective bool                      `json:"isEffective,omitempty"`
+	SSH         ListSSHResult             `json:"ssh,omitempty"`
+	AutoStart   *bool                     `json:"autoStart,omitempty"`
 }
 
 // RuntimeImageLineMismatchResult is the list read-model view of
@@ -324,6 +336,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		Idle:                     env.Idle,
 		Deploy:                   env.Deploy,
 		IsActive:                 listEnvironmentIsActive(store, env),
+		Lifecycle:                ResolveListEnvironmentLifecycle(store, tenant.Name, env.Name, time.Now()),
 		LocalPorts:               localPorts,
 		IsDefault:                env.Name == tenant.DefaultEnvironment,
 		IsEffective:              effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,

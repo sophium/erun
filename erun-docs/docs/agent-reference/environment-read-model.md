@@ -90,10 +90,46 @@ fields a client reads most are below; the object carries roughly forty, most of 
 | `repoPath`, `localRepoPath` | string | |
 | `runtimeVersionLine`, `erunVersion` | object | Present only alongside a `runtimeVersion`; they annotate which release line the number belongs to. |
 | `runtimeImageLineMismatch` | object | Present only when the recorded and last-observed runtime images name different release lines. |
+| `lifecycle` | string enum | **Always present.** The same enum as `state`, resolved on the observations the emitting surface actually made — see [the list surface's narrower answer](#list-lifecycle). |
 
 `isDefault` means "this is the tenant's default"; `isEffective` means "this is what an unqualified
 command resolves to right now". They are separate because a default can be recorded while something
 else — an explicit target, a directory match — is in effect.
+
+### `lifecycle` — the list surface's narrower answer {#list-lifecycle}
+
+`erun list --json` emits this object for every environment in a tenant, and it carries `lifecycle`
+for the same reason it carries `name` and `runtimeVersion`: the clause a companion client reads the
+list for names a per-environment lifecycle state. Read this section before rendering it, because
+the list and the [resolved read model](#the-resolved-read-model) answer the same question over
+**different observation sets**, and the difference is one you must not paper over.
+
+| Surface | Resolved from | Can report |
+|---|---|---|
+| `erun list --json` entry (`lifecycle`) | The environment's config and its stored idle status. **No cluster read of any kind.** | `running`, `unknown` |
+| `EnvironmentReadModel.state`, and `environment.lifecycle` inside that payload | The above, plus a real `helm`/`kubectl` deploy diagnosis for that one environment | all five |
+
+`erun list` is polled — the desktop refreshes it on its own tick — and today makes **zero**
+per-environment cluster calls. A deploy diagnosis is a `helm status` plus a `kubectl get pods` per
+environment, and a cloud-context power state is a live reading `erun-common` never persists, so on
+the list path both signals are unobserved and resolve to `unknown` rather than being guessed at.
+Two of the five states are therefore unreachable from the list entry **by construction**, and a
+client must not read their absence as good news:
+
+- **`deploy-failed` is never reported on the list.** An environment whose release is broken reads
+  `running` there, because nothing the list path reads ever observed it as unhealthy. Read the
+  environment's detail for this one.
+- **`stopped` is never reported on the list.** A cloud-managed environment's power state is not
+  persisted, so a list entry for one reads `unknown` — including one that is currently powered off.
+- **`idle` is never reported on the list either.** Stop-eligibility is a cloud-managed
+  environment's answer, and reaching it needs the same power-state reading `stopped` does.
+
+`unknown` here means exactly one thing: *this surface did not observe the signal that decides the
+question.* It is never a defaulted `running`, and it is never a claim about the environment.
+
+When the emitting surface is the resolved read model rather than the list, `environment.lifecycle`
+is set to that payload's own `state`, so a client that renders only the summary never sees a
+lifecycle value that contradicts the payload it arrived in.
 
 ### `idle` — idle status and activity snapshot {#idle-status}
 

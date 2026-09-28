@@ -108,6 +108,43 @@ func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLif
 	}
 }
 
+// ResolveListEnvironmentLifecycle resolves one environment's lifecycle state
+// from the signals the list surface can observe without a cluster read.
+//
+// The list is a cheap, polled surface -- `erun list`, its MCP tool and the
+// desktop's own refresh all read config and stored activity and make no
+// per-environment cluster call. The two signals the full resolver also uses
+// are deliberately not observed here, so two of the five states are
+// unreachable from this function by construction rather than by omission:
+// DeployFailed needs the deploy diagnosis (`helm status` plus `kubectl get
+// pods`, per environment), and Stopped needs a cloud-context power state this
+// package never persists. Neither absence is guessed at -- they resolve to
+// EnvironmentLifecycleUnknown, which is what "this surface did not observe
+// that signal" means, so a caller can tell a list entry that is genuinely
+// unknown from one it may trust.
+//
+// The environment's detail (ResolveEnvironmentReadModel) is the entry point
+// that does pay for those two, and is where a caller who needs DeployFailed or
+// Stopped should look.
+//
+// An unreadable idle status is that same "not observed", never an error: one
+// environment's unreadable activity files must not blank the lifecycle of
+// every other environment beside it in the list.
+func ResolveListEnvironmentLifecycle(store ListStore, tenant, environment string, now time.Time) EnvironmentLifecycleState {
+	if store == nil {
+		return EnvironmentLifecycleUnknown
+	}
+	idle, err := ResolveStoredEnvironmentIdleStatus(store, tenant, environment, now)
+	if err != nil {
+		return EnvironmentLifecycleUnknown
+	}
+	return ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
+		ManagedCloud:       idle.ManagedCloud,
+		IdleStatusObserved: true,
+		StopEligible:       idle.StopEligible,
+	})
+}
+
 // EnvironmentHealth is the read-only doctor-derived health view: the root
 // config gate plus the current deploy diagnosis, with the single recovery
 // action RecommendedDeployRecovery would suggest layered on top so a caller
@@ -166,10 +203,18 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 		_, needsRecovery := RecommendedDeployRecovery(health.Deploy)
 		inputs.DeployHealthy = !needsRecovery
 	}
+	state := ResolveEnvironmentLifecycleState(inputs)
+	// ListEnvironmentResult carries the list surface's own lifecycle field, so
+	// a summary built here would otherwise ship the cheap answer alongside the
+	// resolved one and the two would disagree the moment the deploy diagnosis
+	// ran. The read model has resolved the fuller signal set for this one
+	// environment, so its summary states the same answer this payload resolves
+	// rather than a narrower one.
+	environment.Lifecycle = state
 	return EnvironmentReadModel{
 		Tenant:       strings.TrimSpace(tenant),
 		Environment:  environment,
-		State:        ResolveEnvironmentLifecycleState(inputs),
+		State:        state,
 		CloudContext: cloudContext,
 		Idle:         idle,
 		Health:       health,

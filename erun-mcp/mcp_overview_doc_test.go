@@ -291,6 +291,10 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 			ManagedCloud:   true,
 			IsDefault:      true,
 			IsEffective:    true,
+			// The read model states the environment summary's own lifecycle
+			// alongside the payload's `state`; a client reading only the
+			// summary must not see a lifecycle that contradicts it.
+			Lifecycle: eruncommon.EnvironmentLifecycleRunning,
 		},
 		State: eruncommon.EnvironmentLifecycleRunning,
 		Idle:  &eruncommon.EnvironmentIdleStatus{Policy: policy, StopEligible: true},

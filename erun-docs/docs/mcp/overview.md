@@ -818,7 +818,8 @@ The environment read model: one call composing what `list`, `idle`, and `doctor`
     "type": "local-agent",
     "runtimeVersion": "1.0.308",
     "isDefault": true,
-    "isEffective": true
+    "isEffective": true,
+    "lifecycle": "running"
   },
   "state": "running",
   "idle": {
