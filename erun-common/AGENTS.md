@@ -241,6 +241,84 @@ demonstrated:
   pruning and refusal on a measured shortage, but no invented refusal when the
   daemon's filesystem cannot be observed. The default/tuning live in
   `release_disk_headroom.go`.
+- A build cache is bounded per environment by one shape: this environment's share
+  of its own docker volume, tightened by its share of the node and never replaced
+  by it (`resolveBuildCacheBound`). A node share that resolves to a ceiling too
+  small to hold a working set is not a small bound — the ceiling is what
+  `docker buildx prune --max-used-space` reclaims the cache down to on every
+  build, so a cache held under what a build is served from drops the layers the
+  next build would have used every time it fires, exactly as it does at a ceiling
+  of no bytes — so an unusable node budget leaves the volume share in force and
+  is traced rather than acted on. What is unusable is read off the division the
+  allowance itself came from rather than asserted as a size: the node's room above
+  its reserve is divided among the caches that share it, and that reserve is
+  divided the same way, so a ceiling under this environment's share of the reserve
+  is a cache bounded smaller than the non-cache state beside it on the same disk
+  (`resolveBuildCacheNodeAllowance`). The threshold is a refusal, not a floor to
+  clamp up to: a CPU limit is shared fairly by the kernel, so
+  `RuntimeDindCPULimit` can floor one, while a disk ceiling is space the
+  environment then holds against every other tenant of that node, so inventing
+  room a node has said it does not have re-creates the aggregate defect the node
+  bound exists to remove. Refusing invents nothing; it leaves in force the bound
+  that was already there.
+- The node's co-tenant count is a declared chart value nothing cross-checks: the
+  pod's RBAC is namespace-scoped, so it cannot count its own co-tenants. The trace
+  reporting a node-derived ceiling names the count it divided by, which is the only
+  surface where a declaration that has drifted from the node is visible
+  (`build_cache_retention.go`, `build_cache_node_bound_test.go`).
+- That node bound has two inputs, both opt-in, and both environment variables
+  because neither is readable from inside the pod: `ERUN_BUILD_CACHE_NODE_BYTES`
+  is the node's disk in bytes, `ERUN_BUILD_CACHE_CO_TENANTS` is how many build
+  caches share it, and the chart renders the pair from its `buildCacheNodeGi` and
+  `buildCacheCoTenants`, both defaulting to zero so neither variable is emitted.
+  Unset is not a node budget of zero bytes: it is no node budget at all, and the
+  environment keeps byte-for-byte the docker-volume ceiling it had, untraced,
+  because that is the state every environment was in before this bound existed
+  (`errNoBuildCacheNodeBudget`). A node size without a count is an incomplete
+  declaration rather than a count of one — the chart emits the pair together, and
+  `declaredBuildCacheNodeAllowance` refuses the count-less form instead of handing
+  one environment the node.
+- The node's share is `(node − floor) / coTenants`, where the floor is
+  `resolveMinDiskHeadroomBytes` of the node itself — 20 GiB or 10% of it, whichever
+  is larger, overridable by `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` — and its
+  ceiling is 80% of that (`resolveBuildCacheBounds`). It replaces the volume share
+  only where that ceiling is the lower of the two, so declaring both inputs at a
+  co-tenant count whose share still exceeds the environment's declared docker
+  volume installs a declaration that changes no ceiling and is never named as one:
+  the trace, and the co-tenant count in it, appear only once the node's share is
+  what is applied. That count is `(node − floor) / volume`, and it is a function of
+  the node, the floor and the volume in hand rather than a fixed number — work out
+  which side of it a node falls on before setting the pair, rather than reading the
+  declaration itself as a bound in force.
+- A share is also refused where no co-tenant count can make it usable. The floor is
+  divided by the same count the node's room is, so below `2.25 × floor` no count makes
+  the share usable: while the floor is the flat 20 GiB — every node under 200 GiB —
+  that is a node under 45 GiB, and a node at 21 GiB refuses the share at a count of 1
+  as surely as at a million. The refusal is the disposal argument above and not the
+  undeclared case: the volume share holds, and the run says the sum across the node
+  went unbounded by it rather than passing over the declaration in silence
+  (`errBuildCacheNodeBudgetUnusable`).
+- That gate bounds the node and not the ceiling, so it is a floor on the node rather
+  than on the bound — but the floor is not a clean node-only threshold. At exactly
+  `2.25 × floor` the two compared quantities are equal and the division on both sides
+  is integer division, so at the line the co-tenant count decides and not the node: a
+  45 GiB node installs the share at counts of 1, 2, 4, 8, 16, 32 and 64 and refuses it
+  at 3, 5, 6, 7 and 1000, each refusal 16–53 bytes short of the tie. The same rounding
+  refuses shares above the line where the sides are close, so a 46 GiB node with 5e7
+  co-tenants refuses a 400-byte ceiling against a 429-byte reserve share. Do not
+  restate the guard as `node < 2.25 × floor`. Above that noisy edge the guard does
+  stop bounding the ceiling: a 100 GiB node declaring 1000 co-tenants installs a
+  68,719,440-byte ceiling, larger than the 21,474,836 bytes it is weighed against.
+  Closing that would need a measured working-set floor, which the design deliberately
+  does not assert — so the guard's refusals are not a size band and none of the byte
+  counts in them is a floor; the sizes refused (up to 7,158,278,800 bytes on a 45 GiB
+  node at three co-tenants) and the size installed are not ordered by magnitude.
+  Refusing the share instead leaves every declared co-tenant unbounded by the node —
+  the aggregate defect this bound exists to remove. The operator's remedy is the
+  declaration: a count that shrinks the share that far is a count the node cannot be
+  holding, and nothing in the pod can check it
+  (`build_cache_node_bound_test.go`, whose refusals are exercised on 21 GiB and 32 GiB
+  nodes only — the 45 GiB and 46 GiB edges above are measured, not pinned).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher

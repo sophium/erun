@@ -755,6 +755,43 @@ rendered=$(render --set worktreeStorage=none)
 [ -z "$(cache_bound_bytes "${rendered}")" ] ||
     fail "no cache bound should render for an env with no docker volume"
 
+# --- 15b. The node's own cache bound travels only when it is declared ---
+# A share of this environment's own volume does not bound the node: four
+# environments each honouring 80% of a declared 50Gi volume hold 160Gi between
+# them, every one of them inside its own ceiling, and the sum is what fills the
+# node. The figures that bound the sum are the node's disk and how many caches
+# share it, and neither is readable from inside the pod — the environment's RBAC
+# is namespace-scoped, so it cannot count its co-tenants, and a node-local,
+# quota-less claim reports the node's capacity rather than its own size. They
+# therefore render only when the deployment states them: a deployment that says
+# nothing about its node must not have one invented for it.
+node_cache_bound() {
+    grep -A1 '^            - name: ERUN_BUILD_CACHE_NODE_BYTES$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+cache_co_tenants() {
+    grep -A1 '^            - name: ERUN_BUILD_CACHE_CO_TENANTS$' "$1" |
+        sed -n 's/^              value: "\([0-9]*\)"$/\1/p'
+}
+
+rendered=$(render)
+[ -z "$(node_cache_bound "${rendered}")" ] ||
+    fail "no node cache bound should render for a deployment that declares no node, got '$(node_cache_bound "${rendered}")'"
+
+rendered=$(render --set buildCacheNodeGi=120 --set buildCacheCoTenants=4)
+[ "$(node_cache_bound "${rendered}")" = "$((120 * 1073741824))" ] ||
+    fail "the node cache bound should be the declared node size (120Gi = $((120 * 1073741824)) bytes), got '$(node_cache_bound "${rendered}")'"
+[ "$(cache_co_tenants "${rendered}")" = "4" ] ||
+    fail "the node cache bound should carry the declared co-tenant count, got '$(cache_co_tenants "${rendered}")'"
+
+# The bound is on a BuildKit cache, which only exists where the dind sidecar
+# does. A runtime env has none, so a node declaration there describes nothing
+# and must not render.
+rendered=$(render --set worktreeStorage=none --set buildCacheNodeGi=120 --set buildCacheCoTenants=4)
+[ -z "$(node_cache_bound "${rendered}")" ] ||
+    fail "no node cache bound should render for an env with no dind sidecar"
+
 # --- 16. The cap on the go build cache is the chart's number, and the image's
 #        fallback is the same number ---
 # The same hazard the docker volume's bound above carries, one layer further

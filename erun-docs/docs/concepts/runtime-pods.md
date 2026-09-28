@@ -239,6 +239,83 @@ share of that volume is a limit no single environment can exceed on the others' 
 cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
 *the node's* space, so every other environment's next build repays its layers from cold.
 
+A share of one environment's volume does not bound the node, though. Four environments each honouring
+80% of a declared 50 GiB volume hold up to 160 GiB between them, every one of them inside its own
+ceiling, and the sum is what fills the node. Two more values describe that: `buildCacheNodeGi`, the
+node's disk in GiB, and `buildCacheCoTenants`, how many build caches share it. When both are set the
+bound is tightened to 80% of `(buildCacheNodeGi − the disk-headroom reserve) ÷ buildCacheCoTenants`,
+where the reserve is the floor every build already keeps clear — 20 GiB or 10% of the node, whichever
+is larger, and `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` overrides both. The tighter of the two ceilings
+wins, so the node's share can only lower the bound and never raise it. A share the node's own figures
+leave unusable is refused rather than installed: the volume ceiling stays in force, and the build log
+says the sum across the node went unbounded by the declared one. What is unusable is read off the same
+division the share came from rather than measured against a fixed cache size — the node's room above
+its reserve is divided among the caches that share it, and that reserve is divided the same way, so a
+ceiling below this environment's own share of the reserve is refused as a cache bounded smaller than
+the non-cache state sitting beside it on the same disk.
+
+Both values default to `0`, which passes nothing to the pod and leaves an environment bounded by its
+own docker volume exactly as before — a deployment that says nothing about its node is not given a
+share of one. Work out whether the pair bites before setting it; it does only above
+`(node − reserve) ÷ the environment's docker volume` co-tenants. On a 120 GiB node with the default
+50 GiB volume that count is 3: at 2 co-tenants the node's share is *equal* to the volume, not below
+it (`(120 − 20) ÷ 2 = 50 GiB`, whose own 80% ceiling is the same 40 GiB the 50 GiB volume already
+allows), and the comparison between the two ceilings is strict, so an equal share is not applied.
+Setting both at that count therefore leaves the ceiling, the 70% warning and the log line
+all describing the volume — a declaration that reads like a bound in force while changing no ceiling
+at all. The build log's own line names the bound actually applied, and names the node's share and the
+co-tenant count it divided by only once that share is the one in use. A runtime env has no build cache
+to bound, so the pair does nothing there.
+
+There is a second gate on the same count, in the other direction: the share is refused wherever no
+co-tenant count makes it usable. Both terms it compares are divided by that same count, so on a node
+below `2.25 ×` its reserve no count makes the share usable and the declaration is refused — with the
+reserve at its flat 20 GiB, every node under 200 GiB, that is a node under 45 GiB. A 21 GiB node
+therefore refuses the share at one co-tenant as surely as at a million, and setting the pair on such
+a node changes nothing; the build log says the node's share was unusable rather than passing the
+declaration over in silence.
+
+**That gate bounds the node, not the ceiling, and it does not catch every share too small to serve a
+build.** Strictly above that line the untruncated comparison can never refuse — `80%` of the room
+divided by the count stays above the reserve divided by the same count, however small the absolute
+numbers get — but the line itself is exactly where those two quantities are equal, and the division
+on both sides is integer division. At the line it is therefore the co-tenant count that decides, not
+the node. On a 45 GiB node — exactly `2.25 ×` the reserve — a count of 1, 2, 4, 8, 16, 32
+or 64 installs the share, and 3, 5, 6, 7 or 1000 refuses it, every one of those refusals landing
+between 16 and 53 bytes short of the tie. The same rounding refuses shares above the line wherever the
+two sides are close enough for it to matter: a 46 GiB node declaring 50 million co-tenants resolves to
+a 400-byte ceiling against a 429-byte share of the reserve, and is refused. So the refusal is not a
+function of the node alone — it moves with the co-tenant count and the node's exact byte size — and no
+count-independent description of it holds at the edge.
+
+**The refusal has no lower edge, and the sizes it refuses are not a band.** Nothing here defines a
+byte floor for a working set: what the guard tests is whether the ceiling came out below this
+environment's own share of the node's reserve, and that is a question about the division rather than
+about size. Its refusals are consequently not ordered by size — the 21 GiB node refuses a 204.8 MiB
+ceiling at four co-tenants and a 51.2 MiB one at sixteen, and the 45 GiB node above refuses a 6.7 GiB
+ceiling at three — while the 65.5 MiB share below is installed. The message calls those refusals a
+cache holding no working set, but that is the message's word for the relation, not a size test a
+reader can locate a threshold in: the largest ceiling refused on these figures is over a hundred times
+the smallest one installed. That is why the count stays the operator's responsibility — the guard can
+refuse a share its arithmetic leaves unusable, and it cannot tell you that the share it installs is
+big enough to serve a build.
+
+The sizes this leaves installed are real ones. A 100 GiB node declaring 1000 co-tenants has 80 GiB
+above its reserve, and 80% of a thousandth of that is 68,719,440 bytes — 65.5 MiB — and that share
+*is* installed, because the gate compares it against 20.5 MiB (this environment's thousandth of the
+same reserve) and 65.5 is the larger of the two. The environment then reclaims its cache down to
+65.5 MiB on every build and drops the layers the next build would have used, which is exactly the
+outcome the refusal exists to prevent. No test covers that state: the refusals are exercised on 21 GiB
+and 32 GiB nodes only, so a node above 32 GiB resolving to a ceiling this small installs with nothing
+asserting either way.
+
+The remedy is the declaration and not the bound: since no byte floor is defined above, the judgement
+of what a build is served from is yours to make, and a `buildCacheCoTenants` large enough to divide
+the node's room down below it is a count the node cannot be holding — so lower it, or leave the pair
+unset and keep the volume ceiling. Nothing on erun's side can catch the drift for you —
+the pod's RBAC is namespace-scoped, so it cannot count its co-tenants and check the number against
+reality, which is why the build log names the count it divided by.
+
 The **go build cache** is the other half of that, and it lives on the home volume rather than the
 docker one. It has a bound of its own because the go command's own rule is not one: go evicts entries
 nothing has touched in five days, which is a rule about *recency* with no ceiling, and the five-day
