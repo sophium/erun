@@ -219,6 +219,12 @@ export class TerminalController {
     this.terminal.open(elements.terminalRoot);
     safeFit(this.fitAddon);
     this.publishTerminalDims();
+    // This xterm is brand new and holds nothing, whatever the one it replaced
+    // was showing. The queue's record of the pane's ownership outlives the
+    // pane, so it has to be told: left alone it names the session the disposed
+    // terminal was on, and the next switch would capture this blank pane under
+    // that session's name (see TerminalSwitchQueue.noteRendered).
+    this.switchQueue.noteRendered(0);
     this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
     this.installClipboardHandlers(elements.terminalRoot);
@@ -264,6 +270,17 @@ export class TerminalController {
       void store.dispatch(boot());
     }
     this.scheduleIdleStatusPoll(0);
+    // A remounted pane is blank, and no switch is due to fill it: setSessionId
+    // reaches the queue only when the store's session *changes*, and tearing
+    // the pane down does not change it. Ask for the session the store names so
+    // the pane and the store agree again -- without this the reader is left
+    // staring at an empty terminal with the tab strip naming the session it
+    // should be showing, and nothing that will ever repaint it. A first mount
+    // has no session yet (boot() restores it), so this is a no-op there.
+    const restoredSessionId = store.getState().terminal.sessionId;
+    if (restoredSessionId > 0) {
+      this.switchQueue.request(restoredSessionId);
+    }
 
     return () => {
       this.unmountTerminal();
