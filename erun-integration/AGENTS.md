@@ -75,10 +75,29 @@ cross-repository structural gates, not production helpers.
   is running-eligible the moment it does, and skipping it by position alone
   left the fixes in this module's own `version_test.go` unpoliced while the
   sweep reported the module clean.
+- "Begins serving" is recognised from the construct, so every construct that
+  serves before or independently of a later statement has to be named: both
+  `NewServer` and `NewTLSServer` (the latter is `NewUnstartedServer` followed by
+  `StartTLS`, so its server is already accepting connections when it is
+  returned), and a `Start()` call reached as an ordinary statement or as the
+  body of a `go` statement. A scope whose serving construct is unrecognised is
+  skipped whole, so an omission here is a silent false negative rather than a
+  partial report.
+- It matches a read to the assignment it resolves to, not to every assignment
+  of that name: a short declaration positioned after the handler's read starts a
+  new binding rather than writing the one the handler reads, and treating it as
+  a write reds correct code. The declaration that began serving is the
+  exception, since the assignment `NewServer` performs on its way out is
+  unordered against the handler it was handed.
 - It is still a shape detector with real limits, stated in the file: a handler
-  reached through a variable or helper, a captured value written from another
-  function, and a variable used as a map-literal key are all missed. It is a
-  floor under the invariant, not a proof of it.
+  reached through a variable or helper, a binding reached through an alias
+  rather than the name bound at its own declaration, a captured value written
+  from another function, a variable used as a map-literal key, and a write
+  through an index or field selector are all missed. The last two are out of
+  scope on purpose -- keying those writes on the base name alone would flag
+  every unrelated field of the same value -- and the alias case would need an
+  assignment graph to follow, which is why it is a shape detector rather than an
+  alias analysis. It is a floor under the invariant, not a proof of it.
 - The **behavioral half is still not gated**: only `-race` reports the actual
   read/write pair, and **no gated venue runs `-race` for this module** --
   `scripts/integration-test.sh`'s own `go test` (the suite behind both

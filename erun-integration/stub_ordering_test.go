@@ -19,15 +19,28 @@ package integration
 //
 // What it covers: every handler literal passed to mux.Handle, mux.HandleFunc
 // or http.HandlerFunc in a scope that begins serving, read against every name
-// that scope assigns at or after the point serving begins. That includes the
-// literal handed straight to the constructor -- `NewServer(http.HandlerFunc(
-// func(...){...}))` -- which is registered before the constructor returns and
-// therefore reachable the moment it does; a literal in a later statement is
-// not, and is left alone. What it cannot cover, and does not claim to: a
-// handler reached indirectly through a variable or a helper, a captured value
-// written from another function or goroutine, and a variable used as a
-// map-literal key. Those are false negatives; none of them is a shape this
-// module has had.
+// that scope assigns at or after the point serving begins. Serving begins at
+// httptest.NewServer or httptest.NewTLSServer -- both accept connections before
+// they return -- or at `<name>.Start()` on a server bound from
+// NewUnstartedServer, whether the call is a statement of its own or the body of
+// a `go` statement. That includes the literal handed straight to the
+// constructor -- `NewServer(http.HandlerFunc(func(...){...}))` -- which is
+// registered before the constructor returns and therefore reachable the moment
+// it does; a literal in a later statement is not, and is left alone.
+//
+// A read is matched to the assignment it actually resolves to, not to any
+// assignment of the same spelling. A short declaration after the read shadows
+// an outer value of that name rather than writing the one the handler reads,
+// so it is not a finding; only a declaration the handler's own read is in scope
+// for counts.
+//
+// What it cannot cover, and does not claim to: a handler reached indirectly
+// through a variable or a helper, a binding reached through an alias rather
+// than the name bound at the server's own declaration, a captured value written
+// from another function or goroutine, a variable used as a map-literal key, and
+// a write through an index or a field selector rather than to the name itself.
+// Those are false negatives, and the first three are why this is a floor rather
+// than a proof; none of them is a shape this module has had.
 //
 // The scope is the module's own source, test and helper alike, and it reads
 // .go files rather than only what is compiled into the test binary, so it must
@@ -112,8 +125,17 @@ type stubScope struct {
 	servingLine int
 	servings    []servingSpan
 	handlers    []*ast.FuncLit
-	writes      map[string][]token.Pos
-	writeLines  map[string][]int
+	writes      map[string][]scopeWrite
+}
+
+// scopeWrite is one assignment in a scope. define marks a short variable
+// declaration, which -- unlike a plain assignment -- introduces a binding whose
+// scope starts at that statement, so a read positioned before it resolves to a
+// different variable of the same name.
+type scopeWrite struct {
+	pos    token.Pos
+	line   int
+	define bool
 }
 
 // servingSpan is one construct that begins serving, as an interval of source
@@ -150,12 +172,11 @@ func (s *stubScope) insideServing(lit *ast.FuncLit) bool {
 	return false
 }
 
-func (s *stubScope) recordWrite(name string, pos token.Pos, line int) {
+func (s *stubScope) recordWrite(name string, pos token.Pos, line int, define bool) {
 	if name == "_" {
 		return
 	}
-	s.writes[name] = append(s.writes[name], pos)
-	s.writeLines[name] = append(s.writeLines[name], line)
+	s.writes[name] = append(s.writes[name], scopeWrite{pos: pos, line: line, define: define})
 }
 
 // writesAtOrAfter returns the line of the first assignment to name at or after
@@ -163,19 +184,49 @@ func (s *stubScope) recordWrite(name string, pos token.Pos, line int) {
 // recorded at the serving site's own position is the assignment that began
 // serving -- `server := httptest.NewServer(mux)` binds server and starts
 // serving in one statement -- so it counts.
-func (s *stubScope) writesAtOrAfter(name string, pos token.Pos) (int, bool) {
-	for i, writePos := range s.writes[name] {
-		if writePos >= pos {
-			return s.writeLines[name][i], true
+//
+// readPos is where the handler reads the name, and it distinguishes the write
+// the handler's read actually resolves to from a same-named one it does not:
+// matching on the name alone reds correct code the moment a short declaration
+// shadows an outer value of that name after the server is already serving.
+func (s *stubScope) writesAtOrAfter(name string, readPos, pos token.Pos) (int, bool) {
+	for _, write := range s.writes[name] {
+		if write.pos < pos {
+			continue
 		}
+		if s.shadowedFromRead(name, readPos, write.pos) {
+			continue
+		}
+		return write.line, true
 	}
 	return 0, false
+}
+
+// shadowedFromRead reports whether a short variable declaration of name starts
+// a new binding strictly between the handler's read and writePos. When one
+// does, writePos assigns that newer binding while the read still resolves to
+// whatever binding was in scope at its own position -- typically an outer one,
+// as in a package-level value shadowed by a local declared after serving began.
+//
+// The declaration that began serving is exempt: NewServer assigns the variable
+// it is bound to on its way out while the handler it was handed is already
+// runnable, which is the shape this gate exists for.
+func (s *stubScope) shadowedFromRead(name string, readPos, writePos token.Pos) bool {
+	for _, decl := range s.writes[name] {
+		if !decl.define || decl.pos == s.servingPos {
+			continue
+		}
+		if decl.pos > readPos && decl.pos <= writePos {
+			return true
+		}
+	}
+	return false
 }
 
 // collectScopeFacts walks one function body without crossing into nested
 // function literals.
 func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
-	scope := &stubScope{writes: map[string][]token.Pos{}, writeLines: map[string][]int{}}
+	scope := &stubScope{writes: map[string][]scopeWrite{}}
 	if body == nil {
 		return scope
 	}
@@ -197,7 +248,7 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 		case *ast.AssignStmt:
 			names := assignedNames(node.Lhs)
 			for _, name := range names {
-				scope.recordWrite(name, node.Pos(), line(node.Pos()))
+				scope.recordWrite(name, node.Pos(), line(node.Pos()), node.Tok == token.DEFINE)
 			}
 			if serving := newServerCall(node.Rhs); serving != nil {
 				scope.markServing(node.Pos(), serving.End(), line(node.Pos()))
@@ -209,6 +260,14 @@ func collectScopeFacts(fset *token.FileSet, body *ast.BlockStmt) *stubScope {
 			}
 		case *ast.ExprStmt:
 			if call, ok := node.X.(*ast.CallExpr); ok && isStartCall(call, unstarted) {
+				scope.markServing(node.Pos(), node.End(), line(node.Pos()))
+			}
+		case *ast.GoStmt:
+			// `go server.Start()` begins serving from this point too: the same
+			// call, deferred to a goroutine. A value assigned after it can be
+			// read by a handler that is already running, so the statement
+			// wrapper being different is not a reason to skip the scope.
+			if isStartCall(node.Call, unstarted) {
 				scope.markServing(node.Pos(), node.End(), line(node.Pos()))
 			}
 		}
@@ -252,9 +311,18 @@ func newServerCall(rhs []ast.Expr) *ast.CallExpr {
 	return nil
 }
 
+// servingConstructors names the httptest constructors that begin serving before
+// they return. NewTLSServer belongs beside NewServer rather than in a separate
+// case: it is NewUnstartedServer followed by StartTLS, so the server it hands
+// back is already accepting connections and the ordering hazard is identical.
+var servingConstructors = map[string]bool{
+	"NewServer":    true,
+	"NewTLSServer": true,
+}
+
 func isNewServerCall(call *ast.CallExpr) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	return ok && sel.Sel.Name == "NewServer"
+	return ok && servingConstructors[sel.Sel.Name]
 }
 
 // isStartCall reports whether call is `<unstarted>.Start()`.
@@ -267,11 +335,19 @@ func isStartCall(call *ast.CallExpr, unstarted map[string]bool) bool {
 	return ok && unstarted[ident.Name]
 }
 
+// handlerRead is one identifier a handler literal reads: its own position, so
+// the read can be resolved against the declarations that do and do not bind it,
+// and the line that gets reported when it cannot.
+type handlerRead struct {
+	pos  token.Pos
+	line int
+}
+
 // handlerReads returns the names a handler literal reads, excluding the names
 // it binds itself. A selector's field or method name is not a read, and
 // neither is a composite literal's key: the false negative that leaves is a
 // map literal keyed by a variable, which no stub in this module writes.
-func handlerReads(fset *token.FileSet, lit *ast.FuncLit) map[string]int {
+func handlerReads(fset *token.FileSet, lit *ast.FuncLit) map[string]handlerRead {
 	bound := map[string]bool{}
 	notARead := map[token.Pos]bool{}
 	ast.Inspect(lit, func(n ast.Node) bool {
@@ -307,13 +383,13 @@ func handlerReads(fset *token.FileSet, lit *ast.FuncLit) map[string]int {
 		return true
 	})
 
-	reads := map[string]int{}
+	reads := map[string]handlerRead{}
 	ast.Inspect(lit, func(n ast.Node) bool {
 		ident, ok := n.(*ast.Ident)
 		if !ok || bound[ident.Name] || notARead[ident.Pos()] {
 			return true
 		}
-		reads[ident.Name] = fset.Position(ident.Pos()).Line
+		reads[ident.Name] = handlerRead{pos: ident.Pos(), line: fset.Position(ident.Pos()).Line}
 		return true
 	})
 	return reads
@@ -351,13 +427,13 @@ func stubOrderingViolationsInFile(fset *token.FileSet, file *ast.File) []stubOrd
 			if !scope.insideServing(lit) && lit.Pos() >= scope.servingPos {
 				continue
 			}
-			for name, readLine := range handlerReads(fset, lit) {
-				writeLine, ok := scope.writesAtOrAfter(name, scope.servingPos)
+			for name, read := range handlerReads(fset, lit) {
+				writeLine, ok := scope.writesAtOrAfter(name, read.pos, scope.servingPos)
 				if !ok {
 					continue
 				}
 				hits = append(hits, stubOrderingHit{
-					readAt:  readLine,
+					readAt:  read.line,
 					writeAt: writeLine,
 					serving: scope.servingLine,
 					name:    name,
@@ -605,6 +681,133 @@ func stub(t testing.TB) *httptest.Server {
 }
 `,
 			names: nil,
+		},
+		"reads_the_server_assigned_by_newtlsserver": {
+			// NewTLSServer serves before it returns exactly as NewServer does:
+			// it is NewUnstartedServer followed by StartTLS, so the returned
+			// server is already accepting connections while the binding it
+			// hands back -- and every value assigned after it -- has no
+			// happens-before edge to a handler it was given.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(server.URL))
+	})
+	server := httptest.NewTLSServer(mux)
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: []string{"server"},
+		},
+		"tls_server_handler_reads_only_prior_values": {
+			// Widening the serving constructors to NewTLSServer must not turn a
+			// correctly ordered TLS stub into a finding.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	issuer := "http://example.invalid"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: nil,
+		},
+		"started_from_a_go_statement": {
+			// `go server.Start()` begins serving too. The call is the same one
+			// the ExprStmt case recognises; only the statement wrapper differs,
+			// so a scope that starts its stub this way must not be skipped.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	var issuer string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	})
+	server := httptest.NewUnstartedServer(mux)
+	go server.Start()
+	issuer = server.URL
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: []string{"issuer"},
+		},
+		"handler_reads_a_package_level_value_shadowed_later": {
+			// The handler's `issuer` is the package-level one, which is never
+			// written after serving begins. The local declared underneath is a
+			// different binding that begins after both the handler's read and
+			// the serving site, so matching the two by name alone would red
+			// correct code.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+var issuer = "http://example.invalid"
+
+func stub(t testing.TB) *httptest.Server {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	})
+	server := httptest.NewServer(mux)
+	issuer := server.URL
+	_ = issuer
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: nil,
+		},
+		"local_declared_before_the_handler_still_counts": {
+			// The shadow exemption must not be a general amnesty for short
+			// declarations: this one is in scope at the handler's read, so the
+			// later assignment to it is a genuine finding.
+			src: `package fixture
+
+import (
+	"net/http"
+	"net/http/httptest"
+)
+
+func stub(t testing.TB) *httptest.Server {
+	mux := http.NewServeMux()
+	issuer := "http://example.invalid"
+	server := httptest.NewUnstartedServer(mux)
+	mux.HandleFunc("GET /v1/platform", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(issuer))
+	})
+	server.Start()
+	issuer = server.URL
+	t.Cleanup(server.Close)
+	return server
+}
+`,
+			names: []string{"issuer"},
 		},
 	}
 
