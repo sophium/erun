@@ -952,7 +952,7 @@ func cancelJob(ctx context.Context, commandCtx common.Context, resolveOpen OpenR
 // Hidden: nothing invokes it directly. It is only ever re-exec'd by
 // StartEnvironmentJob (erun-common/job_supervisor.go), which always re-execs it
 // at `exec job supervise` regardless of which entry point started the job.
-func newJobSuperviseCmd() *cobra.Command {
+func newJobSuperviseCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
 	var tenant string
 	var environment string
 	var name string
@@ -989,6 +989,14 @@ func newJobSuperviseCmd() *cobra.Command {
 				Handoff:        handoff,
 				Exclusive:      exclusive,
 				StartedByJobID: startedByJobID,
+				// The supervisor is the process that observes the outcome, so
+				// it is also the one that records this job to the platform
+				// queue and closes it (see job_report_environment.go). It runs
+				// here, in the environment, so it resolves the environment's
+				// own platform identity rather than the caller's.
+				Context: commandContext(cmd),
+				Store:   store,
+				Deps:    deps,
 			})
 		},
 	}

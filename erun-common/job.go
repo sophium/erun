@@ -382,6 +382,13 @@ type EnvironmentJob struct {
 	// it took no claim of its own and releasing one on its way out would drop
 	// the ancestor's.
 	Exclusive bool `json:"exclusive,omitempty"`
+	// PlatformJobID is the platform queue row this job opened, empty when none
+	// was recorded -- an environment with no platform alias configured, which
+	// is the overwhelming majority of them. It is written once, by the
+	// supervisor that also closes that row when it observes the outcome (see
+	// job_report_environment.go), so a reader can tie the pod's own record to
+	// what the queue shows without a second lookup.
+	PlatformJobID string `json:"platformJobId,omitempty"`
 
 	LogPath          string `json:"logPath,omitempty"`
 	OutputBytes      int64  `json:"outputBytes"`

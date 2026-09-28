@@ -667,6 +667,20 @@ type EnvironmentJobSupervisorParams struct {
 	// override into the record the supervisor registers; empty defers to this
 	// process's own ERUN_JOB_ID (see registerEnvironmentJob).
 	StartedByJobID string
+	// Context is this supervisor's own invocation, used only for the trace
+	// lines the platform job recording writes when it is skipped for a reason
+	// other than "no alias at all" (see job_report_environment.go). Reporting
+	// keeps that contract's silence, so a supervisor whose environment has no
+	// platform alias records nothing and prints nothing.
+	Context Context
+	// Store and Deps are the platform wiring the supervisor records this job's
+	// start and outcome through, best-effort. A nil Store is a caller with no
+	// platform wiring, and reporting is then skipped entirely -- the same
+	// "nothing to report to" a missing alias gives, before any network call.
+	// They belong to the composition boundary that spawned the supervisor
+	// rather than to the job.
+	Store CloudReadStore
+	Deps  CloudDependencies
 }
 
 // jobRecorder is the supervisor's single writer of the job record. The progress
@@ -819,6 +833,17 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 	// observes the terminal record never races this supervisor's own tail, the
 	// same ordering job_task.go's runTaskEnvironmentJob takes for the same
 	// reason.
+	// Registered before the failure recorder below, so it runs after it: a
+	// supervisor that ends without an outcome of its own has that failure
+	// written first, and the platform is then told the settled verdict rather
+	// than the "still running" the record read a moment earlier. Both defers
+	// sit outside runRegisteredEnvironmentJobSupervisor's own, so the activity
+	// lease and any exclusive claim are already released by the time either
+	// runs: a platform call that stalls to its own timeout delays this
+	// supervisor's exit, never the next job's start here.
+	defer func() {
+		reportEnvironmentJobOutcome(params.Context, params.Store, params.Deps, recorder.snapshot())
+	}()
 	var panicked any
 	defer func() {
 		if r := recover(); r != nil {
@@ -826,6 +851,14 @@ func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
 		}
 		recordEnvironmentJobSupervisorFailure(recorder, err, panicked)
 	}()
+	// Opened only now, with the local record durable: a platform row exists for
+	// work that is actually registered, and the id to close it with lives on
+	// that record. Reporting is best-effort throughout -- an empty id is the
+	// answer most environments give, and it is not an error (see
+	// job_report_environment.go).
+	if platformJobID := reportEnvironmentJobStart(params.Context, params.Store, params.Deps, params.Tenant, params.Environment, recorder.snapshot()); platformJobID != "" {
+		recorder.update(func(job *EnvironmentJob) { job.PlatformJobID = platformJobID })
+	}
 	err = runRegisteredEnvironmentJobSupervisor(recorder, params, adoptedBaseline)
 	return err
 }

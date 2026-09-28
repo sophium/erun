@@ -17,7 +17,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 	// regardless of which entry point (this one, or the deprecated top-level
 	// `erun job` alias) actually started the job.
 	jobCmd := newJobCmd(resolveOpen)
-	jobCmd.AddCommand(newJobSuperviseCmd())
+	jobCmd.AddCommand(newJobSuperviseCmd(store, deps))
 
 	return newCommandGroup(
 		"exec",
