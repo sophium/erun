@@ -26,16 +26,25 @@ import { PlatformErrorAlert } from './PlatformSignInAlert';
 // revealing it shifts nothing and it cannot scroll out of view on a diff wider
 // than the panel. Clicking it when a precondition is unmet explains which one
 // rather than doing nothing.
+//
+// `revealed` carries the panel's own record of the line the reader revealed,
+// which outlives a pointer that no longer happens to be over this row -- the
+// panel re-reads the diff on a timer, and an answer that renders the change
+// differently moves the row out from under it. Hover alone cannot cover that:
+// it is a property of where the pointer sits now, and the reader who revealed
+// this line has not moved.
 export function DiffLineCommentAction({
   filePath,
   line,
   commitHash,
   tenant,
+  revealed,
 }: {
   filePath: string;
   line: DiffLine;
   commitHash: string;
   tenant: string;
+  revealed: boolean;
 }): React.ReactElement | null {
   const dispatch = useAppDispatch();
   // The active commenting context is the last-opened review, which survives
@@ -74,7 +83,7 @@ export function DiffLineCommentAction({
           aria-label={`Comment on line ${String(lineNumber)} of ${filePath}`}
           className={cn(
             'flex size-full items-center justify-center border-r border-[oklch(0_0_0/0.05)] bg-inherit text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:text-foreground',
-            open && 'opacity-100',
+            (open || revealed) && 'opacity-100',
           )}
           onClick={() => {
             if (blockedReason) {

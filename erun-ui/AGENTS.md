@@ -196,6 +196,44 @@ Keep dialog focus restoration, narrow live announcements, and consistent sidebar
 activity/status indicators. Expected blocks are status notices; attempted failures
 are alerts.
 
+**The diff panel's line-comment affordance belongs to the line the reader
+pointed at, not to the pixels under the pointer.** The panel re-reads `LoadDiff`
+on its own timer, and an answer that renders the change differently moves that
+row out from under a stationary reader. The reveal is therefore held as state in
+`DiffEnvSectionBody` (`DiffList.tsx`), keyed by the line's own environment, file
+and number, and released by `pointermove` — never by the row's `pointerout` /
+`pointerover`. Measured across that reflow: one `pointerout`/`pointerover` pair
+and its `mouseout`/`mouseover` counterpart on the row that moved, with **zero**
+`pointerleave`, `pointerenter` and **zero** `pointermove` — so a boundary-event
+release reproduces the strand exactly, and a `pointermove` is the only honest
+release signal. `review-diff-line-comment.spec.ts` pins it in the two shapes a
+reflow takes: an injected `meta` hunk line, which carries no affordance at all
+("the affordance the reader revealed survives a re-read of the diff"), and an
+ordinary commentable line of another file arriving under the pointer ("the
+affordance the reader revealed survives a reflow that brings another file under
+the pointer"). Both perform one pointer movement and must never re-hover to
+recover, since re-issuing the hover passes on the unfixed code. The second also
+pins that holding the reveal does not suppress the row the pointer is over now:
+that row reveals itself natively, so two lines are lit, each for its own reason.
+The row key (`${oldLine}:${newLine}:${index}`, `DiffList.tsx`) is what makes the
+held reveal safe — a node React reuses keeps its line's own number, so a reveal
+keyed by that number can never be carried onto a different logical line. The
+unfixed panel's red in the injected `meta` shape is *not* stable — measured
+15/15 serially but only 4/5 under the suite's parallel load — which is a reason
+to read a run of either case as evidence per attempt rather than as a single
+verdict; the fixed panel is deterministic in both.
+
+The hold is released by the reader's next `pointermove` and by nothing else, and
+a wheel scroll fires none. Recorded residual, measured: hovering a line, then
+scrolling so that line moves down still fully visible, leaves its affordance lit
+while the pointer rests on the line the scroll brought under it — which reveals
+itself normally, so two affordances are on screen and one is not under the
+pointer. Releasing when the revealed line leaves the panel does not reach that
+case (that one is the invisible half); the reachable half is the reader's pointer
+leaving the line, which is the same geometry a re-read produces. Cosmetic and
+self-clearing on the next movement, so it is left as recorded rather than
+released on scroll.
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.

@@ -63,6 +63,71 @@ const DIFF = {
   includesWorktree: false,
 };
 
+// DIFF_GROWN is the same change after the panel's own re-read has picked up
+// more of it: an extra hunk renders ahead of the one carrying 'package main',
+// so that row sits lower on the panel than it did. This is the ordinary
+// outcome of the periodic refresh -- the panel re-reads LoadDiff precisely
+// because the diff it is showing can change while it is on screen -- and it is
+// what moves a row out from under a pointer resting on it.
+const DIFF_GROWN = {
+  ...DIFF,
+  files: [
+    {
+      path: 'main.go',
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      binary: false,
+      hunks: [
+        {
+          header: '@@ -0,0 +0,0 @@',
+          lines: [
+            { kind: 'meta', oldLine: null, newLine: null, content: 'index 1111111..2222222' },
+          ],
+        },
+        {
+          header: '@@ -1,0 +1,1 @@',
+          lines: [{ kind: 'add', oldLine: null, newLine: 1, content: 'package main' }],
+        },
+      ],
+    },
+  ],
+};
+
+// DIFF_OTHER_FIRST is the same change after the panel's re-read has picked up a
+// second file ahead of it, whose own added line renders above main.go's. The
+// row that carried 'package main' is pushed down exactly as DIFF_GROWN pushes
+// it, but the row that lands under the stationary pointer is an ordinary
+// commentable line -- in a file the reader revealed nothing for. That is the
+// half of this contract the injected hunk line cannot reach: a `meta` row
+// offers no affordance at all, so it can only show that the reveal is lost; a
+// real line shows whether the reveal is instead handed to whatever the pointer
+// happens to be over.
+const DIFF_OTHER_FIRST = {
+  ...DIFF,
+  summary: { fileCount: 2, additions: 2, deletions: 0 },
+  files: [
+    {
+      path: 'util.go',
+      status: 'added',
+      additions: 1,
+      deletions: 0,
+      binary: false,
+      hunks: [
+        {
+          header: '@@ -0,0 +1,1 @@',
+          lines: [{ kind: 'add', oldLine: null, newLine: 1, content: 'package util' }],
+        },
+      ],
+    },
+    ...DIFF.files,
+  ],
+  tree: [
+    { name: 'util.go', path: 'util.go', type: 'file', depth: 0 },
+    { name: 'main.go', path: 'main.go', type: 'file', depth: 0 },
+  ],
+};
+
 const REVIEW = {
   reviewId: 'review-1',
   tenantId: 't1',
@@ -361,6 +426,183 @@ test.describe('diff panel — commenting on a line (#1348, #1388)', () => {
     } finally {
       removeEnvironment(SEED_TENANT, environment);
     }
+  });
+
+  // The reveal belongs to the line the reader pointed at, not to whatever
+  // pixels the pointer happens to be over: the panel re-reads LoadDiff on its
+  // own timer -- that is what the refresh is for, the diff it is showing can
+  // change while it is on screen -- and an answer that renders the change
+  // differently carries that row somewhere else. A reveal that tracked only the
+  // pointer's position is gone there, and nothing on the page brings it back:
+  // the pointer has not moved, so there is no second hover to produce it and no
+  // clock that converges on it. The invariant this pins is the operator's --
+  // the affordance the reader revealed survives the re-read -- so the case
+  // performs exactly one pointer movement and never re-issues the hover after
+  // the panel has re-read. Re-driving the pointer is the recovery the app is
+  // supposed to supply by itself, and asserting through it would pass on the
+  // pre-fix code for the wrong reason.
+  //
+  // The shift is injected by this spec's own LoadDiff stub answering a grown
+  // diff, rather than by loading the machine, so the reproduction is
+  // deterministic on a quiet host. Pre-fix this case reds with the reveal
+  // stranded at "0" while the pointer rests over the hunk the panel has just
+  // rendered above the row.
+  test('the affordance the reader revealed survives a re-read of the diff', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    let grown = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, grown ? DIFF_GROWN : DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await page.getByText('package main').waitFor({ state: 'visible' });
+
+    const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
+
+    // The reader reveals the affordance. This is the only pointer movement in
+    // this case; every assertion below it reads a state the app produced on its
+    // own.
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    // The panel's next re-read answers the grown diff, which renders the extra
+    // hunk above this row and carries the row out from under the pointer.
+    grown = true;
+    await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
+
+    // The pointer is still where the reader left it, and the affordance the
+    // reader revealed is still revealed -- on the line it was revealed for.
+    // Converging here is what makes the case deterministic: the read follows the
+    // reflow that moved the row, so it cannot catch a mid-transition frame.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+  });
+
+  // The other half of the same contract, and the reason the reveal is held as
+  // panel state rather than left to the row's own `:hover`: a reveal that
+  // outlived the reader's own pointer for good would be its own defect, so the
+  // pointer moving is what re-derives it -- from whatever is under it now, not
+  // from where it used to be. After a re-read has moved the row that means the
+  // line under the pointer decides, which is the state the panel starts from
+  // and the one the reader can act on. The case reads `1` across the re-read
+  // before it moves at all, so it fails on the unfixed code for the reason the
+  // case above fails, and then pins what recovery from there looks like.
+  test('the affordance is re-observed when the panel re-renders under the pointer', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    let grown = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, grown ? DIFF_GROWN : DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await page.getByText('package main').waitFor({ state: 'visible' });
+
+    const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    grown = true;
+    await page.getByText('index 1111111..2222222').waitFor({ state: 'visible' });
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    // The reader moves onto the hunk the re-read rendered above the row. The
+    // reveal is released, because the line under the pointer now offers no
+    // affordance at all -- held state, but never held against the reader.
+    await page.getByText('index 1111111..2222222').hover();
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
+
+    // And moving back re-derives it for the line under the pointer, which the
+    // re-read left at the number it had.
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+  });
+
+  // The injected hunk line above is one shape of the reflow, and the benign
+  // one: a `meta` row carries no affordance (`DiffLineCommentAction` renders
+  // nothing for `kind === 'meta'`), so nothing there can be lit and the case
+  // can only show the reveal being lost. A reflow that brings an ordinary
+  // commentable line of another file under the stationary pointer is the other
+  // shape, and it has to answer both halves at once: the reveal the reader
+  // made stays on the line the reader made it for, and the line the pointer now
+  // covers reveals itself the way any hovered row does. Those are two
+  // mechanisms, and the case pins that holding one does not suppress the other
+  // -- the row the reflow moved under the pointer is not the row the reader
+  // revealed, so it is neither the one the held reveal lights nor the one it
+  // takes anything from.
+  //
+  // Measured, so the case does not overclaim: on the unfixed code the first
+  // half is deterministically red -- the revealed section is carried down by
+  // the file above it and its row loses `:hover` -- which is the strand this
+  // branch exists to fix, in the shape that puts a real added line where the
+  // pointer is resting rather than a `meta` row.
+  test('the affordance the reader revealed survives a reflow that brings another file under the pointer', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    let grown = false;
+    await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+      const body = invokeBody(request);
+      if (body.method === 'LoadDiff') {
+        await fulfillJSON(route, grown ? DIFF_OTHER_FIRST : DIFF);
+        return;
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await dismissAIOccupancyPromptIfShown(app);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+    await page.getByText('package main').waitFor({ state: 'visible' });
+
+    const action = page.getByRole('button', { name: 'Comment on line 1 of main.go' });
+    await expect(action).toHaveCSS('opacity', '0', withTestBudget());
+
+    // The reader reveals main.go's line. This is the only pointer movement in
+    // this case; nothing below re-issues it.
+    await page.getByText('package main').hover();
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+
+    grown = true;
+    await page.getByText('package util').waitFor({ state: 'visible' });
+
+    // The pointer rests over util.go's added line now. The affordance the
+    // reader revealed is still revealed, and it is still main.go's line 1 --
+    // the reveal followed the line, not the row the reflow moved under the
+    // pointer.
+    await expect(action).toHaveCSS('opacity', '1', withTestBudget());
+    // And the row that did move under the pointer reveals itself normally, the
+    // way any hovered row does: holding the reader's reveal neither suppresses
+    // the hover the pointer is making now nor hands it the reveal it is not
+    // over. Two lines are lit, and each is lit for its own reason.
+    await expect(page.getByRole('button', { name: 'Comment on line 1 of util.go' })).toHaveCSS(
+      'opacity',
+      '1',
+      withTestBudget(),
+    );
   });
 
   // The line-comment affordance exists only once the panel has rendered the
