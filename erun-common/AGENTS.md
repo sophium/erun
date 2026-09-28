@@ -156,7 +156,9 @@ demonstrated:
   not each reserve the whole ceiling. Run its script tests when changing it.
 - Batch gate-merge takes ordered sources, fetches once, and composes them on one
   prospective tree. On a squash conflict, restore the batch's last committed
-  state, record skipped files/reason, and continue. Refuse an all-empty batch.
+  state, record skipped files/reason, and continue. A conflict confined to
+  atlas.sum is the exception: it is regenerated from the migration files on disk
+  and the source lands rather than being skipped. Refuse an all-empty batch.
   Do not loop single-source invocations that reset away earlier work.
 - Keep one gate_run per batch and preserve ordered landed/skipped composition
   in its log artifact. Mapping one batch build to multiple review acceptances
