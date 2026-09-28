@@ -112,7 +112,10 @@ type MachineIdentityResult struct {
 	// Issuer is the registered issuer a token from this identity carries, and
 	// the value the erun user row is mapped under.
 	Issuer string
-	// Subject is what such a token resolves by.
+	// Subject is what such a token resolves by, and it is not ClientID: a
+	// service account's client_credentials token is issued as the account's
+	// own id, so that — not the login name the credential presents — is the
+	// subject an enrollment has to name.
 	Subject      string
 	ClientID     string
 	ClientSecret string
@@ -159,6 +162,9 @@ func (s *MachineIdentityService) Provision(ctx context.Context, environmentID st
 	if err != nil {
 		return MachineIdentityResult{}, err
 	}
+	if err := s.releaseOlderIdentityRow(ctx, environment.TenantID, loginName, identity); err != nil {
+		return MachineIdentityResult{}, err
+	}
 	roleID, err := s.tenantAgentRoleID(ctx)
 	if err != nil {
 		return MachineIdentityResult{}, err
@@ -166,7 +172,7 @@ func (s *MachineIdentityService) Provision(ctx context.Context, environmentID st
 	user, alreadyEnrolled, err := s.users.Create(ctx, repository.CreateUserParams{
 		Username: loginName,
 		Issuer:   issuer.Issuer,
-		Subject:  identity.ClientID,
+		Subject:  identity.Subject,
 		RoleIDs:  []string{roleID},
 	})
 	if err != nil {
@@ -179,12 +185,35 @@ func (s *MachineIdentityService) Provision(ctx context.Context, environmentID st
 		EnvironmentID:   environment.EnvironmentID,
 		EnvironmentName: environment.Name,
 		Issuer:          issuer.Issuer,
-		Subject:         identity.ClientID,
+		Subject:         identity.Subject,
 		ClientID:        identity.ClientID,
 		ClientSecret:    identity.ClientSecret,
 		UserID:          user.UserID,
 		AlreadyEnrolled: alreadyEnrolled,
 	}, nil
+}
+
+// releaseOlderIdentityRow clears an erun user row left under this environment's
+// own derived name by an identity that no longer exists.
+//
+// The name is derived from the environment's id, so only this environment's
+// identities can ever hold it — and a row under it while the provider had no
+// identity of this environment's until now can only be one enrolled for a
+// subject a token does not carry any more. Leaving it would collide with the
+// enrollment below on (tenant, username) and fail provisioning outright, so an
+// environment provisioned before the identity was changed would be unable to
+// re-provision at all.
+//
+// It is a no-op on the ordinary path: a provider that had to create the
+// identity means nothing was ever enrolled for it.
+func (s *MachineIdentityService) releaseOlderIdentityRow(ctx context.Context, tenantID string, loginName string, identity zitadel.MachineIdentity) error {
+	if !identity.Created {
+		return nil
+	}
+	if _, err := s.users.DeleteByUsername(ctx, tenantID, loginName); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ensureTenantAgentGrant converges the identity's grant instead of relying on
@@ -298,9 +327,9 @@ type revocationResult struct {
 	// the user, its external-identity mapping and its role grants. False is the
 	// ordinary answer for an environment that never had a machine identity.
 	UserRemoved bool
-	// ApplicationsRemoved counts the identity-provider applications deleted,
+	// IdentitiesRemoved counts the identity-provider machine users deleted,
 	// summed over every organization the tenant resolves by.
-	ApplicationsRemoved int
+	IdentitiesRemoved int
 }
 
 // revokeIdentity is Revoke's implementation, returning what it actually
@@ -311,9 +340,9 @@ type revocationResult struct {
 // resolves to no user — while the provider half is the one that needs the
 // platform's identity-provider credential and so is the likelier to fail.
 // Ordering the reliable half first means a retry after a partial failure still
-// has the provider application to find, which is exactly what its own lookup
-// needs; the reverse order would lose the client id the user row is found by
-// and strand a live credential.
+// has the provider identity to find, which is exactly what its own lookup
+// needs; the reverse order would lose the account the user row is found by and
+// strand a live credential.
 //
 // Every org-scoped issuer the tenant resolves by is searched, rather than the
 // single one Provision insists on. The two have opposite biases: provisioning
@@ -357,14 +386,14 @@ func (s *MachineIdentityService) revokeIdentity(ctx context.Context, environment
 			return result, err
 		}
 		if removed {
-			result.ApplicationsRemoved++
+			result.IdentitiesRemoved++
 		}
 	}
 	return result, nil
 }
 
 // Revoke removes environmentID's machine identity: the erun user row that a
-// token from it resolves to, and the provider application that mints that
+// token from it resolves to, and the provider machine user that mints that
 // token. It is what makes deleting an environment leave nothing usable behind,
 // rather than leaving a credential that outlives the environment it was minted
 // for.
@@ -385,9 +414,9 @@ func (s *MachineIdentityService) Revoke(ctx context.Context, environmentID strin
 	if err != nil {
 		return err
 	}
-	if result.UserRemoved || result.ApplicationsRemoved > 0 {
-		log.Printf("erun api machine identity: revoked %s for environment=%q (user row removed: %t, provider applications removed: %d)",
-			result.LoginName, result.EnvironmentID, result.UserRemoved, result.ApplicationsRemoved)
+	if result.UserRemoved || result.IdentitiesRemoved > 0 {
+		log.Printf("erun api machine identity: revoked %s for environment=%q (user row removed: %t, provider identities removed: %d)",
+			result.LoginName, result.EnvironmentID, result.UserRemoved, result.IdentitiesRemoved)
 	}
 	return nil
 }

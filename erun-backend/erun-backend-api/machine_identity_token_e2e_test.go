@@ -94,6 +94,9 @@ type machineIdentityTokenIssuer struct {
 	mu       sync.Mutex
 	clientID string
 	secret   string
+	// subject is the account's own id, which is what a token minted from this
+	// credential carries.
+	subject  string
 	requests []machineIdentityTokenGrant
 }
 
@@ -107,14 +110,15 @@ func newMachineIdentityTokenIssuer(t *testing.T, refuseOrgScope bool) *machineId
 	return issuer
 }
 
-// expectCredential records the credential the platform minted, so the token
-// endpoint answers only the identity that was actually provisioned rather than
-// any caller that reaches it.
-func (i *machineIdentityTokenIssuer) expectCredential(clientID, secret string) {
+// expectCredential records the credential the platform minted, and the subject
+// a token from it carries, so the token endpoint answers only the identity that
+// was actually provisioned rather than any caller that reaches it.
+func (i *machineIdentityTokenIssuer) expectCredential(clientID, secret, subject string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	i.clientID = clientID
 	i.secret = secret
+	i.subject = subject
 }
 
 func (i *machineIdentityTokenIssuer) handleClientCredentials(w http.ResponseWriter, r *http.Request) {
@@ -132,13 +136,13 @@ func (i *machineIdentityTokenIssuer) handleClientCredentials(w http.ResponseWrit
 	}
 	i.mu.Lock()
 	i.requests = append(i.requests, grant)
-	expectedID, expectedSecret := i.clientID, i.secret
+	expectedID, expectedSecret, subject := i.clientID, i.secret, i.subject
 	i.mu.Unlock()
 
-	// The credential travels in the Authorization header, matching the
-	// API_AUTH_METHOD_TYPE_BASIC application erun provisions -- the two have to
-	// agree, so an issuer that accepted the secret in the body would not be a
-	// model of anything.
+	// The credential travels in the Authorization header, which is the method
+	// erun's own client_credentials grant presents -- the two have to agree, so
+	// an issuer that accepted the secret in the body would not be a model of
+	// anything.
 	if grant.GrantType != "client_credentials" || !hadBasic || user != expectedID || secret != expectedSecret {
 		writeOIDCError(w, http.StatusUnauthorized, "invalid_client")
 		return
@@ -151,10 +155,14 @@ func (i *machineIdentityTokenIssuer) handleClientCredentials(w http.ResponseWrit
 	now := time.Now()
 	claims := map[string]any{
 		"iss": i.issuer(),
-		// A Zitadel machine user's own id is its client id, which is the
-		// subject MachineIdentityService records when it enrols the identity
-		// (service.MachineIdentityResult.Subject).
-		"sub": user,
+		// Zitadel issues a service account's client_credentials token as the
+		// account's own user id, not as the login name the credential presents.
+		// The two are different values, and only the first is the subject
+		// MachineIdentityService enrols the identity under
+		// (service.MachineIdentityResult.Subject) -- a double that issued the
+		// client id here would model a token no Zitadel mints, and would make
+		// an enrolment keyed on the wrong one of the two look correct.
+		"sub": subject,
 		"iat": now.Unix(),
 		"exp": now.Add(time.Hour).Unix(),
 	}
@@ -280,7 +288,7 @@ func newMachineIdentityTokenFixture(t *testing.T, issuerURL string) *machineIden
 // to obtain a token, and returns the access token it minted.
 func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIdentityTokenIssuer) string {
 	t.Helper()
-	issuer.expectCredential(f.identity.ClientID, f.identity.ClientSecret)
+	issuer.expectCredential(f.identity.ClientID, f.identity.ClientSecret, f.identity.Subject)
 
 	const secretRef = "erun/clientsecret/" + machineIdentityTokenAlias
 	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
@@ -351,8 +359,15 @@ func TestMachineIdentityClientCredentialsTokenResolvesItsTenant(t *testing.T) {
 	}
 
 	claims := verifyMachineToken(t, issuer, token)
-	if claims.Subject != fixture.identity.ClientID {
-		t.Fatalf("token subject = %q, want the enrolled machine identity %q", claims.Subject, fixture.identity.ClientID)
+	if claims.Subject != fixture.identity.Subject {
+		t.Fatalf("token subject = %q, want the enrolled machine identity %q", claims.Subject, fixture.identity.Subject)
+	}
+	// The credential's public half and the token's subject are not the same
+	// value, which is the whole reason the identity is enrolled under the
+	// second. A fixture that let them coincide would pass while an enrollment
+	// keyed on the client id failed against a real issuer.
+	if fixture.identity.Subject == fixture.identity.ClientID {
+		t.Fatalf("the provisioned identity's subject and client id are both %q, so this test cannot tell them apart", fixture.identity.Subject)
 	}
 	if got := claims.Raw[machineIdentityTokenOrgClaimKey]; got != machineIdentityTokenOrg {
 		t.Fatalf("token claim %s = %v, want the tenant's org %q", machineIdentityTokenOrgClaimKey, got, machineIdentityTokenOrg)

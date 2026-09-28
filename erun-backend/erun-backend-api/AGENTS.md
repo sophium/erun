@@ -310,7 +310,7 @@ a substitute for GitHub-side enforcement.
 - **Implemented: the machine identity, and the privileged path that mints it.**
   `MachineIdentityService` (`internal/service/machine_identity.go`) provisions
   or returns one environment's own identity: it asks the tenant's own IdP for
-  an application under a login name *derived from the environment's id*
+  a **service account** under a login name *derived from the environment's id*
   (`MachineIdentityLoginName`), enrols the `(issuer, subject)` pair as an erun
   user, and converges the `TenantAgent` grant. Every step is idempotent, and
   derivation rather than storage is the whole mechanism — nothing links an
@@ -320,6 +320,44 @@ a substitute for GitHub-side enforcement.
   `TenantUserClass`: the credential is strictly weaker than the mcp-token that
   class already mints, and the caller is provisioning an environment that
   already exists in their own tenant.
+  - **It must be a service account (Zitadel's machine user), never a project
+    API application**, and the reason is source, not preference: Zitadel's
+    `client_credentials` handler resolves the presented client id with
+    `GetUserByLoginName` and then requires that user's `Machine.EncodedSecret`
+    (`internal/api/oidc/client_credentials.go`, v4.15.3), so a project
+    application — which is not a user — is answered "client not found" however
+    correct its client id and secret are. `internal/zitadel/machine.go`
+    therefore creates a machine user and mints its secret
+    (`POST /management/v1/users/machine`, `PUT /management/v1/users/{id}/secret`),
+    and the lookup is filtered to `TYPE_MACHINE` so a derived name can never
+    match a human account. Revocation deletes that account rather than an
+    application, and deleting it is what stops the credential: Zitadel drops a
+    removed user from the login names it resolves by.
+  - **The enrolment subject is the account's own id, not the client id.** They
+    are two different values and the service needs both: `ClientID` is the
+    login name the credential presents as its Basic user (a preferred login
+    name, so under a domain policy it is the name erun passed suffixed with the
+    organization's domain — read back from the provider, never reconstructed),
+    while the token's `sub` is the account's user id, because Zitadel issues a
+    service account's `client_credentials` token as `userInfo.Subject`, which
+    is `user.User.ID` (`internal/api/oidc/userinfo.go`). Enrolling under the
+    client id is an enrolment no token ever resolves, and the two are only
+    distinguishable against a real issuer — a double that issued the client id
+    as `sub` would confirm the wrong one.
+  - **A repeat call re-issues the credential; it does not return the first
+    one.** A machine secret is write-only at Zitadel — stored as a hash, with
+    no call that reads one back — so answering with a usable credential means
+    minting one. What converges is the identity: same machine user, same
+    subject, one erun row, one grant, and `Created` reports whether this call
+    made the account. The delivery path verifies a minted credential before it
+    writes anything, so a re-provision that fails leaves the environment on
+    what it already had.
+  - **Re-provisioning replaces an erun row left by an earlier identity**
+    (`releaseOlderIdentityRow`, when the provider reports the account was
+    created): the derived name is the environment's own, so a row under it maps
+    a subject nothing carries any more, and leaving it would collide on
+    `users_tenant_username_key` and make provisioning fail outright for exactly
+    the environments provisioned before the identity changed.
   - **Who may grant it: a new privileged internal path, and never an operations
     caller.** The enrolment and the role grant the identity needs are both
     `TenantAdminOnly` as routes, while the session provisioning runs under is an

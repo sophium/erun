@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -27,6 +29,9 @@ type fakeMachineIdentityAdmin struct {
 	// the right places and found none".
 	deleteCalls []zitadel.DeleteMachineIdentityParams
 	deleteErr   error
+	// mints counts the credentials issued, so a test can tell "the identity
+	// converged" from "a second identity was minted".
+	mints int
 }
 
 func newFakeMachineIdentityAdmin() *fakeMachineIdentityAdmin {
@@ -39,11 +44,25 @@ func (f *fakeMachineIdentityAdmin) EnsureMachineIdentity(_ context.Context, para
 		return zitadel.MachineIdentity{}, f.ensureErr
 	}
 	if existing, ok := f.identities[params.LoginName]; ok {
+		// The identity is what a repeat call converges on; only the credential
+		// is re-issued, which is what the provider does too -- a machine secret
+		// is write-only, so a usable one has to be minted again. The fake
+		// rotates it so a test cannot pass by comparing a value that never
+		// changes.
+		existing.Created = false
+		f.mints++
+		existing.ClientSecret = "secret-" + params.LoginName + "-" + strconv.Itoa(f.mints)
 		return existing, nil
 	}
+	// The two are deliberately different values: the client id is the login
+	// name the credential presents, the subject is the account's own id, and
+	// only the second is what a token from it resolves by.
+	f.mints++
 	identity := zitadel.MachineIdentity{
 		ClientID:     "client-" + params.LoginName,
-		ClientSecret: "secret-" + params.LoginName,
+		ClientSecret: "secret-" + params.LoginName + "-" + strconv.Itoa(f.mints),
+		Subject:      "user-" + params.LoginName,
+		Created:      true,
 	}
 	f.identities[params.LoginName] = identity
 	return identity, nil
@@ -119,6 +138,14 @@ func (f *fakeMachineIdentityUsers) Create(_ context.Context, params repository.C
 	if existing, ok := f.bySubject[params.Subject]; ok {
 		return existing, true, nil
 	}
+	// The real store holds one row per (tenant, username), so a name already
+	// enrolled for a different subject is a conflict rather than a second row.
+	// Modelled here because a caller that meets it has to be able to see it:
+	// a fake that silently accepted the duplicate would let provisioning look
+	// idempotent while it was leaving two rows behind.
+	if f.holdsUsername(params.Username) {
+		return model.User{}, false, fmt.Errorf("user %q already exists in this tenant", params.Username)
+	}
 	user := model.User{UserID: "user-" + params.Username, Username: params.Username}
 	f.bySubject[params.Subject] = user
 	f.grants[user.UserID] = map[string]bool{}
@@ -153,6 +180,28 @@ func (f *fakeMachineIdentityUsers) DeleteByUsername(_ context.Context, tenantID 
 // for. It is the count a second provisioning call must not increase.
 func (f *fakeMachineIdentityUsers) enrolledIdentities() int {
 	return len(f.bySubject)
+}
+
+// holdsUsername reports whether any row in this tenant already carries the
+// name, whatever subject it maps -- the (tenant, username) uniqueness the real
+// store enforces.
+func (f *fakeMachineIdentityUsers) holdsUsername(username string) bool {
+	for _, user := range f.bySubject {
+		if user.Username == username {
+			return true
+		}
+	}
+	return false
+}
+
+// subjectOf is the subject the tenant's row under username is enrolled for.
+func (f *fakeMachineIdentityUsers) subjectOf(username string) string {
+	for subject, user := range f.bySubject {
+		if user.Username == username {
+			return subject
+		}
+	}
+	return ""
 }
 
 // fakeMachineIdentityRoles is the role read and grant.
@@ -254,8 +303,18 @@ func TestProvisionEnrollsTheIdentityAndGrantsTheMachineRole(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 	assertProviderWasAskedForTheTenantsOwnOrg(t, fixture, "env-1")
-	if result.Issuer != "https://auth.example" || result.Subject != result.ClientID || result.ClientSecret == "" {
+	if result.Issuer != "https://auth.example" || result.ClientSecret == "" {
 		t.Fatalf("unexpected result %+v", result)
+	}
+	// The row is enrolled under the subject a token carries, which is the
+	// provider account's own id -- not the client id the credential presents.
+	// Enrolling under the wrong one of the two is an enrollment no token ever
+	// resolves, and the two are only distinguishable here.
+	if result.Subject == result.ClientID {
+		t.Fatalf("enrolled subject %q is the client id; a token from this identity carries the account's own id", result.Subject)
+	}
+	if want := "user-" + MachineIdentityLoginName("env-1"); result.Subject != want {
+		t.Fatalf("subject = %q, want %q", result.Subject, want)
 	}
 	if result.AlreadyEnrolled {
 		t.Fatalf("first provisioning reported an existing enrollment: %+v", result)
@@ -299,6 +358,9 @@ func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
 		t.Fatalf("Provision: %v", err)
 	}
 	assertHoldsExactlyTheMachineRole(t, fixture, provisioned.UserID)
+	// Counted from here so the assertion below is about revocation's own
+	// removal rather than about every removal this fixture ever made.
+	deletionsBeforeRevoke := len(fixture.users.deleteCalls)
 
 	if err := fixture.service.Revoke(fixture.ctx, "env-1"); err != nil {
 		t.Fatalf("Revoke: %v", err)
@@ -318,10 +380,10 @@ func TestRevokeRemovesTheIdentityTheUserRowAndTheGrant(t *testing.T) {
 	// the name derived from the environment's id: it runs behind the
 	// environment-delete workflow, where the session's tenant may be an
 	// operations caller's rather than the one that owns the environment.
-	if len(fixture.users.deleteCalls) != 1 {
+	if len(fixture.users.deleteCalls) != deletionsBeforeRevoke+1 {
 		t.Fatalf("expected the user store to be asked to delete once, got %+v", fixture.users.deleteCalls)
 	}
-	if call := fixture.users.deleteCalls[0]; call.tenantID != "tenant-1" || call.username != loginName {
+	if call := fixture.users.deleteCalls[deletionsBeforeRevoke]; call.tenantID != "tenant-1" || call.username != loginName {
 		t.Fatalf("user deletion = %+v, want tenant-1/%s", call, loginName)
 	}
 }
@@ -449,9 +511,7 @@ func TestProvisionIsIdempotentForOneEnvironment(t *testing.T) {
 	if len(fixture.admin.identities) != 1 {
 		t.Fatalf("expected exactly one identity in the provider, got %d", len(fixture.admin.identities))
 	}
-	if second.ClientID != first.ClientID || second.ClientSecret != first.ClientSecret {
-		t.Fatalf("second provisioning returned a different credential: %+v vs %+v", second, first)
-	}
+	assertSameIdentity(t, first, second)
 	if !second.AlreadyEnrolled {
 		t.Fatalf("second provisioning did not report the existing enrollment: %+v", second)
 	}
@@ -460,6 +520,21 @@ func TestProvisionIsIdempotentForOneEnvironment(t *testing.T) {
 	}
 	if grants := fixture.roles.grantCount(first.UserID); grants != 1 {
 		t.Fatalf("expected exactly one grant after two provisioning calls, got %d", grants)
+	}
+}
+
+// assertSameIdentity holds the two halves of the property apart: what converges
+// is the identity, and what cannot is the credential. A machine secret is
+// write-only at the provider, so a second call re-issues one rather than
+// reading the first back -- and a test that let the credential stand in for the
+// identity would pass while a second identity was being minted.
+func assertSameIdentity(t *testing.T, first MachineIdentityResult, second MachineIdentityResult) {
+	t.Helper()
+	if second.ClientID != first.ClientID || second.Subject != first.Subject || second.UserID != first.UserID {
+		t.Fatalf("second provisioning resolved a different identity: %+v vs %+v", second, first)
+	}
+	if second.ClientSecret == first.ClientSecret {
+		t.Fatal("the fake did not re-issue the credential, so this test cannot tell a re-issued secret from a second identity")
 	}
 }
 
@@ -552,5 +627,67 @@ func TestProvisionUsesTheEnvironmentsOwnIDForTheIdentityName(t *testing.T) {
 	// than the same id unpadded.
 	if got, want := MachineIdentityLoginName(" env-a "), "erun-env-env-a"; got != want {
 		t.Fatalf("MachineIdentityLoginName(%q) = %q, want %q", " env-a ", got, want)
+	}
+}
+
+// TestProvisionReplacesARowLeftByAnEarlierIdentity is the migration an
+// environment that already holds a machine identity must survive.
+//
+// The identity an environment is given is minted by the identity provider, so
+// changing what that provider creates changes the subject a token from it
+// carries — the erun row enrolled for the previous one maps a subject nothing
+// resolves by any more. The name it sits under is derived from the
+// environment's own id, though, so a re-provisioning collides with it on
+// (tenant, username) and fails outright unless the stale row is cleared first.
+// That is a dead end for exactly the environments that were provisioned
+// before: their next provisioning call could never succeed.
+func TestProvisionReplacesARowLeftByAnEarlierIdentity(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+	loginName := MachineIdentityLoginName("env-1")
+	// The row an earlier provisioning left: this environment's own derived
+	// name, enrolled for a subject the identity it now resolves does not have.
+	if _, _, err := fixture.users.Create(fixture.ctx, repository.CreateUserParams{
+		Username: loginName,
+		Issuer:   "https://auth.example",
+		Subject:  "client-id-of-the-identity-this-replaced",
+	}); err != nil {
+		t.Fatalf("seeding the earlier enrollment: %v", err)
+	}
+	if !fixture.users.holdsUsername(loginName) {
+		t.Fatal("the fixture did not seed a row under the environment's derived name")
+	}
+
+	result, err := fixture.service.Provision(fixture.ctx, "env-1")
+	if err != nil {
+		t.Fatalf("Provision over an earlier identity's row: %v", err)
+	}
+
+	if enrolled := fixture.users.enrolledIdentities(); enrolled != 1 {
+		t.Fatalf("expected the environment to hold exactly one identity after re-provisioning, got %d", enrolled)
+	}
+	if subject := fixture.users.subjectOf(loginName); subject != result.Subject {
+		t.Fatalf("the row under %s is enrolled for %q, want the identity just provisioned, %q", loginName, subject, result.Subject)
+	}
+	if result.Subject == "client-id-of-the-identity-this-replaced" {
+		t.Fatal("provisioning kept the row of the identity it replaced")
+	}
+	assertHoldsExactlyTheMachineRole(t, fixture, result.UserID)
+}
+
+// TestProvisionLeavesAFreshEnvironmentsRowAlone is the other half: the ordinary
+// first provisioning of an environment that never held an identity must not
+// have its own enrollment removed by the reconcile above.
+func TestProvisionLeavesAFreshEnvironmentsRowAlone(t *testing.T) {
+	fixture := newMachineIdentityFixture(t)
+
+	result, err := fixture.service.Provision(fixture.ctx, "env-1")
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if enrolled := fixture.users.enrolledIdentities(); enrolled != 1 {
+		t.Fatalf("expected exactly one enrolled identity, got %d", enrolled)
+	}
+	if subject := fixture.users.subjectOf(MachineIdentityLoginName("env-1")); subject != result.Subject {
+		t.Fatalf("the enrolled subject is %q, want %q", subject, result.Subject)
 	}
 }

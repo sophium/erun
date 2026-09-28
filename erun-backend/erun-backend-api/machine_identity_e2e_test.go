@@ -89,11 +89,17 @@ type fakeE2EMachineIdentityAdmin struct {
 
 func (f *fakeE2EMachineIdentityAdmin) EnsureMachineIdentity(_ context.Context, params zitadel.EnsureMachineIdentityParams) (zitadel.MachineIdentity, error) {
 	if existing, ok := f.identities[params.LoginName]; ok {
+		existing.Created = false
 		return existing, nil
 	}
+	// The subject is the provider account's own id, which is what a token
+	// minted from this credential carries and therefore what the erun row has
+	// to be enrolled under; the client id is only the credential's public half.
 	identity := zitadel.MachineIdentity{
 		ClientID:     "client-" + params.LoginName,
 		ClientSecret: "secret-" + params.LoginName,
+		Subject:      "user-" + params.LoginName,
+		Created:      true,
 	}
 	f.identities[params.LoginName] = identity
 	return identity, nil
