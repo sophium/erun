@@ -4,7 +4,6 @@ import { reloadStateAfterEnvironmentChange } from './bootThunks';
 import { environmentTypeIsHost, environmentTypeIsRemoteWorktree } from './environmentType';
 import { readError } from './errors';
 import type {
-  AIActivityPayload,
   AppNotificationPayload,
   AppStatusPayload,
   DoctorCompletedPayload,
@@ -31,7 +30,6 @@ import {
   selectSelectedIsPendingFor,
 } from './selectors';
 import { openSelection, selectTerminalTab, startInitialDeploySelection } from './sessionThunks';
-import { setAIBusyForEnv, setAIBusyForSession } from './slices/aiActivitySlice';
 import { recordDoctorOutcome } from './slices/doctorSlice';
 import {
   setEnvActivityForEnv,
@@ -69,25 +67,6 @@ import { selectionKey } from './versionSuggestions';
 // state-side thunk — except terminal-output, which stays imperative on the
 // controller because both the registry buffers and the live xterm instance
 // live there.
-
-// handleAIActivity surfaces that an AI tab is working in one env while the
-// user is looking at another (Nielsen #1, visibility of system status).
-export const handleAIActivity =
-  (payload: AIActivityPayload): AppThunk =>
-  (dispatch) => {
-    const tenant = payload.tenant.trim();
-    const environment = payload.environment.trim();
-    if (!tenant || !environment) {
-      // An orchestrator session carries no env to key by. Dropping the event
-      // here is why the orchestrator row never spun while it was working.
-      if (payload.sessionId > 0) {
-        dispatch(setAIBusyForSession({ sessionId: payload.sessionId, busy: payload.busy }));
-      }
-      return;
-    }
-    const key = selectionKey({ tenant, environment });
-    dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
-  };
 
 // handleOrchestratorShellActivity surfaces that an orchestrator has a
 // background shell running even after its own turn has gone idle — the case a

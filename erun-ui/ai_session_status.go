@@ -31,6 +31,13 @@ import (
 // whose AI tool has never reported a turn boundary keeps the volume latch it
 // has always had, and so does one too old to have the verb.
 //
+// Resolving the state is not the same as showing it, so the badge carries both
+// answers rather than one: the spinner means work in flight, and a turn
+// boundary — which releases that spinner, correctly — also raises its own
+// "waiting on you" state. A badge carrying only "busy" renders the state the
+// model exists for as its opposite: the row goes quiet exactly when the
+// operator is being asked for something.
+//
 // The read goes over the runtime pod exec the heartbeat already uses rather
 // than the MCP edge, for the reason the heartbeat does: kubectl exec works
 // while the edge is down, and a dead edge is exactly when a session is most
@@ -194,10 +201,25 @@ func (a *App) aiSessionReadingForLocked(selection uiSelection) (aiSessionReading
 	return reading, true
 }
 
-// aiSessionEvidenceForTab answers what the tool says about one tab: busy is
-// whether it reports work in flight, reported whether it has said anything
-// about this tab at all. reported=false means the volume latch keeps its say.
-func (a *App) aiSessionEvidenceForTab(managed *managedTerminal) (busy bool, reported bool) {
+// aiSessionTabEvidence is what the environment's AI-session records say about
+// one tab.
+type aiSessionTabEvidence struct {
+	// reported says the tool has said something about this tab at all.
+	// reported=false means the volume latch keeps its say.
+	reported bool
+	// busy says a turn is in flight.
+	busy bool
+	// awaitingInput says the tool is blocked on the operator: its turn ended, or
+	// a permission or a question is pending mid-turn. It is the state the volume
+	// rule structurally cannot produce — a session waiting on a human prints
+	// nothing, which is what a finished one looks like from the stream — and the
+	// reason the badge asks the tool rather than the PTY.
+	awaitingInput bool
+}
+
+// aiSessionEvidenceForTab answers what the tool says about one tab. A tab with
+// no report keeps the volume latch it has always had.
+func (a *App) aiSessionEvidenceForTab(managed *managedTerminal) aiSessionTabEvidence {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.aiSessionEvidenceForTabLocked(managed)
@@ -205,13 +227,13 @@ func (a *App) aiSessionEvidenceForTab(managed *managedTerminal) (busy bool, repo
 
 // aiSessionEvidenceForTabLocked is aiSessionEvidenceForTab for a caller already
 // holding a.mu. Caller holds a.mu.
-func (a *App) aiSessionEvidenceForTabLocked(managed *managedTerminal) (busy bool, reported bool) {
+func (a *App) aiSessionEvidenceForTabLocked(managed *managedTerminal) aiSessionTabEvidence {
 	if managed == nil {
-		return false, false
+		return aiSessionTabEvidence{}
 	}
 	reading, ok := a.aiSessionReadingForLocked(managed.selection)
 	if !ok {
-		return false, false
+		return aiSessionTabEvidence{}
 	}
 	return aiSessionReadingForTab(reading, managed.startedAt)
 }
@@ -226,34 +248,46 @@ func (a *App) aiSessionEvidenceForTabLocked(managed *managedTerminal) (busy bool
 // the agent the operator is watching now. Such a record is evidence neither
 // way, so the volume latch decides — which is exactly the pre-existing
 // behaviour rather than a new silence.
-func aiSessionReadingForTab(reading aiSessionReading, startedAt time.Time) (busy bool, reported bool) {
+func aiSessionReadingForTab(reading aiSessionReading, startedAt time.Time) aiSessionTabEvidence {
+	var evidence aiSessionTabEvidence
 	for _, status := range reading.sessions {
 		if status.LastActivity.IsZero() || !status.LastActivity.After(startedAt) {
 			continue
 		}
-		reported = true
-		if status.State == eruncommon.AISessionStateBusy {
-			busy = true
+		evidence.reported = true
+		switch status.State {
+		case eruncommon.AISessionStateBusy:
+			evidence.busy = true
+		case eruncommon.AISessionStateAwaitingInput:
+			evidence.awaitingInput = true
 		}
 	}
-	return busy, reported
+	// Work in flight outranks a sibling session's turn boundary. One environment
+	// can hold more than one AI conversation, and the desktop draws one badge for
+	// all of them: a row that said "waiting on you" while some other conversation
+	// in it was mid-turn would be reporting the quieter of two truths. Busy also
+	// has to be the answer the volume rule and the report agree on, since either
+	// can raise the spinner.
+	if evidence.busy {
+		evidence.awaitingInput = false
+	}
+	return evidence
 }
 
-// applyAISessionReading turns one tab's reading into the sidebar signal. A
+// applyAISessionReading turns one tab's reading into the sidebar signals. A
 // reading that says nothing about this tab is left alone entirely.
 func (a *App) applyAISessionReading(managed *managedTerminal) {
-	busy, reported := a.aiSessionEvidenceForTab(managed)
-	if !reported {
+	evidence := a.aiSessionEvidenceForTab(managed)
+	if !evidence.reported {
 		return
 	}
-	if busy {
-		a.latchAIActivity(managed)
-		return
-	}
-	// The tool reported a turn boundary — its turn ended, or it is blocked on
-	// the human. Either way the work is not in flight, and this is the one
-	// signal that can say so while the process is still alive and the stream is
-	// still silent. The heartbeat's "the program is running" is not a
-	// counter-argument: a process waiting for input is running.
-	a.releaseAIActivity(managed)
+	// Where the tool reports its own state, it owns both signals. A turn in
+	// flight is the working spinner without the five seconds of output the
+	// volume rule needs — the tool said its turn started, which is the thing the
+	// volume rule was approximating. A turn boundary is the other answer, and it
+	// is not "nothing is happening": the tool has stopped working and is waiting
+	// on the operator, which is its own state to render rather than the absence
+	// of the spinner. The heartbeat's "the program is running" is no
+	// counter-argument to either — a process waiting for input is running.
+	a.applyAIActivityReport(managed, evidence)
 }

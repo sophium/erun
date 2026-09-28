@@ -48,6 +48,15 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
         selectionKey({ tenant: tenantName, environment: environmentName })
       ] === true,
   );
+  // The AI tool reported it is blocked on the operator. Its own selector, and
+  // deliberately not folded into aiBusy: the two are different states of the
+  // row, and a boolean cannot hold both.
+  const aiAwaiting = useAppSelector(
+    (state) =>
+      state.aiActivity.aiAwaitingByEnv[
+        selectionKey({ tenant: tenantName, environment: environmentName })
+      ] === true,
+  );
   const isOpen = useAppSelector((state) => {
     const key = selectionKey({ tenant: tenantName, environment: environmentName });
     return (state.terminal.tabsByEnv[key]?.length ?? 0) > 0;
@@ -110,6 +119,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     isOpening,
     runningCommand,
     aiBusy,
+    aiAwaiting,
     isOpen,
     reconnecting,
     envState,
@@ -142,6 +152,7 @@ export function useEnvironmentRowState(
     isOpening,
     runningCommand,
     aiBusy,
+    aiAwaiting,
     isOpen,
     reconnecting,
     envState,
@@ -161,6 +172,7 @@ export function useEnvironmentRowState(
     isOpening,
     runningCommand,
     aiBusy,
+    aiAwaiting,
     reconnecting,
     envBusy,
     envBusyDetail,

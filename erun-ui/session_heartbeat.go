@@ -162,7 +162,11 @@ func (a *App) reconcileOrchestratorActivity() {
 			session.shellStartedAtUnix = shell.AtUnix
 		}
 		a.mu.Unlock()
-		a.emitAIActivity(r.serial, uiSelection{}, busy)
+		// An orchestrator reports its own turn boundaries through
+		// orchestrator_activity.go, which has no "blocked on the operator"
+		// state to report, so its rows carry the spinner and never the
+		// awaiting-input companion.
+		a.emitAIActivity(r.serial, uiSelection{}, busy, false)
 		a.emitOrchestratorShellActivity(r.serial, shellRunning, shell.Command, shell.AtUnix)
 	}
 }
@@ -206,7 +210,7 @@ func (a *App) releaseUnobservedAIActivity() {
 	a.mu.Lock()
 	var candidates []*managedTerminal
 	for _, managed := range a.sessions {
-		if managed == nil || managed.closed || !aiActivityKind(managed.kind) || !managed.aiBusyEmitted {
+		if managed == nil || managed.closed || !aiActivityKind(managed.kind) || !aiActivitySignalled(managed) {
 			continue
 		}
 		if a.aiLatchStillSupportedLocked(managed) {
@@ -221,20 +225,20 @@ func (a *App) releaseUnobservedAIActivity() {
 }
 
 // aiLatchStillSupportedLocked answers whether something the desktop still
-// believes is holding this session's latch open. Caller holds a.mu.
+// believes is holding this session's signals open. Caller holds a.mu.
 func (a *App) aiLatchStillSupportedLocked(managed *managedTerminal) bool {
-	if _, reported := a.aiSessionEvidenceForTabLocked(managed); reported {
+	if a.aiSessionEvidenceForTabLocked(managed).reported {
 		// The tool's own report is fresh, so the poller owns this latch in both
 		// directions (reconcileAISessionStatusesOnce). Releasing it here as well
 		// would only race the tick that re-asserts it.
 		return true
 	}
 	if managed.aiModelLatch {
-		// A latch the tool raised has nothing left to re-assert it once its
-		// report stops arriving: pod liveness cannot hold it, because a process
-		// blocked on the human is alive too, and holding it there is the exact
-		// false "working" this replaced. So it goes on the silence rule, like
-		// any other latch whose observations have stopped.
+		// Signals the tool raised have nothing left to re-assert them once its
+		// report stops arriving: pod liveness cannot hold them, because a process
+		// blocked on the human is alive too, and holding the "working" spinner
+		// there is the exact false reading this replaced. So they go on the
+		// silence rule, like any other latch whose observations have stopped.
 		return false
 	}
 	heartbeat, ok := a.sessionHeartbeats[selectionKey(managed.selection)]

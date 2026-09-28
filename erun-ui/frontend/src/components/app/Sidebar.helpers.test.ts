@@ -187,6 +187,7 @@ function rowArgs(overrides: {
   isOpening?: boolean;
   runningCommand?: string;
   aiBusy?: boolean;
+  aiAwaiting?: boolean;
   reconnecting?: boolean;
   envBusy?: boolean;
   envBusyDetail?: string;
@@ -196,6 +197,7 @@ function rowArgs(overrides: {
     isOpening: false,
     runningCommand: '',
     aiBusy: false,
+    aiAwaiting: false,
     reconnecting: false,
     envBusy: false,
     envBusyDetail: '',
@@ -216,6 +218,7 @@ function row(overrides: Parameters<typeof rowArgs>[0]) {
     input.isOpening,
     input.runningCommand,
     input.aiBusy,
+    input.aiAwaiting,
     input.reconnecting,
     input.envBusy,
     input.envBusyDetail,
@@ -286,6 +289,44 @@ test('an environment that gave no verdict keeps its desktop latch', () => {
 // The environment's own answer still wins upward, whoever started the work.
 test('an environment that reports work spins even when the desktop started nothing', () => {
   assert.equal(row({ envBusy: true, envObserved: true }).busy, true);
+});
+
+// The defect: the AI tool reported a turn boundary, the badge released the
+// spinner — correctly, the turn is not in flight — and then rendered the row
+// exactly as it renders one whose session had simply gone quiet. The state the
+// AI-session model exists to carry (a session blocked on the operator, which
+// prints nothing and so is invisible to any volume heuristic) arrived at the
+// operator as its opposite: an empty row.
+test('an AI tab waiting on the operator is its own state, not a quiet row', () => {
+  const derived = row({ aiAwaiting: true });
+  assert.equal(derived.busy, false);
+  assert.equal(derived.awaitingInput, true);
+  assert.equal(derived.awaitingLabel, 'AI tab waiting on you in team / dev');
+});
+
+// One slot, one state: a row that is working is not also waiting, and the
+// renderer must not have to arbitrate between two markers that are both set.
+test('a working row never also reads as waiting on the operator', () => {
+  const derived = row({ aiBusy: true, aiAwaiting: true });
+  assert.equal(derived.busy, true);
+  assert.equal(derived.awaitingInput, false);
+  assert.equal(derived.awaitingLabel, '');
+});
+
+test('a row with neither signal carries no awaiting marker', () => {
+  const derived = row({});
+  assert.equal(derived.awaitingInput, false);
+  assert.equal(derived.awaitingLabel, '');
+});
+
+// The environment's "no work in flight" answer is the same answer for a working
+// turn and for a session blocked on the operator — neither is producing output.
+// Letting it clear this would suppress the one state the model exists to report
+// at exactly the moment the operator needs it.
+test("an idle environment report does not clear the AI tool's awaiting state", () => {
+  const derived = row({ aiAwaiting: true, envObserved: true, envBusy: false });
+  assert.equal(derived.awaitingInput, true);
+  assert.equal(derived.awaitingLabel, 'AI tab waiting on you in team / dev');
 });
 
 // This desktop's own in-flight operations answer for themselves: the operator

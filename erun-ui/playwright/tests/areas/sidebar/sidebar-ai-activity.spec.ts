@@ -64,6 +64,73 @@ test.describe('sidebar AI activity spinner', () => {
     await expect(sidebar.getByRole('status')).toHaveCount(0);
   });
 
+  // An AI tool that reported a turn boundary is blocked on the operator, and
+  // that is not the same state as a session that has gone quiet — a distinction
+  // no output-volume heuristic can draw, because both print nothing. Before this
+  // the row rendered it as neither: the spinner was released, correctly, and
+  // nothing took its place, so the one state the AI-session status model exists
+  // to carry reached the operator as an empty row.
+  test('ai-activity awaitingInput paints its own marker instead of a quiet row', async ({
+    app,
+    page,
+  }) => {
+    const tenants = await app.sidebar.tenants();
+    expect(tenants.length).toBeGreaterThan(0);
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    expect(envs.length).toBeGreaterThan(0);
+    const env = envs[0]!;
+
+    const sidebar = page.locator('aside').first();
+    await expect(sidebar.getByRole('status')).toHaveCount(0);
+
+    const emit = (payload: Record<string, unknown>) =>
+      page.evaluate(
+        ({ tenant, env, payload }) => {
+          const runtime = (
+            window as unknown as {
+              runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+            }
+          ).runtime;
+          runtime.EventsEmit('ai-activity', {
+            sessionId: 99,
+            tenant,
+            environment: env,
+            ...payload,
+          });
+        },
+        { tenant, env, payload },
+      );
+
+    // A turn in flight is the spinner, named as working.
+    await emit({ busy: true });
+    await expect(sidebar.getByRole('status')).toHaveCount(1);
+    await expect(sidebar.getByRole('status')).toHaveAttribute(
+      'aria-label',
+      new RegExp(`AI tab working on ${tenant} / ${env}`),
+    );
+
+    // The tool hands control back: the same slot carries the waiting-on-you
+    // marker, which says what the row needs rather than reading as idle.
+    await emit({ busy: false, awaitingInput: true });
+    const awaiting = sidebar.getByRole('status');
+    await expect(awaiting).toHaveCount(1);
+    await expect(awaiting).toHaveAttribute(
+      'aria-label',
+      `AI tab waiting on you in ${tenant} / ${env}`,
+    );
+
+    // The operator answers: the next turn is work in flight again.
+    await emit({ busy: true, awaitingInput: false });
+    await expect(sidebar.getByRole('status')).toHaveAttribute(
+      'aria-label',
+      new RegExp(`AI tab working on ${tenant} / ${env}`),
+    );
+
+    await emit({ busy: false, awaitingInput: false });
+    await expect(sidebar.getByRole('status')).toHaveCount(0);
+  });
+
   test('ai-activity payloads with empty tenant or environment are ignored', async ({
     app: _app,
     page,

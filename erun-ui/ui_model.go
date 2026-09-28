@@ -1704,18 +1704,27 @@ type terminalExitPayload struct {
 	Deliberate bool `json:"deliberate,omitempty"`
 }
 
-// aiActivityPayload carries the AI-session "busy" signal the sidebar uses to
-// spin env rows whose AI tab is working. It has two sources, and the tool's own
-// report wins where it exists: the AI tool's turn-boundary events (busy while a
-// turn is in flight, released when it reports the turn ended or that it is
-// waiting on the operator — see ai_session_status.go), and, only for a session
-// that has never reported one, the debounced output-volume fallback (true after
-// ~5 s of sustained output, false after ~3 s of silence).
+// aiActivityPayload carries what the sidebar draws for an env row's AI tab.
+// Busy spins the row while work is in flight, and AwaitingInput marks the row
+// as waiting on the operator — the state a turn boundary puts a session in, and
+// one the volume rule structurally cannot produce. The two are mutually
+// exclusive and always describe one state together, so a consumer applies both
+// from every event rather than only when the field it cares about changes.
+//
+// It has two sources, and the tool's own report wins where it exists: the AI
+// tool's turn-boundary events (busy while a turn is in flight, awaiting-input
+// when it reports the turn ended or that it is blocked on the operator — see
+// ai_session_status.go), and, only for a session that has never reported one,
+// the debounced output-volume fallback (true after ~5 s of sustained output,
+// false after ~3 s of silence), which has nothing to say about awaiting.
 type aiActivityPayload struct {
 	SessionID   int    `json:"sessionId"`
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Busy        bool   `json:"busy"`
+	// AwaitingInput is omitted when false so an event that only ever carried
+	// "busy" keeps the shape it has always had on the wire.
+	AwaitingInput bool `json:"awaitingInput,omitempty"`
 }
 
 // orchestratorShellActivityPayload carries whether an orchestrator's

@@ -1,6 +1,7 @@
 import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { handleAIActivity } from './aiActivityThunks';
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
 import { handleHostedDefinitionUploaded } from './hostedDefinitionThunks';
 import type {
@@ -19,7 +20,6 @@ import type {
 } from './model';
 import { store } from './store';
 import {
-  handleAIActivity,
   handleAppNotification,
   handleAppStatus,
   handleDoctorCompleted,

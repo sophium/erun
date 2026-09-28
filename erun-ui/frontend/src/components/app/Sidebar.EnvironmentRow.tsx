@@ -8,6 +8,7 @@ import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalError } from '@/app/notificationThunks';
 import { openOutputs } from '@/app/outputsThunks';
 import { closeEnvironment, openSelection } from '@/app/sessionThunks';
+import { AwaitingInputIndicator } from '@/components/app/Sidebar.AwaitingInputIndicator';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import { useEnvironmentRowState } from '@/components/app/Sidebar.EnvironmentRow.state';
@@ -202,6 +203,8 @@ function EnvironmentRowOpenButton({
   isHost,
   busy,
   busyLabel,
+  awaitingInput,
+  awaitingLabel,
 }: {
   environmentName: string;
   rowLabel: string;
@@ -211,6 +214,8 @@ function EnvironmentRowOpenButton({
   isHost: boolean;
   busy: boolean;
   busyLabel: string;
+  awaitingInput: boolean;
+  awaitingLabel: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
@@ -234,7 +239,15 @@ function EnvironmentRowOpenButton({
       ) : (
         isLocal && <LocalEnvBadge selected={selected} />
       )}
-      {busy && <BusyRowSpinner label={busyLabel} />}
+      {/* One slot, two states of it. A row that is working spins; a row whose
+          AI tool handed control back carries the "waiting on you" marker
+          instead. The two are mutually exclusive by construction, so this is a
+          choice rather than a stack. */}
+      {busy ? (
+        <BusyRowSpinner label={busyLabel} />
+      ) : (
+        awaitingInput && <AwaitingInputIndicator label={awaitingLabel} />
+      )}
     </button>
   );
 }
@@ -250,6 +263,8 @@ export function EnvironmentRow({
     selected,
     busy,
     busyLabel,
+    awaitingInput,
+    awaitingLabel,
     busyFromEnvironment,
     isLocal,
     isHost,
@@ -282,12 +297,10 @@ export function EnvironmentRow({
       runtimeVersionLine={runtimeVersionLine}
       erunVersion={erunVersion}
       runtimeImageLineMismatch={runtimeImageLineMismatch}
-      activityLabel={environmentCardActivityLabel(
-        busy,
-        busyFromEnvironment,
-        busyLabel,
-        indicator.dot,
-      )}
+      activityLabel={
+        environmentCardActivityLabel(busy, busyFromEnvironment, busyLabel, indicator.dot) ||
+        awaitingLabel
+      }
       indicator={indicator}
       nodeIndicator={nodeIndicator}
       node={node}
@@ -303,6 +316,8 @@ export function EnvironmentRow({
         isHost={isHost}
         busy={busy}
         busyLabel={busyLabel}
+        awaitingInput={awaitingInput}
+        awaitingLabel={awaitingLabel}
       />
       {/* A host env has no pod, so it is never "running" or "stopped" — it
           simply is. Showing the pod-shaped open/close status dot for it would

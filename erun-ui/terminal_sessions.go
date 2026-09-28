@@ -1998,7 +1998,7 @@ func (a *App) recordAIActivity(managed *managedTerminal) {
 	// waiting on the human can still repaint its prompt, and letting those
 	// redraws raise the badge would set it oscillating against the report that
 	// keeps clearing it. The poller owns both directions there.
-	if _, reported := a.aiSessionEvidenceForTabLocked(managed); reported {
+	if a.aiSessionEvidenceForTabLocked(managed).reported {
 		a.mu.Unlock()
 		return
 	}
@@ -2009,13 +2009,20 @@ func (a *App) recordAIActivity(managed *managedTerminal) {
 	shouldFireBusy := !managed.aiBusyEmitted && now.Sub(managed.aiActiveSince) >= aiActivitySustainedThreshold
 	if shouldFireBusy {
 		managed.aiBusyEmitted = true
+		// This latch is the volume rule's, so it is held and released by the
+		// rules below rather than by the tool's report — and the report has
+		// nothing to say here, or this path would not have been reached. Whatever
+		// it last said has stopped arriving, so the row falls back to the
+		// behaviour it has always had rather than showing both states at once.
+		managed.aiAwaitingInputEmitted = false
+		managed.aiModelLatch = false
 	}
 	a.scheduleAIQuietCheckLocked(managed)
 	selection := managed.selection
 	serial := managed.serial
 	a.mu.Unlock()
 	if shouldFireBusy {
-		a.emitAIActivity(serial, selection, true)
+		a.emitAIActivity(serial, selection, true, false)
 	}
 }
 
@@ -2050,11 +2057,8 @@ func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
 	// it is the only evidence that separates "finished its turn and waiting on
 	// you" from "still working": both are silent, and the pod's liveness is the
 	// same answer for both. See ai_session_status.go.
-	if busy, reported := a.aiSessionEvidenceForTab(managed); reported {
-		if busy {
-			return
-		}
-		a.releaseAIActivity(managed)
+	if evidence := a.aiSessionEvidenceForTab(managed); evidence.reported {
+		a.applyAIActivityReport(managed, evidence)
 		return
 	}
 	if a.heartbeatSaysRunning(managed) {
@@ -2065,7 +2069,7 @@ func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
 
 func (a *App) releaseAIActivityIfQuiet(managed *managedTerminal) {
 	a.mu.Lock()
-	if managed.closed || !managed.aiBusyEmitted {
+	if managed.closed || !aiActivitySignalled(managed) {
 		a.mu.Unlock()
 		return
 	}
@@ -2073,56 +2077,75 @@ func (a *App) releaseAIActivityIfQuiet(managed *managedTerminal) {
 		a.mu.Unlock()
 		return
 	}
-	managed.aiBusyEmitted = false
+	setAIActivityState(managed, false, false)
 	managed.aiActiveSince = time.Time{}
 	managed.aiModelLatch = false
 	selection := managed.selection
 	serial := managed.serial
 	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
+	a.emitAIActivity(serial, selection, false, false)
 }
 
-// releaseAIActivity drops the busy latch regardless of how recently the session
-// printed. Used when the pod itself reports the session's program is gone: the
-// stream may still be dribbling reconnect noise, but the work is over.
+// releaseAIActivity drops both sidebar signals regardless of how recently the
+// session printed. Used when the pod itself reports the session's program is
+// gone: the stream may still be dribbling reconnect noise, but the work is
+// over — and so is whatever the tool was waiting on the operator for.
 func (a *App) releaseAIActivity(managed *managedTerminal) {
 	a.mu.Lock()
-	if managed.closed || !managed.aiBusyEmitted {
+	if managed.closed || !aiActivitySignalled(managed) {
 		a.mu.Unlock()
 		return
 	}
-	managed.aiBusyEmitted = false
+	setAIActivityState(managed, false, false)
 	managed.aiActiveSince = time.Time{}
 	managed.aiModelLatch = false
 	selection := managed.selection
 	serial := managed.serial
 	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
+	a.emitAIActivity(serial, selection, false, false)
 }
 
-// latchAIActivity raises the busy latch for a session the AI tool itself
-// reports as working, without the five seconds of output volume the heuristic
-// needs: the tool said its turn started, which is the thing the volume rule was
-// approximating. The latch is marked as the tool's own, so pod liveness alone
-// never holds it open — it is re-asserted by the next reading, and released
-// when the tool stops saying it (see releaseUnobservedAIActivity).
+// applyAIActivityReport applies the AI tool's own answer to this tab's sidebar
+// signals. The two are one state, not two: a session is either working or
+// blocked on the operator, so they are written together and the event carries
+// the pair — never one of them left stale from an earlier report.
+//
+// The signals are marked as the tool's own, so pod liveness alone never holds
+// them open: they are re-asserted by the next reading, and go when the tool
+// stops saying them (see releaseUnobservedAIActivity).
 //
 // Caller must not hold a.mu.
-func (a *App) latchAIActivity(managed *managedTerminal) {
+func (a *App) applyAIActivityReport(managed *managedTerminal, evidence aiSessionTabEvidence) {
 	if managed == nil || !aiActivityKind(managed.kind) {
 		return
 	}
 	a.mu.Lock()
-	if managed.closed || managed.aiBusyEmitted {
+	if managed.closed || !setAIActivityState(managed, evidence.busy, evidence.awaitingInput) {
 		a.mu.Unlock()
 		return
 	}
-	managed.aiBusyEmitted = true
 	managed.aiModelLatch = true
 	selection := managed.selection
 	serial := managed.serial
 	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, true)
+	a.emitAIActivity(serial, selection, evidence.busy, evidence.awaitingInput)
+}
+
+// aiActivitySignalled reports whether either of a tab's sidebar signals is set.
+func aiActivitySignalled(managed *managedTerminal) bool {
+	return managed.aiBusyEmitted || managed.aiAwaitingInputEmitted
+}
+
+// setAIActivityState writes both of a tab's sidebar signals at once and reports
+// whether either actually changed, so a caller emits only on a change: a
+// re-assertion of a state the sidebar already has is not news.
+func setAIActivityState(managed *managedTerminal, busy, awaitingInput bool) bool {
+	if managed.aiBusyEmitted == busy && managed.aiAwaitingInputEmitted == awaitingInput {
+		return false
+	}
+	managed.aiBusyEmitted = busy
+	managed.aiAwaitingInputEmitted = awaitingInput
+	return true
 }
 
 // finalizeAIActivity ensures the sidebar busy latch is released when an
@@ -2138,25 +2161,26 @@ func (a *App) finalizeAIActivity(managed *managedTerminal) {
 		managed.aiInactivityTimer.Stop()
 		managed.aiInactivityTimer = nil
 	}
-	if !managed.aiBusyEmitted {
+	if !aiActivitySignalled(managed) {
 		a.mu.Unlock()
 		return
 	}
-	managed.aiBusyEmitted = false
+	setAIActivityState(managed, false, false)
 	managed.aiActiveSince = time.Time{}
 	managed.aiModelLatch = false
 	selection := managed.selection
 	serial := managed.serial
 	a.mu.Unlock()
-	a.emitAIActivity(serial, selection, false)
+	a.emitAIActivity(serial, selection, false, false)
 }
 
-func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
+func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy, awaitingInput bool) {
 	a.emitEvent(aiActivityEvent, aiActivityPayload{
-		SessionID:   sessionID,
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-		Busy:        busy,
+		SessionID:     sessionID,
+		Tenant:        selection.Tenant,
+		Environment:   selection.Environment,
+		Busy:          busy,
+		AwaitingInput: awaitingInput,
 	})
 }
 
@@ -2378,18 +2402,23 @@ type managedTerminal struct {
 	// reports is matched to the tab by identity rather than re-derived.
 	appSession string
 
-	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
-	// drive the debounced AI activity signal that powers the sidebar
-	// "Claude is working" spinner. Only populated for sessionKindAI
-	// managed terminals. See recordAIActivity for the debounce policy
-	// (5 s sustained output to flip on, 3 s silence to flip off) and
-	// session_heartbeat.go for the observed-liveness override that keeps a
-	// quiet-but-running session from reading as finished.
-	aiActiveSince     time.Time
-	aiLastOutput      time.Time
-	aiBusyEmitted     bool
-	aiInactivityTimer *time.Timer
-	// aiModelLatch records that the current latch was raised by the AI tool's
+	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiAwaitingInputEmitted /
+	// aiInactivityTimer drive the AI activity signals that power the sidebar
+	// "Claude is working" spinner and its "waiting on you" companion. Only
+	// populated for sessionKindAI managed terminals. See recordAIActivity for
+	// the debounce policy (5 s sustained output to flip on, 3 s silence to flip
+	// off) and session_heartbeat.go for the observed-liveness override that
+	// keeps a quiet-but-running session from reading as finished.
+	aiActiveSince time.Time
+	aiLastOutput  time.Time
+	aiBusyEmitted bool
+	// aiAwaitingInputEmitted is the sidebar's "the AI tool is blocked on the
+	// operator" signal. It is the one state the output-volume rule cannot
+	// produce, so it is only ever raised by the tool's own report — and it is
+	// released by the same report, or by the session going away entirely.
+	aiAwaitingInputEmitted bool
+	aiInactivityTimer      *time.Timer
+	// aiModelLatch records that the current signals were raised by the AI tool's
 	// own turn-boundary report rather than by output volume. A volume-raised
 	// latch is held open by pod liveness (the program is running, so silence
 	// is not evidence); a report-raised one is not, because the same report is

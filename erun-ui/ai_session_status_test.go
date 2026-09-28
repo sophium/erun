@@ -131,6 +131,104 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 	}
 }
 
+// emittedAIActivity reads an emitted ai-activity event back as the JSON the
+// frontend actually receives. The assertions below are on the wire shape rather
+// than on the payload struct on purpose: the struct field is the thing being
+// added, so a test written against it could not have been run against the code
+// the defect was in.
+func emittedAIActivity(t *testing.T, event any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal the emitted event: %v", err)
+	}
+	var emitted map[string]any
+	if err := json.Unmarshal(data, &emitted); err != nil {
+		t.Fatalf("read the emitted event back: %v", err)
+	}
+	return emitted
+}
+
+// TestAnAwaitingInputReportReachesTheSidebarAsItsOwnState is the reproduction of
+// the defect this change fixes. The model resolved awaiting-input and the badge
+// consumed it, releasing the spinner — correctly, the turn is not in flight —
+// and then had nothing left to say: its payload was a boolean, so the one state
+// the model exists to carry arrived at the renderer as its opposite,
+// indistinguishable from a session that had merely gone quiet. A consumer
+// cannot render a state the event does not name.
+func TestAnAwaitingInputReportReachesTheSidebarAsItsOwnState(t *testing.T) {
+	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	app, emits, _ := newAISessionStatusTestApp("", nil)
+	managed := aiStatusTestTab(selection)
+	app.sessions[managed.key] = managed
+	app.sessionHeartbeats[selectionKey(selection)] = heartbeatFor(true)
+	app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
+		reportedAISessionStatus("conv-1", eruncommon.AISessionStateAwaitingInput, time.Now()),
+	})
+
+	app.reconcileAISessionStatusesOnce()
+
+	events := emits.events(aiActivityEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected one signal for the turn boundary, got %+v", events)
+	}
+	emitted := emittedAIActivity(t, events[0])
+	if emitted["busy"] != false {
+		t.Fatalf("a turn boundary is not work in flight; emitted %v", emitted)
+	}
+	if emitted["awaitingInput"] != true {
+		t.Fatalf("awaiting-input reached the sidebar as 'not busy'; emitted %v", emitted)
+	}
+
+	// The state can be left as well as entered: the next turn hands control back
+	// to the tool, and the row must stop saying it needs the operator.
+	app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
+		reportedAISessionStatus("conv-1", eruncommon.AISessionStateBusy, time.Now()),
+	})
+	app.applyAISessionReading(managed)
+
+	events = emits.events(aiActivityEvent)
+	emitted = emittedAIActivity(t, events[len(events)-1])
+	if emitted["busy"] != true {
+		t.Fatalf("a turn start is work in flight; emitted %v", emitted)
+	}
+	if _, present := emitted["awaitingInput"]; present {
+		t.Fatalf("a turn start must clear the awaiting state; emitted %v", emitted)
+	}
+}
+
+// TestWorkInFlightOutranksASiblingSessionsTurnBoundary pins the reduction when
+// an environment holds more than one AI conversation: the sidebar draws one
+// badge for all of them, and reporting the quieter of two truths would show a
+// row waiting on the operator while a turn in that same environment is still
+// running.
+func TestWorkInFlightOutranksASiblingSessionsTurnBoundary(t *testing.T) {
+	selection := uiSelection{Tenant: "petios", Environment: "local"}
+	app, emits, _ := newAISessionStatusTestApp("", nil)
+	managed := aiStatusTestTab(selection)
+	managed.aiBusyEmitted = false
+	app.sessions[managed.key] = managed
+	app.sessionHeartbeats[selectionKey(selection)] = heartbeatFor(true)
+	app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
+		reportedAISessionStatus("conv-awaiting", eruncommon.AISessionStateAwaitingInput, time.Now()),
+		reportedAISessionStatus("conv-busy", eruncommon.AISessionStateBusy, time.Now()),
+	})
+
+	app.reconcileAISessionStatusesOnce()
+
+	events := emits.events(aiActivityEvent)
+	if len(events) != 1 {
+		t.Fatalf("expected one signal, got %+v", events)
+	}
+	emitted := emittedAIActivity(t, events[0])
+	if emitted["busy"] != true {
+		t.Fatalf("a turn in flight must win; emitted %v", emitted)
+	}
+	if _, present := emitted["awaitingInput"]; present {
+		t.Fatalf("the row is working, not waiting; emitted %v", emitted)
+	}
+}
+
 // TestModelReportedWorkLightsTheBadgeWithoutOutput pins the other direction:
 // the badge is the tool's answer, not a threshold crossing. An agent inside a
 // long silent tool call has produced nothing to measure, and the report is the
@@ -305,7 +403,7 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 	app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
 		reportedAISessionStatus("conv-1", eruncommon.AISessionStateBusy, time.Now()),
 	})
-	app.latchAIActivity(managed)
+	app.applyAISessionReading(managed)
 	if len(emits.events(aiActivityEvent)) != 1 {
 		t.Fatalf("expected the report to raise the latch, got %+v", emits.events(aiActivityEvent))
 	}

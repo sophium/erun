@@ -64,6 +64,14 @@ export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
   busyLabel: string;
+  // awaitingInput says the AI tool reported control went back to the operator:
+  // its turn ended, or a permission or a question is pending. It is a state of
+  // its own rather than the absence of busy — a session waiting on a human and
+  // one that has simply gone quiet are indistinguishable from output volume,
+  // which is the whole reason the AI-session status model exists. Never set
+  // alongside `busy`: a row that is working is not waiting.
+  awaitingInput: boolean;
+  awaitingLabel: string;
   // busyFromEnvironment says the label describes the environment's own
   // condition rather than an operation this desktop is running. A row's spinner
   // needs the label either way, because a screen reader has no other context;
@@ -94,6 +102,7 @@ export function deriveEnvironmentRow(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  aiAwaiting: boolean,
   reconnecting: boolean,
   envBusy: boolean,
   envBusyDetail: string,
@@ -137,6 +146,12 @@ export function deriveEnvironmentRow(
     envBusy,
     envBusyDetail,
   );
+  // The awaiting state is not squeezed through environmentRowIsBusy: the
+  // environment's generic "no work in flight" answer is the same answer for a
+  // working turn and a blocked one, so letting it clear this would hide exactly
+  // the state the model exists to carry. It has its own source, its own
+  // liveness, and its own label.
+  const awaitingInput = aiAwaiting && !busy;
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
@@ -147,6 +162,10 @@ export function deriveEnvironmentRow(
     selected,
     busy,
     busyLabel,
+    awaitingInput,
+    awaitingLabel: awaitingInput
+      ? `AI tab waiting on you in ${tenantName} / ${environmentName}`
+      : '',
     busyFromEnvironment,
     isLocal,
     isHost,
