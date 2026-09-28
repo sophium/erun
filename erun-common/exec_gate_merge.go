@@ -140,7 +140,10 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // aborted, the conflict recorded in the result's Skipped list, and the next
 // source is tried against the working tree as it stood before that attempt
 // — rather than failing the whole batch, so one bad branch cannot turn an
-// otherwise-clean batch dead. A source whose squash stages nothing is
+// otherwise-clean batch dead. The one conflict that is not a skip is one
+// confined to atlas.sum: it is regenerated from the migration files on disk
+// and the source lands like a clean squash (resolveAtlasSumConflicts,
+// skipConflictedGateMergeSource). A source whose squash stages nothing is
 // skipped the same way: it contributes no change, which is a no-op rather
 // than an error, and it is recorded so the caller can tell "already landed"
 // from "broken". Sources is required to be non-empty.
