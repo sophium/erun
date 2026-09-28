@@ -421,6 +421,13 @@ export class TerminalController {
     // re-pointed off a tab the user has picked, which is finishOpenSession's
     // restore to keep.
     if (payload.sessionId !== store.getState().terminal.sessionId) {
+      // The buffered replay that covers this skip is invisible from the
+      // outside, so this line is the only record of which exit was taken and
+      // on whose behalf: a red on the switch-timing spec can be read out of it
+      // rather than re-instrumented.
+      console.warn(
+        `erun-terminal: guard=session-mismatch payloadSessionId=${String(payload.sessionId)} activeSessionId=${String(store.getState().terminal.sessionId)}`,
+      );
       return;
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
@@ -432,6 +439,12 @@ export class TerminalController {
   private writeToTerminal(sessionId: number, data: TerminalWriteData, replay = false): void {
     const terminal = this.terminal;
     if (!terminal) {
+      // No pane to write into. The one caller that can still get here is the
+      // cursor-restore timer, which outlives unmountTerminal; the ids say whose
+      // write was dropped, and `replay` which of the callers it came from.
+      console.warn(
+        `erun-terminal: guard=no-terminal targetSessionId=${String(sessionId)} activeSessionId=${String(store.getState().terminal.sessionId)} replay=${String(replay)}`,
+      );
       return;
     }
     terminal.write(data, this.writeSources.begin(sessionId, replay));
