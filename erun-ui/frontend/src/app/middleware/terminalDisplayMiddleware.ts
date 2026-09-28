@@ -23,9 +23,13 @@ startListening({
     if (sessionId === previousSessionId) {
       return;
     }
-    // One hand-off, not a reset and a write composed by the caller: the switch
-    // has to run after everything already written for the outgoing session has
-    // parsed, or its bytes land in the incoming session's pane (switchSession).
-    controller.switchSession(previousSessionId, sessionId);
+    // The switch is a request, not a hand-off this effect can perform here:
+    // what it has to move from is the session on the pane, and two dispatches
+    // arriving before that pane has moved have to coalesce rather than each
+    // snapshot, reset and activate in turn. Both of those are the controller's
+    // to decide -- see requestSessionSwitch. The hand-off itself still runs
+    // after everything already written for the outgoing session has parsed, or
+    // its bytes land in the incoming session's pane.
+    controller.requestSessionSwitch(sessionId);
   },
 });

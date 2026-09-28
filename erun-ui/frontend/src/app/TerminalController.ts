@@ -39,6 +39,7 @@ import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses'
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeTerminalOutput } from './terminalStatus';
+import { TerminalSwitchQueue } from './TerminalSwitchQueue';
 import { TerminalWailsEvents } from './terminalWailsEvents';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
@@ -74,10 +75,6 @@ export class TerminalController {
       this.publishTerminalDims();
     },
   });
-  // True from the moment a switch is dispatched until the callback xterm
-  // invokes from its own queue has run. While it is set the switch owns the
-  // pane's reset (switchSession), so a direct resetTerminal() defers to it.
-  private switchInFlight = false;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -98,6 +95,20 @@ export class TerminalController {
   private liveCursorState: CursorVisibilityState = { altScreen: false, cursorHidden: false };
   private cursorRestoreTimer = 0;
   private static readonly CURSOR_RESTORE_DELAY_MS = 250;
+  private readonly switchQueue = new TerminalSwitchQueue({
+    behindWrites: (run) => {
+      const terminal = this.terminal;
+      if (!terminal) {
+        return false;
+      }
+      terminal.write('', run);
+      return true;
+    },
+    appendedCount: (sessionId) => this.sessions.displayAppendedCount(sessionId),
+    perform: (from, to, appendedAtRequest) => {
+      this.performSwitch(from, to, appendedAtRequest);
+    },
+  });
   private readonly clipboard = new TerminalClipboard({
     getTerminal: () => this.terminal,
     getTerminalRoot: () => this.terminalRoot,
@@ -208,6 +219,12 @@ export class TerminalController {
     this.terminal.open(elements.terminalRoot);
     safeFit(this.fitAddon);
     this.publishTerminalDims();
+    // This xterm is brand new and holds nothing, whatever the one it replaced
+    // was showing. The queue's record of the pane's ownership outlives the
+    // pane, so it has to be told: left alone it names the session the disposed
+    // terminal was on, and the next switch would capture this blank pane under
+    // that session's name (see TerminalSwitchQueue.noteRendered).
+    this.switchQueue.noteRendered(0);
     this.pathLinkProviderDisposable = installTerminalLinkHandling(this.terminal);
 
     this.installClipboardHandlers(elements.terminalRoot);
@@ -253,6 +270,17 @@ export class TerminalController {
       void store.dispatch(boot());
     }
     this.scheduleIdleStatusPoll(0);
+    // A remounted pane is blank, and no switch is due to fill it: setSessionId
+    // reaches the queue only when the store's session *changes*, and tearing
+    // the pane down does not change it. Ask for the session the store names so
+    // the pane and the store agree again -- without this the reader is left
+    // staring at an empty terminal with the tab strip naming the session it
+    // should be showing, and nothing that will ever repaint it. A first mount
+    // has no session yet (boot() restores it), so this is a no-op there.
+    const restoredSessionId = store.getState().terminal.sessionId;
+    if (restoredSessionId > 0) {
+      this.switchQueue.request(restoredSessionId);
+    }
 
     return () => {
       this.unmountTerminal();
@@ -260,6 +288,10 @@ export class TerminalController {
   }
 
   private unmountTerminal(): void {
+    // xterm drops pending write-completion callbacks on dispose, so a switch
+    // queued behind one never runs: drop the request with it rather than carry
+    // it into a later mount, where it would move a pane it knows nothing about.
+    this.switchQueue.cancel();
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
     window.clearTimeout(this.resizeTimer);
@@ -287,12 +319,8 @@ export class TerminalController {
     this.fitAddon = null;
     this.serializeAddon = null;
     // xterm drops pending write-completion callbacks on dispose, so reset the
-    // source queue to avoid carrying a stale head into the next mount -- and
-    // clear the switch flag with it, or a switch disposed mid-flight would
-    // leave every later resetTerminal() deferring to a callback that will never
-    // run and the pane would never clear again.
+    // source queue to avoid carrying a stale head into the next mount.
     this.writeSources.clear();
-    this.switchInFlight = false;
   }
 
   private removeClipboardHandlers(): void {
@@ -328,22 +356,29 @@ export class TerminalController {
     }, delay);
   }
 
-  // Reset is not always the caller's to run. A switch in flight runs it itself,
-  // from inside xterm's own queue and after it has snapshotted the outgoing
-  // session, so a reset landing in the switch's tick can only run in front of
-  // that snapshot and hand it a blank screen -- the outgoing session then
-  // switch-backs to nothing. Both direct callers (globalConfigCloudThunks'
-  // startCloudInitSession, manageDeleteThunks' submitManageDelete) call this on
-  // the statement after their setSessionId dispatch, in the same synchronous
-  // run of the thunk body, so that is exactly where it would land. Deferring to
-  // the switch keeps the post-condition -- the pane ends up reset -- and drops
-  // only the duplicate.
+  // Reset is not always the caller's to run. Both direct callers
+  // (globalConfigCloudThunks' startCloudInitSession, manageDeleteThunks'
+  // submitManageDelete) dispatch setSessionId and then reset on the next
+  // statement, in the same synchronous run of the thunk body, which is a switch
+  // this queue already owns: it clears the pane itself, between capturing the
+  // outgoing session's screen and activating the incoming one. Asking the queue
+  // whether that clear is already accounted for is deliberately not a question
+  // about xterm's queue -- see resetIsAlreadySatisfied.
   resetTerminal(): void {
-    if (this.switchInFlight) {
+    if (this.switchQueue.resetIsAlreadySatisfied(store.getState().terminal.sessionId)) {
       return;
     }
+    this.resetPane();
+  }
+
+  private resetPane(): void {
     this.terminal?.reset();
     this.terminal?.clear();
+    // The pane holds nothing now, and is recorded as holding nothing rather
+    // than as holding session 0 -- zero is a real switch target (a close clears
+    // the pane), so stamping the pane with it would say it holds a session it
+    // does not. See TerminalSwitchQueue.noteRendered.
+    this.switchQueue.noteRendered(0);
     this.cancelCursorRestoreTimer();
     this.reattachRepaint.clear();
     this.liveCursorState = { altScreen: false, cursorHidden: false };
@@ -521,62 +556,39 @@ export class TerminalController {
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
 
-  // switchSession moves the shared xterm onto `sessionId`, ordered behind every
-  // write already issued for the session being left.
+  // requestSessionSwitch is what a setSessionId dispatch asks for. It is a
+  // request rather than a hand-off because the pane may not have moved yet when
+  // the next one arrives: two dispatches inside one task coalesce onto a single
+  // switch instead of each snapshotting, resetting and activating in turn (see
+  // TerminalSwitchQueue). A no-op when there is no terminal to move.
+  requestSessionSwitch(sessionId: number): void {
+    this.switchQueue.request(sessionId);
+  }
+
+  // performSwitch carries out the hand-off TerminalSwitchQueue settled on, from
+  // inside xterm's own queue: an empty write's completion callback fires once
+  // every chunk queued ahead of it has parsed, so the capture below is taken of
+  // a screen that already carries the outgoing session's last output and the
+  // reset cannot land in front of it.
   //
-  // xterm parses write() asynchronously: with an empty queue it pushes the chunk
-  // and schedules the drain on a macrotask. So at the moment a switch is
-  // dispatched, the outgoing session's last output is typically still sitting in
-  // that queue, unparsed -- and reset()/clear() reset the buffer synchronously
-  // without touching the queue (xterm's own note on Terminal.reset: it "does not
-  // clear input buffers and does not reset the parser, thus the terminal will
-  // continue to apply pending input data"). Resetting now would therefore land
-  // BEFORE those bytes: they would parse into the freshly-reset buffer, after the
-  // incoming session's screen had been restored, and paint the outgoing session's
-  // output into the pane now showing the incoming one. The snapshot taken on the
-  // way out runs before they parse too, so it cannot carry them either, and
-  // captureSnapshot drops the display buffer with it -- the line ends up on the
-  // session that did not produce it and missing from the one that did.
-  //
-  // The empty write below is the ordering guarantee, not a wait: its callback is
-  // invoked from xterm's own queue once every chunk queued ahead of it has been
-  // parsed, so the snapshot is taken of a screen that already carries that
-  // output and the reset cannot run ahead of it. The boundary taken here is what
-  // keeps the ordering from costing anything: chunks up to it have their writes
-  // queued (so they are on the screen the snapshot captures), and anything
-  // appended after this call has no write at all, because handleTerminalOutput
-  // buffers without writing for a session the store no longer names.
-  //
-  // That boundary is the session's append sequence number, not the buffer's
-  // length: the buffer trims its own head at the retention budget, once per
-  // append for a session sitting at it, so a length taken now can have stopped
-  // naming the same chunks by the time the callback reads it (see
-  // captureSnapshot).
-  //
-  // A no-op when there is no terminal to move; `sessionId <= 0` resets the pane
-  // without activating anything, which is how a close clears it.
-  //
-  // While this hand-off is in flight it also owns the reset: see
-  // switchInFlight and resetTerminal.
-  switchSession(previousSessionId: number, sessionId: number): void {
-    const terminal = this.terminal;
-    if (!terminal) {
+  // `from` is the session the pane really holds (null when it holds nothing),
+  // so the capture takes its own screen, up to the append sequence the switch
+  // was asked for -- output for that session arriving in between was never
+  // written to the pane and is not in `serialized`, so the capture keeps it
+  // rather than dropping it with the rest of the buffer (see captureSnapshot).
+  // `to <= 0` clears the pane without activating anything, which is how a close
+  // lands.
+  private performSwitch(from: number | null, to: number, appendedAtRequest: number): void {
+    this.snapshotSession(from ?? 0, appendedAtRequest);
+    this.resetPane();
+    if (to <= 0) {
       return;
     }
-    const appendedAtDispatch = this.sessions.displayAppendedCount(previousSessionId);
-    this.switchInFlight = true;
-    terminal.write('', () => {
-      this.switchInFlight = false;
-      this.snapshotSession(previousSessionId, appendedAtDispatch);
-      this.resetTerminal();
-      if (sessionId > 0) {
-        this.activateSession(sessionId);
-        // Push the pane geometry to the newly-active PTY so a session spawned at
-        // a default size (an orchestrator starts at 80x24) redraws at the real
-        // width instead of rendering its UI clipped.
-        this.resizeActiveSession();
-      }
-    });
+    this.activateSession(to);
+    // Push the pane geometry to the newly-active PTY so a session spawned at a
+    // default size (an orchestrator starts at 80x24) redraws at the real width
+    // instead of rendering its UI clipped.
+    this.resizeActiveSession();
   }
 
   // snapshotSession captures the outgoing session's rendered screen (its
@@ -588,9 +600,9 @@ export class TerminalController {
   // since last visit) instead of O(session's total history). A no-op for
   // sessionId <= 0 (no prior session was actually showing).
   //
-  // `appendedAtDispatch` bounds which buffer entries that is: see switchSession,
-  // which is the only caller that has output it must not drop. Called on its
-  // own, it captures everything the buffer holds.
+  // `appendedAtDispatch` bounds which buffer entries that is: see
+  // performSwitch's caller, which is the only one that has output it must not
+  // drop. Called on its own, it captures everything the buffer holds.
   snapshotSession(sessionId: number, appendedAtDispatch = Number.POSITIVE_INFINITY): void {
     if (sessionId <= 0 || !this.terminal || !this.serializeAddon) {
       return;
@@ -606,6 +618,7 @@ export class TerminalController {
   // (never switched away from in this window) falls back to a bounded replay
   // of its retained history, same as before #1322.
   activateSession(sessionId: number): void {
+    this.switchQueue.noteRendered(sessionId);
     const snapshot = this.sessions.snapshot(sessionId);
     let cursorHidden: boolean;
     // The writes this activation makes, resolved before any of them run so
