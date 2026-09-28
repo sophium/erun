@@ -54,6 +54,67 @@ cross-repository structural gates, not production helpers.
 - On Windows, preserve the executable stub runner, NUL-delimited argv transfer,
   and absolute `ERUN_STUB_SH` (the scrubbed PATH cannot discover a shell).
   Keep golden files LF via the narrowly scoped `.gitattributes` entry.
+- A fixture stub server assigns every value its handlers read **before**
+  `Start()`, never from `NewServer`'s return: `NewServer` begins serving before
+  it returns, so a write after it has no happens-before edge to a handler read
+  (`NewUnstartedServer`, assign from `Listener.Addr()`, then `Start()`). That
+  covers every captured value, not only the URL -- a handler that read a
+  page-path variable assigned after the server started had the same shape.
+- `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is the gate that
+  reds for that invariant: an AST sweep of the whole module's source, so the
+  ordering is a property of the source rather than of a schedule, and the
+  ordinary `go test ./...` at `scripts/integration-test.sh`'s compare-mode line
+  fails on the pre-fix tree with no `-race` anywhere. It reports the handler's
+  read, the offending assignment and the line serving began. It also carries its
+  own fixture test, so the shapes it must catch and the legitimate ones it must
+  leave alone are pinned independently of this module's real stubs.
+- The shapes it catches are the handler registered before its scope begins
+  serving **and** the handler handed straight to the constructor,
+  `NewServer(http.HandlerFunc(func(...){...}))`. The second is not a special
+  case to skip: its literal is registered before the constructor returns, so it
+  is running-eligible the moment it does, and skipping it by position alone
+  left the fixes in this module's own `version_test.go` unpoliced while the
+  sweep reported the module clean.
+- "Begins serving" is recognised from the construct, so every construct that
+  serves before or independently of a later statement has to be named: both
+  `NewServer` and `NewTLSServer` (the latter is `NewUnstartedServer` followed by
+  `StartTLS`, so its server is already accepting connections when it is
+  returned), and a `Start()` call reached as an ordinary statement or as the
+  body of a `go` statement. A scope whose serving construct is unrecognised is
+  skipped whole, so an omission here is a silent false negative rather than a
+  partial report.
+- It matches a read to the assignment it resolves to, not to every assignment
+  of that name: a short declaration positioned after the handler's read starts a
+  new binding rather than writing the one the handler reads, and treating it as
+  a write reds correct code. The declaration that began serving is the
+  exception, since the assignment `NewServer` performs on its way out is
+  unordered against the handler it was handed.
+- It is still a shape detector with real limits, stated in the file: a handler
+  reached through a variable or helper, a binding reached through an alias
+  rather than the name bound at its own declaration, a captured value written
+  from another function, a variable used as a map-literal key, and a write
+  through an index or field selector are all missed. The last two are out of
+  scope on purpose -- keying those writes on the base name alone would flag
+  every unrelated field of the same value -- and the alias case would need an
+  assignment graph to follow, which is why it is a shape detector rather than an
+  alias analysis. It is a floor under the invariant, not a proof of it.
+- The **behavioral half is still not gated**: only `-race` reports the actual
+  read/write pair, and **no gated venue runs `-race` for this module** --
+  `scripts/integration-test.sh`'s own `go test` (the suite behind both
+  `make integration-test` and `make check-gate`) passes `-count=1`, `-parallel`
+  and `-timeout` and nothing else, and the Makefile wires `-race` for
+  `erun-common` and `erun-ui` alone. The ordering probes below are therefore
+  green in the gate on the pre-fix tree too; they are evidence that the pair is
+  real, and the sweep above is the gate. Run the probes explicitly with
+  `go test -race -count=1 -run <probe> .`.
+- A probe pinning the ordering drives its request from a separate `curl`
+  process: an in-process client's own netpoll round trip orders the two accesses
+  and hides the race, so an in-process probe stays silent even under `-race`.
+  `curl` is consequently a host prerequisite of this suite, present in the image
+  test stage's base beside git and tar; a probe fails loudly rather than
+  skipping when it is missing.
+- See `exec_test.go::TestGithubRulesetStubServerAssignsItsURLBeforeItServes` and
+  `list_control_planes_test.go::TestControlPlaneStubAssignsItsServerBeforeItServes`.
 - For shared fixture/harness changes, validate on Linux as well as the local host;
   local success must not depend on tools absent from the image test stage.
 
