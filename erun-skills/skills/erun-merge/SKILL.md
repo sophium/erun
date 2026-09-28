@@ -139,6 +139,14 @@ re-run `/erun-merge`. Re-running after a clean merge (or an abort) starts
 this rung over, which is correct — the merge did not happen, so there is
 nothing to skip.
 
+The one conflict that never reaches here is `atlas.sum`: it is a hash chain
+over its directory's migrations, so two branches that each add one conflict on
+it by construction and the conflict carries no information about which side is
+right. `erun exec merge` regenerates each from the migration files already on
+disk, stages it, and completes the merge commit — the merge lands rather than
+stopping. There is nothing to report and nothing to resolve; carry on to the
+next rung.
+
 If the branch is already even with `${target}` (nothing to merge), the
 command is a no-op past the fetch; proceed.
 
@@ -387,6 +395,9 @@ make, never this skill's.
   merge commit.
 - **Resolving a merge conflict itself.** It stops and names the files;
   resolving is a human (or a separate, deliberate agent action) decision.
+  The one conflict outside this rule is `atlas.sum`, which `erun exec merge`
+  regenerates from the migrations already on disk so the merge lands — there
+  is nothing there for this skill or the operator to resolve.
 - **Advancing the merge queue or overriding its unresolved-thread gate.**
   Both are out of scope by design, not by oversight — see the top of this
   file.

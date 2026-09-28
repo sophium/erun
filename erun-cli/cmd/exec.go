@@ -454,7 +454,10 @@ func newExecMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 			"would orphan every thread on an open review.\n\n" +
 			"A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The " +
 			"worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or " +
-			"run `git merge --abort` to back out, before doing anything else.\n\n" +
+			"run `git merge --abort` to back out, before doing anything else. A conflict confined to atlas.sum, " +
+			"the regenerable migration checksum, is the exception: each is regenerated from the migration " +
+			"files already on disk and staged, the merge commit is completed, and the merge is reported as " +
+			"landed rather than as a conflict.\n\n" +
 			"--dry-run traces the fetch and merge without running them.",
 		Example:      "  erun exec merge main\n  erun exec merge release/2026.9 --remote upstream",
 		Args:         cobra.ExactArgs(1),

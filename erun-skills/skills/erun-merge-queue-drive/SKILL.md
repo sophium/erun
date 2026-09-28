@@ -1,6 +1,6 @@
 ---
 name: erun-merge-queue-drive
-description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict), gate the landed stack with one real `erun build --gate`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
+description: Drive one or more reviews already promoted to MERGE through the merge-queue gate — batch their sources into one prospective merge with `erun exec gate-merge` (skipping, per branch, any that conflict, except one confined to the regenerable `atlas.sum` checksum, which is resolved from the migrations on disk and the branch lands), gate the landed stack with one real `erun build --gate`, and push and report MERGED only for branches that actually landed and passed. Reports each actual outcome, including reviews left at MERGE after an inconclusive gate, and never advances, overrides, or promotes the queue itself. Requires a machine with a configured erun platform cloud alias, since every rung is a platform call; an agent environment can hold one only if `erun init` provisioned it from a signed-in host, so where it has none it stops before claiming the environment and hands the drive to a credentialed host. Use when the user says "drive the merge queue", "batch these reviews through the gate", "run the merge gate", "gate this promoted review", "build and push the merge queue head", or any similar request to execute the gate for one or more reviews that are already at MERGE.
 ---
 
 # Drive already-promoted reviews through the gate
@@ -114,7 +114,10 @@ stop this drive; do not clear another live lease or schedule probes beside it.
   Use a private attempt directory rather than shared fixed /tmp filenames.
 - Read `landed` and `skipped` from the result. The shared command fetches once,
   squashes in order, and restores its controlled clean baseline after a conflict;
-  do not hand-roll its reset/merge loop or resolve a skipped branch here.
+  do not hand-roll its reset/merge loop or resolve a skipped branch here. A
+  conflict confined to `atlas.sum` is not in `skipped` at all: the command
+  regenerates it from the migrations already on disk and the source lands, so a
+  batch member that landed despite a conflicting checksum needs no follow-up.
 - An empty/all-skipped result is **not** a green build. Stop before building or
   pushing. Report real conflicts against the observed source commit; classify
   fetch/access/infrastructure failures separately instead of failing every review

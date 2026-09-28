@@ -783,7 +783,7 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, execPushTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_merge",
-		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
+		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort — unless the conflict is confined to atlas.sum, the regenerable migration checksum, which is regenerated from the migration files already on disk and staged, completing the merge commit so the merge lands instead. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
 	}, execMergeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_gate-merge",
