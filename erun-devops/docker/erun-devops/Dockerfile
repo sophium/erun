@@ -10,7 +10,7 @@ ARG HELM_VERSION=v4.2.2
 # `make integration-test`, not just when a developer's own machine happens to
 # have atlas installed) and the final image's `atlas` stay pinned to the same
 # version.
-ARG ATLAS_VERSION=v1.2.0
+ARG PTAH_IMAGE=stokaro/ptah:0.11.4@sha256:98cc4799c9e368dc8495eddcb4389ec628cab52f9a369808b49ce26331628378
 
 # Declared once at the top for the same reason as HELM_VERSION above: the test
 # stage's own Playwright install-deps call (below) and the final image's
@@ -28,6 +28,9 @@ ARG PLAYWRIGHT_VERSION=1.63.0
 # BUILDPLATFORM, the final image is the target) -- only the version is shared,
 # and it is the whole reason the default moved up here.
 ARG TERRAFORM_VERSION=1.12.2
+
+FROM --platform=$BUILDPLATFORM ${PTAH_IMAGE} AS ptah-test
+FROM ${PTAH_IMAGE} AS ptah-runtime
 
 # Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
 # of — see the node COPY below. No RUN of its own, so it needs no emulation
@@ -120,9 +123,8 @@ RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-lin
 # ERUN_ATLAS_BIN, the same seam production code resolves it through, so the
 # suite proves the checksum this fix relies on is genuinely tamper-sensitive
 # rather than trusting a hand-rolled stub to reimplement atlas's own hashing.
-ARG ATLAS_VERSION
-RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
-    chmod 0755 /usr/local/bin/atlas
+COPY --from=ptah-test /usr/local/bin/ptah-compat /usr/local/bin/atlas
+COPY --from=ptah-test /usr/share/licenses/ptah/LICENSE /usr/share/licenses/ptah/LICENSE
 
 # `terraform` for `make check`'s terraform-module-tests target, which runs the
 # published modules' own `terraform test` behaviour suites: mocked providers,
@@ -607,6 +609,9 @@ FROM golang:1.26.0 AS goroot
 
 FROM ghcr.io/sophium/erun-ubuntu:noble-20260217-1
 
+COPY --from=ptah-runtime /usr/local/bin/ptah-compat /usr/local/bin/atlas
+COPY --from=ptah-runtime /usr/share/licenses/ptah/LICENSE /usr/share/licenses/ptah/LICENSE
+
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
 # HELM_VERSION's default lives in the global ARG at the top of this file,
@@ -626,9 +631,6 @@ ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.222
 ARG AWS_CLI_VERSION=2.32.16
-# ATLAS_VERSION's default lives in the global ARG at the top of this file,
-# shared with the test stage's own atlas install.
-ARG ATLAS_VERSION
 # Default lives in the global ARG at the top of this file, shared with the
 # test stage's own install-deps call. Keep it in sync with the
 # @playwright/test version resolved in erun-ui/playwright/yarn.lock so the
@@ -667,7 +669,6 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" && \
-    curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${arch}-${ATLAS_VERSION}" && \
     curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" && \
     tar -xzf /tmp/helm.tar.gz -C /tmp && \
     install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm && \

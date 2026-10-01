@@ -14,23 +14,13 @@
 # no migration ever applies), and any other divergence -- a missing trigger,
 # a differently-named constraint, a table that only exists on one side.
 #
-# `atlas migrate diff` is the built-in tool for exactly this comparison, and
-# was tried first. It cannot be used here: this schema declares PL/pgSQL
-# functions (schema/rls/context.sql's erun_current_tenant_id()/
-# erun_current_user_id(), schema/triggers/timestamps.sql's
-# erun_set_timestamps(), schema/triggers/comments.sql's own trigger function)
-# for its RLS and timestamp-trigger machinery, and the pinned atlas CLI
-# (v1.2.0, matching erun-devops/docker/erun-backend-db/Dockerfile's
-# ATLAS_VERSION) refuses to diff any schema source containing a function or
-# procedure without `atlas login` against Atlas Cloud -- a paid account this
-# environment cannot and should not provision unattended. Confirmed
-# empirically: `atlas migrate diff --env default` fails with "functions and
-# procedures are available to logged-in users only" on the very first
-# function-bearing file in the src list, before it reaches roles.sql at all.
+# The former Atlas binary required login to diff this function-bearing schema.
+# Ptah Compat is installed as `atlas` in the images and generates these objects
+# without login. Keep this independent SQL comparator: it can catch omissions
+# in a migration generator as well as mistakes in the declared schema.
 #
-# The comparator here sidesteps that gate entirely by never asking Atlas to
-# model the schema semantically. It builds the two states as two real
-# postgres databases -- one via `atlas migrate apply` (pure execution, no
+# The comparator does not ask the migration tool to model the schema. It builds
+# the two states as two real postgres databases -- one via `atlas migrate apply` (pure execution, no
 # parsing gate) replaying every migration, the other by concatenating
 # atlas.hcl's own `src` file list (extracted from atlas.hcl itself, so the
 # comparison can never hand-duplicate -- and silently drift from -- that
@@ -211,3 +201,108 @@ if ! diff -u "${tmpdir}/declared.txt" "${tmpdir}/migrated.txt" >"${tmpdir}/drift
 fi
 
 echo "OK: the declared schema (schema/*.sql via atlas.hcl's src order) and the migration-applied state describe the same database"
+
+# Exercise generation in a copy: the committed schema and migration history
+# stay untouched. An unchanged desired schema must not produce a migration.
+work_module="${tmpdir}/db"
+cp -R "${db_module}" "${work_module}"
+cp "${work_module}/migrations/default/atlas.sum" "${tmpdir}/baseline.sum"
+(cd "${work_module}" && atlas migrate diff unchanged --env default)
+cmp "${tmpdir}/baseline.sum" "${work_module}/migrations/default/atlas.sum" \
+    || fail "unchanged desired schema generated a migration"
+
+cat >"${work_module}/schema/ptah_probe.sql" <<'SQL'
+CREATE TABLE ptah_probe (
+ id uuid PRIMARY KEY DEFAULT uuidv7(),
+ tenant_id uuid NOT NULL DEFAULT erun_current_tenant_id(),
+ name text NOT NULL,
+ created_at timestamptz,
+ updated_at timestamptz
+);
+CREATE TRIGGER ptah_probe_set_timestamps BEFORE INSERT OR UPDATE ON ptah_probe
+ FOR EACH ROW EXECUTE FUNCTION erun_set_timestamps();
+ALTER TABLE ptah_probe ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ptah_probe FORCE ROW LEVEL SECURITY;
+CREATE POLICY ptah_probe_tenant ON ptah_probe TO erun_tenant
+ USING (tenant_id = erun_current_tenant_id()) WITH CHECK (tenant_id = erun_current_tenant_id());
+CREATE POLICY ptah_probe_operations ON ptah_probe TO erun_operations USING (true) WITH CHECK (true);
+GRANT SELECT, INSERT ON ptah_probe TO erun_tenant, erun_operations;
+GRANT UPDATE (name) ON ptah_probe TO erun_tenant;
+SQL
+awk '/^  ]/ { print "    \"file://schema/ptah_probe.sql\"," } { print }' \
+    "${work_module}/atlas.hcl" >"${tmpdir}/atlas.hcl"
+mv "${tmpdir}/atlas.hcl" "${work_module}/atlas.hcl"
+(cd "${work_module}" && atlas migrate diff generated_objects --env default)
+if cmp -s "${tmpdir}/baseline.sum" "${work_module}/migrations/default/atlas.sum"; then
+    fail "new trigger, policies, and grants produced no migration"
+fi
+(cd "${work_module}" && atlas migrate apply --env default --url "${url}")
+psql_as -d erun_declared <"${work_module}/schema/ptah_probe.sql" >/dev/null
+psql_as -d erun_migrated <"${introspect_sql}" >"${tmpdir}/generated.txt" 2>&1
+psql_as -d erun_declared <"${introspect_sql}" >"${tmpdir}/expected.txt" 2>&1
+diff -u "${tmpdir}/expected.txt" "${tmpdir}/generated.txt" \
+    || fail "generated migration differs from the desired PostgreSQL objects"
+
+# Effective behavior matters as well as catalog definitions.
+psql_as -d erun_migrated <<'SQL'
+\set ON_ERROR_STOP on
+BEGIN;
+DO $$
+BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_class WHERE oid = 'ptah_probe'::regclass AND relrowsecurity AND relforcerowsecurity) THEN
+  RAISE EXCEPTION 'RLS is not enabled and forced';
+ END IF;
+ IF (SELECT count(*) FROM pg_policy WHERE polrelid = 'ptah_probe'::regclass) <> 2 THEN
+  RAISE EXCEPTION 'policies missing';
+ END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'ptah_probe'::regclass AND tgname = 'ptah_probe_set_timestamps' AND NOT tgisinternal) THEN
+  RAISE EXCEPTION 'timestamp trigger missing';
+ END IF;
+END $$;
+INSERT INTO ptah_probe (tenant_id, name) VALUES
+ ('11111111-1111-1111-1111-111111111111', 'tenant-one'),
+ ('22222222-2222-2222-2222-222222222222', 'tenant-two');
+DO $$
+BEGIN
+ IF EXISTS (SELECT 1 FROM ptah_probe WHERE created_at IS NULL OR updated_at IS NULL) THEN
+  RAISE EXCEPTION 'timestamp trigger did not execute';
+ END IF;
+END $$;
+SET LOCAL ROLE erun_tenant;
+SET LOCAL erun.tenant_id = '11111111-1111-1111-1111-111111111111';
+DO $$
+BEGIN
+ IF (SELECT count(*) FROM ptah_probe) <> 1 THEN
+  RAISE EXCEPTION 'tenant isolation failed';
+ END IF;
+END $$;
+UPDATE ptah_probe SET name = 'tenant-one-updated';
+DO $$
+BEGIN
+ BEGIN
+  INSERT INTO ptah_probe (tenant_id, name) VALUES ('22222222-2222-2222-2222-222222222222', 'forbidden');
+  RAISE EXCEPTION 'cross-tenant insert unexpectedly succeeded';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;
+ END;
+ BEGIN
+  UPDATE ptah_probe SET tenant_id = '22222222-2222-2222-2222-222222222222';
+  RAISE EXCEPTION 'column privilege unexpectedly widened';
+ EXCEPTION WHEN insufficient_privilege THEN NULL;
+ END;
+END $$;
+RESET ROLE;
+SET LOCAL ROLE erun_operations;
+DO $$
+BEGIN
+ IF (SELECT count(*) FROM ptah_probe) <> 2 THEN
+  RAISE EXCEPTION 'operations access failed';
+ END IF;
+END $$;
+ROLLBACK;
+\echo trigger, tenant isolation, operations access, and column grant: PASS
+SQL
+cp "${work_module}/migrations/default/atlas.sum" "${tmpdir}/generated.sum"
+(cd "${work_module}" && atlas migrate diff settled --env default)
+cmp "${tmpdir}/generated.sum" "${work_module}/migrations/default/atlas.sum" \
+    || fail "generated migration did not converge"
+echo "OK: generated triggers, RLS policies, and grants apply and converge without manual SQL"

@@ -8,7 +8,7 @@ if [ -z "${ERUN_DATABASE_URL:-}" ]; then
     exit 1
 fi
 
-echo "applying PostgreSQL migrations with Atlas"
+echo "applying PostgreSQL migrations with Ptah Compat"
 apply_log="$(mktemp)"
 if ! atlas migrate apply --env default --url "${ERUN_DATABASE_URL}" 2>"$apply_log"; then
     cat "$apply_log" >&2

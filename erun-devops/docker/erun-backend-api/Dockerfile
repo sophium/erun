@@ -1,38 +1,38 @@
 ARG ERUN_VERSION=1.0.0
 
-# ATLAS_VERSION mirrors erun-backend-db/Dockerfile's own default and
+# PTAH_IMAGE mirrors erun-backend-db/Dockerfile's own default and
 # erun-devops/Dockerfile's top-of-file ARG: the `test` stage below applies
 # erun-backend-db's real migrations, so the migrating CLI has to be the same
-# Atlas the image that runs those migrations in production ships. DOCKER_VERSION
+# Ptah Compat the image that runs those migrations in production ships. DOCKER_VERSION
 # mirrors erun-devops/Dockerfile's own default, for the same reason applied to
 # the daemon client the `test` stage drives its PostgreSQL fixture with.
-ARG ATLAS_VERSION=v1.2.0
+ARG PTAH_IMAGE=stokaro/ptah:0.11.4@sha256:98cc4799c9e368dc8495eddcb4389ec628cab52f9a369808b49ce26331628378
 ARG DOCKER_VERSION=28.1.1
 
-# The two binaries the `test` stage below drives its PostgreSQL fixture with,
+# The binaries the `test` stage below drives its PostgreSQL fixture with,
 # in a stage of their own so the pinned downloads are not re-fetched on every
 # build: `erun build --gate` invalidates the `test` stage's layer cache by name
 # (dockerBuildGateStageArgs' --no-cache-filter), and a copy out of this stage
 # survives that while a download inside it would not. Both binaries are static,
-# so an Alpine downloader is a fine source for a Debian-based consumer.
+# so they can be copied into the Debian-based test stage.
+FROM --platform=$BUILDPLATFORM ${PTAH_IMAGE} AS ptah
+
 FROM alpine:3.20 AS test-toolchain
 
 ARG BUILDARCH
-ARG ATLAS_VERSION
 ARG DOCKER_VERSION
 
 RUN apk add --no-cache ca-certificates curl && \
     case "${BUILDARCH}" in \
-        amd64) atlas_arch=amd64; docker_arch=x86_64 ;; \
-        arm64) atlas_arch=arm64; docker_arch=aarch64 ;; \
+        amd64) docker_arch=x86_64 ;; \
+        arm64) docker_arch=aarch64 ;; \
         *) echo "unsupported BUILDARCH: ${BUILDARCH}" >&2; exit 1 ;; \
     esac && \
     mkdir -p /out && \
-    curl -fsSL -o /out/atlas "https://release.ariga.io/atlas/atlas-linux-${atlas_arch}-${ATLAS_VERSION}" && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     cp /tmp/docker/docker /out/docker && \
-    chmod 0755 /out/atlas /out/docker && \
+    chmod 0755 /out/docker && \
     rm -rf /tmp/docker.tgz /tmp/docker
 
 # This component's own gate venue. erun-devops/AGENTS.md's "Build Workflow"
@@ -52,7 +52,8 @@ RUN apk add --no-cache ca-certificates curl && \
 # of those cases reported SKIP under a package line that still read `ok`.
 FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
-COPY --from=test-toolchain /out/atlas /usr/local/bin/atlas
+COPY --from=ptah /usr/local/bin/ptah-compat /usr/local/bin/atlas
+COPY --from=ptah /usr/share/licenses/ptah/LICENSE /usr/share/licenses/ptah/LICENSE
 COPY --from=test-toolchain /out/docker /usr/local/bin/docker
 
 WORKDIR /src
