@@ -1,18 +1,7 @@
 ARG ERUN_VERSION=1.0.0
 
-FROM alpine:3.20 AS atlas-fetcher
-
-ARG TARGETARCH
-ARG ATLAS_VERSION=v1.2.0
-
-RUN apk add --no-cache ca-certificates curl && \
-    case "${TARGETARCH}" in \
-        amd64) atlas_arch=amd64 ;; \
-        arm64) atlas_arch=arm64 ;; \
-        *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac && \
-    curl -fsSL -o /atlas "https://release.ariga.io/atlas/atlas-linux-${atlas_arch}-${ATLAS_VERSION}" && \
-    chmod 0755 /atlas
+# Ptah Compat retains the atlas command interface, including migration checksums.
+FROM stokaro/ptah:0.11.4@sha256:98cc4799c9e368dc8495eddcb4389ec628cab52f9a369808b49ce26331628378 AS ptah
 
 FROM alpine:3.20
 
@@ -22,7 +11,8 @@ RUN apk add --no-cache ca-certificates postgresql16-client && \
     mkdir -p /opt/erun-backend-db /home/erun && \
     chown -R erun:erun /opt/erun-backend-db /home/erun
 
-COPY --from=atlas-fetcher /atlas /usr/local/bin/atlas
+COPY --from=ptah /usr/local/bin/ptah-compat /usr/local/bin/atlas
+COPY --from=ptah /usr/share/licenses/ptah/LICENSE /usr/share/licenses/ptah/LICENSE
 COPY erun-backend/erun-backend-db /opt/erun-backend-db
 COPY --chmod=0755 erun-devops/docker/erun-backend-db/migrate.sh /usr/local/bin/erun-backend-db-migrate
 COPY --chmod=0755 erun-devops/docker/erun-backend-db/retention.sh /usr/local/bin/erun-backend-db-retention

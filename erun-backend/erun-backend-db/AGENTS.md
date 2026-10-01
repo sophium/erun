@@ -4,17 +4,17 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 
 ## Module Role
 
-- `erun-backend-db` is the Atlas-managed database project for hosted ERun backend state.
+- `erun-backend-db` is the database project managed by Ptah Compat (installed as `atlas`) for hosted ERun backend state.
 - The default OLTP database is PostgreSQL 18 or newer.
 - Do not add SQLite migrations, schema files, repository branches, or local fallback behavior.
 - Store audit events in PostgreSQL with the rest of the hosted backend schema. Do not reintroduce SQLite audit storage as a simple-deployment fallback.
 
-## Atlas Workflow
+## Migration Workflow
 
 - Store Atlas configuration in `atlas.hcl`.
 - Store default OLTP migrations in `migrations/default/`.
 - Store declarative target schema files in `schema/` when generating migrations.
-- Generate schema changes through Atlas rather than hand-maintaining API startup DDL.
+- Generate schema changes with `atlas migrate diff --env default <name>` rather than hand-maintaining API startup DDL. The images ship Ptah Compat under this command name; triggers, policies, and grants need no login or manual additions.
 - Validate OLTP migrations against the default Atlas environment.
 - Keep audit-event schema in PostgreSQL schema files when audit persistence changes.
 
@@ -23,10 +23,10 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Declarative `atlas.hcl` sources and replayed migrations must produce the same
   schema. Update both, including grants, explicit constraint names, triggers,
   functions, and source dependency order.
-- The pinned Atlas diff requires login for this function-bearing schema. Use
-  `make test-schema-drift`: build both states in real PostgreSQL, obtain source
+- Run `make test-schema-drift`: build both states in real PostgreSQL, obtain source
   order from atlas.hcl, and compare SQL introspection ordered by object name,
-  not physical column order.
+  not physical column order. The same test generates a temporary migration and
+  verifies triggers, RLS, table/column grants, and an empty second diff.
 - Run this Docker/Atlas-dependent check before merging schema, migration, or
   atlas.hcl changes; it is not covered by the bare `make check` environment.
 
