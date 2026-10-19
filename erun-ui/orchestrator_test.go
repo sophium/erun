@@ -91,11 +91,16 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint:         reachable,
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
+		// Never the real secret store: a test that launches through the gateway
+		// stages its own credential.
+		resolveGatewayCredential: func(*eruncommon.OpenRouterConfig) (string, error) {
+			return "", errors.New("no gateway credential staged by this test")
+		},
 	})
 	// Stage failure reports inside the test's own directory. Left at the default
 	// they land in the shared host temp dir, which is how a suite that spawns
@@ -296,7 +301,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 
 	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "runtime", Role: eruncommon.OrchestratorEnvRoleRuntime},
-	}, nil, "")
+	}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -323,7 +328,7 @@ func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T)
 	for _, role := range []eruncommon.OrchestratorEnvRole{eruncommon.OrchestratorEnvRoleCode, eruncommon.OrchestratorEnvRoleBuild, ""} {
 		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 			{Tenant: "frs", Environment: "runtime", Role: role},
-		}, nil, "")
+		}, nil, "", orchestratorLaunchInput{})
 		if err == nil {
 			t.Fatalf("expected linking the runtime env with role %q to be refused", role)
 		}
@@ -343,7 +348,7 @@ func TestCreateOrchestratorLinksLocalAgentWithoutSync(t *testing.T) {
 
 	info, err := app.CreateOrchestrator("laptop agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop", Directory: filepath.Join(t.TempDir(), "ignored")},
-	}, nil, "")
+	}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -371,10 +376,10 @@ func TestCreateOrchestratorRejectsLocalAgentWithoutWorktree(t *testing.T) {
 	store.envs["frs/gone"] = eruncommon.EnvConfig{Name: "gone", Type: eruncommon.EnvironmentTypeLocalAgent, LocalRepoPath: missing}
 	store.envs["frs/unset"] = eruncommon.EnvConfig{Name: "unset", Type: eruncommon.EnvironmentTypeLocalAgent}
 
-	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}, nil, ""); err == nil {
+	if _, err := app.CreateOrchestrator("gone", []orchestratorEnvInput{{Tenant: "frs", Environment: "gone"}}, nil, "", orchestratorLaunchInput{}); err == nil {
 		t.Fatal("expected a local-agent env whose worktree is absent to be rejected")
 	}
-	if _, err := app.CreateOrchestrator("unset", []orchestratorEnvInput{{Tenant: "frs", Environment: "unset"}}, nil, ""); err == nil {
+	if _, err := app.CreateOrchestrator("unset", []orchestratorEnvInput{{Tenant: "frs", Environment: "unset"}}, nil, "", orchestratorLaunchInput{}); err == nil {
 		t.Fatal("expected a local-agent env with no repository path to be rejected")
 	}
 }
@@ -455,14 +460,14 @@ func TestCreateOrchestratorWiresSyncAndPersists(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	if _, err := app.CreateOrchestrator("no envs", nil, nil, ""); err == nil {
+	if _, err := app.CreateOrchestrator("no envs", nil, nil, "", orchestratorLaunchInput{}); err == nil {
 		t.Fatal("expected an orchestrator with no linked environments to be rejected")
 	}
 
 	info, err := app.CreateOrchestrator(
 		"validation agent",
 		[]orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}},
-		nil, "")
+		nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -489,7 +494,7 @@ func TestRestartOrchestratorRespawnsWithFreshSession(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -531,12 +536,14 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch:   func(string, string, string, string) (string, []string, error) { return "claude-stub", nil, nil },
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
+			return "claude-stub", nil, nil
+		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -566,7 +573,7 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 	created, err := app.CreateOrchestrator(
 		"agent",
 		[]orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}},
-		nil, "")
+		nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -577,7 +584,7 @@ func TestUpdateOrchestratorRelinksEnvironments(t *testing.T) {
 		[]orchestratorEnvInput{
 			{Tenant: "frs", Environment: "dev", Directory: t.TempDir()},
 		},
-		nil, "")
+		nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
@@ -665,7 +672,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	app, laptopRepo := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	mustNoErr(t, err, "CreateOrchestrator")
 	started, err := app.StartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "StartOrchestrator")
@@ -677,7 +684,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 	// Re-scope to a different environment while the session is still running.
 	updated, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{
 		{Tenant: "frs", Environment: "laptop", Directory: laptopRepo},
-	}, nil, "")
+	}, nil, "", orchestratorLaunchInput{})
 	mustNoErr(t, err, "UpdateOrchestrator")
 	if updated.Status != "running" {
 		t.Fatalf("expected the live session to still be reported running, got %+v", updated)
@@ -708,6 +715,7 @@ func TestUpdateOrchestratorOnALiveSessionLeavesItsToolsetStale(t *testing.T) {
 
 func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T) {
 	var seededPrompt string
+	var seededLaunch eruncommon.OrchestratorLaunch
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
@@ -716,8 +724,8 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(_, prompt, _, _ string) (string, []string, error) {
-			seededPrompt = prompt
+		resolveOrchestratorLaunch: func(launch eruncommon.OrchestratorLaunch, _, prompt, _, _ string) (string, []string, error) {
+			seededPrompt, seededLaunch = prompt, launch
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -733,6 +741,9 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		t.Fatalf("expected a transient investigator, got %+v", info)
 	}
 	assertLoneTenant(t, info.Tenants, "frs")
+	// A transient investigator has no persisted settings: it launches on the
+	// fixed defaults whatever any orchestrator is configured with.
+	requireDefaultOrchestratorLaunch(t, seededLaunch)
 	if !strings.Contains(seededPrompt, "report-") || !strings.Contains(seededPrompt, "erun-file-issue") {
 		t.Fatalf("unexpected seed prompt: %q", seededPrompt)
 	}
@@ -1867,7 +1878,7 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 
 func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	// No pinned session id (legacy/transient) keeps the continue-else-fresh path.
-	_, posix := buildOrchestratorLaunch("linux", "", false, "", "", "")
+	_, posix := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", "", "")
 	posixCmd := posix[len(posix)-1]
 	for _, want := range []string{"claude --continue", "ultracode", "--model opus", " || claude"} {
 		if !strings.Contains(posixCmd, want) {
@@ -1875,7 +1886,7 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 		}
 	}
 
-	_, win := buildOrchestratorLaunch("windows", "", false, "", "", "")
+	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "", "", "")
 	winCmd := win[len(win)-1]
 	for _, want := range []string{"claude --continue", "ultracode", "--model opus", "$LASTEXITCODE"} {
 		if !strings.Contains(winCmd, want) {
@@ -1884,7 +1895,7 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 	}
 
 	// A seeded (Investigate) launch is a fresh session — no resume.
-	_, seeded := buildOrchestratorLaunch("linux", "", false, "fix the thing", "", "")
+	_, seeded := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "fix the thing", "", "")
 	seededCmd := seeded[len(seeded)-1]
 	if strings.Contains(seededCmd, "--continue") {
 		t.Fatalf("seeded launch must not resume: %q", seededCmd)
@@ -1900,13 +1911,13 @@ func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
 func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
 	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000001"
 
-	_, existing := buildOrchestratorLaunch("linux", sid, true, "", "", "")
+	_, existing := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", "", "")
 	cmd := existing[len(existing)-1]
 	if !strings.Contains(cmd, "--resume "+sid) || strings.Contains(cmd, "--continue") {
 		t.Fatalf("existing session must --resume its own id, not --continue: %q", cmd)
 	}
 
-	_, firstOpen := buildOrchestratorLaunch("linux", sid, false, "", "", "")
+	_, firstOpen := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, false, "", "", "")
 	fresh := firstOpen[len(firstOpen)-1]
 	if !strings.Contains(fresh, "--session-id "+sid) {
 		t.Fatalf("first open must create the pinned session: %q", fresh)
@@ -1915,7 +1926,7 @@ func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
 		t.Fatalf("first open must not continue/resume: %q", fresh)
 	}
 
-	_, win := buildOrchestratorLaunch("windows", sid, true, "", "finish the task", "")
+	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), sid, true, "", "finish the task", "")
 	if wcmd := win[len(win)-1]; !strings.Contains(wcmd, "--resume "+sid) || !strings.Contains(wcmd, "finish the task") {
 		t.Fatalf("windows pinned resume+prompt missing pieces: %q", wcmd)
 	}
@@ -1942,7 +1953,7 @@ func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
 	const prompt = "carry on"
 
 	t.Run("existing session fallback retries resume", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", sid, true, "", "", "")
+		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", "", "")
 		fallback := posixFallback(t, launch[len(launch)-1])
 		if !strings.Contains(fallback, "--resume "+sid) {
 			t.Fatalf("fallback for an existing session must retry --resume, got %q", fallback)
@@ -1952,7 +1963,7 @@ func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
 	t.Run("first open fallback retries the same create", func(t *testing.T) {
 		// No conversation on disk yet: the fallback must retry the same
 		// --session-id create rather than dropping to unpinned fresh.
-		_, launch := buildOrchestratorLaunch("linux", sid, false, "", "", "")
+		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, false, "", "", "")
 		fallback := posixFallback(t, launch[len(launch)-1])
 		if !strings.Contains(fallback, "--session-id "+sid) {
 			t.Fatalf("first-open fallback must keep the pinned session id, got %q", fallback)
@@ -1960,7 +1971,7 @@ func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
 	})
 
 	t.Run("resume prompt chains through the pinned fallback", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", sid, true, "", prompt, "")
+		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", prompt, "")
 		fallback := posixFallback(t, launch[len(launch)-1])
 		if !strings.Contains(fallback, sid) || !strings.Contains(fallback, prompt) {
 			t.Fatalf("resume-prompt fallback must keep both the pin and the prompt, got %q", fallback)
@@ -1968,7 +1979,7 @@ func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
 	})
 
 	t.Run("windows uses the LASTEXITCODE chain", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("windows", sid, true, "", "", "")
+		_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), sid, true, "", "", "")
 		cmd := launch[len(launch)-1]
 		parts := strings.SplitN(cmd, "$LASTEXITCODE -ne 0", 2)
 		if len(parts) != 2 || !strings.Contains(parts[1], sid) {
@@ -1977,9 +1988,9 @@ func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
 	})
 
 	t.Run("transient launch keeps the unpinned fresh fallback", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", "", false, "", "", "")
+		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", "", "")
 		fallback := posixFallback(t, launch[len(launch)-1])
-		if !strings.HasPrefix(fallback, "claude"+orchestratorUltracodeFlag) {
+		if !strings.HasPrefix(fallback, "claude"+` --settings '{"ultracode":true}'`) {
 			t.Fatalf("transient fallback should remain unpinned fresh, got %q", fallback)
 		}
 	})
@@ -2006,7 +2017,7 @@ func TestOrchestratorSessionIDIsStableAndDistinct(t *testing.T) {
 func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	const prompt = "verify the rebuild is live, then finish the task"
 
-	_, posix := buildOrchestratorLaunch("linux", "", false, "", prompt, "")
+	_, posix := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", prompt, "")
 	posixCmd := posix[len(posix)-1]
 	for _, want := range []string{"claude --continue", prompt, " || claude", "ultracode", "--model opus"} {
 		if !strings.Contains(posixCmd, want) {
@@ -2018,7 +2029,7 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 		t.Fatalf("expected the resume prompt on both branches: %q", posixCmd)
 	}
 
-	_, win := buildOrchestratorLaunch("windows", "", false, "", prompt, "")
+	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "", prompt, "")
 	winCmd := win[len(win)-1]
 	for _, want := range []string{"claude --continue", prompt, "$LASTEXITCODE"} {
 		if !strings.Contains(winCmd, want) {
@@ -2027,7 +2038,7 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 	}
 
 	// initialPrompt still wins over resumePrompt (a seeded fresh session ignores resume).
-	_, seeded := buildOrchestratorLaunch("linux", "", false, "fix the thing", prompt, "")
+	_, seeded := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "fix the thing", prompt, "")
 	if seededCmd := seeded[len(seeded)-1]; strings.Contains(seededCmd, "--continue") {
 		t.Fatalf("initialPrompt must take precedence over resumePrompt (fresh, no resume): %q", seededCmd)
 	}
@@ -2046,7 +2057,7 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 // of the agent's own judgement about its instructions.
 func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
 	for _, goos := range []string{"linux", "windows"} {
-		_, launch := buildOrchestratorLaunch(goos, "", false, "", "", "")
+		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", false, "", "", "")
 		if command := launch[len(launch)-1]; !strings.Contains(command, "--disallowedTools AskUserQuestion") {
 			t.Fatalf("%s launch must deny the ask tool: %q", goos, command)
 		}
@@ -2056,7 +2067,7 @@ func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
 func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
 
-	_, launch := buildOrchestratorLaunch("linux", "", false, prompt, "", "/cfg/orchestrator-mcp-erun.json")
+	_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, prompt, "", "/cfg/orchestrator-mcp-erun.json")
 	command := launch[len(launch)-1]
 	if !strings.Contains(command, "--mcp-config '/cfg/orchestrator-mcp-erun.json' -- ") {
 		t.Fatalf("the prompt must follow a -- that ends option parsing: %q", command)
@@ -2088,7 +2099,7 @@ func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 // the backtick as its escape character inside double quotes, so the prompt and
 // the config path are single-quoted there, with embedded apostrophes doubled.
 func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
-	_, launch := buildOrchestratorLaunch("windows", "", false, "keep $HOME and `code` and it's fine", "", `C:\cfg\mcp.json`)
+	_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "keep $HOME and `code` and it's fine", "", `C:\cfg\mcp.json`)
 	command := launch[len(launch)-1]
 	if !strings.Contains(command, "-- 'keep $HOME and `code` and it''s fine'") {
 		t.Fatalf("windows prompt must be single-quoted with doubled apostrophes: %q", command)
@@ -2119,7 +2130,7 @@ func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, sessionID, _, resumePrompt, _ string) (string, []string, error) {
 			launchedConversation, launchedPrompt = sessionID, resumePrompt
 			return "claude-stub", nil, nil
 		},
@@ -2127,7 +2138,7 @@ func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T)
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2200,7 +2211,7 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(sessionID, _, resumePrompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, sessionID, _, resumePrompt, _ string) (string, []string, error) {
 			mu.Lock()
 			conversations = append(conversations, sessionID)
 			prompts = append(prompts, resumePrompt)
@@ -2213,7 +2224,7 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2261,7 +2272,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -2270,7 +2281,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 	emits := newCapturedEmits()
 	app.SetEmitter(emits.fn())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -2319,14 +2330,14 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/adrg/xdg"
 )
 
 // The state ERun keeps under the user's config directory is two trees, not
@@ -124,6 +126,16 @@ func TestPortForwardStateLivesInsideTheConfigTree(t *testing.T) {
 // two are distinguishable at all.
 func TestTheDesktopStateTreeAndTheConfigTreeKeepTheirOwnSpellings(t *testing.T) {
 	redirectConfigHomeForTest(t)
+	// The desktop tree is published under os.UserConfigDir, which on macOS
+	// ignores XDG_CONFIG_HOME; point the config home at that same directory so
+	// the two trees share one home the way a default install does, and the
+	// spellings are what is compared. A no-op where XDG_CONFIG_HOME is honoured.
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("os.UserConfigDir: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", userConfigDir)
+	xdg.Reload()
 	configTree, err := ERunConfigDir()
 	if err != nil {
 		t.Fatalf("ERunConfigDir: %v", err)

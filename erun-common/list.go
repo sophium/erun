@@ -42,6 +42,12 @@ type ListOrchestratorResult struct {
 	// operator can set and cannot read back is the gap the operator-settable
 	// registry exists to catch.
 	Alias string `json:"alias,omitempty"`
+	// UseGateway, Model and Effort are the launch settings as recorded, not as
+	// resolved: an empty Model or Effort reads as the default, which is what the
+	// operator declared.
+	UseGateway bool   `json:"useGateway,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Effort     string `json:"effort,omitempty"`
 	// Directories are the orchestrator's own: paths it works in that belong to
 	// no environment at all. Reported so an orchestrator pointed only at
 	// directories does not read as having no scope.
@@ -519,6 +525,9 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 			Environments: envs,
 			Directories:  directories,
 			Alias:        strings.TrimSpace(orchestrator.Alias),
+			UseGateway:   orchestrator.UseGateway,
+			Model:        strings.TrimSpace(orchestrator.Model),
+			Effort:       strings.TrimSpace(orchestrator.Effort),
 		})
 	}
 	return results, nil

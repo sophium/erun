@@ -40,7 +40,11 @@ type PortForwardState struct {
 // against would stop being found, taking the recorded local port and the log
 // beside it out of reach. This tree is the lowercase one; the desktop's own
 // per-installation state is a separate capitalized tree, and the two are only
-// indistinguishable on a case-insensitive volume.
+// indistinguishable on a case-insensitive volume. The config home is the one
+// the tenant config resolves through (xdg.ConfigHome), not os.UserConfigDir:
+// on macOS the latter ignores XDG_CONFIG_HOME and on Windows it names a
+// different AppData root, either of which would put this tree beside a
+// config tree other than the one it is validated against.
 func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 	kind = strings.TrimSpace(kind)
 	tenant = strings.TrimSpace(tenant)
@@ -57,11 +61,103 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 			return "", err
 		}
 	}
-	configDir, err := os.UserConfigDir()
+	return resolveConfigFilePath(filepath.Join(configRoot, "portforward", kind, tenant, environment+".json"))
+}
+
+// ResolvePortForwardStatePath is PortForwardStatePath for the writer: a record
+// an earlier release left at a legacy location is moved into the canonical
+// tree first, with its log, so a forward that was running across the upgrade
+// is still found instead of being started a second time.
+//
+// A dry run moves nothing — resolving this path is a read every forward setup
+// makes before its own dry-run check — and returns the legacy path it found, so
+// it still reports where the record lives today.
+func ResolvePortForwardStatePath(kind, tenant, environment string, dryRun bool) (string, error) {
+	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(configDir, configRoot, "portforward", kind, tenant, environment+".json"), nil
+	if _, err := os.Stat(statePath); err == nil {
+		return statePath, nil
+	}
+	for _, legacyPath := range legacyPortForwardStatePaths(kind, tenant, environment, statePath) {
+		if _, err := os.Stat(legacyPath); err != nil {
+			continue
+		}
+		if dryRun {
+			return legacyPath, nil
+		}
+		migrateLegacyPortForwardState(legacyPath, statePath)
+		return statePath, nil
+	}
+	return statePath, nil
+}
+
+// legacyPortForwardStatePaths lists where earlier releases kept a forward's
+// record, oldest layout first: the cache dir, then the tree os.UserConfigDir
+// named. A location that coincides with the canonical path is left out.
+func legacyPortForwardStatePaths(kind, tenant, environment, statePath string) []string {
+	var paths []string
+	if cacheDir, err := os.UserCacheDir(); err == nil {
+		paths = append(paths, filepath.Join(cacheDir, configRoot, kind, tenant, environment+".json"))
+	}
+	if root, ok := legacyPortForwardRoot(); ok {
+		paths = append(paths, filepath.Join(root, kind, tenant, environment+".json"))
+	}
+	legacy := paths[:0]
+	for _, path := range paths {
+		if filepath.Clean(path) != filepath.Clean(statePath) {
+			legacy = append(legacy, path)
+		}
+	}
+	return legacy
+}
+
+// legacyPortForwardRoot is the forward tree as it resolved through
+// os.UserConfigDir, reported only where it differs from the current one: on
+// macOS with XDG_CONFIG_HOME set and on Windows. Elsewhere the two coincide and
+// there is no second tree to look in.
+func legacyPortForwardRoot() (string, bool) {
+	configDir, err := legacyUserConfigDir()
+	if err != nil {
+		return "", false
+	}
+	legacy := filepath.Join(configDir, configRoot, "portforward")
+	current, err := portForwardRoot()
+	if err == nil && filepath.Clean(legacy) == filepath.Clean(current) {
+		return "", false
+	}
+	return legacy, true
+}
+
+// legacyUserConfigDir is os.UserConfigDir with the macOS branch keyed on the
+// detected host, so the integration suite can pin that layout on any host.
+func legacyUserConfigDir() (string, error) {
+	if DetectHost().OS == HostOSDarwin {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, "Library", "Application Support"), nil
+	}
+	return os.UserConfigDir()
+}
+
+// migrateLegacyPortForwardState moves a legacy record, its log and the log's
+// rotated generation into the canonical tree. Best-effort: a record that cannot
+// be moved is left where it is, and the forward setup carries on with the
+// canonical path.
+func migrateLegacyPortForwardState(legacyPath, statePath string) {
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return
+	}
+	if err := os.Rename(legacyPath, statePath); err != nil {
+		return
+	}
+	legacyLog := PortForwardLogPathForState(legacyPath)
+	newLog := PortForwardLogPathForState(statePath)
+	_ = os.Rename(legacyLog, newLog)
+	_ = os.Rename(legacyLog+".1", newLog+".1")
 }
 
 // PortForwardLogPathForState is where a forward's kubectl output accumulates:
@@ -72,8 +168,8 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 // touched.
 //
 // It takes the state path rather than the record's identity so the migration
-// off the legacy cache-dir location can derive the log beside a path that is
-// not (yet) the canonical one.
+// and removal of a legacy-location record can derive the log beside a path
+// that is not the canonical one.
 func PortForwardLogPathForState(statePath string) string {
 	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
 }
@@ -106,11 +202,28 @@ func portForwardLogPath(kind, tenant, environment string) (string, error) {
 // reissued to whichever environment is created next, so a record that outlived
 // its environment resolves to a live forward belonging to somebody else, which
 // is the failure removing it exists to prevent.
+//
+// A record still at a legacy location is removed by the same rules: it is
+// unmigrated only because nothing opened the environment since the upgrade, and
+// the next open would otherwise move it into the canonical tree for an
+// environment of the same name created later.
 func RemovePortForwardRecord(ctx Context, kind, tenant, environment string) error {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
 		return err
 	}
+	if err := removePortForwardRecordAt(ctx, kind, statePath); err != nil {
+		return err
+	}
+	for _, legacyPath := range legacyPortForwardStatePaths(kind, tenant, environment, statePath) {
+		if err := removePortForwardRecordAt(ctx, kind, legacyPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removePortForwardRecordAt(ctx Context, kind, statePath string) error {
 	// Derived from the state path, never read from the record's own logPath:
 	// a hand-edited or half-written record must not be able to point the
 	// removal at a file outside the forward tree.

@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
-import { isolatedHomeDir, SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
+import {
+  desktopConfigDir,
+  isolatedHomeDir,
+  SEED_ORCHESTRATOR,
+} from '../../../fixtures/seedRoot.js';
 
 // An orchestrator whose session moved to a conversation of its own used to be
 // recoverable only by hand: read the transcript directory, work out which file
@@ -30,7 +34,7 @@ const LIVE_CONVERSATION = '0c01340d-65bd-4ed9-bb9e-91bdff59a6ec';
 // transcripts are: the harness has no real Claude to run. The desktop reads this
 // file for the launch notice asserted below.
 function stageLiveConversationRecord(orchestratorId: string, conversationId: string): void {
-  const dir = path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-live');
+  const dir = path.join(desktopConfigDir(), 'orchestrator-live');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, `${orchestratorId}.json`),
@@ -39,12 +43,9 @@ function stageLiveConversationRecord(orchestratorId: string, conversationId: str
 }
 
 function removeLiveConversationRecord(orchestratorId: string): void {
-  fs.rmSync(
-    path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-live', `${orchestratorId}.json`),
-    {
-      force: true,
-    },
-  );
+  fs.rmSync(path.join(desktopConfigDir(), 'orchestrator-live', `${orchestratorId}.json`), {
+    force: true,
+  });
 }
 
 function stageTranscript(conversationId: string, cwd: string, prompt: string, ageMs: number): void {

@@ -187,12 +187,40 @@ export function e2eK3dEnabled(): boolean {
 // share one isolated kubeconfig and never read the developer's ~/.kube.
 // global-setup must write the live cluster's kubeconfig here before the backend
 // boots.
+// desktopConfigDir is where the desktop keeps its own state (the orchestrator
+// open set, live-conversation records, nudge history): Go's os.UserConfigDir()
+// plus "ERun", resolved for the backend's environment. That is XDG_CONFIG_HOME
+// only on Linux; macOS ignores it for ~/Library/Application Support, and
+// Windows reads %AppData%, which backendEnv points inside the isolated root.
+export function desktopConfigDir(): string {
+  const home = isolatedHomeDir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'ERun');
+  }
+  if (process.platform === 'win32') {
+    return path.join(windowsRoamingAppData(home), 'ERun');
+  }
+  return path.join(home, '.config', 'ERun');
+}
+
+// The isolated root's stand-ins for %AppData% and %LocalAppData%. On Windows
+// Go's os.UserConfigDir/UserCacheDir read those and os.UserHomeDir reads
+// %USERPROFILE%, never HOME or XDG_*, so they are redirected separately.
+function windowsRoamingAppData(home: string): string {
+  return path.join(home, 'AppData', 'Roaming');
+}
+
+function windowsLocalAppData(home: string): string {
+  return path.join(home, 'AppData', 'Local');
+}
+
 export function kubeconfigPath(): string {
   return path.join(isolatedHomeDir(), '.kube', 'config');
 }
 
 // backendEnv redirects both erun roots — xdg config home and os.UserHomeDir +
-// ".erun" — into the isolated root via HOME + XDG_*, and the PATH-prepended
+// ".erun" — into the isolated root via HOME + XDG_* (plus USERPROFILE and the
+// AppData pair on Windows), and the PATH-prepended
 // stubs keep the backend and every `erun`/shell child it spawns off any real
 // cluster, cloud, or docker daemon.
 export function backendEnv(): Record<string, string> {
@@ -202,6 +230,13 @@ export function backendEnv(): Record<string, string> {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    ...(process.platform === 'win32'
+      ? {
+          USERPROFILE: home,
+          APPDATA: windowsRoamingAppData(home),
+          LOCALAPPDATA: windowsLocalAppData(home),
+        }
+      : {}),
     // Where a long-lived stub records the pid it parks under, so the harness can
     // reap a session it opened and never closed (fixtures/stubProcesses.ts).
     // Inherited by every child the backend spawns, the stubs included.
@@ -916,7 +951,7 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
 // It is a SEPARATE record from config.yaml -- erun-ui/orchestrator_open_state.go
 // writes it on open and only ever reads it back at launch.
 function orchestratorOpenStatePath(): string {
-  return path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-open.json');
+  return path.join(desktopConfigDir(), 'orchestrator-open.json');
 }
 
 // removeOrchestratorOpenState drops one orchestrator from that open set.
@@ -1051,6 +1086,55 @@ export function addERunCloudProviderAlias(alias: string, apiURL: string): () => 
   const configPath = path.join(erunConfigDir(), 'config.yaml');
   const before = fs.readFileSync(configPath, 'utf8');
   writeConfigFile(configPath, withERunCloudProviderAlias(before, alias, apiURL));
+  return () => {
+    writeConfigFile(configPath, before);
+  };
+}
+
+const OPENROUTER_KEY = 'openrouter:';
+
+// withoutTopLevelBlock returns `lines` without the top-level `key` block: the
+// key's own line and every indented line under it, wherever the key sits.
+function withoutTopLevelBlock(lines: string[], key: string): string[] {
+  const start = lines.findIndex((line) => line.trimEnd() === key);
+  if (start < 0) {
+    return lines;
+  }
+  let end = start + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  return [...lines.slice(0, start), ...lines.slice(end)];
+}
+
+// setOpenRouterCatalog stages the erun-level gateway catalog
+// (ERunConfig.OpenRouter) in the shared root config.yaml, replacing any catalog
+// already there. The block is removed wherever the current writer placed it and
+// the new one is appended as a top-level key, which is valid whatever precedes
+// it; its nested indentation is this block's own, never the file's. No
+// credential is written: the catalog alone is what makes the gateway
+// selectable. Returns a restore function that puts the file back exactly as
+// found, mirroring addERunCloudProviderAlias.
+export function setOpenRouterCatalog(catalog: {
+  baseUrl: string;
+  models: string[];
+  defaultModel?: string;
+}): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  const kept = withoutTopLevelBlock(before.split('\n'), OPENROUTER_KEY);
+  while (kept.length > 0 && (kept[kept.length - 1] ?? '').trim() === '') {
+    kept.pop();
+  }
+  const block = [
+    OPENROUTER_KEY,
+    `  baseurl: ${catalog.baseUrl}`,
+    ...(catalog.defaultModel ? [`  defaultmodel: ${catalog.defaultModel}`] : []),
+    ...(catalog.models.length > 0
+      ? ['  models:', ...catalog.models.map((id) => `    - id: ${id}`)]
+      : []),
+  ];
+  writeConfigFile(configPath, `${[...kept, ...block].join('\n')}\n`);
   return () => {
     writeConfigFile(configPath, before);
   };

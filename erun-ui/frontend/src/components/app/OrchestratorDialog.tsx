@@ -43,6 +43,12 @@ import {
   envKey,
 } from '@/components/app/OrchestratorDialog.Environments.helpers';
 import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog.Guidance';
+import { OrchestratorLaunchFields } from '@/components/app/OrchestratorDialog.Launch';
+import { orchestratorLaunchSettingsToSave } from '@/components/app/OrchestratorDialog.Launch.helpers';
+import {
+  type OrchestratorLaunchForm,
+  useOrchestratorLaunchForm,
+} from '@/components/app/OrchestratorDialog.Launch.hooks';
 
 import {
   ListOrchestratorAliasChoices,
@@ -70,6 +76,7 @@ interface OrchestratorForm {
   aliasChoices: string[];
   alias: OrchestratorAlias;
   setAlias: (alias: OrchestratorAlias) => void;
+  launch: OrchestratorLaunchForm;
   selected: OrchestratorEnvRef[];
   toggle: (candidate: EnvCandidate, checked: boolean) => void;
   setDirectory: (ref: OrchestratorEnvRef, directory: string) => void;
@@ -88,6 +95,7 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   const [aliasChoices, setAliasChoices] = React.useState<string[]>([]);
   const [selected, setSelected] = React.useState<OrchestratorEnvRef[]>([]);
   const [directories, setDirectories] = React.useState<string[]>([]);
+  const launch = useOrchestratorLaunchForm(open, editing);
 
   React.useEffect(() => {
     if (!open) {
@@ -171,10 +179,11 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   // exactly the form it collected, and keeping the two in one place is what stops
   // a new field from being rendered but never sent.
   const submit = (): void => {
+    const settings = orchestratorLaunchSettingsToSave(launch.settings);
     if (editing) {
-      void dispatch(updateOrchestrator(editing.id, name, selected, directories, alias));
+      void dispatch(updateOrchestrator(editing.id, name, selected, directories, alias, settings));
     } else {
-      void dispatch(createOrchestrator(name, selected, directories, alias));
+      void dispatch(createOrchestrator(name, selected, directories, alias, settings));
     }
   };
 
@@ -185,6 +194,7 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     aliasChoices,
     alias,
     setAlias,
+    launch,
     selected,
     toggle,
     setDirectory,
@@ -300,6 +310,7 @@ function OrchestratorForm({
           alias={form.alias}
           onChange={form.setAlias}
         />
+        <OrchestratorLaunchFields launch={form.launch} disabled={busy} />
         <RestartRequiredNotice editing={editing} />
         <EnvironmentsField
           candidates={candidates}
@@ -447,7 +458,7 @@ function OrchestratorManageActions({
           }}
         >
           <RotateCcw aria-hidden="true" />
-          {editing.restartRequired || editing.roleChanged ? 'Restart to apply' : 'Restart'}
+          {restartNoticeText(editing) ? 'Restart to apply' : 'Restart'}
         </Button>
       ) : null}
       <Button
@@ -471,13 +482,17 @@ function OrchestratorManageActions({
 // the same sentence — a role never changes which MCP tools the session holds,
 // so claiming "tools are missing" for it would be a false diagnosis (root
 // AGENTS.md § "Smooth, Seamless, No Dead Ends": distinguish causes before
-// writing copy).
+// writing copy). Changed launch settings get their own wording for the same
+// reason: a session fixes its gateway, model and effort when it launches.
 function restartNoticeText(editing: OrchestratorInfo): string | null {
   if (editing.restartRequired) {
     return 'Its environments changed while it was running. The session still holds tools for what it was linked to before and none for what was added since.';
   }
   if (editing.roleChanged) {
     return "A linked environment's role changed while it was running. It's saved, but the session's current context may still reflect the old one — restart to be sure it picks up the change.";
+  }
+  if (editing.launchSettingsChanged) {
+    return 'Its gateway, model or effort changed while it was running. The change is saved; the session keeps what it launched with until it restarts.';
   }
   return null;
 }
@@ -486,7 +501,7 @@ function restartNoticeText(editing: OrchestratorInfo): string | null {
 // opened, that their earlier edit did not take effect yet: a live Claude Code
 // session resolves its MCP toolset once at launch, so it still holds tools for
 // whatever it was linked to before and none for what was added since — only a
-// restart re-wires it (erun#1319). It carries the exact control that resolves
+// restart re-wires it. It carries the exact control that resolves
 // it (root AGENTS.md: "a message naming a remedy should carry the action that
 // resolves it") rather than pointing at the footer's Restart button below.
 // Takes the raw `editing` value and decides for itself whether there is

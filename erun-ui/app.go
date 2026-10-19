@@ -72,13 +72,16 @@ type erunUIDeps struct {
 	// dial cannot: a stale port-forward accepts and never answers, so a
 	// dial-gated recovery never fires and the environment stays dead behind a
 	// healthy-looking listener.
-	canReachMCPEndpoint          func(int) bool
-	setRemoteCloudAlias          func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
-	startTerminal                func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand                func(context.Context, startTerminalSessionParams) (string, error)
-	launchHostArtifact           func(exePath, dir string) error
-	launchHostOpener             func(executable string, args []string) error
-	resolveOrchestratorLaunch    func(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
+	canReachMCPEndpoint       func(int) bool
+	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
+	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
+	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
+	launchHostArtifact        func(exePath, dir string) error
+	launchHostOpener          func(executable string, args []string) error
+	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
+	// resolveGatewayCredential reads the secret an orchestrator launched through
+	// the gateway sends, injectable so a test never reads the real secret store.
+	resolveGatewayCredential     func(*eruncommon.OpenRouterConfig) (string, error)
 	savePastedFile               func(pastedFileSaveParams) (string, error)
 	listAgentOutputs             func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput          func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
@@ -384,6 +387,7 @@ func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	deps = withDefaultRuntimeResolutionDeps(deps)
 	deps = withDefaultRuntimeSessionDeps(deps)
+	deps = withDefaultOrchestratorLaunchDeps(deps)
 	return deps
 }
 
@@ -413,8 +417,15 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.setRemoteCloudAlias == nil {
 		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
 	}
+	return deps
+}
+
+func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 	if deps.resolveOrchestratorLaunch == nil {
 		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
+	}
+	if deps.resolveGatewayCredential == nil {
+		deps.resolveGatewayCredential = eruncommon.ResolveGatewayCredential
 	}
 	return deps
 }

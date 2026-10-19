@@ -1,6 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 
-import { expectDialogContentStaysWithinCard } from '../../../fixtures/boundingBox.js';
+import {
+  boundingBoxOf,
+  expectDialogContentStaysWithinCard,
+} from '../../../fixtures/boundingBox.js';
 import { test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
@@ -148,19 +151,15 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
 // footer stays fully on screen.
 test.describe('dialog footer stays reachable at a short window height', () => {
   test('the Edit orchestrator Save button is fully within the viewport', async ({ app, page }) => {
-    await page.setViewportSize({ width: 1280, height: 520 });
+    const viewportHeight = 520;
+    await page.setViewportSize({ width: 1280, height: viewportHeight });
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
     await app.orchestratorDialog.waitForOpen('Edit orchestrator');
 
     const save = app.orchestratorDialog.saveButton();
     await expect(save).toBeVisible();
-    const box = await save.boundingBox();
-    const viewport = page.viewportSize();
-    expect(box).not.toBeNull();
-    expect(viewport).not.toBeNull();
-    if (box && viewport) {
-      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-    }
+    const box = await boundingBoxOf(save, 'the Edit orchestrator Save button');
+    expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight);
 
     await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');

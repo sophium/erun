@@ -64,10 +64,25 @@ launch, and the shared orchestrator contract reads its scope from them.
 | `ERUN_UI_SESSION` | bool literal `1` | unset | Internal. Marks the process as one the desktop app started, so the app can tell its own session from a shell the Operator opened by hand. Do not depend on this. | Desktop app, for every session it launches (orchestrator and in-app shell alike). |
 | `ERUN_DEV_BIN_DIR` | absolute path | `erun-cli/bin` | Internal to the development wrapper `erun-cli/run.sh`, which reads it as the directory it builds `erun` and `erun-app` into. An Operator sets it to a directory outside the checkout so that invoking `erun` does not write into a worktree — which a host-side orchestrator treats as a read-only review directory. Do not depend on this; it is not part of the session contract. | `erun-cli/run.sh` (read from the environment, never set by erun). |
 
-One variable outside the `ERUN_*` namespace is set here too:
-`CLAUDE_CODE_SUBAGENT_MODEL` (string, `opus`), which pins the model the
-session's subagents run on. The in-pod Claude variables above are unrelated —
-those come from `EnvConfig.claude.*` and describe a pod, not a session.
+A few variables outside the `ERUN_*` namespace are set here too. They come from
+the orchestrator's own launch settings ([`orchestrators[].usegateway`, `.model`,
+`.effort`](/reference/configuration#erunconfig)), not from `EnvConfig.claude.*`:
+the in-pod Claude variables above describe a pod, not a session, even where a name
+is shared.
+
+| Variable | Type | Default | Purpose | Source |
+|---|---|---|---|---|
+| `CLAUDE_CODE_SUBAGENT_MODEL` | string | `opus` | Pins the model the session's subagents run on to the session's own resolved model — the same value passed as `--model`. `opus` for an orchestrator with no model set and its gateway off, and for every transient (Investigate) session. | `orchestrators[].model`, else the catalog's default model when the gateway is on, else `opus`. |
+| `ANTHROPIC_BASE_URL` | URL | unset | The gateway endpoint the session talks to. Set only when the orchestrator's gateway is on. | Root config `openrouter.baseurl`. |
+| `ANTHROPIC_API_KEY` | string | unset | Set to an **empty string** when the orchestrator's gateway is on, for the same reason as in a pod: left unset, Claude Code can fall back to a direct provider and bypass the gateway. | The gateway catalog. |
+| `ANTHROPIC_AUTH_TOKEN` | string | unset | The gateway credential, sent as `Authorization: Bearer`. Set only when the orchestrator's gateway is on, and only in the session's process environment: the desktop resolves it at launch from ERun's own operator secret store (`openrouter.authtokenref`), or from this machine's own Claude Code key when nothing is saved and that key already belongs to the same `baseurl`, and never writes it into a launch command, a log line, or a file. When nothing resolves, the orchestrator does not start. | Root config `openrouter.authtokenref`, resolved at launch. |
+| `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY` | bool literal `1` | unset | Ask the gateway for its model list, exactly as in a pod (see the in-pod table above for what Claude Code keeps from it). Set only when the orchestrator's gateway is on. | Root config `openrouter`. |
+| `CLAUDE_CODE_MAX_CONTEXT_TOKENS` | int | unset | The context window Claude Code should assume for the session's model. Set only when the orchestrator's gateway is on **and** the catalog declares a context for that model. | Root config `openrouter.models[].context`. |
+
+With the gateway off, erun sets none of the gateway variables — but Claude Code
+itself also applies the `env` block of this machine's own Claude Code settings to
+every session it starts, so a gateway configured there still reaches an
+orchestrator whose gateway is off. erun neither overrides nor strips it.
 
 Read scope from `ERUN_ORCHESTRATOR_ID`, never from memory or disk: the id is the
 only thing that ties a session to its `orchestrators:` entry.

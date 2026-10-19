@@ -31,6 +31,7 @@ import {
   type OrchestratorAlias,
   type OrchestratorEnvRef,
   type OrchestratorInfo,
+  type OrchestratorLaunchSettings,
   setOrchestratorRestoreNotices,
   setOrchestrators,
   setOrchestratorsBusy,
@@ -92,19 +93,20 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
 
 // createOrchestrator persists a new orchestrator linking the chosen agent
 // environments (each with the host directory it is reviewed in) plus the
-// directories of its own and the platform alias it declares as its own, and
-// closes the dialog.
+// directories of its own, the platform alias it declares as its own and its
+// launch settings, and closes the dialog.
 export const createOrchestrator =
   (
     name: string,
     envs: OrchestratorEnvRef[],
     directories: string[],
     alias: OrchestratorAlias,
+    launch: OrchestratorLaunchSettings,
   ): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await CreateOrchestrator(name, envs, directories, alias);
+      await CreateOrchestrator(name, envs, directories, alias, launch);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));
@@ -114,9 +116,10 @@ export const createOrchestrator =
   };
 
 // updateOrchestrator edits an existing orchestrator's linked environments, its
-// own directories, its name, and the platform alias it declares as its own.
-// Every field is sent, not only the changed one: the backend replaces the whole
-// definition, so an omitted field is erased rather than left alone.
+// own directories, its name, the platform alias it declares as its own, and
+// its launch settings. Every field is sent, not only the changed one: the
+// backend replaces the whole definition, so an omitted field is erased rather
+// than left alone.
 export const updateOrchestrator =
   (
     id: string,
@@ -124,11 +127,12 @@ export const updateOrchestrator =
     envs: OrchestratorEnvRef[],
     directories: string[],
     alias: OrchestratorAlias,
+    launch: OrchestratorLaunchSettings,
   ): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await UpdateOrchestrator(id, name, envs, directories, alias);
+      await UpdateOrchestrator(id, name, envs, directories, alias, launch);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));

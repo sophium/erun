@@ -627,6 +627,9 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 	if err := writeOrchestratorAlias(ctx, orchestrator.Alias); err != nil {
 		return err
 	}
+	if err := writeOrchestratorLaunchSettings(ctx, orchestrator); err != nil {
+		return err
+	}
 	if len(orchestrator.Environments) == 0 {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    environments: none"); err != nil {
 			return err
@@ -655,6 +658,28 @@ func writeOrchestratorAlias(ctx common.Context, alias string) error {
 	}
 	_, err := fmt.Fprintf(ctx.Stdout, "    platform alias: %s\n", alias)
 	return err
+}
+
+// writeOrchestratorLaunchSettings prints the gateway, model and effort the
+// orchestrator records, each only when set, by the same rule as
+// writeOrchestratorAlias: unset is the default launch, not a setting.
+func writeOrchestratorLaunchSettings(ctx common.Context, orchestrator common.ListOrchestratorResult) error {
+	var lines []string
+	if orchestrator.UseGateway {
+		lines = append(lines, "gateway: on")
+	}
+	if model := strings.TrimSpace(orchestrator.Model); model != "" {
+		lines = append(lines, "model: "+model)
+	}
+	if effort := strings.TrimSpace(orchestrator.Effort); effort != "" {
+		lines = append(lines, "effort: "+effort)
+	}
+	for _, line := range lines {
+		if _, err := fmt.Fprintf(ctx.Stdout, "    %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeOrchestratorDirectories prints the orchestrator's own directories, and

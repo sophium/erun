@@ -81,6 +81,15 @@ func gatewayCredentialForDeploy(gateway *OpenRouterConfig) (string, error) {
 	return resolveGatewayCredential(store, gateway.AuthTokenRefName(), gateway.Endpoint())
 }
 
+// ResolveGatewayCredential resolves the credential a host-side session sends to
+// gateway, with the same precedence a deploy uses: the value saved in erun's own
+// operator secret store, else this machine's Claude Code key when it belongs to
+// the same endpoint. The result is a secret: callers deliver it only through a
+// process environment, never argv, a trace, or a file erun writes.
+func ResolveGatewayCredential(gateway *OpenRouterConfig) (string, error) {
+	return gatewayCredentialForDeploy(gateway)
+}
+
 // resolveGatewayCredential is the decision itself, separated from the store's
 // construction so it can be exercised against a store a test owns.
 //

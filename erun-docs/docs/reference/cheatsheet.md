@@ -62,7 +62,7 @@ erun open --no-shell                # print kubectl/cd commands for scripting
 
 ```bash
 # From the desktop, port-forward is published automatically.
-cat <UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json
+cat <config-root>/portforward/mcp/<tenant>/<env>.json
 
 # Wire your agent client:
 claude --mcp-config <that-file>

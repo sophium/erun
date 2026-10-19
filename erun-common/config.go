@@ -73,6 +73,21 @@ type OrchestratorConfig struct {
 	// mapping that work needs in place first, and giving an orchestrator a
 	// credential of its own remains a separate decision.
 	Alias string `yaml:"alias,omitempty" json:"alias,omitempty"`
+	// UseGateway routes this orchestrator's Claude session through the
+	// erun-level gateway catalog (ERunConfig.OpenRouter). False -- the default
+	// -- leaves it on this machine's own Claude Code configuration, which is
+	// what every orchestrator ran on before the field existed. It is an opt-in
+	// rather than the environment-style tri-state on purpose: an orchestrator
+	// runs on the operator's own machine under their own sign-in, so a catalog
+	// configured for environments must not silently move it.
+	UseGateway bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
+	// Model is the model the session and its subagents launch on. Empty
+	// resolves to the gateway catalog's default under the gateway, and to
+	// DefaultOrchestratorModel otherwise (ResolveOrchestratorLaunch).
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Effort is one of ClaudeEffortLevels. Empty resolves to the same default
+	// an environment's AI tab launches with.
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 // OrchestratorDirectoryConfig is one directory the orchestrator operates in,

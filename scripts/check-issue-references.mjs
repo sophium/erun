@@ -263,7 +263,6 @@ export const issueReferenceBaseline = {
   'erun-ui/frontend/src/components/app/OrchestratorDialog.Conversations.helpers.test.ts': 1,
   'erun-ui/frontend/src/components/app/OrchestratorDialog.Conversations.helpers.ts': 1,
   'erun-ui/frontend/src/components/app/OrchestratorDialog.Guidance.tsx': 1,
-  'erun-ui/frontend/src/components/app/OrchestratorDialog.tsx': 1,
   'erun-ui/frontend/src/components/app/PlatformSignInAlert.tsx': 4,
   'erun-ui/frontend/src/components/app/ReviewDetailDialog.Comments.tsx': 4,
   'erun-ui/frontend/src/components/app/ReviewPanel.ChangedFiles.tsx': 2,

@@ -1,0 +1,3 @@
+Dry run: orchestrator effort update planned.
+audit: erun orchestrator set-effort --dry-run --effort high eng-1
+write orchestrator eng-1 effort

@@ -202,7 +202,9 @@ func (c *OpenRouterConfig) ModelIDs() []string {
 	seen := make(map[string]struct{}, len(c.Models))
 	for _, m := range c.Models {
 		id := strings.TrimSpace(m.ID)
-		if id == "" || !m.driveable() {
+		// An id that is not a plain model token is never offered: every reader
+		// passes these to a launch line, where it would be flag or shell syntax.
+		if id == "" || !m.driveable() || !claudeModelTokenPattern.MatchString(id) {
 			continue
 		}
 		if _, ok := seen[id]; ok {
@@ -284,7 +286,7 @@ func (c *OpenRouterConfig) ResolveDefaultModel() string {
 	if c == nil {
 		return ""
 	}
-	if def := strings.TrimSpace(c.DefaultModel); def != "" && c.HasModel(def) && !c.RequiresReasoningEcho(def) {
+	if def := strings.TrimSpace(c.DefaultModel); def != "" && c.HasModel(def) && !c.RequiresReasoningEcho(def) && claudeModelTokenPattern.MatchString(def) {
 		return def
 	}
 	if ids := c.ModelIDs(); len(ids) > 0 {

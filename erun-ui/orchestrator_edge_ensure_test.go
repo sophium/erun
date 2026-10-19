@@ -94,7 +94,7 @@ func orchestratorEdgeTestApp(t *testing.T, edge *spawnEdgeProbe) (*App, *capture
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint:         edge.reachable,

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // stageOrchestratorConversationAt stages a transcript and backdates it, so a
@@ -117,7 +119,7 @@ func TestStartingAnOrchestratorResumesTheDerivedAnchorNotADivergedConversation(t
 	defer app.shutdown(context.Background())
 
 	var launched []string
-	app.deps.resolveOrchestratorLaunch = func(conversationID, _, _, _ string) (string, []string, error) {
+	app.deps.resolveOrchestratorLaunch = func(_ eruncommon.OrchestratorLaunch, conversationID, _, _, _ string) (string, []string, error) {
 		launched = append(launched, conversationID)
 		return "claude-stub", nil, nil
 	}
@@ -172,7 +174,7 @@ func TestRestoreNeverResumesAnotherOrchestratorsConversation(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	id := createAndStartOrchestrator(t, app)
-	other, err := app.CreateOrchestrator("stranger", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	other, err := app.CreateOrchestrator("stranger", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -374,7 +376,7 @@ func TestADivergedTrackedConversationIsReportedWhenTheOrchestratorStarts(t *test
 	app.SetEmitter(emits.fn())
 
 	var launched []string
-	app.deps.resolveOrchestratorLaunch = func(conversationID, _, _, _ string) (string, []string, error) {
+	app.deps.resolveOrchestratorLaunch = func(_ eruncommon.OrchestratorLaunch, conversationID, _, _, _ string) (string, []string, error) {
 		launched = append(launched, conversationID)
 		return "claude-stub", nil, nil
 	}

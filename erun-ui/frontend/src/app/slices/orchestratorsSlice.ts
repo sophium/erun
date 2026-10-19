@@ -16,6 +16,21 @@ export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
 // machine's own alias.
 export type OrchestratorAlias = string;
 
+// OrchestratorUseGateway, OrchestratorModel and OrchestratorEffort mirror the
+// Go eruncommon.OrchestratorConfig.UseGateway/Model/Effort: how the
+// orchestrator's Claude session launches. false routes nothing through the
+// erun-level gateway catalog, and '' is the default model or effort, never a
+// value of its own.
+export type OrchestratorUseGateway = boolean;
+export type OrchestratorModel = string;
+export type OrchestratorEffort = string;
+
+export interface OrchestratorLaunchSettings {
+  useGateway: OrchestratorUseGateway;
+  model: OrchestratorModel;
+  effort: OrchestratorEffort;
+}
+
 export interface OrchestratorEnvRef {
   tenant: string;
   environment: string;
@@ -129,6 +144,17 @@ export interface OrchestratorInfo {
   // a value written by `erun orchestrator set-alias` survives an unrelated
   // edit made in the desktop.
   alias?: OrchestratorAlias;
+  // useGateway/model/effort are the launch settings as configured, absent at
+  // their defaults. Like alias, the dialog seeds from them and sends them back
+  // on save, so a value written by `erun orchestrator set-*` survives an
+  // unrelated edit.
+  useGateway?: OrchestratorUseGateway;
+  model?: OrchestratorModel;
+  effort?: OrchestratorEffort;
+  // launchSettingsChanged is true when the configured launch settings differ
+  // from what the running session launched with. Like roleChanged it asks for
+  // a Restart without claiming tools are missing.
+  launchSettingsChanged: boolean;
 }
 
 export interface OrchestratorsState {

@@ -1,0 +1,2 @@
+audit: erun orchestrator set-model --model  eng-1
+invalid model "": must be a model id, or "default" to clear it

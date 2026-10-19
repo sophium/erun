@@ -1166,6 +1166,11 @@ type orchestratorSeed struct {
 	// Empty is the default and the common case, and writes no key at all, so
 	// goldens seeded before this field existed are unchanged by it.
 	alias string
+	// useGateway, model and effort are the launch settings. Their zero values
+	// are the defaults and write no key, for the same reason as alias.
+	useGateway bool
+	model      string
+	effort     string
 }
 
 // seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
@@ -1192,6 +1197,15 @@ func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators 
 		sb.WriteString("    name: " + orchestrator.name + "\n")
 		if orchestrator.alias != "" {
 			sb.WriteString("    alias: " + orchestrator.alias + "\n")
+		}
+		if orchestrator.useGateway {
+			sb.WriteString("    usegateway: true\n")
+		}
+		if orchestrator.model != "" {
+			sb.WriteString("    model: " + orchestrator.model + "\n")
+		}
+		if orchestrator.effort != "" {
+			sb.WriteString("    effort: " + orchestrator.effort + "\n")
 		}
 		if len(orchestrator.environments) > 0 {
 			sb.WriteString("    environments:\n")

@@ -658,20 +658,6 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 	return "/bin/bash", nil
 }
 
-// claudeEffortLevels enumerates the selectable Claude effort levels in ascending
-// order. The first five mirror `claude --effort`; ultracode sits above max as
-// "everything on". Must stay in lockstep with erun-common's claudeEffortLevels
-// and the frontend fallback in state.ts.
-var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", "ultracode"}
-
-const defaultClaudeEffort = "ultracode"
-
-func claudeEffortLevelOptions() []string {
-	out := make([]string, len(claudeEffortLevels))
-	copy(out, claudeEffortLevels)
-	return out
-}
-
 func formatLaunchCommand(params startTerminalSessionParams) string {
 	parts := make([]string, 0, len(params.Args)+1)
 	parts = append(parts, params.Executable)

@@ -251,6 +251,12 @@ func (a *App) DetachOrchestratorConversation(id string, cols, rows int) (orchest
 // orchestrator is also how the operator says it should not come back, so it
 // forgets the durable entry the choice lives on.
 func (a *App) restartOrchestratorOnConversation(def eruncommon.OrchestratorConfig, conversationID, attach string, cols, rows int) (orchestratorInfo, error) {
+	// Resolved before the teardown, so settings that cannot launch leave the
+	// running session and the recorded attachment as they were.
+	launch, err := a.resolvePersistedOrchestratorLaunch(def)
+	if err != nil {
+		return orchestratorInfo{}, err
+	}
 	a.stopOrchestratorSession(def.ID)
 	if err := setAttachedOrchestratorConversation(a.deps.orchestratorOpenPath, def.ID, attach); err != nil {
 		return orchestratorInfo{}, fmt.Errorf("record the attached conversation: %w", err)
@@ -259,6 +265,7 @@ func (a *App) restartOrchestratorOnConversation(def eruncommon.OrchestratorConfi
 		id:             def.ID,
 		name:           def.Name,
 		alias:          def.Alias,
+		launch:         launch,
 		envs:           a.refreshLinkedEnvDirectories(def.Environments),
 		dirs:           def.Directories,
 		conversationID: conversationID,

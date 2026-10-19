@@ -67,3 +67,58 @@ func TestOpenRouterCatalogRoundTripsTheReasoningEchoDeclaration(t *testing.T) {
 		t.Fatalf("ModelIDs = %v, want the declared listing omitted", ids)
 	}
 }
+
+// TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse: every launch
+// drops an id that is not a plain model token, so storing one silently would
+// leave an entry the operator saved and nothing ever offers.
+func TestSavingTheGatewayCatalogRefusesAModelIDNoLaunchWouldUse(t *testing.T) {
+	stored := &eruncommon.OpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []eruncommon.OpenRouterModel{{ID: "acme/coder"}}}
+	cases := []struct {
+		name    string
+		catalog uiOpenRouterConfig
+		want    string
+	}{
+		{"flag-shaped model", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []uiOpenRouterModel{{ID: "acme/coder"}, {ID: "--dangerously-skip-permissions"}}}, `invalid model "--dangerously-skip-permissions"`},
+		{"shell syntax in a model", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", Models: []uiOpenRouterModel{{ID: "acme/coder; rm -rf ~"}}}, `invalid model "acme/coder; rm -rf ~"`},
+		{"shell syntax in the default", uiOpenRouterConfig{BaseURL: "https://gateway.example.test", DefaultModel: "$(id)", Models: []uiOpenRouterModel{{ID: "acme/coder"}}}, `default invalid model "$(id)"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := stubUIStore{config: &eruncommon.ERunConfig{OpenRouter: stored}}
+			app := NewApp(erunUIDeps{store: store})
+			_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &tc.catalog})
+			if err == nil || !strings.Contains(err.Error(), "cannot save the gateway catalog: "+tc.want) {
+				t.Fatalf("expected the save refused naming the id (%s), got %v", tc.want, err)
+			}
+			if store.config.OpenRouter != stored {
+				t.Fatalf("a refused save replaced the catalog with %+v", store.config.OpenRouter)
+			}
+		})
+	}
+
+	store := stubUIStore{config: &eruncommon.ERunConfig{}}
+	app := NewApp(erunUIDeps{store: store})
+	_, err := app.SaveERunConfig(uiERunConfig{OpenRouter: &uiOpenRouterConfig{
+		BaseURL:      "https://gateway.example.test",
+		DefaultModel: " acme/coder ",
+		Models:       []uiOpenRouterModel{{ID: " acme/coder "}, {ID: "vendor/model:free"}, {ID: "  "}},
+	}})
+	if err != nil {
+		t.Fatalf("expected plain model ids to save, got %v", err)
+	}
+	if got := store.config.OpenRouter.ModelIDs(); len(got) != 2 || got[0] != "acme/coder" || got[1] != "vendor/model:free" {
+		t.Fatalf("expected both ids stored trimmed, got %q", got)
+	}
+}
+
+// TestTheSaveCheckAgreesWithWhatTheCatalogOffers pins the save check to the
+// rule the catalog applies: an id the save accepts must be one the catalog
+// offers, and the other way round.
+func TestTheSaveCheckAgreesWithWhatTheCatalogOffers(t *testing.T) {
+	for _, id := range []string{"opus", "acme/coder", "vendor/model:free", "a.b_c-d", "-p", "--model", "a b", "a;b", "$(id)", "a'b", "a\"b", "a|b", "ü", "a\nb", ".hidden", "/abs", ":tag"} {
+		offered := len((&eruncommon.OpenRouterConfig{Models: []eruncommon.OpenRouterModel{{ID: id}}}).ModelIDs()) == 1
+		if accepted := validateGatewayCatalogModelIDs(&eruncommon.OpenRouterConfig{Models: []eruncommon.OpenRouterModel{{ID: id}}}) == nil; accepted != offered {
+			t.Fatalf("id %q: the save accepts=%v but the catalog offers=%v", id, accepted, offered)
+		}
+	}
+}
