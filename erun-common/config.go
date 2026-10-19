@@ -1476,6 +1476,19 @@ const configFilePerm os.FileMode = 0o600
 // never a 0-byte or partially written file. The rename is atomic because the temp
 // file shares the destination's directory, and thus its filesystem.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeFileViaRename(path, data, perm, true)
+}
+
+// replaceFileAtomically gives a concurrent reader WriteFileAtomic's guarantee --
+// the whole previous file or the whole new one, never a truncated one -- without
+// its fsync. Activity snapshots and lease records are rewritten on hot paths
+// (the MCP server records one per request) and are read concurrently by idle
+// polls; what they need is visibility atomicity, not crash durability.
+func replaceFileAtomically(path string, data []byte, perm os.FileMode) error {
+	return writeFileViaRename(path, data, perm, false)
+}
+
+func writeFileViaRename(path string, data []byte, perm os.FileMode, durable bool) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -1492,9 +1505,11 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
+	if durable {
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return err
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		return err

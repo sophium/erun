@@ -412,7 +412,9 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o644)
+	// Replaced, never rewritten in place: every idle-status read parses every
+	// snapshot, and one truncated mid-write fails that whole read.
+	return replaceFileAtomically(path, data, 0o644)
 }
 
 func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, updates []EnvironmentActivityClientUpdate, now time.Time) {

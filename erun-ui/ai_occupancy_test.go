@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -149,4 +151,31 @@ func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 	if len(again.Occupancy) != 0 {
 		t.Fatalf("expected reuse to skip the occupancy check entirely, got %+v", again.Occupancy)
 	}
+}
+
+// TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable
+// reproduces the occupancy notice failing open: the idle-status read the check
+// reuses parses every activity snapshot, and the ERun tab rewrites cli.json at
+// the instant its prompt releases the queued AI start. A snapshot caught
+// between truncate and write is empty, the whole status read failed, and the
+// start launched a second agent with no notice although the lease was held.
+func TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable(t *testing.T) {
+	app, started := newAIOccupancyTestApp(t)
+	takeTestLease(t, "job-fix-1201")
+	dir, err := eruncommon.EnvironmentActivityDir("erun", "remote")
+	if err != nil {
+		t.Fatalf("activity dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, eruncommon.ActivityKindCLI+".json"), nil, 0o644); err != nil {
+		t.Fatalf("stage a truncated snapshot: %v", err)
+	}
+	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "erun", Environment: "remote"}); err == nil {
+		t.Fatal("precondition: an empty snapshot must fail the idle-status read")
+	}
+
+	result, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24, false)
+	if err != nil {
+		t.Fatalf("StartAISession failed: %v", err)
+	}
+	assertOccupiedUnconfirmedResult(t, result, *started)
 }

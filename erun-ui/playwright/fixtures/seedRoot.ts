@@ -763,21 +763,49 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
+// environmentActivityDir is eruncommon.EnvironmentActivityDir:
+// XDG_CACHE_HOME/erun/activity/<tenant>/<environment>.
+function environmentActivityDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment);
+}
+
 // activityLeaseDir is where eruncommon.TakeEnvironmentActivityLease persists
-// leases: XDG_CACHE_HOME/erun/activity/<tenant>/<environment>/leases.
+// leases.
 function activityLeaseDir(tenant: string, environment: string): string {
-  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'leases');
+  return path.join(environmentActivityDir(tenant, environment), 'leases');
+}
+
+// writeTruncatedActivitySnapshot stages the state a snapshot is in between an
+// in-place rewrite's truncate and its write: present and empty, so every
+// reader that parses it fails. Pass a kind nothing in the inert harness
+// records, or the next real record replaces it before the spec reads it.
+export function writeTruncatedActivitySnapshot(
+  tenant: string,
+  environment: string,
+  kind: string,
+): void {
+  const dir = environmentActivityDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${kind}.json`), '');
+}
+
+export function removeActivitySnapshot(tenant: string, environment: string, kind: string): void {
+  fs.rmSync(path.join(environmentActivityDir(tenant, environment), `${kind}.json`), {
+    force: true,
+  });
 }
 
 // writeHeldLease stages a real activity lease file — the same on-disk shape
 // eruncommon.TakeEnvironmentActivityLease writes — so a headless spec can
-// drive the AI-tab occupancy check (erun#1221) without a live orchestrator job.
+// drive the AI-tab occupancy check without a live orchestrator job. It is
+// renamed into place like the backend's own: a lease reader reclaims a lease
+// it cannot parse, and the idle poll reads this directory every second.
 export function writeHeldLease(tenant: string, environment: string, name: string): void {
   const dir = activityLeaseDir(tenant, environment);
   fs.mkdirSync(dir, { recursive: true });
   const startedAt = new Date();
   const expiresAt = new Date(startedAt.getTime() + 15 * 60 * 1000);
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(dir, `${name}.json`),
     JSON.stringify({
       id: name,
