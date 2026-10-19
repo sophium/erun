@@ -9,9 +9,11 @@ import { LOCAL_SHELL_PROMPT, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 // erase reds every row-0 spec on macOS and none on Linux. Emitting the redraw
 // directly makes that state reachable on every host. Its prompt is a sentinel
 // rather than the real one, so seeing it on screen proves this redraw -- not
-// one the live shell sent on its own -- has landed.
+// one the live shell sent on its own -- has landed. It ends by moving to the
+// next row, so a real redraw arriving afterwards lands there instead of
+// erasing the sentinel this spec waits on.
 const REDRAW_PROMPT = 'erun-redraw-sentinel$ ';
-const READLINE_RESIZE_REDRAW = `\r\x1b[K${REDRAW_PROMPT}`;
+const READLINE_RESIZE_REDRAW = `\r\x1b[K${REDRAW_PROMPT}\r\n`;
 
 test('a printed line survives the shell redrawing its line after a resize', async ({
   app,
