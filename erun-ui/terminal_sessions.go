@@ -24,7 +24,7 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "open", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindOpen, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runOpenSession(ctx, selection, slot, cols, rows)
 	})
 }
@@ -218,7 +218,7 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confir
 	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindAI, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
 	})
 }

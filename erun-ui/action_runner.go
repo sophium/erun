@@ -264,10 +264,41 @@ type gatedSessionStarter func(ctx context.Context) (startSessionResult, *managed
 // every marker is missed, sized generously to span a cold build+deploy.
 const gatedSessionMaxSetup = 6 * time.Minute
 
+// gatedSessionKind names a terminal tab whose start runs through
+// enqueueGatedSession. Its activity entry stays running only while that tab
+// is being established, which is setup of a terminal rather than work a
+// closing window would cut short.
+type gatedSessionKind string
+
+const (
+	gatedSessionKindOpen           gatedSessionKind = "open"
+	gatedSessionKindAI             gatedSessionKind = "ai"
+	gatedSessionKindContributeERun gatedSessionKind = "contribute-erun"
+	gatedSessionKindContributeAI   gatedSessionKind = "contribute-ai"
+)
+
+func isGatedSessionKind(kind string) bool {
+	switch gatedSessionKind(kind) {
+	case gatedSessionKindOpen, gatedSessionKindAI, gatedSessionKindContributeERun, gatedSessionKindContributeAI:
+		return true
+	}
+	return false
+}
+
+// isGatedSessionSetupEntry reports whether entry is a terminal tab still
+// being established by enqueueGatedSession.
+func isGatedSessionSetupEntry(entry activityQueueEntry) bool {
+	return entry.Source == "action" && isGatedSessionKind(entry.ActionKind)
+}
+
 // enqueueGatedSession blocks the Wails caller until the enqueued action
 // runs and creates the session, then holds the gate until the session
-// signals ready.
-func (a *App) enqueueGatedSession(selection uiSelection, kind string, start gatedSessionStarter) (startSessionResult, error) {
+// signals ready. Only a registered gatedSessionKind is accepted, so every
+// entry it creates is one isGatedSessionSetupEntry recognises.
+func (a *App) enqueueGatedSession(selection uiSelection, kind gatedSessionKind, start gatedSessionStarter) (startSessionResult, error) {
+	if !isGatedSessionKind(string(kind)) {
+		return startSessionResult{}, fmt.Errorf("unregistered gated session kind %q", kind)
+	}
 	type spawnOutcome struct {
 		result startSessionResult
 		err    error
@@ -275,9 +306,9 @@ func (a *App) enqueueGatedSession(selection uiSelection, kind string, start gate
 	ready := make(chan spawnOutcome, 1)
 
 	if _, err := a.enqueueDesktopAction(desktopAction{
-		kind:      kind,
+		kind:      string(kind),
 		selection: selection,
-		summary:   kind + " " + strings.TrimSpace(selection.Tenant+"/"+selection.Environment),
+		summary:   string(kind) + " " + strings.TrimSpace(selection.Tenant+"/"+selection.Environment),
 		run: func(ctx context.Context) error {
 			result, managed, startErr := start(ctx)
 			ready <- spawnOutcome{result: result, err: startErr}

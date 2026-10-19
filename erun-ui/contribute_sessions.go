@@ -21,7 +21,7 @@ func (a *App) StartContributeSession(selection uiSelection, slot, cols, rows int
 	if err := errMissingTenantOrEnvironment("start contribute ERun session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "contribute-erun", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeERun, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, false)
 	})
 }
@@ -33,7 +33,7 @@ func (a *App) StartContributeAISession(selection uiSelection, slot, cols, rows i
 	if err := errMissingTenantOrEnvironment("start contribute AI session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "contribute-ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindContributeAI, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runContributeSession(ctx, selection, slot, cols, rows, true)
 	})
 }

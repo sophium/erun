@@ -119,6 +119,28 @@ export function stubRegistryPath(): string {
   return path.join(isolatedRoot(), 'stub-pids');
 }
 
+// tabSetupHoldsDir is where a spec parks a tab's setup phase: while
+// `<tenant>.<environment>` exists here, the erun stub holds an interactive tab
+// open short of printing its setup-complete marker, so the desktop's gated
+// session stays in setup for exactly as long as the spec needs. Per worker,
+// removed with the isolated root.
+export function tabSetupHoldsDir(): string {
+  return path.join(isolatedRoot(), 'tab-setup-holds');
+}
+
+// holdTabSetup keeps every interactive tab the desktop opens for the
+// environment in its setup phase until the returned release is called. Release
+// it in a finally: a held tab's stub polls for the release and never parks.
+export function holdTabSetup(tenant: string, environment: string): () => void {
+  const dir = tabSetupHoldsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const hold = path.join(dir, `${tenant}.${environment}`);
+  fs.writeFileSync(hold, '');
+  return () => {
+    fs.rmSync(hold, { force: true });
+  };
+}
+
 // stubBinPath is the on-disk path of a stub tool. On Windows the backend
 // resolves and execs a real PE (LookPath honours PATHEXT), so stubs carry a
 // .exe extension; POSIX stubs are extensionless shell scripts.
@@ -241,6 +263,9 @@ export function backendEnv(): Record<string, string> {
     // reap a session it opened and never closed (fixtures/stubProcesses.ts).
     // Inherited by every child the backend spawns, the stubs included.
     ERUN_PLAYWRIGHT_STUB_REGISTRY: stubRegistryPath(),
+    // Where a spec parks an interactive tab short of its setup-complete marker
+    // (holdTabSetup above). Read by the erun stub only.
+    ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS: tabSetupHoldsDir(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -459,7 +484,8 @@ export function seedGitRemoteAgentForK3d(
 //   prints a shell-prompt line (the action runner's setup-complete marker,
 //   see signalSessionReadyOnLine in erun-ui/activity_queue_app.go) and then
 //   sleeps, so the tab behaves like a healthy opened session: alive, quiet,
-//   and killable on env close.
+//   and killable on env close. A spec holding the env's tab setup
+//   (holdTabSetup) delays that marker until it releases the hold.
 //
 //   `--no-shell` is the non-interactive probe form (`erun open <t> <e>
 //   --no-shell --reconnect`, see buildOpenNoShellArgs in erun-ui/session.go):
@@ -522,6 +548,8 @@ function writeStubBinary(name: string): void {
       'case "$1" in',
       '  open)',
       '    register_stub',
+      '    hold="$ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS/$2.$3"',
+      '    while [ -n "$ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS" ] && [ -e "$hold" ]; do sleep 0.05; done',
       "    printf 'erun@playwright:~$ \\n'",
       '    exec sleep 2147483647',
       '    ;;',
