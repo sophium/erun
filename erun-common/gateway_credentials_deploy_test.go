@@ -245,3 +245,33 @@ func TestAppliedSecretNamesMatchTheChartValues(t *testing.T) {
 		t.Fatalf("the chart is not told the entry that Secret carries:\n%s", set)
 	}
 }
+
+// TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff pins that a gateway
+// replaces the model provider: Claude Code reads CLAUDE_CODE_USE_BEDROCK and
+// _MANTLE ahead of ANTHROPIC_BASE_URL, so an environment that selected the
+// gateway with either still on would be routed past it. One that opted out of
+// the gateway keeps its own provider choice.
+func TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff(t *testing.T) {
+	on, off := true, false
+	catalog := &OpenRouterConfig{BaseURL: testGatewayURL}
+	providers := EnvironmentClaudeConfig{UseBedrock: &on, UseMantle: &on}
+
+	set := strings.Join(helmClaudeSetArgs(providers, catalog), " ")
+	for _, want := range []string{"claude.useBedrock=0", "claude.useMantle=0", "claude.openRouterBaseURL="} {
+		if !strings.Contains(set, want) {
+			t.Fatalf("a gateway-routed environment should render %s:\n%s", want, set)
+		}
+	}
+
+	optedOut := providers
+	optedOut.UseGateway = &off
+	set = strings.Join(helmClaudeSetArgs(optedOut, catalog), " ")
+	for _, want := range []string{"claude.useBedrock=1", "claude.useMantle=1"} {
+		if !strings.Contains(set, want) {
+			t.Fatalf("an environment that left the gateway should keep its provider choice %s:\n%s", want, set)
+		}
+	}
+	if strings.Contains(set, "claude.openRouterBaseURL=") {
+		t.Fatalf("an environment that left the gateway must not render it:\n%s", set)
+	}
+}

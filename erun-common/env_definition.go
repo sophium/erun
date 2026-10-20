@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -688,6 +689,21 @@ func renderClaudeConfig(config EnvironmentClaudeConfig) string {
 	}
 	if len(config.Models) > 0 {
 		parts = append(parts, "models="+strings.Join(config.Models, ","))
+	}
+	// Every other field counts too, each only when set so a definition that
+	// never chose one renders as before: a field missing here is one the drift
+	// check cannot see, so pulling a definition would overwrite it silently.
+	if config.MaxOutputTokens != nil {
+		parts = append(parts, "max-output-tokens="+strconv.Itoa(*config.MaxOutputTokens))
+	}
+	if config.Effort != nil {
+		parts = append(parts, "effort="+valueOrUnset(*config.Effort))
+	}
+	if config.DefaultModel != nil {
+		parts = append(parts, "default-model="+valueOrUnset(*config.DefaultModel))
+	}
+	if config.VerboseDebug {
+		parts = append(parts, "verbose-debug=enabled")
 	}
 	return strings.Join(parts, " ")
 }

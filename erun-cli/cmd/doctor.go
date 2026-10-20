@@ -151,15 +151,9 @@ func runDoctorForTarget(ctx common.Context, configStore common.ConfigStore, prom
 	if err := reportProjectConfigAndExecutionModes(ctx, result); err != nil {
 		return err
 	}
+	// The erun-level gateway catalog arrives on the resolved target, so the
+	// diagnosis judges the same routing the AI launch uses.
 	req := common.ShellLaunchParamsFromResult(result)
-	// The gateway catalog is erun-level rather than part of this environment's
-	// own config, so it is resolved from the root config here. A root config
-	// that cannot be read leaves the catalog unset, which keeps the diagnosis
-	// on its pre-existing answer; the root-config section above already reports
-	// the unreadable config itself.
-	if gateway, err := common.ResolveOpenRouterConfig(configStore); err == nil {
-		req.Gateway = gateway
-	}
 	diagnosis, err := runDeployDiagnosis(ctx, req)
 	if err != nil {
 		return err

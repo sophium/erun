@@ -462,6 +462,9 @@ export interface UIEnvironmentConfig {
   };
   claude: UIEnvironmentClaudeConfig;
   claudeDefaults: UIEnvironmentClaudeDefaults;
+  // aiLaunchSignature is the launch command the AI tab runs for the persisted
+  // config, resolved by the backend; a save that changes it reopens AI tabs.
+  aiLaunchSignature: string;
   localPorts: UIEnvironmentLocalPorts;
   type?: string;
   localRepoPath?: string;
@@ -529,6 +532,11 @@ export interface UIEnvironmentClaudeDefaults {
   // gatewayConfigured reports whether the erun-level catalog names a gateway.
   // Without one there is nothing for the per-environment controls to override.
   gatewayConfigured: boolean;
+  // gatewayModels / gatewayDefaultModel are the catalog's selectable models and
+  // the one a gateway launch falls back to. models/knownModels stay the
+  // environment's own, so the AI tab picks a set from the draft's useGateway.
+  gatewayModels: string[];
+  gatewayDefaultModel: string;
 }
 
 export interface UIRuntimePodConfig {

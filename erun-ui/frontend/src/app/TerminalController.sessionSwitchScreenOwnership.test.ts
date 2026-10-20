@@ -125,13 +125,20 @@ function mountDriver(): Driver {
         handler({ sessionId, data });
       }
     },
-    // Settled = every write already queued for xterm has been parsed.
-    settled: () =>
-      new Promise((resolve) => {
-        terminal.write('', () => {
-          resolve();
+    // Settled = every write already queued for xterm has been parsed, including
+    // the writes a switch issues. A switch runs from a write callback and issues
+    // its own writes there, after a single barrier was already queued, so the
+    // first barrier lets the queued switch run and the second lets what it wrote
+    // be parsed.
+    settled: async () => {
+      for (let barrier = 0; barrier < 2; barrier += 1) {
+        await new Promise<void>((resolve) => {
+          terminal.write('', () => {
+            resolve();
+          });
         });
-      }),
+      }
+    },
     keystroke: () => {
       const textarea = (terminal as unknown as { textarea?: HTMLTextAreaElement }).textarea;
       if (!textarea) {

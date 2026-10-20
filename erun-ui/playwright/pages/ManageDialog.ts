@@ -663,6 +663,13 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-claude-gateway');
   }
 
+  // The Radix listbox is portal'd to the document body, so the option is
+  // queried at the page root rather than inside the dialog.
+  async chooseClaudeGateway(label: string): Promise<void> {
+    await this.claudeGatewayField().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
   // The gateway credential is one erun-level value, so this control no longer
   // exists and every use of it asserts that absence rather than filling it in.
   claudeGatewaySecretInput(): Locator {

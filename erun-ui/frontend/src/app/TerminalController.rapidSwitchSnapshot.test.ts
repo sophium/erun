@@ -108,13 +108,19 @@ function mountDriver(): Driver {
   terminal.loadAddon(paneReader);
   // Settled = every write already queued for xterm has been parsed: the empty
   // write's completion callback fires only after the writes queued before it.
-  // That observable replaces a delay everywhere this driver needs to wait.
-  const settled = (): Promise<void> =>
-    new Promise((resolve) => {
-      terminal.write('', () => {
-        resolve();
+  // That observable replaces a delay everywhere this driver needs to wait. A
+  // switch runs from such a callback and issues its own writes there, after a
+  // single barrier was already queued, so the first barrier lets the queued
+  // switch run and the second lets what it wrote be parsed.
+  const settled = async (): Promise<void> => {
+    for (let barrier = 0; barrier < 2; barrier += 1) {
+      await new Promise<void>((resolve) => {
+        terminal.write('', () => {
+          resolve();
+        });
       });
-    });
+    }
+  };
   return {
     controller,
     pane: () => paneReader.serialize(),

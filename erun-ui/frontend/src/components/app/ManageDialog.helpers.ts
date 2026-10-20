@@ -25,6 +25,33 @@ function hasClaudeTypedOverride(claude: UIEnvironmentConfig['claude']): boolean 
   return (claude.models?.length ?? 0) > 0;
 }
 
+// effectiveClaudeModelDefaults resolves which model set the AI tab offers,
+// mirroring erun-common EffectiveGateway and resolveClaudeLaunchModel: a
+// configured catalog applies unless the environment opted out, and then the
+// catalog's models (with its default) are what a launch can select; otherwise
+// the environment's own models are, with the first available as the default.
+// It reads the draft, so flipping "Use the gateway" changes the choices before
+// the save rather than after it.
+export function effectiveClaudeModelDefaults(
+  claude: UIEnvironmentConfig['claude'],
+  defaults: UIEnvironmentConfig['claudeDefaults'],
+): {
+  viaGateway: boolean;
+  available: string[];
+  defaultLaunchModel: string;
+} {
+  const viaGateway = defaults.gatewayConfigured && claude.useGateway !== false;
+  if (viaGateway) {
+    return {
+      viaGateway,
+      available: defaults.gatewayModels,
+      defaultLaunchModel: defaults.gatewayDefaultModel,
+    };
+  }
+  const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
+  return { viaGateway, available, defaultLaunchModel: available[0] ?? '' };
+}
+
 export function isValidClaudeTokens(
   text: string,
   defaults: UIEnvironmentConfig['claudeDefaults'],

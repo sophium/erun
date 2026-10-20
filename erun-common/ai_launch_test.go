@@ -173,6 +173,27 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	})
 }
 
+// TestAISessionLaunchContextFollowsTheOptOut pins that an environment that left
+// the gateway is not sized from the catalog. Its own model shares an id with a
+// catalog listing, but it runs on its own sign-in, so the catalog's context
+// window describes a model this session is not using.
+func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
+	model := func(v string) *string { return &v }
+	optOut := false
+	catalog := &OpenRouterConfig{BaseURL: "https://gateway.example/api", Models: []OpenRouterModel{{ID: "vendor/model-x", Context: 1048576}}}
+	got := AISessionLaunchCommand("", EnvironmentClaudeConfig{
+		UseGateway:   &optOut,
+		Models:       []string{"vendor/model-x"},
+		DefaultModel: model("vendor/model-x"),
+	}, catalog, "team", "dev")
+	if strings.Contains(got, "CLAUDE_CODE_MAX_CONTEXT_TOKENS") {
+		t.Fatalf("an opted-out environment must not take the catalog's context window, got %q", got)
+	}
+	if !strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL=vendor/model-x claude") {
+		t.Fatalf("the environment's own model should still be mirrored to subagents, got %q", got)
+	}
+}
+
 // TestAISessionLaunchRemoteControl pins the default Remote Control launch: the
 // managed claude session is named <tenant>/<env> so the operator can drive it
 // from the Claude iOS app. It is gated off for the Bedrock/Mantle gateways —
