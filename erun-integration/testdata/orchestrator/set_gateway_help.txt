@@ -1,0 +1,18 @@
+Turn on or off whether this host-side orchestrator's Claude session routes through the erun-level gateway catalog -- the one configured in the desktop's ERun settings, which environments launch through too. Off is the default and leaves the orchestrator on this machine's own Claude Code configuration. Turning it on is refused while no gateway catalog is configured, and while the orchestrator's recorded model is one the gateway cannot drive. A gateway launch also needs the gateway key saved in the desktop's ERun settings; without it the orchestrator refuses to start. Stored on the orchestrator's entry in config.yaml and read back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted.
+
+Usage:
+  erun orchestrator set-gateway ORCHESTRATOR_ID [flags]
+
+Examples:
+  erun orchestrator set-gateway my-orchestrator --gateway on
+  erun orchestrator set-gateway my-orchestrator --gateway off
+
+Flags:
+      --dry-run          Resolve and trace mutating actions without executing them.
+      --gateway string   "on" to route through the gateway catalog, "off" for this machine's own Claude Code configuration
+  -h, --help             help for set-gateway
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

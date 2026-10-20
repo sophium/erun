@@ -1,0 +1,2 @@
+audit: erun orchestrator set-model --model sonnet
+set orchestrator model: no orchestrator id given — pass one explicitly (`erun orchestrator set-model <id> --model <model|default>`)

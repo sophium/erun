@@ -75,7 +75,7 @@ parameter descriptions. Both transports must describe the same actual behavior.
 - Inspect state from its owning machine: pod evidence does not establish host
   configuration. Prefer structured tools; use raw argv only for missing evidence.
 - A desktop-open environment's MCP port is in
-  `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json`.
+  `<config-root>/portforward/mcp/<tenant>/<environment>.json`.
   Direct JSON-RPC diagnostics require initialize → initialized notification →
   calls with the returned `Mcp-Session-Id` and JSON/SSE acceptance.
 - Confirm the running image, source commit, required toolchain, process, and bound

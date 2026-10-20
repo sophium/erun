@@ -1,0 +1,64 @@
+package main
+
+import (
+	"errors"
+	"os"
+	"strings"
+	"testing"
+
+	eruncommon "github.com/sophium/erun/erun-common"
+)
+
+// requireLoneRestartPreviewNotice fails unless the preview names only id, with
+// a notice carrying every one of wants.
+func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopRestartReopen, id string, wants ...string) {
+	t.Helper()
+	if len(preview) != 1 || preview[0].OrchestratorID != id {
+		t.Fatalf("expected one row for %s, got %+v", id, preview)
+	}
+	for _, want := range wants {
+		if !strings.Contains(preview[0].Notice, want) {
+			t.Fatalf("expected the row's notice to carry %q, got %q", want, preview[0].Notice)
+		}
+	}
+}
+
+// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the boot path
+// consumes the hand-off before the start is refused, so a preview that reported
+// the task coming back would be the last thing the operator read before
+// losing it.
+func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	var credentialErr error
+	app.deps.resolveGatewayCredential = func(*eruncommon.OpenRouterConfig) (string, error) {
+		return testGatewayToken, credentialErr
+	}
+	stageGatewayCatalog(app)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{UseGateway: true})
+	mustNoErr(t, err, "CreateOrchestrator")
+	_, err = app.StartOrchestrator(created.ID, 80, 24)
+	mustNoErr(t, err, "StartOrchestrator")
+	id := created.ID
+	stageOrchestratorConversation(t, orchestratorSessionID(id))
+
+	preview := app.orchestratorRestartPreview(id)
+	if len(preview) != 1 || preview[0].ConversationID != orchestratorSessionID(id) || preview[0].Notice != "" {
+		t.Fatalf("expected the hand-off delivered with nothing to report, got %+v", preview)
+	}
+
+	credentialErr = errors.New("no gateway credential: nothing is saved under \"claude-gateway\"")
+	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
+		"The restart will not start "+id,
+		"its task will not be continued",
+		"no gateway credential",
+		"save the gateway key in the desktop's ERun settings",
+		orchestratorReturnNoteName(id))
+	if entries, err := os.ReadDir(restoreDir); err == nil && len(entries) != 0 {
+		t.Fatalf("a preview must write no hand-off, found %d", len(entries))
+	}
+
+	credentialErr = nil
+	app.deps.store.(stubUIStore).config.OpenRouter = nil
+	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
+		"no gateway catalog is configured", "configure the gateway catalog")
+}

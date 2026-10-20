@@ -30,6 +30,12 @@ describe('isClaudeModelToken', () => {
     }
   });
 
+  it('rejects a leading dash, which would reach --model as a flag', () => {
+    for (const id of ['-x', '--dangerously-skip-permissions']) {
+      expect(isClaudeModelToken(id)).toBe(false);
+    }
+  });
+
   it('ignores surrounding whitespace', () => {
     expect(isClaudeModelToken('  deepseek/deepseek-v4.1-flash  ')).toBe(true);
   });

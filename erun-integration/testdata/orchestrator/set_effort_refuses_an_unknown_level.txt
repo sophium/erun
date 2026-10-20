@@ -1,0 +1,2 @@
+audit: erun orchestrator set-effort --effort extreme eng-1
+orchestrator eng-1: invalid effort "extreme": must be one of low, medium, high, xhigh, max, ultracode -- name a known level or clear it (`erun orchestrator set-effort eng-1 --effort default`)

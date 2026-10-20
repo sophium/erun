@@ -148,11 +148,12 @@ type DesktopRestartReopen struct {
 	// ConversationID is the conversation the launch that follows the restart
 	// resumes for this orchestrator.
 	ConversationID string `json:"conversationId,omitempty"`
-	// Notice is set exactly when that is NOT the conversation this
-	// orchestrator's own session was working in — and it is the whole warning:
-	// it names both conversations, so the operator can tell which work is about
-	// to be left behind and attach it before the restart happens. Empty is the
-	// ordinary case, and the only one that needs no reporting.
+	// Notice is set when that is NOT the conversation this orchestrator's own
+	// session was working in -- naming both conversations, so the operator can
+	// tell which work is about to be left behind and attach it before the
+	// restart happens -- or when the launch after the restart would be refused,
+	// naming why. Empty is the ordinary case, and the only one that needs no
+	// reporting.
 	Notice string `json:"notice,omitempty"`
 }
 

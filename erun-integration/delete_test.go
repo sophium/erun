@@ -596,4 +596,47 @@ exit 0
 			t.Errorf("a dry run must not remove the port-forward state file, stat err: %v", err)
 		}
 	})
+
+	t.Run("dry_run_lists_a_record_left_at_the_user_config_dir_layout", func(t *testing.T) {
+		// A record nothing reopened since the upgrade is still at the layout
+		// os.UserConfigDir named. The plan must name it, its log and the log's
+		// rotated generation as removals, and remove none of them.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		legacyState := seedLegacyPortForwardRecord(t, setup, "mcp", "team", "dev", 26100)
+		envVars := append(setup.Env(), openHostOSOverride)
+
+		result := erun.Run(t, []string{"delete", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/dry_run_lists_a_record_left_at_the_user_config_dir_layout", normalize.Apply(result.Combined))
+		if _, err := os.Stat(legacyState); err != nil {
+			t.Errorf("a dry run must not remove the legacy record, stat err: %v", err)
+		}
+	})
+
+	t.Run("real_run_removes_a_record_left_at_the_user_config_dir_layout", func(t *testing.T) {
+		// Left in place, that record would be migrated by the next open into
+		// an environment of the same name created later, resolving to a local
+		// port this delete frees for somebody else.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		legacyState := seedLegacyPortForwardRecord(t, setup, "mcp", "team", "dev", 26100)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envVars = append(envVars, openHostOSOverride)
+
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		legacyLog := strings.TrimSuffix(legacyState, ".json") + ".log"
+		for _, path := range []string{legacyState, legacyLog, legacyLog + ".1"} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("expected %s to be removed, stat err: %v", path, err)
+			}
+		}
+	})
 }

@@ -66,4 +66,21 @@ var OperatorSettableConfigFields = []OperatorSettableConfigField{
 		Name:  "OrchestratorConfig.Alias",
 		Token: "orchestratoralias",
 	},
+	{
+		// Set by the desktop's Edit orchestrator dialog (its launch settings
+		// controls) and by `erun orchestrator set-gateway`. The frontend type
+		// mirroring this field (orchestratorsSlice.ts) is what this token matches.
+		Name:  "OrchestratorConfig.UseGateway",
+		Token: "orchestratorusegateway",
+	},
+	{
+		// Set by the same dialog and by `erun orchestrator set-model`.
+		Name:  "OrchestratorConfig.Model",
+		Token: "orchestratormodel",
+	},
+	{
+		// Set by the same dialog and by `erun orchestrator set-effort`.
+		Name:  "OrchestratorConfig.Effort",
+		Token: "orchestratoreffort",
+	},
 }

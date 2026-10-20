@@ -728,8 +728,8 @@ func claudeDefaultsForUI(gateway *eruncommon.OpenRouterConfig) uiClaudeDefaults 
 		KnownModels:     known,
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
-		Effort:          defaultClaudeEffort,
-		EffortLevels:    claudeEffortLevelOptions(),
+		Effort:          eruncommon.DefaultClaudeEffortLevel,
+		EffortLevels:    eruncommon.ClaudeEffortLevels(),
 		// The per-environment gateway controls override an erun-level catalog, so
 		// they are only meaningful when one exists.
 		GatewayConfigured: gateway.Configured(),

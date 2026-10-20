@@ -45,6 +45,23 @@ func registerStub(name string) {
 	_, _ = fmt.Fprintf(f, "%d %s\n", os.Getpid(), name)
 }
 
+// waitForTabSetupRelease holds an interactive tab short of its setup-complete
+// marker while a spec holds `<tenant>.<environment>` in the hold directory, the
+// same as the POSIX stub (holdTabSetup in fixtures/seedRoot.ts).
+func waitForTabSetupRelease(args []string) {
+	dir := os.Getenv("ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS")
+	if dir == "" || len(args) < 3 {
+		return
+	}
+	hold := filepath.Join(dir, args[1]+"."+args[2])
+	for {
+		if _, err := os.Stat(hold); err != nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func main() {
 	name := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 	args := os.Args[1:]
@@ -69,6 +86,7 @@ func main() {
 			// activity_queue_app.go), then block so the tab behaves like a healthy,
 			// quiet, killable session.
 			registerStub(name)
+			waitForTabSetupRelease(args)
 			fmt.Print("erun@playwright:~$ \n")
 			_ = os.Stdout.Sync()
 			blockForever() // stay alive like `exec sleep`; ended by the harness reap or env close
@@ -92,8 +110,27 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "kubectl stub: no cluster in the Playwright harness")
 		os.Exit(1)
+	case "explorer":
+		// The desktop's host opener: record the request and open nothing.
+		recordOpenerRequest(args)
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "%s stub: disabled in the Playwright harness\n", name)
 		os.Exit(1)
 	}
+}
+
+// recordOpenerRequest appends the opener's arguments to the log the harness
+// reads back, mirroring the POSIX open/xdg-open stubs.
+func recordOpenerRequest(args []string) {
+	log := os.Getenv("ERUN_PLAYWRIGHT_OPENER_LOG")
+	if log == "" {
+		return
+	}
+	f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(f, strings.Join(args, " "))
+	_ = f.Close()
 }

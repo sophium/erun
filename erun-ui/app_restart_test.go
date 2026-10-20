@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // restartTestApp is an app whose restart records live in a temp dir and whose
@@ -26,7 +28,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorRestoreDir: restoreDir,
@@ -443,7 +445,7 @@ func restartTwoOrchestrators(t *testing.T) (*App, string, string, string) {
 	t.Helper()
 	app, restoreDir := restartTestApp(t)
 	first := createAndStartOrchestrator(t, app)
-	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, "")
+	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -595,7 +597,7 @@ func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
 	}
 	liveConversation := readRestoreState(t, restoreDir, id).ConversationID
 	stageOrchestratorConversation(t, liveConversation)
-	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
+	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, "", orchestratorLaunchInput{}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -645,7 +647,7 @@ func TestMixedRestoreAttributesEachWarningToItsOwnOrchestrator(t *testing.T) {
 
 	stale := createAndStartOrchestrator(t, app)
 	stageOrchestratorConversation(t, orchestratorSessionID(stale))
-	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, ""); err != nil {
+	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil, "", orchestratorLaunchInput{}); err != nil {
 		t.Fatalf("UpdateOrchestrator failed: %v", err)
 	}
 
@@ -888,7 +890,7 @@ func TestRestartHandoffStaysEmptyWhenNoLaunchIsNamed(t *testing.T) {
 // session object anywhere in this desktop.
 func createStoppedOrchestrator(t *testing.T, app *App) string {
 	t.Helper()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

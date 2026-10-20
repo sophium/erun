@@ -98,7 +98,8 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 }
 
 // removePortForwardStateFiles deletes every port-forward record this
-// environment could have — the state file and the log beside it. Without it,
+// environment could have — the state file and the log beside it, at the
+// canonical location and at any legacy one it was never migrated from. Without it,
 // the local port range the file names keeps getting freed and reissued to
 // whichever environment is created next, while the deleted environment's file
 // still claims it — so a stale record resolves to a live forward that belongs

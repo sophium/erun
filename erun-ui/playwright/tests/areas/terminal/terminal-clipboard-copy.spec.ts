@@ -33,9 +33,10 @@ const ESCAPE = '\x1b';
 // The Local tab's real shell prints its own prompt asynchronously once it has
 // started, over the same event channel printOnlyLine's synthetic clear uses —
 // so this waits for that known, harness-controlled prompt (see
-// fixtures/seedRoot.ts ERUN_LOCAL_SHELL_OVERRIDE) first. Only once the shell
-// has gone quiet is it safe to clear the screen and print the marker: nothing
-// else the shell does on its own can still land on row 0 afterward.
+// fixtures/seedRoot.ts ERUN_LOCAL_SHELL_OVERRIDE) first, so its startup output
+// is behind the clear. The prompt being up does not make the shell quiet: a
+// resize the spec provoked can still make it redraw its current line, which is
+// why printOnlyLine leaves the cursor off row 0.
 async function selectPrintedLine(app: AppShell, sessionId: number, marker: string): Promise<void> {
   await expect(app.terminalPane.rows()).toContainText(LOCAL_SHELL_PROMPT);
   await app.terminalPane.printOnlyLine(sessionId, marker);

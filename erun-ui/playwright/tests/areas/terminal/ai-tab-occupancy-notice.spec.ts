@@ -1,9 +1,11 @@
 import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
+  removeActivitySnapshot,
   removeCompletedJob,
   removeHeldLease,
   writeCompletedJob,
   writeHeldLease,
+  writeTruncatedActivitySnapshot,
 } from '../../../fixtures/seedRoot.js';
 
 const OCCUPANT_LEASE = 'job-fix-1201';
@@ -65,6 +67,35 @@ test.describe('AI tab occupancy notice', () => {
 
     await expect(page.getByRole('tab', { name: 'AI', exact: true })).toHaveCount(0);
 
+    removeHeldLease(tenant, environment, OCCUPANT_LEASE);
+  });
+
+  // The check reads leases through the idle status, which also parses every
+  // activity snapshot. The ERun tab rewrites its snapshot at the instant its
+  // prompt releases the queued AI start, so under load the read could land
+  // between that write's truncate and its write: the whole status read failed,
+  // the check failed open, and a second agent started with no dialog although
+  // the lease was held. The truncated snapshot is staged on a kind nothing in
+  // the inert harness records, so it is still truncated when the check reads it.
+  test('a truncated activity snapshot does not hide a held lease', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    const { tenant, environment } = seededEnv;
+    writeHeldLease(tenant, environment, OCCUPANT_LEASE);
+    writeTruncatedActivitySnapshot(tenant, environment, 'mcp');
+
+    await app.sidebar.openEnvironment(tenant, environment);
+
+    const dialog = app.aiOccupancyPromptDialog;
+    await dialog.waitForOpen();
+    await expect(dialog.locator()).toContainText(OCCUPANT_LEASE);
+    await expect(page.getByRole('tab', { name: 'AI', exact: true })).toHaveCount(0);
+
+    await dialog.cancel();
+    await dialog.waitForClosed();
+    removeActivitySnapshot(tenant, environment, 'mcp');
     removeHeldLease(tenant, environment, OCCUPANT_LEASE);
   });
 

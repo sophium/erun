@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // nudgeOrchestratorOnce drives one pacing nudge into id's live session via the
@@ -45,7 +47,7 @@ func TestOrchestratorNudgeHistorySurvivesStopThenStart(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -88,7 +90,7 @@ func TestOrchestratorNudgeHistoryFreshOrchestratorStartsAtZero(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("fresh", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("fresh", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestDeleteOrchestratorClearsNudgeHistory(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -124,7 +126,7 @@ func TestDeleteOrchestratorClearsNudgeHistory(t *testing.T) {
 		t.Fatalf("DeleteOrchestrator failed: %v", err)
 	}
 
-	recreated, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	recreated, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("recreate CreateOrchestrator failed: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestListOrchestratorsReportsHistoryForStoppedOrchestrator(t *testing.T) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -195,14 +197,14 @@ func TestOrchestratorNudgeHistoryUnreadableFileIsReportedNotSilentlyZeroed(t *te
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	defer app.shutdown(context.Background())
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}

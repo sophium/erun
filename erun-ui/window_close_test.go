@@ -72,6 +72,79 @@ func TestBeforeCloseIdleQueueUnchanged(t *testing.T) {
 	}
 }
 
+// TestATabStillBeingEstablishedDoesNotBlockTheClose holds each gated tab kind
+// in its setup phase — started, but before its ready marker — exactly as every
+// launch does for the selected environment's tabs, and asks whether the window
+// may close. Setting up a terminal is not in-flight work: the idle path must not
+// prompt, while a deploy running beside the held tab still must.
+func TestATabStillBeingEstablishedDoesNotBlockTheClose(t *testing.T) {
+	for _, kind := range []gatedSessionKind{
+		gatedSessionKindOpen,
+		gatedSessionKindAI,
+		gatedSessionKindContributeERun,
+		gatedSessionKindContributeAI,
+	} {
+		t.Run(string(kind), func(t *testing.T) {
+			assertTabSetupDoesNotBlockTheClose(t, kind)
+		})
+	}
+}
+
+func assertTabSetupDoesNotBlockTheClose(t *testing.T, kind gatedSessionKind) {
+	t.Helper()
+	app := newTestAppForWindowClose(t)
+	t.Cleanup(app.stopActionRunners)
+	emits := newCapturedEmits()
+	app.SetEmitter(emits.fn())
+	selection := uiSelection{Tenant: "pw", Environment: "alpha"}
+	held := &managedTerminal{selection: selection}
+	t.Cleanup(func() { held.signalReady(nil) })
+
+	if _, err := app.enqueueGatedSession(selection, kind, func(context.Context) (startSessionResult, *managedTerminal, error) {
+		return startSessionResult{SessionID: 1, Selection: selection}, held, nil
+	}); err != nil {
+		t.Fatalf("enqueueGatedSession: %v", err)
+	}
+	setup := app.FindActiveDeployForSelection(selection)
+	if setup.Status != activityQueueStatusRunning || setup.ActionKind != string(kind) {
+		t.Fatalf("expected the %s tab to be held running in setup, got %+v", kind, setup)
+	}
+
+	if gate := app.PrepareWindowClose(); gate.Blocked || len(gate.Running) != 0 {
+		t.Fatalf("a %s tab still being established must not block the close: %+v", kind, gate)
+	}
+	if events := emits.events(appCloseGateEvent); len(events) != 0 {
+		t.Fatalf("expected no close-gate event while only a tab is being established, got %d", len(events))
+	}
+
+	app.activityQueue.start(activityQueueEntry{
+		ID:          "deploy-1",
+		Command:     "deploy",
+		Tenant:      "pw",
+		Environment: "alpha",
+		Status:      activityQueueStatusRunning,
+	})
+	gate := app.PrepareWindowClose()
+	if !gate.Blocked || len(gate.Running) != 1 || gate.Running[0].ID != "deploy-1" {
+		t.Fatalf("a running deploy must still block the close and be the only entry named: %+v", gate)
+	}
+}
+
+// TestAnUnregisteredGatedSessionKindIsRefused keeps every entry
+// enqueueGatedSession creates recognisable to the close gate.
+func TestAnUnregisteredGatedSessionKindIsRefused(t *testing.T) {
+	app := newTestAppForWindowClose(t)
+	t.Cleanup(app.stopActionRunners)
+	started := false
+	_, err := app.enqueueGatedSession(uiSelection{Tenant: "pw", Environment: "alpha"}, gatedSessionKind("deploy"), func(context.Context) (startSessionResult, *managedTerminal, error) {
+		started = true
+		return startSessionResult{}, nil, nil
+	})
+	if err == nil || started {
+		t.Fatalf("expected an unregistered kind to be refused before starting, err=%v started=%v", err, started)
+	}
+}
+
 // TestConfirmWindowClosePersistsRecordThenQuits pins the second half of the
 // fix: confirming the close records what was running before anything is
 // killed, then quits without re-prompting.

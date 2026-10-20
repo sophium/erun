@@ -7,8 +7,9 @@ import type { UIOpenRouterModel } from '@/uiOpenRouterTypes';
 // Mirrors claudeModelTokenPattern in erun-common/ai_launch.go. A value outside
 // it reaches the shell as syntax rather than a model name, and the launch drops
 // it silently, so it is rejected at the point of entry instead of accepted and
-// then ignored.
-const claudeModelTokenPattern = /^[A-Za-z0-9._:/-]+$/;
+// then ignored. The first character excludes '-', which would reach `--model`
+// as a flag.
+const claudeModelTokenPattern = /^[A-Za-z0-9._:/][A-Za-z0-9._:/-]*$/;
 
 export function isClaudeModelToken(value: string): boolean {
   return claudeModelTokenPattern.test(value.trim());

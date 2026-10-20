@@ -24,7 +24,7 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	if err := errMissingTenantOrEnvironment("start ERun session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "open", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindOpen, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runOpenSession(ctx, selection, slot, cols, rows)
 	})
 }
@@ -218,7 +218,7 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int, confir
 	if err := errMissingTenantOrEnvironment("start AI session", selection.Tenant, selection.Environment); err != nil {
 		return startSessionResult{}, err
 	}
-	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+	return a.enqueueGatedSession(selection, gatedSessionKindAI, func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
 		return a.runAISession(ctx, selection, slot, cols, rows, confirmed)
 	})
 }
@@ -312,15 +312,25 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 }
 
 // aiSessionOccupants reuses the same idle-status resolution the titlebar polls
-// (local-vs-remote, merged) to read the environment's held leases. A failed
-// read fails open — returning no occupants rather than blocking the start —
-// because this is a best-effort notice, not an access check.
+// (local-vs-remote, merged) to read the environment's held leases. That status
+// also parses every activity snapshot, so when it fails the leases are read on
+// their own: a snapshot the leases do not depend on must not hide a held one.
+// Only a failed lease read fails open — returning no occupants rather than
+// blocking the start — because this is a best-effort notice, not an access
+// check.
 func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
 	status, err := a.LoadIdleStatus(selection)
+	if err == nil {
+		return status.Leases
+	}
+	now := time.Now()
+	leases, err := eruncommon.LoadEnvironmentActivityLeases(selection.Tenant, selection.Environment, now)
 	if err != nil {
 		return nil
 	}
-	return status.Leases
+	occupants := environmentLeasesToUI(leases, now)
+	a.verifyLeaseJobIDs(selection.Tenant, selection.Environment, occupants)
+	return occupants
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {

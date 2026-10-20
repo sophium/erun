@@ -373,35 +373,57 @@ func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time
 // createExclusiveEnvironmentActivityLeaseFile is the atomic primitive the
 // exclusive mode depends on: created is false with a nil error when another
 // claimant's create won the race, distinct from a real I/O failure.
+//
+// The claim is written to a temporary file and published with a hard link,
+// which fails when the path already exists. Creating the path first and
+// writing into it would leave an empty claim visible, and a reader that cannot
+// parse a lease reclaims it -- deleting the new claim and letting a second
+// claimant take the environment.
 func createExclusiveEnvironmentActivityLeaseFile(path string, lease EnvironmentActivityLease) (bool, error) {
 	data, err := json.MarshalIndent(lease, "", "  ")
 	if err != nil {
 		return false, err
 	}
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
-		if os.IsExist(err) {
-			return false, nil
-		}
 		return false, err
 	}
-	_, writeErr := file.Write(append(data, '\n'))
-	closeErr := file.Close()
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	_, writeErr := tmp.Write(append(data, '\n'))
+	closeErr := tmp.Close()
 	if writeErr != nil {
 		return false, writeErr
 	}
 	if closeErr != nil {
 		return false, closeErr
 	}
+	if err := os.Chmod(tmpName, 0o644); err != nil {
+		return false, err
+	}
+	if err := os.Link(tmpName, path); err != nil {
+		if os.IsExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	exclusiveLeaseClaimVisible(path)
 	return true, nil
 }
+
+// exclusiveLeaseClaimVisible runs the moment a new exclusive claim first exists
+// at its path, so a test can look at it from a concurrent reader's side.
+var exclusiveLeaseClaimVisible = func(string) {}
 
 func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) (EnvironmentActivityLease, error) {
 	data, err := json.MarshalIndent(lease, "", "  ")
 	if err != nil {
 		return EnvironmentActivityLease{}, err
 	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+	// Replaced, never rewritten in place: a reader that finds a lease it cannot
+	// parse reclaims it (readHeldEnvironmentActivityLease), so a renewal caught
+	// mid-write would delete the claim it was renewing.
+	if err := replaceFileAtomically(path, append(data, '\n'), 0o644); err != nil {
 		return EnvironmentActivityLease{}, err
 	}
 	return lease, nil

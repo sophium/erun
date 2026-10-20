@@ -1,0 +1,2 @@
+audit: erun orchestrator set-model --model deepseek/deepseek-v4.1-flash eng-1
+orchestrator eng-1: model "deepseek/deepseek-v4.1-flash" cannot be driven through the gateway: its provider requires its own reasoning echoed back -- choose another model (`erun orchestrator set-model eng-1 --model <model>`), or keep the gateway off

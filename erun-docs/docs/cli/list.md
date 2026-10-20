@@ -58,6 +58,20 @@ The line is absent when the orchestrator declares none, which is the default. [`
 
 The line is what the declaration *is*, not what it does: an orchestrator resolves this machine's own alias whether or not it declares one of its own, so the line records an intent nothing acts on yet. See [Configuration · `ERunConfig`](/reference/configuration#erunconfig) for the field's current behavior and [erun#2684](https://github.com/sophium/erun/issues/2684) for the work that will change it.
 
+An orchestrator's launch settings print the same way, one line each and only when set:
+
+```
+Orchestrators:
+  - my-orchestrator "My Orchestrator"
+    gateway: on
+    model: sonnet
+    effort: high
+    environments:
+      - my-tenant/prod role=build directory=/Users/you/code/my-project
+```
+
+Each line is absent at its default: no `gateway:` line means the orchestrator runs on this machine's own Claude Code configuration, no `model:` line means it launches on the default model (`opus`, or, when its gateway is on, the gateway catalog's default model if the catalog lists one), and no `effort:` line means `ultracode`. The lines print what is recorded, not what a running session launched with — a value changed while the orchestrator runs takes a restart to apply. [`erun orchestrator set-gateway`, `set-model`, and `set-effort`](/cli/orchestrator#launch-settings) write them, and the desktop's Edit orchestrator dialog has the same controls.
+
 ## Stale ssh aliases {#stale-ssh-aliases}
 
 [`erun sshd init`](/cli/sshd) writes a `Host erun-<tenant>-<env>` block into `~/.ssh/config`, and `erun delete` removes the one it wrote. Nothing covers the other ways a block goes stale: an environment renamed rather than deleted, or its `sshd` turned off. The block survives, still pointing at `127.0.0.1:<its old local port>` — and local ports are reissued, so the stale alias starts resolving into whichever environment inherited that port:

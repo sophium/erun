@@ -75,7 +75,7 @@ func TestAnOrchestratorsAliasSurvivesAnUnrelatedEditMadeInTheDesktop(t *testing.
 
 func mustCreateOrchestrator(t *testing.T, app *App, name string, envs []orchestratorEnvInput, alias string) orchestratorInfo {
 	t.Helper()
-	info, err := app.CreateOrchestrator(name, envs, nil, alias)
+	info, err := app.CreateOrchestrator(name, envs, nil, alias, orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator(%q) failed: %v", name, err)
 	}
@@ -84,7 +84,7 @@ func mustCreateOrchestrator(t *testing.T, app *App, name string, envs []orchestr
 
 func mustUpdateOrchestrator(t *testing.T, app *App, id, name string, envs []orchestratorEnvInput, alias string) orchestratorInfo {
 	t.Helper()
-	info, err := app.UpdateOrchestrator(id, name, envs, nil, alias)
+	info, err := app.UpdateOrchestrator(id, name, envs, nil, alias, orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("UpdateOrchestrator(%q) failed: %v", id, err)
 	}
@@ -124,7 +124,7 @@ func TestARunningOrchestratorsAliasReachesTheDialogItIsEditedFrom(t *testing.T) 
 	defer app.shutdown(context.Background())
 
 	const alias = "erun+erunpaas.com@erun"
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, alias)
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, alias, orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestTheDesktopRefusesAnAliasThisHostCannotResolve(t *testing.T) {
 	app := orchestratorAliasTestApp(t)
 	defer app.shutdown(context.Background())
 
-	_, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "erun+elsewhere.example@erun")
+	_, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "erun+elsewhere.example@erun", orchestratorLaunchInput{})
 	if err == nil {
 		t.Fatal("CreateOrchestrator accepted an alias this host does not have configured")
 	}
@@ -161,11 +161,11 @@ func TestTheDesktopRefusesAnAliasThisHostCannotResolve(t *testing.T) {
 		t.Fatalf("error %v does not name the alias it could not resolve", err)
 	}
 
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "erun+erunpaas.com@erun")
+	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "erun+erunpaas.com@erun", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator with a configured alias failed: %v", err)
 	}
-	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "aws-prod"); err == nil {
+	if _, err := app.UpdateOrchestrator(created.ID, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "aws-prod", orchestratorLaunchInput{}); err == nil {
 		t.Fatal("UpdateOrchestrator accepted a non-erun alias")
 	}
 }

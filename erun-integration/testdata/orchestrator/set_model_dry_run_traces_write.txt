@@ -1,0 +1,3 @@
+Dry run: orchestrator model update planned.
+audit: erun orchestrator set-model --dry-run --model sonnet eng-1
+write orchestrator eng-1 model

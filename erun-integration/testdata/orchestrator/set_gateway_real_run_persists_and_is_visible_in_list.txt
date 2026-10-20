@@ -1,0 +1,2 @@
+Set gateway on for orchestrator eng-1
+audit: erun orchestrator set-gateway --gateway on eng-1

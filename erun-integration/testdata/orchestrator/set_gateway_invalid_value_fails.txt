@@ -1,0 +1,2 @@
+audit: erun orchestrator set-gateway --gateway maybe eng-1
+invalid gateway "maybe": must be "on" or "off"

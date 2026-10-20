@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -443,6 +444,8 @@ func startERunAuthorizationCodeLogin(discovery OIDCDiscovery, clientID string, s
 }
 
 func TestRunERunAuthorizationCodeLoginRoundTrip(t *testing.T) {
+	t.Setenv("ERUN_HOST_OS_OVERRIDE", "linux")
+	t.Setenv("ERUN_XDG_OPEN_BIN", writeExecutableStub(t, 0))
 	tokenSrv := httptest.NewServer(authorizationCodeExchangeHandler(t, "auth-code-1", ERunTokens{AccessToken: "access-1", RefreshToken: "refresh-1", ExpiresIn: time.Hour}))
 	defer tokenSrv.Close()
 
@@ -771,5 +774,26 @@ func TestOAuthTokenErrorFallsBackToServerMessage(t *testing.T) {
 	err := oauthTokenError(http.StatusInternalServerError, []byte(`{"error":"server_error","error_description":"something broke"}`))
 	if !strings.Contains(err.Error(), "something broke") {
 		t.Fatalf("err = %v, want to mention the server's description", err)
+	}
+}
+
+// The login flow opens the authorize URL with the host's own opener, and a
+// test that forgot to stub it launched the operator's real browser at a
+// fixture hostname -- invisible in the Linux gate, a stray tab on a desktop.
+// With no per-test stub, every platform's opener must resolve to the inert
+// binary the package's TestMain installs.
+func TestNoTestCanReachTheHostBrowserOpener(t *testing.T) {
+	inert, err := exec.LookPath("true")
+	if err != nil {
+		t.Fatalf("look up inert binary: %v", err)
+	}
+	for _, hostOS := range []HostOS{HostOSDarwin, HostOSLinux, HostOSWindows} {
+		executable, args, err := erunLoginBrowserCommand(hostOS, "https://auth.example.test/authorize")
+		if err != nil {
+			t.Fatalf("%s: %v", hostOS, err)
+		}
+		if got := Command(executable, args...).Path; got != inert {
+			t.Fatalf("%s opener %q resolves to %q, want the inert %q", hostOS, executable, got, inert)
+		}
 	}
 }

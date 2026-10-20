@@ -139,7 +139,12 @@ func (s bootstrapRunner) resolveRegistryCredentialSecret(target OpenResult) (str
 // distinguishable from one that never asked.
 func (s bootstrapRunner) resolvePlatformAliasSecret(target OpenResult) (string, error) {
 	namespace := KubernetesNamespaceName(target.Tenant, target.Environment)
-	store := ConfigStore{}
+	// The runner's own store, so the alias is resolved against the same config
+	// the rest of init reads rather than whatever the default store finds.
+	var store CloudReadStore = ConfigStore{}
+	if s.Store != nil {
+		store = s.Store
+	}
 	deps := DefaultCloudDependencies()
 	name, provisioned, err := provisionMachineIdentitySecret(s.Context, store, target.Tenant, target.Environment, namespace, target.EnvConfig.KubernetesContext, deps)
 	if err != nil {

@@ -3519,18 +3519,7 @@ esac
 		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
 			t.Fatalf("env cfg: %v", err)
 		}
-		rootBody := "openrouter:\n" +
-			"  baseurl: https://openrouter.ai/api\n" +
-			"  authtokensecret: erun-claude-gateway\n" +
-			"  defaultmodel: deepseek/deepseek-v4-pro-0813\n" +
-			"  models:\n" +
-			"    - id: deepseek/deepseek-v4.1-flash\n" +
-			"      context: 1048576\n" +
-			"    - id: deepseek/deepseek-v4-pro-0813\n" +
-			"      context: 1024000\n"
-		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(rootBody), 0o644); err != nil {
-			t.Fatalf("root cfg: %v", err)
-		}
+		seedGatewayCatalog(t, setup, defaultGatewayCatalogSeed())
 		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
 		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {

@@ -148,6 +148,7 @@ function fakeOrchestrator(overrides: Partial<OrchestratorInfo> = {}): Orchestrat
     nudgeCapped: false,
     restartRequired: false,
     roleChanged: false,
+    launchSettingsChanged: false,
     ...overrides,
   };
 }

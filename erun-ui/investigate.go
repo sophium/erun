@@ -68,8 +68,11 @@ func (a *App) spawnFailureAgent(idPrefix, report, tenant, environment string, co
 		}
 	}
 	info, err := a.spawnOrchestratorSession(orchestratorSpawn{
-		id:            id,
-		name:          name,
+		id:   id,
+		name: name,
+		// A transient session has no persisted settings, so it always launches
+		// on the fixed defaults.
+		launch:        defaultOrchestratorLaunchPlan(),
 		envs:          envs,
 		initialPrompt: prompt(path),
 		transient:     true,

@@ -33,16 +33,18 @@ edge.
 `erun open` — run directly, or by the desktop app, which keeps the forward fresh by re-running `erun open --no-shell` — writes a small JSON state file per open environment:
 
 ```
-<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json
+<config-root>/portforward/mcp/<tenant>/<environment>.json
 ```
 
-`UserConfigDir` follows Go's `os.UserConfigDir`:
+`<config-root>` is the per-user config root — the same tree your tenant and environment configs live in:
 
 | OS | Path |
 |---|---|
-| macOS | `~/Library/Application Support` |
-| Linux | `$XDG_CONFIG_HOME` or `~/.config` |
-| Windows | `%AppData%` |
+| macOS | `$XDG_CONFIG_HOME/erun`, else `~/Library/Application Support/erun` |
+| Linux | `$XDG_CONFIG_HOME/erun`, else `~/.config/erun` |
+| Windows | `%XDG_CONFIG_HOME%\erun`, else `%LOCALAPPDATA%\erun` |
+
+See [Config file locations](/reference/config-locations); [`erun doctor`](/cli/doctor) prints the root ERun actually resolved.
 
 The file's `localPort` field is the port to call. For the full state-file shape, see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files).
 

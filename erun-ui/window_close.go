@@ -12,14 +12,17 @@ type uiCloseGate struct {
 // runningActivityEntries returns the activity queue entries that are
 // currently executing — the work a SIGKILL-on-close would tear down mid-flight.
 // Waiting (queued but not yet started) entries are excluded: nothing has run
-// for them yet, so closing loses no partial work.
+// for them yet, so closing loses no partial work. So is a terminal tab still
+// being established: an established tab never blocks the close, and every
+// launch establishes the selected environment's tabs, so counting their setup
+// would prompt on the idle path just after launch.
 func (a *App) runningActivityEntries() []activityQueueEntry {
 	if a.activityQueue == nil {
 		return nil
 	}
 	var running []activityQueueEntry
 	for _, entry := range a.activityQueue.list() {
-		if entry.Status == activityQueueStatusRunning {
+		if entry.Status == activityQueueStatusRunning && !isGatedSessionSetupEntry(entry) {
 			running = append(running, entry)
 		}
 	}

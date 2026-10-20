@@ -1,0 +1,2 @@
+audit: erun orchestrator set-model --model --dangerously-skip-permissions eng-1
+orchestrator eng-1: invalid model "--dangerously-skip-permissions": a model id is letters, digits and . _ : / -, and cannot start with - -- name another model or clear it (`erun orchestrator set-model eng-1 --model default`)

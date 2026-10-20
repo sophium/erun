@@ -67,7 +67,7 @@ If the expected context is missing, restore your `~/.kube/config` from the cloud
 
 ```bash
 # From your laptop:
-cat <UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json
+cat <config-root>/portforward/mcp/<tenant>/<env>.json
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<localPort>/mcp
 ```
 

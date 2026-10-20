@@ -779,26 +779,20 @@ func (a *App) restartHandoffFromOpenState(state orchestratorRestoreState) orches
 // the orchestrator the restart is resuming gets its own live conversation back
 // (see restartHandoff), so it is reported coming back to that, and a hand-off
 // that cannot be delivered falls back onto the same attached-or-derived
-// resolution every other orchestrator gets.
+// resolution every other orchestrator gets. A hand-off whose orchestrator the
+// next launch would refuse to start is not delivered either: the boot path
+// consumes it before the start is refused, so this is the only moment the
+// operator can still fix the launch and keep the task.
 func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []eruncommon.DesktopRestartReopen {
 	entries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
 	handoff := a.restartHandoff(returnToOrchestratorID)
+	launchRefusal := a.restartLaunchRefusal(handoff.OrchestratorID)
 	// The same predicate the launch itself applies to the hand-off it finds on
 	// disk, reused rather than re-derived: a hand-off that would be withheld on
 	// the way back is not what this orchestrator comes back on either.
-	delivered := handoff.ConversationID != "" && a.resumeRefusal(handoff).Text == ""
+	delivered := launchRefusal == "" && handoff.ConversationID != "" && a.resumeRefusal(handoff).Text == ""
 
-	ids := make([]string, 0, len(entries)+1)
-	for _, entry := range entries {
-		ids = append(ids, entry.OrchestratorID)
-	}
-	// A restart naming an orchestrator that is not in the open set still reopens
-	// it — the hand-off makes it the pane owner on its own — so leaving it out of
-	// the plan would be the one silence this is meant to end.
-	if handoff.OrchestratorID != "" && !containsOrchestratorID(ids, handoff.OrchestratorID) {
-		ids = append(ids, handoff.OrchestratorID)
-	}
-
+	ids := restartPreviewOrchestratorIDs(entries, handoff.OrchestratorID)
 	out := make([]eruncommon.DesktopRestartReopen, 0, len(ids))
 	for _, id := range ids {
 		if delivered && id == handoff.OrchestratorID {
@@ -809,13 +803,53 @@ func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []erunco
 			continue
 		}
 		choice := a.resolveOrchestratorConversation(orchestratorEntryOrEmpty(entries, id))
+		notice := choice.Notice
+		if id == handoff.OrchestratorID && launchRefusal != "" {
+			notice = strings.TrimSpace(launchRefusal + " " + notice)
+		}
 		out = append(out, eruncommon.DesktopRestartReopen{
 			OrchestratorID: id,
 			ConversationID: choice.ConversationID,
-			Notice:         choice.Notice,
+			Notice:         notice,
 		})
 	}
 	return out
+}
+
+// restartPreviewOrchestratorIDs is every orchestrator a restart reopens: the
+// open set in its recorded order, then the hand-off's own orchestrator. A
+// restart naming one that is not in the open set still reopens it -- the
+// hand-off makes it the pane owner on its own -- so leaving it out of the plan
+// would be the one silence the preview is meant to end.
+func restartPreviewOrchestratorIDs(entries []orchestratorOpenEntry, handoffID string) []string {
+	ids := make([]string, 0, len(entries)+1)
+	for _, entry := range entries {
+		ids = append(ids, entry.OrchestratorID)
+	}
+	if handoffID != "" && !containsOrchestratorID(ids, handoffID) {
+		ids = append(ids, handoffID)
+	}
+	return ids
+}
+
+// restartLaunchRefusal answers, before a restart, whether the launch that
+// follows would refuse to start id -- resolved exactly as that start resolves
+// it, credential included -- and what to do about it. "" when it would start,
+// or when id names no persisted orchestrator, which no launch would resolve.
+func (a *App) restartLaunchRefusal(id string) string {
+	if id == "" {
+		return ""
+	}
+	def, err := a.findOrchestratorConfig(id)
+	if err != nil {
+		return ""
+	}
+	if _, err := a.resolvePersistedOrchestratorLaunch(def); err != nil {
+		return fmt.Sprintf("The restart will not start %s, so its task will not be continued: %v. "+
+			"Fix that before restarting, or check %s in the orchestrators working directory once it starts.",
+			id, err, orchestratorReturnNoteName(id))
+	}
+	return ""
 }
 
 // containsOrchestratorID reports whether ids already names id.

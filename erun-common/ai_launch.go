@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -114,8 +115,31 @@ func resolveAvailableClaudeModel(config EnvironmentClaudeConfig) string {
 }
 
 // claudeModelTokenPattern guards a persisted model name so it can only reach the
-// launch script as a plain argv token, never shell or flag syntax.
-var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+// launch script as a plain argv token, never shell or flag syntax. The first
+// character excludes '-': a value such as `--dangerously-skip-permissions` is
+// made of allowed characters and would otherwise reach `--model` as a flag.
+var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/][A-Za-z0-9._:/-]*$`)
+
+// ValidateClaudeModelID reports whether id is a model id a launch can pass:
+// letters, digits and . _ : / -, never starting with -.
+func ValidateClaudeModelID(id string) error {
+	if !claudeModelTokenPattern.MatchString(id) {
+		return fmt.Errorf("invalid model %q: a model id is letters, digits and . _ : / -, and cannot start with -", id)
+	}
+	return nil
+}
+
+// ClaudeEffortLevels returns the selectable effort levels in ascending order.
+// A fresh copy, so a caller offering them as choices cannot reorder the source.
+func ClaudeEffortLevels() []string {
+	out := make([]string, len(claudeEffortLevels))
+	copy(out, claudeEffortLevels)
+	return out
+}
+
+// DefaultClaudeEffortLevel is the effort a session launches with when nothing
+// chose one.
+const DefaultClaudeEffortLevel = defaultClaudeEffort
 
 // AISessionLaunchCommand returns the shell command the AI tab's persistent
 // remote session runs as its program — for claude, a guard that resumes the
