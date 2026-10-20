@@ -111,10 +111,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "kubectl stub: no cluster in the Playwright harness")
 		os.Exit(1)
 	case "explorer":
-		// The desktop's host opener: accept the request and open nothing.
+		// The desktop's host opener: record the request and open nothing.
+		recordOpenerRequest(args)
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "%s stub: disabled in the Playwright harness\n", name)
 		os.Exit(1)
 	}
+}
+
+// recordOpenerRequest appends the opener's arguments to the log the harness
+// reads back, mirroring the POSIX open/xdg-open stubs.
+func recordOpenerRequest(args []string) {
+	log := os.Getenv("ERUN_PLAYWRIGHT_OPENER_LOG")
+	if log == "" {
+		return
+	}
+	f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	_, _ = fmt.Fprintln(f, strings.Join(args, " "))
+	_ = f.Close()
 }

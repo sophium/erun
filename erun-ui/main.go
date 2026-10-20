@@ -64,6 +64,20 @@ func main() {
 	// our additions in normal mode.
 	os.Args = append([]string{os.Args[0]}, parsed.Leftover...)
 
+	app := NewApp(desktopDeps(headless))
+
+	if headless {
+		if err := runHeadless(app, port); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	runWails(app)
+}
+
+// desktopDeps is the composition-root dependency set for one launch mode.
+func desktopDeps(headless bool) erunUIDeps {
 	deps := erunUIDeps{
 		store:           eruncommon.ConfigStore{},
 		findProjectRoot: eruncommon.FindProjectRoot,
@@ -75,17 +89,12 @@ func main() {
 		// window, so the headless build supplies a stub. Window state
 		// is irrelevant when there is no window to restore.
 		deps.windowMaximised = func(context.Context) bool { return false }
+		// A headless backend is started by a harness or a terminal that hands
+		// it its environment on purpose; importing the login shell's PATH would
+		// replace the stubs the Playwright harness puts first on it.
+		deps.skipLoginShellEnv = true
 	}
-	app := NewApp(deps)
-
-	if headless {
-		if err := runHeadless(app, port); err != nil {
-			log.Fatal(err)
-		}
-		return
-	}
-
-	runWails(app)
+	return deps
 }
 
 // parsedCLIFlags is the outcome of parsing erun-app's own command-line

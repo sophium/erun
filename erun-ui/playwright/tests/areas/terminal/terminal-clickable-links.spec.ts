@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
-import { LOCAL_SHELL_PROMPT, SEED_TENANT } from '../../../fixtures/seedRoot.js';
+import { LOCAL_SHELL_PROMPT, openerCalls, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import type { AppShell } from '../../../pages/index.js';
 import { captureInvokes, type InvokeCall, parseInvoke } from '../../../pages/index.js';
 import type { Page } from '@playwright/test';
@@ -156,6 +156,7 @@ test.describe('clickable terminal links (#1354)', () => {
       await hoverAndClickDecoratedLink(app);
 
       await expect.poll(() => openHostPathCalls(invokes)).toContain(target);
+      await expect.poll(() => openerCalls()).toContain(target);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -200,5 +201,9 @@ test.describe('clickable terminal links (#1354)', () => {
 
     await expect.poll(() => openHostPathCalls(invokes)).toContain('/etc/hosts');
     expect(resolveEnvironmentHostPathCalls(invokes)).toHaveLength(0);
+    // The open must land on the harness's inert opener, never the operator's
+    // own: on macOS a backend that re-imported its login shell's PATH ran the
+    // real `open` here and put /etc/hosts on the operator's screen.
+    await expect.poll(() => openerCalls()).toContain('/etc/hosts');
   });
 });

@@ -124,6 +124,22 @@ export function stubRegistryPath(): string {
 // open short of printing its setup-complete marker, so the desktop's gated
 // session stays in setup for exactly as long as the spec needs. Per worker,
 // removed with the isolated root.
+// openerLogPath is where the inert OS-opener stubs (open, xdg-open, explorer)
+// record each request, one line of arguments per call. A spec reads it back to
+// prove a host path reached the stub rather than the operator's real opener.
+export function openerLogPath(): string {
+  return path.join(isolatedRoot(), 'opener-calls');
+}
+
+// openerCalls returns every request the opener stubs received so far.
+export function openerCalls(): string[] {
+  try {
+    return fs.readFileSync(openerLogPath(), 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 export function tabSetupHoldsDir(): string {
   return path.join(isolatedRoot(), 'tab-setup-holds');
 }
@@ -266,6 +282,8 @@ export function backendEnv(): Record<string, string> {
     // Where a spec parks an interactive tab short of its setup-complete marker
     // (holdTabSetup above). Read by the erun stub only.
     ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS: tabSetupHoldsDir(),
+    // Where the OS-opener stubs record each request (openerCalls above).
+    ERUN_PLAYWRIGHT_OPENER_LOG: openerLogPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -585,7 +603,8 @@ function writeStubBinary(name: string): void {
   } else if (name === 'open' || name === 'xdg-open') {
     body = [
       '#!/bin/sh',
-      `# erun playwright stub for ${name}: accepts the request and opens nothing.`,
+      `# erun playwright stub for ${name}: records the request and opens nothing.`,
+      '[ -n "$ERUN_PLAYWRIGHT_OPENER_LOG" ] && printf \'%s\\n\' "$*" >> "$ERUN_PLAYWRIGHT_OPENER_LOG"',
       'exit 0',
       '',
     ].join('\n');

@@ -81,31 +81,35 @@ type erunUIDeps struct {
 	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
 	// resolveGatewayCredential reads the secret an orchestrator launched through
 	// the gateway sends, injectable so a test never reads the real secret store.
-	resolveGatewayCredential     func(*eruncommon.OpenRouterConfig) (string, error)
-	savePastedFile               func(pastedFileSaveParams) (string, error)
-	listAgentOutputs             func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
-	downloadAgentOutput          func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff                     func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	execCommit                   func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
-	execPush                     func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
-	loadIdleStatus               func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
-	loadEnvironmentJobs          func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
-	readEnvironmentJobOutput     func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
-	cancelEnvironmentJob         func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
-	whipEnvironment              func(context.Context, string, string, string, string) (eruncommon.WhipResult, error)
-	loadAPILog                   func(context.Context, uiTenantDashboardInput) (string, error)
-	workspaceSyncReady           func(context.Context, string) error
-	syncWorkspace                func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
-	workspaceSyncInterval        time.Duration
-	recordActivity               func(eruncommon.EnvironmentActivityParams) error
-	runWorkingIssueCommand       workingIssueCommandRunner
-	loadPodBranch                func(context.Context, string, string) (string, error)
-	runPodRaw                    func(context.Context, string, string, []string) (string, error)
-	execRuntimePod               func(context.Context, uiSelection, string) (string, error)
-	loadRuntimeUsage             func(context.Context, uiSelection) (uiRuntimeUsage, error)
-	stopCloudContext             func(context.Context, string) (eruncommon.CloudContextStatus, error)
-	windowStatePath              string
-	windowMaximised              func(context.Context) bool
+	resolveGatewayCredential func(*eruncommon.OpenRouterConfig) (string, error)
+	savePastedFile           func(pastedFileSaveParams) (string, error)
+	listAgentOutputs         func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
+	downloadAgentOutput      func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
+	loadDiff                 func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
+	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
+	loadIdleStatus           func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadEnvironmentJobs      func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
+	readEnvironmentJobOutput func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
+	cancelEnvironmentJob     func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
+	whipEnvironment          func(context.Context, string, string, string, string) (eruncommon.WhipResult, error)
+	loadAPILog               func(context.Context, uiTenantDashboardInput) (string, error)
+	workspaceSyncReady       func(context.Context, string) error
+	syncWorkspace            func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
+	workspaceSyncInterval    time.Duration
+	recordActivity           func(eruncommon.EnvironmentActivityParams) error
+	runWorkingIssueCommand   workingIssueCommandRunner
+	loadPodBranch            func(context.Context, string, string) (string, error)
+	runPodRaw                func(context.Context, string, string, []string) (string, error)
+	execRuntimePod           func(context.Context, uiSelection, string) (string, error)
+	loadRuntimeUsage         func(context.Context, uiSelection) (uiRuntimeUsage, error)
+	stopCloudContext         func(context.Context, string) (eruncommon.CloudContextStatus, error)
+	windowStatePath          string
+	windowMaximised          func(context.Context) bool
+	// skipLoginShellEnv leaves the process environment as the caller gave it.
+	// Set for --headless, whose caller always supplies its environment on
+	// purpose -- the importer exists for launchd's minimal Finder/Dock env.
+	skipLoginShellEnv            bool
 	cloneERun                    func(context.Context, string, string) error
 	contributeStatePath          string
 	interruptedActivityPath      string
@@ -673,7 +677,9 @@ func (a *App) startup(ctx context.Context) {
 	// Homebrew PATH, no KUBECONFIG, no AWS_* — so pull a short allowlist from the
 	// user's login shell, and do it first so every later shell-out sees the same
 	// state the user's terminal does.
-	importLoginShellEnv()
+	if !a.deps.skipLoginShellEnv {
+		importLoginShellEnv()
+	}
 	configureAppIdentity("ERun")
 	observeAppActivation()
 	a.startActivityPollers()
