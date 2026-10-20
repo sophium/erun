@@ -4608,7 +4608,15 @@ func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies
 	}
 }
 
+// stubUIStoreConfigMu guards the root config a stubUIStore points at. Opening
+// an environment reads it from the runtime-ensure goroutine while the test's
+// own goroutine may be saving it, and the stub is copied by value, so the lock
+// cannot live on the stub itself.
+var stubUIStoreConfigMu sync.Mutex
+
 func (s stubUIStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+	stubUIStoreConfigMu.Lock()
+	defer stubUIStoreConfigMu.Unlock()
 	if s.config == nil {
 		return eruncommon.ERunConfig{}, "", nil
 	}
@@ -4631,6 +4639,8 @@ func (s stubUIStore) SaveProjectConfig(projectRoot string, config eruncommon.Pro
 }
 
 func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {
+	stubUIStoreConfigMu.Lock()
+	defer stubUIStoreConfigMu.Unlock()
 	if s.config != nil {
 		*s.config = config
 	}

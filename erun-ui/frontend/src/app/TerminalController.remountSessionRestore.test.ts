@@ -35,7 +35,17 @@ const EXTRA_MARKER = 'EXTRA-PROMPT-MARKER';
 const EXTRA = 501;
 
 type OutputHandler = (payload: TerminalOutputPayload) => void;
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+// Waits on xterm's own write queue instead of the clock. A switch runs from a
+// write callback and then issues writes of its own, so the first barrier lets
+// the queued switch run and the second lets what it wrote be parsed.
+async function settled(terminal: Terminal): Promise<void> {
+  for (let barrier = 0; barrier < 2; barrier += 1) {
+    await new Promise<void>((resolve) => {
+      terminal.write('', resolve);
+    });
+  }
+}
 
 function installBrowserGlobals(): Map<string, OutputHandler[]> {
   Object.defineProperty(window, 'matchMedia', {
@@ -100,26 +110,26 @@ test('a remounted pane renders the session the store already names', async () =>
   };
 
   let unmount = controller.mount(elements());
+  const first = (controller as unknown as { terminal: Terminal }).terminal;
   const reader = new SerializeAddon();
-  (controller as unknown as { terminal: Terminal }).terminal.loadAddon(reader);
+  first.loadAddon(reader);
 
   store.dispatch(setSessionId(EXTRA));
-  await sleep(10);
+  await settled(first);
   controller.resetTerminal();
   emit(EXTRA, `${EXTRA_MARKER}\r\n`.repeat(4));
-  await sleep(30);
+  await settled(first);
   assert.ok(reader.serialize().includes(EXTRA_MARKER), 'setup: extra did not render');
 
   // The pane is torn down and rebuilt -- a layout change, a window re-open --
   // with the store still naming the session the reader was on, and nothing
   // dispatching a session id afterwards.
   unmount();
-  await sleep(10);
   unmount = controller.mount(elements());
   const terminal = (controller as unknown as { terminal: Terminal }).terminal;
   const reader2 = new SerializeAddon();
   terminal.loadAddon(reader2);
-  await sleep(60);
+  await settled(terminal);
 
   const landed = reader2.serialize();
   unmount();
