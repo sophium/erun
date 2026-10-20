@@ -253,15 +253,18 @@ var claudeSessionNameTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._
 //
 // The gateway credential is deliberately absent here. A launch command's argv
 // is visible to anything that can list processes, so the token reaches the pod
-// through Claude Code's settings env block instead — see OpenRouterConfig.
-// AuthTokenRef. Only non-secret routing values belong in this prefix.
+// as the container's ANTHROPIC_AUTH_TOKEN, read from the gateway Secret that
+// deploy writes from OpenRouterConfig.AuthTokenRef. Only non-secret routing
+// values belong in this prefix.
 func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
 	model := resolveClaudeLaunchModel(claude, gateway)
 	if model == "" {
 		return ""
 	}
 	prefix := "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
-	if context := gateway.ContextFor(model); context > 0 {
+	// Through the opt-out: an environment that left the gateway is not running
+	// the catalog's model, even when its own choice shares a catalog id.
+	if context := EffectiveGateway(claude, gateway).ContextFor(model); context > 0 {
 		prefix = "CLAUDE_CODE_MAX_CONTEXT_TOKENS=" + strconv.Itoa(context) + " " + prefix
 	}
 	return prefix

@@ -19,6 +19,8 @@ async function withGatewayCatalog(page: import('@playwright/test').Page): Promis
     };
     if (payload.data?.claudeDefaults) {
       payload.data.claudeDefaults.gatewayConfigured = true;
+      payload.data.claudeDefaults.gatewayModels = ['vendor/model-x'];
+      payload.data.claudeDefaults.gatewayDefaultModel = 'vendor/model-x';
     }
     await route.fulfill({ response, json: payload });
   });
@@ -53,4 +55,47 @@ test.describe('per-environment gateway overrides', () => {
     // one when the catalog is global.
     await expect(app.manageDialog.claudeGatewaySecretInput()).toHaveCount(0);
   });
+
+  // The reported defect: choosing Disabled (or Enabled) snapped back to
+  // Default, the tab never became dirty, and Save wrote nothing — so an
+  // environment could not be taken off the gateway from the desktop at all.
+  for (const choice of ['Disabled', 'Enabled'] as const) {
+    test(`choosing ${choice} sticks, marks the tab dirty, and is saved`, async ({ app, page }) => {
+      await withGatewayCatalog(page);
+      // Saves are stubbed to echo the submitted config back, so the dialog runs
+      // a full save cycle without writing the seeded config.
+      const saved: { claude?: { useGateway?: boolean } }[] = [];
+      await page.route('**/__erun_invoke', async (route: Route, request: Request) => {
+        const body = JSON.parse(request.postData() ?? '{}') as { method: string; args: unknown[] };
+        if (body.method !== 'SaveEnvironmentConfig') {
+          await route.fallback();
+          return;
+        }
+        const config = body.args[1] as { claude?: { useGateway?: boolean } };
+        saved.push(config);
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: config }),
+        });
+      });
+      await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
+      await app.manageDialog.waitForOpen();
+      await app.manageDialog.selectTab('AI');
+      expect(await app.manageDialog.tabHasUnsavedChanges('AI')).toBe(false);
+
+      await app.manageDialog.chooseClaudeGateway(choice);
+
+      await expect(app.manageDialog.claudeGatewayField()).toContainText(choice);
+      await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('AI')).toBe(true);
+      // The model choices follow the gateway choice before the save: off the
+      // gateway the environment launches its own models, on it the catalog's.
+      await expect(app.manageDialog.claudeDefaultModelSelect()).toContainText(
+        choice === 'Disabled' ? 'Default (opus)' : 'Default (vendor/model-x)',
+      );
+
+      await app.manageDialog.save();
+      await expect.poll(() => saved.length).toBe(1);
+      expect(saved[0]?.claude?.useGateway).toBe(choice === 'Enabled');
+    });
+  }
 });

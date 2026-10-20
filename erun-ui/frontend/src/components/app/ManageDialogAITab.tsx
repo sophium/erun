@@ -5,9 +5,19 @@ import { useAppDispatch } from '@/app/hooks';
 import { updateManageClaudeConfig } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
 import { CheckboxField } from '@/components/app/ManageDialog.fields';
-import { isClaudeOverridden, isValidClaudeTokens } from '@/components/app/ManageDialog.helpers';
-import { ClaudeGatewayFields } from '@/components/app/ManageDialogAIClaudeGateway';
-import { ClaudeAddModelField } from '@/components/app/ManageDialogAIClaudeModels';
+import {
+  effectiveClaudeModelDefaults,
+  isClaudeOverridden,
+  isValidClaudeTokens,
+} from '@/components/app/ManageDialog.helpers';
+import {
+  ClaudeGatewayFields,
+  ClaudeGatewayNoModelsNotice,
+} from '@/components/app/ManageDialogAIClaudeGateway';
+import {
+  ClaudeAddModelField,
+  ClaudeDefaultModelField,
+} from '@/components/app/ManageDialogAIClaudeModels';
 import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
@@ -30,28 +40,18 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
   const config = dialog.config;
   const claude = config.claude;
   const defaults = config.claudeDefaults;
+  const effective = effectiveClaudeModelDefaults(claude, defaults);
   const disabled = dialog.busy || dialog.configLoading;
   const overridden = isClaudeOverridden(claude);
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
-          Claude
-        </div>
-        {overridden && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={disabled}
-            onClick={() => {
-              dispatch(updateManageClaudeConfig(claudeOverrideResetValues));
-            }}
-          >
-            Reset all to defaults
-          </Button>
-        )}
-      </div>
+      <ClaudeSectionHeader
+        overridden={overridden}
+        disabled={disabled}
+        onReset={() => {
+          dispatch(updateManageClaudeConfig(claudeOverrideResetValues));
+        }}
+      />
       <ClaudeBoolField
         id="environment-config-claude-mantle"
         label="Use Mantle"
@@ -74,8 +74,9 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
           dispatch(updateManageClaudeConfig({ useBedrock }));
         }}
       />
+      <ClaudeGatewayNoModelsNotice effective={effective} />
       <ClaudeModelsField
-        defaults={defaults}
+        defaults={effective.defaults}
         value={claude.models ?? []}
         disabled={disabled}
         onChange={(models) => {
@@ -100,7 +101,7 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
       />
       <ClaudeDefaultModelField
         claude={claude}
-        defaults={defaults}
+        effective={effective}
         disabled={disabled}
         onChange={(defaultModel) => {
           dispatch(updateManageClaudeConfig({ defaultModel }));
@@ -126,6 +127,29 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
   );
 }
 
+function ClaudeSectionHeader({
+  overridden,
+  disabled,
+  onReset,
+}: {
+  overridden: boolean;
+  disabled: boolean;
+  onReset: () => void;
+}): React.ReactElement {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+        Claude
+      </div>
+      {overridden && (
+        <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onReset}>
+          Reset all to defaults
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function ClaudeVerboseDebugField({
   claude,
   disabled,
@@ -146,53 +170,6 @@ function ClaudeVerboseDebugField({
       disabled={disabled}
       onChange={(checked) => {
         onChange(checked ? true : undefined);
-      }}
-    />
-  );
-}
-
-function ClaudeDefaultModelField({
-  claude,
-  defaults,
-  disabled,
-  onChange,
-}: {
-  claude: UIEnvironmentConfig['claude'];
-  defaults: UIEnvironmentConfig['claudeDefaults'];
-  disabled?: boolean;
-  onChange: (value: string | undefined) => void;
-}): React.ReactElement {
-  // The selectable models mirror what launch-side resolution honours, so an
-  // operator can never pick a model the env does not expose. A stored model
-  // no longer in that set stays visible as a flagged option but is dropped at
-  // launch.
-  const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
-  // "Default" starts on the first available model rather than the agent's own
-  // default, so name it "Default (<model>)" to show which model that is.
-  const defaultLaunchModel = available[0] ?? '';
-  const options = [
-    {
-      value: 'default',
-      label: defaultLaunchModel ? `Default (${defaultLaunchModel})` : 'Default',
-    },
-    ...available.map((model) => ({ value: model, label: model })),
-  ];
-  if (claude.defaultModel && !available.includes(claude.defaultModel)) {
-    options.push({
-      value: claude.defaultModel,
-      label: `${claude.defaultModel} (not in available models — ignored at launch)`,
-    });
-  }
-  return (
-    <SelectField
-      id="environment-config-claude-default-model"
-      label="Default model"
-      value={claude.defaultModel ?? 'default'}
-      options={options}
-      helper="Model the AI tab preselects (claude --model). Options are this environment's available models — tick a model above to make it selectable here. Default launches the first available model (never fable, which stays opt-in). Saving a change reopens open AI tabs; the Claude session resumes."
-      disabled={disabled}
-      onChange={(next) => {
-        onChange(next === 'default' ? undefined : next);
       }}
     />
   );

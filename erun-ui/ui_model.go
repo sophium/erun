@@ -1133,13 +1133,20 @@ type uiEnvironmentConfig struct {
 	// ImagePullSecrets names the Kubernetes dockerconfigjson secrets the runtime
 	// pod pulls its image with. Without one a private runtime image leaves the
 	// pod in ImagePullBackOff, which the app could previously cause and not fix.
-	ImagePullSecrets      []string                `json:"imagePullSecrets,omitempty"`
-	RuntimePod            uiRuntimePodConfig      `json:"runtimePod"`
-	SSHD                  uiSSHDConfig            `json:"sshd"`
-	Idle                  uiIdleConfig            `json:"idle"`
-	Claude                uiClaudeConfig          `json:"claude"`
-	ClaudeDefaults        uiClaudeDefaults        `json:"claudeDefaults"`
-	AITool                string                  `json:"aiTool,omitempty"`
+	ImagePullSecrets []string           `json:"imagePullSecrets,omitempty"`
+	RuntimePod       uiRuntimePodConfig `json:"runtimePod"`
+	SSHD             uiSSHDConfig       `json:"sshd"`
+	Idle             uiIdleConfig       `json:"idle"`
+	Claude           uiClaudeConfig     `json:"claude"`
+	ClaudeDefaults   uiClaudeDefaults   `json:"claudeDefaults"`
+	AITool           string             `json:"aiTool,omitempty"`
+	// AILaunchSignature is the command the environment's AI tab launches with
+	// for the persisted config, computed by the same eruncommon resolution the
+	// launch uses (gateway, model, effort, Remote Control). A save whose value
+	// changed reopens the open AI tabs; deciding that here rather than from a
+	// copy of the rules in the frontend keeps the two from disagreeing. Read
+	// only: a save ignores it and returns a fresh one.
+	AILaunchSignature     string                  `json:"aiLaunchSignature"`
 	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
 	AutoStart             *bool                   `json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
@@ -1246,6 +1253,13 @@ type uiClaudeDefaults struct {
 	// Without one the per-environment controls have nothing to override, so the
 	// AI tab hides them rather than offering a switch that changes nothing.
 	GatewayConfigured bool `json:"gatewayConfigured"`
+	// GatewayModels and GatewayDefaultModel are the catalog's selectable models
+	// and the model a gateway launch falls back to. They stand beside Models and
+	// KnownModels rather than replacing them, because which set applies is the
+	// environment's own choice: the AI tab picks from the draft's useGateway, so
+	// an environment that leaves the gateway is offered its own models at once.
+	GatewayModels       []string `json:"gatewayModels"`
+	GatewayDefaultModel string   `json:"gatewayDefaultModel"`
 }
 
 type uiRuntimePodConfig struct {

@@ -1,5 +1,6 @@
 import * as React from 'react';
 
+import type { effectiveClaudeModelDefaults } from '@/components/app/ManageDialog.helpers';
 import { ClaudeBoolField } from '@/components/app/ManageDialogAITab';
 import type { UIEnvironmentConfig } from '@/types';
 
@@ -39,5 +40,28 @@ export function ClaudeGatewayFields({
         }}
       />
     </div>
+  );
+}
+
+// ClaudeGatewayNoModelsNotice names the one gateway state that cannot launch:
+// the gateway applies to this environment, but its catalog lists no model an AI
+// tab can run. Without it the model choices would read as empty with no reason.
+export function ClaudeGatewayNoModelsNotice({
+  effective,
+}: {
+  effective: ReturnType<typeof effectiveClaudeModelDefaults>;
+}): React.ReactElement | null {
+  if (!effective.viaGateway || effective.available.length > 0) {
+    return null;
+  }
+  return (
+    <p
+      className="text-xs text-amber-700 dark:text-amber-400 [overflow-wrap:anywhere]"
+      data-testid="environment-config-claude-gateway-no-models"
+    >
+      This environment uses the gateway, but its catalog lists no model an AI tab can run. Add a
+      runnable model to the gateway catalog in ERun settings, or turn off &quot;Use the
+      gateway&quot; below.
+    </p>
   );
 }

@@ -537,3 +537,39 @@ func TestHostedMarkerNormalizesTheAPIHost(t *testing.T) {
 		t.Fatalf("the same host written two ways read as two platforms: %v", err)
 	}
 }
+
+// TestBuildEnvDefinitionPlanSeesEveryClaudeField pins that a pull which would
+// change any Claude setting reports it. The plan compares rendered fields, so a
+// Claude field left out of the rendering was overwritten by a pull with no
+// change and no prompt — an environment's effort or default model replaced
+// silently.
+func TestBuildEnvDefinitionPlanSeesEveryClaudeField(t *testing.T) {
+	low, high := "low", "high"
+	opus, sonnet := "opus", "sonnet"
+	small, large := 16000, 64000
+	cases := []struct {
+		name            string
+		local, platform EnvironmentClaudeConfig
+	}{
+		{"effort", EnvironmentClaudeConfig{Effort: &low}, EnvironmentClaudeConfig{Effort: &high}},
+		{"default model", EnvironmentClaudeConfig{DefaultModel: &opus}, EnvironmentClaudeConfig{DefaultModel: &sonnet}},
+		{"max output tokens", EnvironmentClaudeConfig{MaxOutputTokens: &small}, EnvironmentClaudeConfig{MaxOutputTokens: &large}},
+		{"verbose debug", EnvironmentClaudeConfig{}, EnvironmentClaudeConfig{VerboseDebug: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			platform := tc.platform
+			plan := BuildEnvDefinitionPlan(EnvDefinitionPlanParams{
+				Local:            EnvConfig{Name: "same", Type: EnvironmentTypeRuntime, Claude: tc.local},
+				Definition:       PlatformEnvDefinition{Claude: &platform},
+				PlatformName:     "same",
+				PlatformType:     string(EnvironmentTypeRuntime),
+				LocalRevision:    1,
+				PlatformRevision: 1,
+			})
+			if len(plan.Changes) != 1 {
+				t.Fatalf("a pull that changes the Claude %s reported changes %+v, want one", tc.name, plan.Changes)
+			}
+		})
+	}
+}

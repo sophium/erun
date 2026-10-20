@@ -13,6 +13,10 @@ export function compactClaudeDraft(
   const next: UIEnvironmentConfig['claude'] = {};
   if (merged.useMantle !== undefined) next.useMantle = merged.useMantle;
   if (merged.useBedrock !== undefined) next.useBedrock = merged.useBedrock;
+  // In the Go JSON order (ui_model.go uiClaudeConfig): the AI tab's dirty check
+  // compares serialized drafts, so a key appended out of order would mark a
+  // loaded override as an unsaved change.
+  if (merged.useGateway !== undefined) next.useGateway = merged.useGateway;
   if (merged.models !== undefined && merged.models.length > 0) next.models = merged.models;
   if (merged.maxOutputTokens !== undefined) next.maxOutputTokens = merged.maxOutputTokens;
   if (merged.effort !== undefined) next.effort = merged.effort;
@@ -21,21 +25,17 @@ export function compactClaudeDraft(
   return next;
 }
 
-// aiSessionLaunchSignature distills the env config down to what changes the AI
-// tab's Claude launch command, mirroring the resolution erun-common's
-// AISessionLaunchCommand (the Go owner) applies. A save whose signature changed
-// must reopen the env's open AI tabs — a launch flag only takes effect when the
-// persistent session restarts. Non-claude tools launch verbatim and are
+// aiSessionLaunchSignature is the launch command the env's AI tab runs for a
+// config, as the backend resolved it (erun-common AISessionLaunchCommand). A
+// save whose signature changed must reopen the env's open AI tabs — a launch
+// flag only takes effect when the persistent session restarts. It is read from
+// the backend rather than re-derived here because the launch resolves the
+// erun-level gateway, the env's opt-out, the catalog's models and Remote
+// Control together, and a copy of those rules in the frontend is what let a
+// gateway change go unapplied. Non-claude tools launch verbatim and are
 // filtered backend-side by EndAISessions.
 export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
-  const claude = config.claude;
-  const available =
-    (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : config.claudeDefaults.models;
-  const model =
-    claude.defaultModel && available.includes(claude.defaultModel) ? claude.defaultModel : '';
-  return [claude.effort ?? '', model, claude.verboseDebug === true ? 'verbose-debug' : ''].join(
-    ' ',
-  );
+  return config.aiLaunchSignature;
 }
 
 // versionSourceSignature captures what decides which registries the version
@@ -77,7 +77,10 @@ export function nextPendingRedeploy(
 // autoUpgrade/upgradeChannel select a future `erun upgrade`, autoStart and
 // remoteHostCredentials and sshd sync are desktop-side, and claude
 // effort/defaultModel/verboseDebug only change the AI launch command (the save
-// path relaunches AI tabs for those instead).
+// path relaunches AI tabs for those instead). useGateway is deploy-relevant as
+// well as a launch input: it decides whether the chart renders the gateway's
+// base URL, models and credential reference, and whether deploy applies or
+// prunes the gateway credential Secret.
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
     // A local-agent env's worktree hostPath is its LocalRepoPath, so retargeting
@@ -105,6 +108,7 @@ function deployRelevantSignature(config: UIEnvironmentConfig): string {
     claudePod: {
       useMantle: config.claude.useMantle,
       useBedrock: config.claude.useBedrock,
+      useGateway: config.claude.useGateway,
       models: config.claude.models,
       maxOutputTokens: config.claude.maxOutputTokens,
     },

@@ -180,6 +180,11 @@ type OpenResult struct {
 	// so deploy tells the in-pod dind daemon to trust it (an in-pod build pushes
 	// to this non-loopback host, which dind would otherwise reject as needing TLS).
 	ClusterRegistryInsecure bool
+	// Gateway is the erun-level gateway catalog, resolved with the target so
+	// every caller that launches or diagnoses the environment's AI session
+	// reaches the same catalog instead of each reading it (or forgetting to).
+	// Nil when no catalog is configured or the root config cannot be read.
+	Gateway *OpenRouterConfig
 }
 
 func (r OpenResult) RemoteRepo() bool {
@@ -212,12 +217,11 @@ type ShellLaunchParams struct {
 	AITool     string
 	Claude     EnvironmentClaudeConfig
 	// Gateway is the erun-level OpenRouter catalog, when the operator has
-	// configured one. Set by the callers that launch an AI session, and by the
-	// callers that diagnose an environment: the deploy diagnosis resolves this
-	// environment's effective gateway through it to tell a gateway-routed
-	// environment whose pod template never consumed the gateway from a healthy
-	// one (runtime_agent_credentials.go). Nil for every other use of these
-	// params, which leaves both the launch and the diagnosis unchanged.
+	// configured one, carried over from OpenResult.Gateway. The AI launch
+	// resolves this environment's effective gateway through it (model, Remote
+	// Control, context window), and so does the deploy diagnosis, to tell a
+	// gateway-routed environment whose pod template never consumed the gateway
+	// from a healthy one (runtime_agent_credentials.go).
 	Gateway *OpenRouterConfig
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
@@ -420,7 +424,20 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		LocalPorts:   localPorts,
 		RepoPath:     repoPath,
 		Title:        tenant + "-" + environment,
+		Gateway:      resolveOpenGateway(store),
 	}, nil
+}
+
+// resolveOpenGateway reads the erun-level gateway catalog for a resolved
+// target. A root config that cannot be read leaves it unset rather than failing
+// the open: the catalog only changes how an AI session is routed, and the
+// unreadable config itself is reported by whatever inspects the root config.
+func resolveOpenGateway(store OpenStore) *OpenRouterConfig {
+	gateway, err := ResolveOpenRouterConfig(store)
+	if err != nil {
+		return nil
+	}
+	return gateway
 }
 
 // tenantResolutionRemedy renders the second half of resolveOpenTenant's
@@ -695,6 +712,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		Idle:               result.EnvConfig.Idle,
 		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
 		Claude:             result.EnvConfig.Claude,
+		Gateway:            result.Gateway,
 		RuntimeImage:       strings.TrimSpace(result.EnvConfig.RuntimeImage),
 		RuntimeVersion:     strings.TrimSpace(result.EnvConfig.RuntimeVersion),
 		RuntimePod:         result.EnvConfig.RuntimePod,

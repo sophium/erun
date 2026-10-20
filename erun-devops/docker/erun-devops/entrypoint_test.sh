@@ -524,6 +524,73 @@ for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; d
 done
 stop_run
 
+# --- 10b. Leaving the gateway removes what the relay wrote, and only that ---
+# settings.json lives on the persistent volume, so a pod redeployed off the
+# gateway boots with the catalog's model, context window and model list still in
+# it from the previous boot — and Claude Code, now on the environment's own
+# sign-in, would keep launching the gateway's model. The pod below predates the
+# ownership record, which is exactly the upgrade that turns the gateway off.
+prepare_run leave_gateway
+run_dir="${work_root}/leave_gateway"
+mkdir -p "${run_dir}/home/.claude"
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{
+  "theme": "dark",
+  "env": {
+    "ANTHROPIC_MODEL": "deepseek/deepseek-v4.1-flash",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1048576",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+    "OPERATOR_OWN_SETTING": "keep"
+  },
+  "availableModels": ["deepseek/deepseek-v4.1-flash"]
+}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for stale in ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS availableModels deepseek; do
+    case "${settings}" in
+        *"${stale}"*) fail "leaving the gateway should remove the relayed ${stale}: ${settings}" ;;
+        *) ;;
+    esac
+done
+for kept in OPERATOR_OWN_SETTING '"theme"'; do
+    case "${settings}" in
+        *"${kept}"*) ;;
+        *) fail "the relay must not remove ${kept}, which it never wrote: ${settings}" ;;
+    esac
+done
+stop_run
+
+# Once the record exists, an entry the relay did not write survives a boot
+# that relays nothing, even under a name the relay could own.
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{"env": {"ANTHROPIC_MODEL": "opus"}}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config-2" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+grep -q '"ANTHROPIC_MODEL": "opus"' "${run_dir}/home/.claude/settings.json" ||
+    fail "an operator's own ANTHROPIC_MODEL must survive once the relay records what it owns: $(cat "${run_dir}/home/.claude/settings.json")"
+stop_run
+
 # --- 11. Agent MCP configuration is reconciled once per container boot, not once
 # per shell ---
 # Both configure scripts rewrite ~/.claude and ~/.codex from the image's baked
@@ -756,4 +823,4 @@ wait_for 'booted'
 stop_run
 cache_trim_max_bytes=""
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"
+echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay and its reconciliation when the gateway is left, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"
