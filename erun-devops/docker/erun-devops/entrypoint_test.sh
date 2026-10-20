@@ -33,6 +33,26 @@ stop_run() {
     run_pid=""
 }
 
+# A `shell` boot returns in the foreground but leaves the environment monitor
+# looping behind it, so it runs in its own session as well and is reaped once it
+# returns. Left alone, the loop outlives the test and calls the real erun once
+# the stub bin directory is gone.
+reap_shell() {
+    wait "$1" 2>/dev/null || true
+    kill -TERM "-$1" 2>/dev/null || true
+}
+
+# run_leftovers names every live process still carrying a run's HOME: each run
+# gets one under work_root, so whatever still has it is something a run left
+# behind.
+run_leftovers() {
+    for _proc in /proc/[0-9]*; do
+        tr '\0' '\n' <"${_proc}/environ" 2>/dev/null | grep -q "^HOME=${work_root}/" &&
+            printf '%s ' "${_proc#/proc/}"
+    done
+    true
+}
+
 # wait_for polls a condition rather than sleeping a fixed interval, so the test
 # never races the entrypoint's boot steps or the supervisor's restart delay.
 wait_for() {
@@ -211,7 +231,8 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_APP_SESSION_DIR="${session_dir_override}" \
     ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
-    sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+    setsid sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 &
+reap_shell "$!"
 [ "$(wc -l <"${run_dir}/prune-argv")" -eq 1 ] ||
     fail "an in-container shell must not prune live session sockets"
 session_dir_override=""
@@ -650,7 +671,8 @@ boot_shell() {
         ERUN_ENVIRONMENT=dev \
         ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
         ERUN_GO_BUILD_CACHE_MAX_BYTES="${cache_trim_max_bytes:-17179869184}" \
-        sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+        setsid sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 &
+    reap_shell "$!"
 }
 
 # source_hook runs the installed hook the way a login shell does, in its own
@@ -850,4 +872,8 @@ wait_for 'booted'
 stop_run
 cache_trim_max_bytes=""
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay and its reconciliation when the gateway is left, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"
+# --- Nothing a run starts outlives it ---
+wait_for '[ -z "$(run_leftovers)" ]' ||
+    fail "processes outlived their run: $(for _pid in $(run_leftovers); do ps -o pid=,args= -p "${_pid}"; done)"
+
+echo "PASS:entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay and its reconciliation when the gateway is left, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"
