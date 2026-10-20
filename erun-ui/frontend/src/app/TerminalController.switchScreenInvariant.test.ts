@@ -118,7 +118,7 @@ interface Driver {
   settlePane: () => Promise<void>;
   holdContentWritesFor: (ms: number) => void;
   activation: () => { writes: number; source: string };
-  unmount: () => void;
+  unmount: () => Promise<void>;
 }
 
 interface SwitchQueueView {
@@ -288,7 +288,15 @@ function mount(split: boolean): Driver {
       writes: Number(root.dataset.terminalActivationWrites ?? '-1'),
       source: root.dataset.terminalActivationSource ?? 'none',
     }),
-    unmount: () => {
+    // xterm syncs its viewport on an animation frame after a write, so the pane
+    // is disposed only once that frame has run; disposing first leaves the
+    // callback reading a renderer that no longer exists.
+    unmount: async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
       unmount();
     },
   };
@@ -371,7 +379,7 @@ async function measurePair(options: PairOptions): Promise<string[]> {
       found.push(`${where}: activation source=${act.source} writes=${String(act.writes)}`);
     }
   } finally {
-    driver.unmount();
+    await driver.unmount();
   }
   return found;
 }
