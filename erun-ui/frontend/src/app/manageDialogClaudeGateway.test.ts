@@ -6,6 +6,7 @@ import type { UIEnvironmentConfig } from '@/types';
 
 import {
   aiSessionLaunchSignature,
+  claudeRoutingChanged,
   compactClaudeDraft,
   manageDialogTabHasUnsavedChanges,
   nextPendingRedeploy,
@@ -77,4 +78,12 @@ test('the AI-tab reopen follows the launch the backend resolved', () => {
     aiSessionLaunchSignature(withClaude({ effort: 'ultracode' }, 'same')),
     aiSessionLaunchSignature(withClaude({}, 'same')),
   );
+});
+
+test('a save that moves the Claude routing leaves the AI-tab reopen to the redeploy', () => {
+  // Routing lives in the pod's environment, which only a redeploy changes, so a
+  // relaunch at save time would run the new launch against the old routing.
+  assert.equal(claudeRoutingChanged(withClaude({}), withClaude({ useGateway: false })), true);
+  assert.equal(claudeRoutingChanged(withClaude({}), withClaude({ useBedrock: true })), true);
+  assert.equal(claudeRoutingChanged(withClaude({}), withClaude({ effort: 'low' })), false);
 });

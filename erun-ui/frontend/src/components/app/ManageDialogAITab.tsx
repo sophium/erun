@@ -12,7 +12,8 @@ import {
 } from '@/components/app/ManageDialog.helpers';
 import {
   ClaudeGatewayFields,
-  ClaudeGatewayNoModelsNotice,
+  ClaudeGatewayModelsField,
+  ClaudeProviderFields,
 } from '@/components/app/ManageDialogAIClaudeGateway';
 import {
   ClaudeAddModelField,
@@ -52,37 +53,33 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
           dispatch(updateManageClaudeConfig(claudeOverrideResetValues));
         }}
       />
-      <ClaudeBoolField
-        id="environment-config-claude-mantle"
-        label="Use Mantle"
-        helper="When enabled, Claude requests for this environment are routed through Mantle. Default uses the global setting."
-        defaultValue={defaults.useMantle}
-        value={claude.useMantle}
+      <ClaudeProviderFields
+        claude={claude}
+        defaults={defaults}
+        viaGateway={effective.viaGateway}
         disabled={disabled}
-        onChange={(useMantle) => {
-          dispatch(updateManageClaudeConfig({ useMantle }));
+        onChange={(values) => {
+          dispatch(updateManageClaudeConfig(values));
         }}
       />
-      <ClaudeBoolField
-        id="environment-config-claude-bedrock"
-        label="Use Bedrock"
-        helper="When enabled, Claude requests are routed through AWS Bedrock. Mantle and Bedrock can both be enabled; the runtime decides which to use per request."
-        defaultValue={defaults.useBedrock}
-        value={claude.useBedrock}
-        disabled={disabled}
-        onChange={(useBedrock) => {
-          dispatch(updateManageClaudeConfig({ useBedrock }));
-        }}
-      />
-      <ClaudeGatewayNoModelsNotice effective={effective} />
-      <ClaudeModelsField
-        defaults={effective.defaults}
-        value={claude.models ?? []}
-        disabled={disabled}
-        onChange={(models) => {
-          dispatch(updateManageClaudeConfig({ models }));
-        }}
-      />
+      {effective.viaGateway ? (
+        <ClaudeGatewayModelsField
+          effective={effective}
+          disabled={disabled}
+          onDefaultModel={(defaultModel) => {
+            dispatch(updateManageClaudeConfig({ defaultModel }));
+          }}
+        />
+      ) : (
+        <ClaudeModelsField
+          defaults={defaults}
+          value={claude.models ?? []}
+          disabled={disabled}
+          onChange={(models) => {
+            dispatch(updateManageClaudeConfig({ models }));
+          }}
+        />
+      )}
       <ClaudeMaxTokensField
         defaults={defaults}
         value={claude.maxOutputTokens}

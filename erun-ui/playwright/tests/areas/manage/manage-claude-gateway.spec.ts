@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // withGatewayCatalog marks the environment's read as living under a configured
@@ -86,15 +86,24 @@ test.describe('per-environment gateway overrides', () => {
       await app.manageDialog.chooseClaudeGateway(choice);
 
       await expect(app.manageDialog.claudeGatewayField()).toContainText(choice);
-      await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('AI')).toBe(true);
+      await expect
+        .poll(() => app.manageDialog.tabHasUnsavedChanges('AI'), withTestBudget())
+        .toBe(true);
       // The model choices follow the gateway choice before the save: off the
       // gateway the environment launches its own models, on it the catalog's.
       await expect(app.manageDialog.claudeDefaultModelSelect()).toContainText(
         choice === 'Disabled' ? 'Default (opus)' : 'Default (vendor/model-x)',
       );
 
+      // On the gateway the catalog is the selectable set, so the env's own model
+      // list is not offered for editing — ticking it would record a choice
+      // nothing honours and leave catalog ids behind for after it leaves.
+      await expect(app.manageDialog.claudeModelCheckbox('opus')).toHaveCount(
+        choice === 'Disabled' ? 1 : 0,
+      );
+
       await app.manageDialog.save();
-      await expect.poll(() => saved.length).toBe(1);
+      await expect.poll(() => saved.length, withTestBudget()).toBe(1);
       expect(saved[0]?.claude?.useGateway).toBe(choice === 'Enabled');
     });
   }

@@ -38,6 +38,22 @@ export function aiSessionLaunchSignature(config: UIEnvironmentConfig): string {
   return config.aiLaunchSignature;
 }
 
+// claudeRoutingChanged reports whether a save moved where the env's Claude is
+// routed — the gateway, Mantle, or Bedrock. Routing lives in the pod's
+// environment, which only a redeploy changes, so an AI tab relaunched at save
+// time would run the new launch against the old routing (a catalog model
+// against the env's own sign-in, or Remote Control through a gateway). Such a
+// save leaves the reopen to the redeploy its banner asks for, which restarts
+// the pod and with it the AI sessions.
+export function claudeRoutingChanged(
+  prior: UIEnvironmentConfig,
+  saved: UIEnvironmentConfig,
+): boolean {
+  const routing = (config: UIEnvironmentConfig) =>
+    JSON.stringify([config.claude.useGateway, config.claude.useMantle, config.claude.useBedrock]);
+  return routing(prior) !== routing(saved);
+}
+
 // versionSourceSignature captures what decides which registries the version
 // picker lists from, mirroring the backend's discovery: the env's own marked
 // registries, and — for an env that marks none — the local repo path whose

@@ -540,6 +540,7 @@ cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
     "ANTHROPIC_MODEL": "deepseek/deepseek-v4.1-flash",
     "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1048576",
     "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+    "MAX_THINKING_TOKENS": "1024",
     "OPERATOR_OWN_SETTING": "keep"
   },
   "availableModels": ["deepseek/deepseek-v4.1-flash"]
@@ -567,6 +568,32 @@ for kept in OPERATOR_OWN_SETTING '"theme"'; do
     case "${settings}" in
         *"${kept}"*) ;;
         *) fail "the relay must not remove ${kept}, which it never wrote: ${settings}" ;;
+    esac
+done
+stop_run
+
+# A settings file the earlier relay never touched (no token defaults in it)
+# owns nothing, so an operator's own entries survive the first boot too.
+rm -f "${run_dir}/home/.claude/settings.json.erun-relayed.json"
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{"env": {"ANTHROPIC_MODEL": "sonnet", "MAX_THINKING_TOKENS": "4096"}, "availableModels": ["sonnet"]}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config-never-relayed" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for kept in '"ANTHROPIC_MODEL": "sonnet"' '"MAX_THINKING_TOKENS": "4096"' availableModels; do
+    case "${settings}" in
+        *"${kept}"*) ;;
+        *) fail "a settings file the relay never wrote must keep ${kept}: ${settings}" ;;
     esac
 done
 stop_run

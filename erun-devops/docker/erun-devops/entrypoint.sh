@@ -882,9 +882,10 @@ function listValue(value) {
 // otherwise outlive the deploy that turned it off — an environment that left
 // the gateway would keep launching the catalog's model against its own Claude
 // sign-in. Ownership is recorded beside the settings file so an entry the
-// operator wrote by hand is never removed; a pod with no record yet predates it,
-// and every entry it relayed was one of these names, so all of them count as
-// owned once.
+// operator wrote by hand is never removed. A pod with no record yet predates it:
+// if its earlier relay evidently ran (it always wrote both token defaults), every
+// entry that relay wrote was one of these names, so all of them count as owned
+// once; a settings file the relay never touched owns nothing.
 const relayedPassthroughNames = [
   'AWS_PROFILE',
   'ANTHROPIC_MODEL',
@@ -912,9 +913,21 @@ const relayedEnvNames = [
 ];
 const relayRecordPath = settingsPath ? `${settingsPath}.erun-relayed.json` : '';
 const relayRecord = relayRecordPath && fs.existsSync(relayRecordPath) ? readJSON(relayRecordPath) : null;
-const ownedEnv = relayRecord ? new Set(Array.isArray(relayRecord.env) ? relayRecord.env : []) : new Set(relayedEnvNames);
-const ownsAvailableModels = relayRecord ? relayRecord.availableModels === true : true;
+let ownedEnv = new Set();
+let ownsAvailableModels = false;
 const relayedNow = { env: [], availableModels: false };
+
+function resolveRelayOwnership(settings) {
+  if (relayRecord) {
+    ownedEnv = new Set(Array.isArray(relayRecord.env) ? relayRecord.env : []);
+    ownsAvailableModels = relayRecord.availableModels === true;
+    return;
+  }
+  const env = settings.env && typeof settings.env === 'object' ? settings.env : {};
+  const relayRan = Boolean(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS && env.MAX_THINKING_TOKENS);
+  ownedEnv = relayRan ? new Set(relayedEnvNames) : new Set();
+  ownsAvailableModels = relayRan;
+}
 
 function syncEnv(settings, name, value) {
   const normalized = (value || '').trim();
@@ -929,6 +942,7 @@ function syncEnv(settings, name, value) {
 if (settingsPath) {
   const settings = readJSON(settingsPath);
   const before = JSON.stringify(settings);
+  resolveRelayOwnership(settings);
   if (configureRelay) {
     settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
     settings.env = ensureObject(settings, 'env');

@@ -37,7 +37,6 @@ export function effectiveClaudeModelDefaults(
   defaults: UIEnvironmentConfig['claudeDefaults'],
 ): {
   viaGateway: boolean;
-  defaults: UIEnvironmentConfig['claudeDefaults'];
   available: string[];
   defaultLaunchModel: string;
 } {
@@ -45,17 +44,12 @@ export function effectiveClaudeModelDefaults(
   if (viaGateway) {
     return {
       viaGateway,
-      defaults: {
-        ...defaults,
-        models: defaults.gatewayModels,
-        knownModels: defaults.gatewayModels,
-      },
       available: defaults.gatewayModels,
       defaultLaunchModel: defaults.gatewayDefaultModel,
     };
   }
   const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
-  return { viaGateway, defaults, available, defaultLaunchModel: available[0] ?? '' };
+  return { viaGateway, available, defaultLaunchModel: available[0] ?? '' };
 }
 
 export function isValidClaudeTokens(
