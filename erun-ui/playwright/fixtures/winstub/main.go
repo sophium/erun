@@ -110,6 +110,9 @@ func main() {
 		}
 		fmt.Fprintln(os.Stderr, "kubectl stub: no cluster in the Playwright harness")
 		os.Exit(1)
+	case "explorer":
+		// The desktop's host opener: accept the request and open nothing.
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "%s stub: disabled in the Playwright harness\n", name)
 		os.Exit(1)

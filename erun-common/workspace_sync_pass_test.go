@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -109,6 +110,14 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 		timingTempDir = dir
+	}
+	// No test may reach the operator's real browser or file opener: the OIDC
+	// login opens the authorize URL as its first act, and on a desktop that is
+	// a stray tab at a fixture hostname. Every platform's opener is pointed at
+	// an inert binary unless a test names its own.
+	if err := pointBrowserOpenersAtInertBinary(); err != nil {
+		fmt.Fprintf(os.Stderr, "stub browser openers: %v\n", err)
+		os.Exit(1)
 	}
 	code := m.Run()
 	if timingTempDir != "" {
@@ -386,4 +395,24 @@ func TestSyncWorkspaceOnceKeepsFilesThePodStillHas(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(mirror, "app", "keep.go")); statErr != nil {
 		t.Fatalf("mirror file was deleted: %v", statErr)
 	}
+}
+
+// browserOpenerOverrideEnvs are the ERUN_<NAME>_BIN seams of every platform's
+// opener erunLoginBrowserCommand can name.
+var browserOpenerOverrideEnvs = []string{"ERUN_OPEN_BIN", "ERUN_XDG_OPEN_BIN", "ERUN_CMD_BIN"}
+
+func pointBrowserOpenersAtInertBinary() error {
+	inert, err := exec.LookPath("true")
+	if err != nil {
+		return err
+	}
+	for _, name := range browserOpenerOverrideEnvs {
+		if _, ok := os.LookupEnv(name); ok {
+			continue
+		}
+		if err := os.Setenv(name, inert); err != nil {
+			return err
+		}
+	}
+	return nil
 }

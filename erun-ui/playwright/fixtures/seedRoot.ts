@@ -361,7 +361,13 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
+  // The OS openers are stubbed in every mode: OpenHostPath and RevealHostPath
+  // exec them from PATH, so a spec that clicks a host path would otherwise
+  // open a real file on the operator's desktop.
+  const openers = isWindows ? ['explorer'] : ['open', 'xdg-open'];
+  const stubs = e2eK3dEnabled()
+    ? ['aws', ...openers]
+    : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude', ...openers];
   for (const name of stubs) {
     writeStubBinary(name);
   }
@@ -574,6 +580,13 @@ function writeStubBinary(name: string): void {
       '  *"config get-contexts"*) exit 0 ;;',
       '  *) echo "kubectl stub: no cluster in the Playwright harness" >&2; exit 1 ;;',
       'esac',
+      '',
+    ].join('\n');
+  } else if (name === 'open' || name === 'xdg-open') {
+    body = [
+      '#!/bin/sh',
+      `# erun playwright stub for ${name}: accepts the request and opens nothing.`,
+      'exit 0',
       '',
     ].join('\n');
   } else {
