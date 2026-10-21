@@ -62,7 +62,7 @@ erun app restart [flags]
 
 | Flag | Description |
 |---|---|
-| `--orchestrator` | Id of the orchestrator to resume after the restart. Defaults to `$ERUN_ORCHESTRATOR_ID`. |
+| `--orchestrator` | Id of the orchestrator that owns the terminal pane after the restart. Defaults to `$ERUN_ORCHESTRATOR_ID`. |
 | `--dry-run` | Resolve the target and report what a restart would reopen, without restarting anything. |
 | `--output` | `text` (default) or `json`. |
 
@@ -76,20 +76,17 @@ erun app restart --dry-run
 
 ### What a restart reopens {#erun-app-restart-what-reopens}
 
-Every orchestrator that was open comes back. Each one resumes the conversation attached to it, or — when nothing is attached — the conversation derived from its id. The orchestrator named by `--orchestrator` is the exception: the restart hands it back the conversation its own session was live on, because that is the session asking for the restart.
+Every orchestrator that was open comes back, and the one named by `--orchestrator` owns the terminal pane. Orchestrators run as Claude Code background agents, so the restart does not interrupt them — the one that asked for the restart included — and the new desktop reattaches each one to its agent, on whatever conversation that agent is on (see [Desktop app · The conversation an orchestrator comes back to](/desktop/orchestrators#orchestrator-conversations)).
 
-So an orchestrator whose last session was working in some other conversation comes back on the derived one and leaves that work behind. Recovering it means attaching the conversation you want and restarting again — which is a round trip the operator only learns about after the fact, because the report is raised by the launch that follows the restart.
-
-`--dry-run` moves that report to before the restart. It asks the running desktop what it would reopen and names the ones that would not come back to the conversation their last session was working in:
+What can still go wrong is a desktop that would refuse to reopen one: an orchestrator whose gateway has no catalog behind it, say, or whose gateway key is gone. `--dry-run` names those before the restart, while they can still be fixed:
 
 ```
 would restart the running desktop app (pid 41827)
-it would reopen 2 orchestrators, and 1 of them will NOT come back to the conversation their last session was working in:
-  Reopened petios-ops on the conversation derived from its id (1cbe8921-0f4a-4c5e-9d21-8b6f3a2e5c70), not the one its last session was working in (6942fcd4-2f8b-4c6d-8e10-7a3d9b5c4e21). That conversation is still there; manage the orchestrator to attach it.
-Attach each one in the desktop's Manage → Conversation before restarting, and the restart reopens it there.
+it would reopen 2 orchestrators, and 1 of them would NOT be reopened:
+  The restart will not reopen petios-ops: the gateway is turned on but no gateway catalog is configured. Its background agent keeps running; fix that and open it again.
 ```
 
-Attach the conversations you want first, then restart once: the restart is still the same restart, and the resolution order above is unchanged.
+When every orchestrator would reopen, it says so in one line.
 
 The plan is computed by the running desktop — the only process that can resolve it — and asking for it writes nothing, launches nothing, and quits nothing. With `--output json` the same plan arrives as a `preview` array on the result.
 

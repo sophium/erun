@@ -67,18 +67,17 @@ func newAppRestartCmd() *cobra.Command {
 		Use:   "restart",
 		Short: "Restart the running desktop app in place to pick up a rebuild",
 		Long: "Restart the already-running erun-app desktop process: it asks that process to run the exact " +
-			"rebuild+restart its own Restart button runs — write the resume hand-off (naming the conversation " +
-			"the orchestrator was actually live on, per --orchestrator), relaunch a fresh copy of itself, then " +
-			"quit. It never spawns a second desktop instance or signals a process directly; it only ever asks " +
+			"rebuild+restart its own Restart button runs — record which orchestrator owns the terminal pane " +
+			"afterwards (per --orchestrator), relaunch a fresh copy of itself, then quit. Orchestrators run as " +
+			"Claude Code background agents, so the restart does not interrupt them: the new desktop reattaches " +
+			"each one to its agent, mid-turn included. It never spawns a second desktop instance or signals a process directly; it only ever asks " +
 			"the one already running to restart itself, so it cannot leave two instances up or a process " +
 			"half-killed. It resolves the running desktop from a marker that process wrote at startup and " +
 			"verifies that process is still alive before doing anything — a stale marker (the desktop already " +
 			"exited) or no marker at all (nothing running) is refused outright rather than guessed at, since a " +
 			"relaunch armed against a dead target would silently do nothing. A --dry-run asks that same process " +
-			"what a restart triggered now would reopen, naming every orchestrator that would not come back to " +
-			"the conversation its last session was working in — a restart reopens an orchestrator on the " +
-			"conversation attached to it or on the one derived from its id — so those conversations can be " +
-			"attached before the restart instead of reported after it.",
+			"what a restart triggered now would reopen, naming every orchestrator the new desktop would refuse " +
+			"to reopen and why, so it can be fixed before the restart instead of reported after it.",
 		Example:       "  erun app restart\n  erun app restart --orchestrator my-orchestrator\n  erun app restart --dry-run",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -87,7 +86,7 @@ func newAppRestartCmd() *cobra.Command {
 			return runAppRestartCommand(commandContext(cmd), orchestratorID)
 		},
 	}
-	cmd.Flags().StringVar(&orchestratorID, "orchestrator", "", "Orchestrator id to resume after the restart (defaults to $ERUN_ORCHESTRATOR_ID; a bare restart with neither set reopens whatever was last open, idle)")
+	cmd.Flags().StringVar(&orchestratorID, "orchestrator", "", "Orchestrator id that owns the terminal pane after the restart (defaults to $ERUN_ORCHESTRATOR_ID; a bare restart with neither set gives it to the most recently opened one)")
 	addDryRunFlag(cmd)
 	addOutputFlag(cmd)
 	return cmd
@@ -96,8 +95,8 @@ func newAppRestartCmd() *cobra.Command {
 // runAppRestartCommand resolves the orchestrator asking for the restart (the
 // flag, else the environment an orchestrator session already carries), then
 // defers entirely to eruncommon.RestartDesktopApp: the running desktop is the
-// only thing that can correctly resolve which conversation to resume, so this
-// command never re-implements that resolution.
+// only thing that holds the open orchestrators, so this command never
+// re-implements the restart.
 func runAppRestartCommand(ctx eruncommon.Context, orchestratorID string) error {
 	id := strings.TrimSpace(orchestratorID)
 	if id == "" {
@@ -129,15 +128,14 @@ func appRestartSummary(outcome eruncommon.DesktopRestartOutcome) string {
 	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
 }
 
-// appRestartDryRunReport renders what a restart would reopen. A dry run is the
-// only moment any of it is still actionable: an orchestrator that would come
-// back on a conversation other than the one its own session was working in can
-// be attached BEFORE the restart, where the notice the next launch raises can
-// only be acted on by attaching and restarting a second time.
+// appRestartDryRunReport renders what a restart would reopen. Every
+// orchestrator's background agent keeps running through the restart, so the
+// only thing worth saying beforehand is an orchestrator the next launch would
+// refuse to reopen -- while it can still be fixed.
 //
 // Its counterweight is the case where the plan could not be read at all. That is
 // reported as itself and never rendered as an empty plan: "nothing would be
-// stranded" is precisely what an answer nobody received must not be mistaken
+// refused" is precisely what an answer nobody received must not be mistaken
 // for, and the outcome is still would-restart either way, because the marker and
 // the liveness probe already established that a real target is there.
 func appRestartDryRunReport(ctx eruncommon.Context, outcome eruncommon.DesktopRestartOutcome) {
@@ -153,24 +151,22 @@ func appRestartDryRunReport(ctx eruncommon.Context, outcome eruncommon.DesktopRe
 		_, _ = fmt.Fprintln(ctx.Stdout, "it has no orchestrator to reopen")
 		return
 	}
-	stranded := make([]eruncommon.DesktopRestartReopen, 0, len(outcome.Preview))
+	refused := make([]eruncommon.DesktopRestartReopen, 0, len(outcome.Preview))
 	for _, reopen := range outcome.Preview {
 		if reopen.Notice != "" {
-			stranded = append(stranded, reopen)
+			refused = append(refused, reopen)
 		}
 	}
-	if len(stranded) == 0 {
-		_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, each on the conversation it was working in\n",
+	if len(refused) == 0 {
+		_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, each reattached to its running background agent\n",
 			describeOrchestratorCount(len(outcome.Preview)))
 		return
 	}
-	_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, and %d of them will NOT come back to the conversation their last session was working in:\n",
-		describeOrchestratorCount(len(outcome.Preview)), len(stranded))
-	for _, reopen := range stranded {
+	_, _ = fmt.Fprintf(ctx.Stdout, "it would reopen %s, and %d of them would NOT be reopened:\n",
+		describeOrchestratorCount(len(outcome.Preview)), len(refused))
+	for _, reopen := range refused {
 		_, _ = fmt.Fprintf(ctx.Stdout, "  %s\n", reopen.Notice)
 	}
-	_, _ = fmt.Fprintln(ctx.Stdout,
-		"Attach each one in the desktop's Manage → Conversation before restarting, and the restart reopens it there.")
 }
 
 // describeOrchestratorCount renders a reopened-orchestrator count for an

@@ -282,3 +282,20 @@ func claudeEffortFlags(effort string) string {
 	}
 	return ""
 }
+
+// ClaudeBackgroundEffort splits a resolved effort level between the two places
+// a Claude background session carries it: settings keys, which the session
+// re-reads on every restart, and launch flags, which only a recreated session
+// picks up. The effortLevel setting rejects "max" (and ignores the effort
+// environment variable), so that one level stays a flag.
+func ClaudeBackgroundEffort(effort string) (map[string]any, []string) {
+	switch {
+	case effort == claudeEffortUltracode:
+		return map[string]any{"ultracode": true}, nil
+	case effort == "max":
+		return map[string]any{}, []string{"--effort", "max"}
+	case validClaudeEffort(effort):
+		return map[string]any{"effortLevel": effort}, nil
+	}
+	return map[string]any{}, nil
+}

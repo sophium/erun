@@ -91,7 +91,7 @@ func orchestratorTestAppWithReachability(t *testing.T, reachable func(int) bool)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint:         reachable,
@@ -536,7 +536,7 @@ func TestSpawnOrchestratorSessionExposesOrchestratorID(t *testing.T) {
 			capturedEnv = p.Env
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -724,7 +724,7 @@ func TestInvestigateFailureSpawnsTransientTenantScopedOrchestrator(t *testing.T)
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(launch eruncommon.OrchestratorLaunch, _, prompt, _, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(launch eruncommon.OrchestratorLaunch, _, prompt, _ string) (string, []string, error) {
 			seededPrompt, seededLaunch = prompt, launch
 			return "claude-stub", nil, nil
 		},
@@ -1551,17 +1551,6 @@ func readSessionStartGroups(t *testing.T, path string) ([]sessionStartGroup, []b
 	return settings.Hooks.SessionStart, data
 }
 
-// sessionStartGroupAsBlock re-renders a decoded group in the untyped shape the
-// hook-block predicates read, so a test can ask the production predicate which
-// blocks are which instead of matching on command text of its own.
-func sessionStartGroupAsBlock(group sessionStartGroup) map[string]any {
-	hooks := make([]any, 0, len(group.Hooks))
-	for _, hook := range group.Hooks {
-		hooks = append(hooks, map[string]any{"type": hook.Type, "command": hook.Command})
-	}
-	return map[string]any{"matcher": group.Matcher, "hooks": hooks}
-}
-
 // sessionStartCommandCounts flattens every command across the given groups
 // into a command -> occurrence-count map.
 func sessionStartCommandCounts(groups []sessionStartGroup) map[string]int {
@@ -1625,12 +1614,6 @@ func TestOrchestratorSessionStartHookInjectsContract(t *testing.T) {
 	for _, group := range groups {
 		if len(group.Hooks) == 0 || group.Hooks[0].Type != "command" {
 			t.Fatalf("SessionStart matcher %q missing a command hook:\n%s", group.Matcher, data)
-		}
-		// The live-conversation recorder shares this event and is not a contract
-		// injector; it has its own coverage in
-		// TestOrchestratorLiveConversationRecorderIsInstalledWhereItIsRead.
-		if isOrchestratorLiveConversationHookBlock(sessionStartGroupAsBlock(group)) {
-			continue
 		}
 		if !strings.Contains(group.Hooks[0].Command, "CLAUDE.md") {
 			t.Fatalf("SessionStart command does not inject the contract (print CLAUDE.md):\n%s", group.Hooks[0].Command)
@@ -1826,13 +1809,6 @@ func TestOrchestratorSessionStartHookReinjectsRoleFileOnClearAndCompact(t *testi
 
 	groups, data := readSessionStartGroups(t, filepath.Join(dir, ".claude", "settings.json"))
 	assertSessionStartReinjectsRoleAndContract(t, shell, orchestratorID, roleMarker, groups, data, "clear", "compact")
-
-	// A compaction does not move an orchestrator's conversation: the id is
-	// derived from the orchestrator id, so it is the same before and after, and
-	// nothing has to be recorded to keep up with it.
-	if before, after := orchestratorSessionID(orchestratorID), orchestratorSessionID(orchestratorID); before != after {
-		t.Fatalf("derived conversation is not stable: %q vs %q", before, after)
-	}
 }
 
 func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
@@ -1876,171 +1852,71 @@ func TestOrchestratorSessionStartHookPreservesExistingSettings(t *testing.T) {
 	}
 }
 
-func TestBuildOrchestratorLaunchResumesWithUltracodeOpus(t *testing.T) {
-	// No pinned session id (legacy/transient) keeps the continue-else-fresh path.
-	_, posix := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", "", "")
-	posixCmd := posix[len(posix)-1]
-	for _, want := range []string{"claude --continue", "ultracode", "--model opus", " || claude"} {
-		if !strings.Contains(posixCmd, want) {
-			t.Fatalf("posix launch missing %q: %q", want, posixCmd)
+// A transient (Investigate) session has no background agent: it is a fresh
+// session in the PTY, on the default ultracode Opus launch, never a resume of
+// anything.
+func TestBuildOrchestratorLaunchStartsAFreshTransientSession(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", "")
+		command := launch[len(launch)-1]
+		for _, want := range []string{"ultracode", "--model opus"} {
+			if !strings.Contains(command, want) {
+				t.Fatalf("%s launch missing %q: %q", goos, want, command)
+			}
+		}
+		for _, unwanted := range []string{"--continue", "--resume", "--session-id"} {
+			if strings.Contains(command, unwanted) {
+				t.Fatalf("%s transient launch must not resume (%s): %q", goos, unwanted, command)
+			}
 		}
 	}
-
-	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "", "", "")
-	winCmd := win[len(win)-1]
-	for _, want := range []string{"claude --continue", "ultracode", "--model opus", "$LASTEXITCODE"} {
-		if !strings.Contains(winCmd, want) {
-			t.Fatalf("windows launch missing %q: %q", want, winCmd)
-		}
-	}
-
-	// A seeded (Investigate) launch is a fresh session — no resume.
-	_, seeded := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "fix the thing", "", "")
-	seededCmd := seeded[len(seeded)-1]
-	if strings.Contains(seededCmd, "--continue") {
-		t.Fatalf("seeded launch must not resume: %q", seededCmd)
-	}
-	if !strings.Contains(seededCmd, "ultracode") || !strings.Contains(seededCmd, "--model opus") {
-		t.Fatalf("seeded launch missing ultracode/opus: %q", seededCmd)
+	_, seeded := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "fix the thing", "")
+	if command := seeded[len(seeded)-1]; !strings.Contains(command, "-- 'fix the thing'") {
+		t.Fatalf("seeded launch must hand over its prompt: %q", command)
 	}
 }
 
-// A pinned session id isolates each orchestrator: it resumes its OWN conversation
-// (`--resume <id>` when it exists, `--session-id <id>` to create it on first
-// open) and never `--continue`s the shared most-recent conversation.
-func TestBuildOrchestratorLaunchPinsPerOrchestratorSession(t *testing.T) {
-	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000001"
-
-	_, existing := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", "", "")
-	cmd := existing[len(existing)-1]
-	if !strings.Contains(cmd, "--resume "+sid) || strings.Contains(cmd, "--continue") {
-		t.Fatalf("existing session must --resume its own id, not --continue: %q", cmd)
+// A persisted orchestrator's PTY only ever attaches to its agent by id, and an
+// id is spliced into a shell line, so anything that is not an agent id is
+// refused rather than run.
+func TestOrchestratorLaunchCommandAttachesOnlyToAnAgentID(t *testing.T) {
+	if _, err := exec.LookPath(defaultAITool); err != nil {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, defaultAITool), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	}
-
-	_, firstOpen := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, false, "", "", "")
-	fresh := firstOpen[len(firstOpen)-1]
-	if !strings.Contains(fresh, "--session-id "+sid) {
-		t.Fatalf("first open must create the pinned session: %q", fresh)
+	_, args, err := orchestratorLaunchCommand(defaultOrchestratorLaunch(), "33cfe4e8", "", "/cfg/mcp.json")
+	if err != nil {
+		t.Fatalf("attach to a well-formed id: %v", err)
 	}
-	if strings.Contains(fresh, "--continue") || strings.Contains(fresh, "--resume") {
-		t.Fatalf("first open must not continue/resume: %q", fresh)
+	if command := args[len(args)-1]; command != "claude attach 33cfe4e8" {
+		t.Fatalf("expected a bare attach by id, got %q", command)
 	}
-
-	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), sid, true, "", "finish the task", "")
-	if wcmd := win[len(win)-1]; !strings.Contains(wcmd, "--resume "+sid) || !strings.Contains(wcmd, "finish the task") {
-		t.Fatalf("windows pinned resume+prompt missing pieces: %q", wcmd)
+	for _, bad := range []string{"erun", "33cfe4e8; rm -rf ~", "33CFE4E8", "abc"} {
+		if _, _, err := orchestratorLaunchCommand(defaultOrchestratorLaunch(), bad, "", ""); err == nil {
+			t.Fatalf("expected %q to be refused as an agent id", bad)
+		}
 	}
 }
 
-// posixFallback splits a POSIX `primary || fallback` chain and returns the
-// fallback half, failing the (sub)test if the chain shape is not there.
-func posixFallback(t *testing.T, cmd string) string {
-	t.Helper()
-	parts := strings.SplitN(cmd, " || ", 2)
-	if len(parts) != 2 {
-		t.Fatalf("expected a primary || fallback chain, got %q", cmd)
-	}
-	return parts[1]
-}
-
-// TestBuildOrchestratorLaunchFallbackKeepsThePin locks down the crash-fallback
-// fix: a pinned orchestrator whose primary launch fails must fall back to
-// retrying its OWN conversation, never to a bare unpinned `claude`. An unpinned
-// fallback is what the live-session hook then records as this orchestrator's
-// conversation, silently swapping it onto an amnesiac session on every crash.
-func TestBuildOrchestratorLaunchFallbackKeepsThePin(t *testing.T) {
-	const sid = "6f7e9c2a-1b3d-4e5f-8a9b-000000000003"
-	const prompt = "carry on"
-
-	t.Run("existing session fallback retries resume", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", "", "")
-		fallback := posixFallback(t, launch[len(launch)-1])
-		if !strings.Contains(fallback, "--resume "+sid) {
-			t.Fatalf("fallback for an existing session must retry --resume, got %q", fallback)
-		}
-	})
-
-	t.Run("first open fallback retries the same create", func(t *testing.T) {
-		// No conversation on disk yet: the fallback must retry the same
-		// --session-id create rather than dropping to unpinned fresh.
-		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, false, "", "", "")
-		fallback := posixFallback(t, launch[len(launch)-1])
-		if !strings.Contains(fallback, "--session-id "+sid) {
-			t.Fatalf("first-open fallback must keep the pinned session id, got %q", fallback)
-		}
-	})
-
-	t.Run("resume prompt chains through the pinned fallback", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), sid, true, "", prompt, "")
-		fallback := posixFallback(t, launch[len(launch)-1])
-		if !strings.Contains(fallback, sid) || !strings.Contains(fallback, prompt) {
-			t.Fatalf("resume-prompt fallback must keep both the pin and the prompt, got %q", fallback)
-		}
-	})
-
-	t.Run("windows uses the LASTEXITCODE chain", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), sid, true, "", "", "")
-		cmd := launch[len(launch)-1]
-		parts := strings.SplitN(cmd, "$LASTEXITCODE -ne 0", 2)
-		if len(parts) != 2 || !strings.Contains(parts[1], sid) {
-			t.Fatalf("windows fallback must keep the pinned session id, got %q", cmd)
-		}
-	})
-
-	t.Run("transient launch keeps the unpinned fresh fallback", func(t *testing.T) {
-		_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", "", "")
-		fallback := posixFallback(t, launch[len(launch)-1])
-		if !strings.HasPrefix(fallback, "claude"+` --settings '{"ultracode":true}'`) {
-			t.Fatalf("transient fallback should remain unpinned fresh, got %q", fallback)
-		}
-	})
-}
-
-// Per-orchestrator session ids are deterministic and unique so each orchestrator
-// resumes its own conversation, while a transient (empty-id) orchestrator has no
-// pinned session.
-func TestOrchestratorSessionIDIsStableAndDistinct(t *testing.T) {
-	if orchestratorSessionID("va1") == orchestratorSessionID("petios1") {
-		t.Fatal("distinct orchestrators must derive distinct session ids")
-	}
-	if id := orchestratorSessionID("va1"); id != orchestratorSessionID("va1") {
-		t.Fatal("session id must be stable for the same orchestrator")
-	}
-	if orchestratorSessionID("") != "" {
-		t.Fatal("transient orchestrator (empty id) must have no pinned session")
-	}
-}
-
-// A resume prompt resumes the conversation AND hands it the prompt, on both
-// shells, with a fresh-session fallback that carries the same prompt so an
-// auto-resume runs the task even on a first launch with no prior conversation.
-func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
-	const prompt = "verify the rebuild is live, then finish the task"
-
-	_, posix := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "", prompt, "")
-	posixCmd := posix[len(posix)-1]
-	for _, want := range []string{"claude --continue", prompt, " || claude", "ultracode", "--model opus"} {
-		if !strings.Contains(posixCmd, want) {
-			t.Fatalf("posix resume+prompt launch missing %q: %q", want, posixCmd)
+// An orchestrator is contracted to resolve ambiguity itself and carry a task to
+// a verified end, so stopping to ask is a defect — and one asked while the
+// operator is away stalls the work until they come back. The harness cannot ask
+// if it does not have the tool, which makes that structural rather than a matter
+// of the agent's own judgement about its instructions. Both a transient launch
+// and a background agent are denied it.
+func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", "")
+		if command := launch[len(launch)-1]; !strings.Contains(command, "--disallowedTools AskUserQuestion") {
+			t.Fatalf("%s launch must deny the ask tool: %q", goos, command)
 		}
 	}
-	// The prompt must appear on both the resume and the fresh-fallback branch.
-	if strings.Count(posixCmd, prompt) < 2 {
-		t.Fatalf("expected the resume prompt on both branches: %q", posixCmd)
-	}
-
-	_, win := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "", prompt, "")
-	winCmd := win[len(win)-1]
-	for _, want := range []string{"claude --continue", prompt, "$LASTEXITCODE"} {
-		if !strings.Contains(winCmd, want) {
-			t.Fatalf("windows resume+prompt launch missing %q: %q", want, winCmd)
-		}
-	}
-
-	// initialPrompt still wins over resumePrompt (a seeded fresh session ignores resume).
-	_, seeded := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, "fix the thing", prompt, "")
-	if seededCmd := seeded[len(seeded)-1]; strings.Contains(seededCmd, "--continue") {
-		t.Fatalf("initialPrompt must take precedence over resumePrompt (fresh, no resume): %q", seededCmd)
+	args := strings.Join(orchestratorAgentSpec{id: "erun", dir: "/o", settingsPath: "/s", mcpConfigPath: "/m"}.args(""), " ")
+	if !strings.Contains(args, "--disallowedTools AskUserQuestion") {
+		t.Fatalf("a background agent must deny the ask tool: %q", args)
 	}
 }
 
@@ -2050,24 +1926,10 @@ func TestBuildOrchestratorLaunchResumeWithPromptRunsIt(t *testing.T) {
 // consumed by the preceding multi-value --mcp-config unless option parsing ends
 // first, and the host shell executes the metacharacters unless the value is
 // quoted for the shell that re-parses the command line.
-// An orchestrator is contracted to resolve ambiguity itself and carry a task to
-// a verified end, so stopping to ask is a defect — and one asked while the
-// operator is away stalls the work until they come back. The harness cannot ask
-// if it does not have the tool, which makes that structural rather than a matter
-// of the agent's own judgement about its instructions.
-func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
-	for _, goos := range []string{"linux", "windows"} {
-		_, launch := buildOrchestratorLaunch(goos, defaultOrchestratorLaunch(), "", false, "", "", "")
-		if command := launch[len(launch)-1]; !strings.Contains(command, "--disallowedTools AskUserQuestion") {
-			t.Fatalf("%s launch must deny the ask tool: %q", goos, command)
-		}
-	}
-}
-
 func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
 
-	_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", false, prompt, "", "/cfg/orchestrator-mcp-erun.json")
+	_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), prompt, "/cfg/orchestrator-mcp-erun.json")
 	command := launch[len(launch)-1]
 	if !strings.Contains(command, "--mcp-config '/cfg/orchestrator-mcp-erun.json' -- ") {
 		t.Fatalf("the prompt must follow a -- that ends option parsing: %q", command)
@@ -2099,7 +1961,7 @@ func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
 // the backtick as its escape character inside double quotes, so the prompt and
 // the config path are single-quoted there, with embedded apostrophes doubled.
 func TestBuildOrchestratorLaunchQuotesThePromptForPowerShell(t *testing.T) {
-	_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "", false, "keep $HOME and `code` and it's fine", "", `C:\cfg\mcp.json`)
+	_, launch := buildOrchestratorLaunch("windows", defaultOrchestratorLaunch(), "keep $HOME and `code` and it's fine", `C:\cfg\mcp.json`)
 	command := launch[len(launch)-1]
 	if !strings.Contains(command, "-- 'keep $HOME and `code` and it''s fine'") {
 		t.Fatalf("windows prompt must be single-quoted with doubled apostrophes: %q", command)
@@ -2114,52 +1976,6 @@ func TestInvestigateFailureRejectsEmptyReport(t *testing.T) {
 	defer app.shutdown(context.Background())
 	if _, err := app.InvestigateFailure("   ", "frs", "dev", 80, 24); err == nil {
 		t.Fatal("expected an empty failure report to be rejected")
-	}
-}
-
-// A restart hand-off names the conversation to continue, and the launch attaches
-// to that one rather than re-deriving it from the orchestrator id — which is
-// mutable and reusable, so several conversations answer to it.
-func TestStartOrchestratorWithResumeAttachesToTheNamedConversation(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("HOME", home)
-	var launchedConversation, launchedPrompt string
-	app := NewApp(erunUIDeps{
-		store: newOrchestratorStubStore(t.TempDir()),
-		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
-			return newStubTerminalSession(), nil
-		},
-		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, sessionID, _, resumePrompt, _ string) (string, []string, error) {
-			launchedConversation, launchedPrompt = sessionID, resumePrompt
-			return "claude-stub", nil, nil
-		},
-		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
-	})
-	defer app.shutdown(context.Background())
-
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil, "", orchestratorLaunchInput{})
-	if err != nil {
-		t.Fatalf("CreateOrchestrator failed: %v", err)
-	}
-	if _, err := app.StartOrchestratorWithResume(created.ID, "conversation-that-asked", "finish the task", 80, 24); err != nil {
-		t.Fatalf("StartOrchestratorWithResume failed: %v", err)
-	}
-
-	if launchedConversation != "conversation-that-asked" {
-		t.Fatalf("expected the named conversation to be resumed, got %q", launchedConversation)
-	}
-	if launchedPrompt != "finish the task" {
-		t.Fatalf("expected the task to be handed to it, got %q", launchedPrompt)
-	}
-
-	// Without one, the orchestrator's own pinned conversation still answers.
-	app.stopOrchestratorSession(created.ID)
-	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
-		t.Fatalf("StartOrchestrator failed: %v", err)
-	}
-	if launchedConversation != orchestratorSessionID(created.ID) {
-		t.Fatalf("expected the pinned conversation without a hand-off, got %q", launchedConversation)
 	}
 }
 
@@ -2190,18 +2006,18 @@ func TestOrchestratorReconnectRefusedGuards(t *testing.T) {
 	}
 }
 
-// TestOrchestratorRespawnsAfterCrashIntoTheSameConversation is the end-to-end
-// path for the crash-recovery half of #1260: a session that exits non-zero is
-// relaunched automatically, into the SAME conversation, carrying a prompt that
-// tells it to carry on rather than idling.
-func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
+// TestOrchestratorRespawnsAfterCrashOntoTheSameAgent is the end-to-end path for
+// crash recovery: a terminal that exits non-zero is reattached automatically to
+// the SAME background agent, which kept its conversation throughout, so it is
+// handed no prompt -- nothing stopped that would need telling to carry on.
+func TestOrchestratorRespawnsAfterCrashOntoTheSameAgent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 
 	var mu sync.Mutex
 	var sessions []*stubTerminalSession
-	var conversations, prompts []string
+	var attached, prompts []string
 	app := NewApp(erunUIDeps{
 		store: newOrchestratorStubStore(t.TempDir()),
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
@@ -2211,10 +2027,10 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, sessionID, _, resumePrompt, _ string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(_ eruncommon.OrchestratorLaunch, agentID, initialPrompt, _ string) (string, []string, error) {
 			mu.Lock()
-			conversations = append(conversations, sessionID)
-			prompts = append(prompts, resumePrompt)
+			attached = append(attached, agentID)
+			prompts = append(prompts, initialPrompt)
 			mu.Unlock()
 			return "claude-stub", nil, nil
 		},
@@ -2242,14 +2058,14 @@ func TestOrchestratorRespawnsAfterCrashIntoTheSameConversation(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(conversations) != 2 {
-		t.Fatalf("expected two launches (initial + respawn), got %d: %v", len(conversations), conversations)
+	if len(attached) != 2 || attached[0] == "" || attached[0] != attached[1] {
+		t.Fatalf("respawn must reattach to the SAME agent, got %v", attached)
 	}
-	if conversations[0] != conversations[1] {
-		t.Fatalf("respawn must resume the SAME conversation, got %q then %q", conversations[0], conversations[1])
+	if prompts[1] != "" {
+		t.Fatalf("a reattach must not send the agent a prompt, got %q", prompts[1])
 	}
-	if prompts[1] == "" || !strings.Contains(prompts[1], "carry") {
-		t.Fatalf("respawn must carry a prompt telling it to continue, got %q", prompts[1])
+	if creates := len(fakeAgentsOf(t, app).creates); creates != 1 {
+		t.Fatalf("expected the agent created once and reattached, got %d creates", creates)
 	}
 }
 
@@ -2272,7 +2088,7 @@ func TestOrchestratorCleanExitDoesNotRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
@@ -2330,7 +2146,7 @@ func TestStopOrchestratorRefusesItsOwnRespawn(t *testing.T) {
 			mu.Unlock()
 			return session, nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,

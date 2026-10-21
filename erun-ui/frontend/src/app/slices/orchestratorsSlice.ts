@@ -1,6 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { OrchestratorNotice } from '@/app/orchestratorRestore';
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
@@ -163,11 +162,6 @@ export interface OrchestratorsState {
   editing: OrchestratorInfo | null;
   busy: boolean;
   error: string;
-  // restoreNotices is what a restore had to say about how it resolved this
-  // launch's set of reopened orchestrators -- kept apart from `error` because
-  // most of these are not errors: a resumed tracked conversation is the
-  // mechanism working, not a failure to render through the same field as one.
-  restoreNotices: OrchestratorNotice[];
 }
 
 const initialState: OrchestratorsState = {
@@ -176,7 +170,6 @@ const initialState: OrchestratorsState = {
   editing: null,
   busy: false,
   error: '',
-  restoreNotices: [],
 };
 
 export const orchestratorsSlice = createSlice({
@@ -190,7 +183,6 @@ export const orchestratorsSlice = createSlice({
       state.dialogOpen = true;
       state.editing = action.payload;
       state.error = '';
-      state.restoreNotices = [];
     },
     closeOrchestratorDialog(state) {
       state.dialogOpen = false;
@@ -200,15 +192,11 @@ export const orchestratorsSlice = createSlice({
       state.busy = action.payload;
       if (action.payload) {
         state.error = '';
-        state.restoreNotices = [];
       }
     },
     setOrchestratorsError(state, action: PayloadAction<string>) {
       state.busy = false;
       state.error = action.payload;
-    },
-    setOrchestratorRestoreNotices(state, action: PayloadAction<OrchestratorNotice[]>) {
-      state.restoreNotices = action.payload;
     },
     // setEnvActivityForOrchestratorEnvs is the live half of the activity join:
     // a fetch (setOrchestrators) joins the poller's snapshot onto each env ref
@@ -267,7 +255,6 @@ export const {
   closeOrchestratorDialog,
   setOrchestratorsBusy,
   setOrchestratorsError,
-  setOrchestratorRestoreNotices,
   setEnvActivityForOrchestratorEnvs,
   setEnvUsageForOrchestratorEnvs,
 } = orchestratorsSlice.actions;

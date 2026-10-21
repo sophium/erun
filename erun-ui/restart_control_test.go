@@ -93,11 +93,10 @@ func TestRestartControlServer_ReportsRestartAppFailure(t *testing.T) {
 	}
 }
 
-// TestRestartControlServer_ResumesTheHandoffsExactConversation ties the
-// trigger to the same resume path the button uses: a restart triggered
-// through the control server must hand the next launch the exact conversation
-// the live orchestrator session was on, not a re-derived one.
-func TestRestartControlServer_ResumesTheHandoffsExactConversation(t *testing.T) {
+// TestRestartControlServer_HandsThePaneToTheOrchestratorThatAsked ties the
+// trigger to the same hand-off the button writes: a restart triggered through
+// the control server makes the orchestrator that asked own the pane next.
+func TestRestartControlServer_HandsThePaneToTheOrchestratorThatAsked(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
 
@@ -111,16 +110,11 @@ func TestRestartControlServer_ResumesTheHandoffsExactConversation(t *testing.T) 
 	if !resp.OK {
 		t.Fatalf("expected ok=true, got %+v", resp)
 	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the live conversation to be recorded, got %+v", state)
+	if state := readRestoreState(t, restoreDir, id); state.OrchestratorID != id {
+		t.Fatalf("expected the hand-off to name %q, got %+v", id, state)
 	}
-	stageOrchestratorConversation(t, state.ConversationID)
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ConversationID != state.ConversationID {
-		t.Fatalf("expected the hand-off's exact conversation to be resumed, got %+v", target)
+	if target := app.ResolveOrchestratorToReopen(); target.OrchestratorID != id {
+		t.Fatalf("expected %q to own the pane, got %+v", id, target)
 	}
 }
 

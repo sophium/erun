@@ -340,36 +340,6 @@ export class OrchestratorDialog {
     });
   }
 
-  // The conversation picker: which conversation this orchestrator resumes, every
-  // one it could be pointed at instead, and the attach that corrects it. Rows
-  // carry their conversation id and role as data attributes so a spec addresses
-  // one without matching on rendered prose.
-  conversationSummary(): Locator {
-    return this.locator('Edit orchestrator').getByText('Resuming the conversation', {
-      exact: false,
-    });
-  }
-
-  conversationRow(conversationId: string): Locator {
-    return this.locator('Edit orchestrator').locator(`[data-conversation-id="${conversationId}"]`);
-  }
-
-  conversationRows(): Locator {
-    return this.locator('Edit orchestrator').locator('[data-conversation-id]');
-  }
-
-  conversationAttachButton(conversationId: string): Locator {
-    return this.conversationRow(conversationId).getByRole('button', {
-      name: `Attach ${conversationId} to this orchestrator`,
-    });
-  }
-
-  conversationDetachButton(conversationId: string): Locator {
-    return this.conversationRow(conversationId).getByRole('button', {
-      name: `Stop using ${conversationId} for this orchestrator`,
-    });
-  }
-
   // The restart-required banner (erun#1319): shown at the top of the form when
   // this orchestrator's live session was spawned with a scope that no longer
   // matches what it is linked to now, naming why and carrying its own action

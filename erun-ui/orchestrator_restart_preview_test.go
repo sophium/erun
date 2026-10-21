@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -17,7 +19,6 @@ import (
 // the same package would pass whatever the package happens to produce.
 type restartDryRunReopen struct {
 	OrchestratorID string `json:"orchestratorId"`
-	ConversationID string `json:"conversationId"`
 	Notice         string `json:"notice"`
 }
 
@@ -78,82 +79,58 @@ func assertPlanNames(t *testing.T, what, text string, wants ...string) {
 	}
 }
 
+// stagedRestoreIDs lists the orchestrators with a hand-off still on disk.
+func stagedRestoreIDs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("read restore dir: %v", err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, strings.TrimSuffix(entry.Name(), ".json"))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // assertNothingRestarted fails when a dry run did anything but ask: no relaunch,
-// no resume hand-off staged.
+// no hand-off staged.
 func assertNothingRestarted(t *testing.T, relaunches int, restoreDir string) {
 	t.Helper()
 	if relaunches != 0 {
 		t.Fatalf("a dry run relaunched the desktop %d times", relaunches)
 	}
 	if staged := stagedRestoreIDs(t, restoreDir); len(staged) != 0 {
-		t.Fatalf("a dry run staged a resume hand-off for %v", staged)
+		t.Fatalf("a dry run staged a hand-off for %v", staged)
 	}
 }
 
-// reopenedConversationFor reads the conversation one orchestrator is reopened on
-// by the launch target, whether it owns the pane or comes back alongside it.
-func reopenedConversationFor(target relaunchTarget, id string) string {
-	if target.OrchestratorID == id {
-		return target.ConversationID
-	}
-	for _, ref := range target.AlsoReopen {
-		if ref.OrchestratorID == id {
-			return ref.ConversationID
-		}
-	}
-	return ""
-}
-
-// stagedRestartFixture stages the state the reported incident describes: two
-// orchestrators open, neither with a conversation attached, and each one's own
-// session working in a conversation that is NOT the anchor derived from its id.
-// It returns each one's derived anchor and the conversation its session was
-// really working in.
-//
-// The one that asks for the restart (asking) has the same diverging record as
-// the other, and that is the point of keeping it in the fixture: the restart
-// hands it back the conversation its own session is on, so it must come out of
-// the preview unresumed-by-anchor, while `other` — which no hand-off reaches —
-// is the one the operator can still do something about.
-func stagedRestartFixture(t *testing.T, app *App) (asking, other, askingLive, otherLive string) {
+// stagedRestartFixture opens two orchestrators and then turns the gateway on
+// for one of them with no catalog behind it, as a hand edit can: that one keeps
+// running, but the next desktop would refuse to reopen it.
+func stagedRestartFixture(t *testing.T, app *App) (asking, refused string) {
 	t.Helper()
 	asking = createAndStartNamedOrchestrator(t, app, "erun", "dev")
-	other = createAndStartNamedOrchestrator(t, app, "petios-ops", "laptop")
-	askingLive = "3bde477f-6a1c-4a2e-9f0d-2c5b8e7a1d34"
-	otherLive = "6942fcd4-2f8b-4c6d-8e10-7a3d9b5c4e21"
-	for _, staged := range []struct {
-		id, live string
-	}{
-		{asking, askingLive},
-		{other, otherLive},
-	} {
-		anchor := orchestratorSessionID(staged.id)
-		if anchor == "" || anchor == staged.live {
-			t.Fatalf("fixture needs a conversation distinct from the anchor of %s", staged.id)
-		}
-		stageOrchestratorConversation(t, anchor)
-		stageOrchestratorConversation(t, staged.live)
-		writeLiveConversationRecord(t, staged.id, orchestratorLiveConversation{
-			ConversationID: staged.live,
-			LaunchID:       recordedLaunchID(t, app.deps.orchestratorOpenPath, staged.id),
-		})
-	}
-	return asking, other, askingLive, otherLive
+	refused = createAndStartNamedOrchestrator(t, app, "petios-ops", "laptop")
+	editStoredOrchestrator(app, refused, func(o *eruncommon.OrchestratorConfig) { o.UseGateway = true })
+	return asking, refused
 }
 
-// The reported flow at the boundary the operator actually uses, and the whole
-// defect in one assertion: the ONLY moment an operator can still do something
-// about a stranding restart is before it happens, and before it happens nothing
-// said anything. This asks the running desktop what a restart triggered now
-// would reopen, and requires the answer to name the orchestrator that will not
-// come back to the conversation its session was working in — together with the
-// conversation it lands on instead and the one it leaves behind.
-func TestRestartDryRunNamesTheOrchestratorsItWouldNotResume(t *testing.T) {
+// The dry run is the one moment an operator can still fix an orchestrator the
+// next desktop would refuse to reopen, so the plan names it and why, and names
+// nothing about the rest: every other orchestrator reattaches to its running
+// agent, and a plan that warned about those would teach the operator to ignore
+// the plan.
+func TestRestartDryRunNamesTheOrchestratorsItWouldNotReopen(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	relaunches := 0
 	app.deps.relaunchApp = func() error { relaunches++; return nil }
 
-	asking, other, askingLive, otherLive := stagedRestartFixture(t, app)
+	asking, refused := stagedRestartFixture(t, app)
 
 	server, port := startRestartControlServer(app)
 	if server == nil {
@@ -168,37 +145,25 @@ func TestRestartDryRunNamesTheOrchestratorsItWouldNotResume(t *testing.T) {
 	if len(plan.Preview) != 2 {
 		t.Fatalf("expected both open orchestrators in the plan, got %+v", plan.Preview)
 	}
-
-	stranded := restartPlanRow(t, plan.Preview, other)
-	if stranded.ConversationID != orchestratorSessionID(other) {
-		t.Fatalf("expected %q to be reported landing on its anchor %q, got %q",
-			other, orchestratorSessionID(other), stranded.ConversationID)
-	}
-	assertPlanNames(t, "the warning", stranded.Notice, otherLive, orchestratorSessionID(other), "manage the orchestrator")
-
-	// The one that asked for the restart is not stranded and must not be
-	// reported as if it were: the restart hands it back the conversation its own
-	// session is on. A plan that warned about it would teach the operator to
-	// ignore the plan.
-	if resumed := restartPlanRow(t, plan.Preview, asking); resumed.ConversationID != askingLive || resumed.Notice != "" {
-		t.Fatalf("expected %q to be reported coming back to its live conversation %q with nothing to say, got %+v",
-			asking, askingLive, resumed)
+	assertPlanNames(t, "the warning", restartPlanRow(t, plan.Preview, refused).Notice,
+		"will not reopen "+refused, "no gateway catalog is configured")
+	if row := restartPlanRow(t, plan.Preview, asking); row.Notice != "" {
+		t.Fatalf("expected %q to reopen with nothing to say, got %+v", asking, row)
 	}
 
 	// Asking what would happen is not the same as doing it.
 	assertNothingRestarted(t, relaunches, restoreDir)
 }
 
-// A warning is worth nothing unless it is the warning the restart then produces
-// — and the two are computed on opposite sides of a process boundary, from
-// state the restart itself is about to change. So the plan is held to what the
-// next launch actually does: the same orchestrator, the same conversation left
-// behind, the same one landed on.
-func TestTheRestartPlanAgreesWithWhatTheNextLaunchResumes(t *testing.T) {
+// A warning is worth nothing unless it is what the restart then does, and the
+// two are computed on opposite sides of a process boundary. So the plan is held
+// to the next launch: the orchestrator it named is reopened, and opening it is
+// refused for the reason the plan gave.
+func TestTheRestartPlanAgreesWithWhatTheNextLaunchReopens(t *testing.T) {
 	app, _ := restartTestApp(t)
 	app.deps.relaunchApp = func() error { return nil }
 
-	asking, other, _, otherLive := stagedRestartFixture(t, app)
+	asking, refused := stagedRestartFixture(t, app)
 
 	server, port := startRestartControlServer(app)
 	if server == nil {
@@ -206,19 +171,20 @@ func TestTheRestartPlanAgreesWithWhatTheNextLaunchResumes(t *testing.T) {
 	}
 	plan := postRestartDryRun(t, port, asking)
 	server.Close()
-
-	planned := restartPlanRow(t, plan.Preview, other)
-	if planned.Notice == "" {
-		t.Fatalf("expected the plan to warn about %q, got %+v", other, plan.Preview)
-	}
+	planned := restartPlanRow(t, plan.Preview, refused)
 
 	if err := app.RestartApp(asking); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
 	target := app.ResolveOrchestratorToReopen()
-
-	if landed := reopenedConversationFor(target, other); landed != planned.ConversationID {
-		t.Fatalf("the plan said %q would reopen on %q, the launch put it on %q", other, planned.ConversationID, landed)
+	if target.OrchestratorID != asking || len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != refused {
+		t.Fatalf("expected %q to own the pane with %q reopened beside it, got %+v", asking, refused, target)
 	}
-	assertPlanNames(t, "the launch's notices", noticeText(target.Notices), planned.Notice, otherLive)
+	app.stopOrchestratorSession(refused)
+	_, err := app.StartOrchestrator(refused, 80, 24)
+	if err == nil {
+		t.Fatalf("the plan said %q would not reopen, but it did", refused)
+	}
+	assertPlanNames(t, "the plan", planned.Notice, "no gateway catalog is configured")
+	assertPlanNames(t, "the refusal", err.Error(), "no gateway catalog is configured")
 }

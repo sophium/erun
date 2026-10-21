@@ -78,7 +78,10 @@ type erunUIDeps struct {
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
-	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error)
+	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
+	// claudeAgents drives the Claude background agents persisted orchestrators
+	// run as, injectable so no test ever starts or stops a real one.
+	claudeAgents claudeAgentCLI
 	// resolveGatewayCredential reads the secret an orchestrator launched through
 	// the gateway sends, injectable so a test never reads the real secret store.
 	resolveGatewayCredential func(*eruncommon.OpenRouterConfig) (string, error)
@@ -427,6 +430,9 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 func withDefaultOrchestratorLaunchDeps(deps erunUIDeps) erunUIDeps {
 	if deps.resolveOrchestratorLaunch == nil {
 		deps.resolveOrchestratorLaunch = orchestratorLaunchCommand
+	}
+	if deps.claudeAgents == nil {
+		deps.claudeAgents = newDefaultClaudeAgents()
 	}
 	if deps.resolveGatewayCredential == nil {
 		deps.resolveGatewayCredential = eruncommon.ResolveGatewayCredential

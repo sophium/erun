@@ -13,13 +13,11 @@ import (
 )
 
 // The desktop app's Restart button (erun-ui's App.RestartApp) is the only
-// place that knows how to hand a rebuild+restart off correctly: it resolves
-// which conversation is actually live for the orchestrator asking, writes the
-// resume hand-off, relaunches a fresh copy of itself, and quits — all inside
-// the one process that holds that live session state in memory. Nothing
-// outside that process can reconstruct it, so a CLI-triggered restart cannot
-// reimplement the restart; it can only ask the running desktop to run its own
-// RestartApp. desktopControlMarkerFileName is where the running desktop
+// place that knows how to hand a rebuild+restart off correctly: it records
+// which orchestrator the operator restarted from, relaunches a fresh copy of
+// itself, and quits — all inside the one process that holds the open sessions.
+// A CLI-triggered restart therefore cannot reimplement the restart; it can
+// only ask the running desktop to run its own RestartApp. desktopControlMarkerFileName is where the running desktop
 // records how to reach itself for exactly that ask, and DesktopControlPath is
 // the endpoint RestartDesktopApp calls once the marker resolves to a live pid.
 const (
@@ -122,15 +120,15 @@ type DesktopRestartOutcome struct {
 	PID         int                  `json:"pid,omitempty"`
 	ControlPort int                  `json:"controlPort,omitempty"`
 	// Preview is the dry run's answer: every orchestrator the restart would
-	// reopen, and the ones among them that do not come back to the conversation
-	// their own session was working in (see DesktopRestartReopen.Notice). Empty
-	// for a real restart — by the time one is asked for, it has happened.
+	// reopen, and the ones among them the next launch would refuse to reopen
+	// (see DesktopRestartReopen.Notice). Empty for a real restart — by the time
+	// one is asked for, it has happened.
 	Preview []DesktopRestartReopen `json:"preview,omitempty"`
 	// PreviewUnavailable says a dry run resolved and verified a live target but
 	// could not read the plan from it. The dry run still reports
 	// would-restart — that much the marker and the liveness probe established —
 	// and this is what keeps the missing half from reading as "nothing would be
-	// stranded", which is the one thing an absent preview must never say.
+	// refused", which is the one thing an absent preview must never say.
 	PreviewUnavailable string `json:"previewUnavailable,omitempty"`
 }
 
@@ -141,19 +139,14 @@ type DesktopRestartRequest struct {
 	OrchestratorID string `json:"orchestratorId"`
 }
 
-// DesktopRestartReopen is one orchestrator a restart reopens, and what it comes
-// back on.
+// DesktopRestartReopen is one orchestrator a restart reopens. Its background
+// agent keeps running through the restart, so it comes back on whatever
+// conversation the agent is on.
 type DesktopRestartReopen struct {
 	OrchestratorID string `json:"orchestratorId"`
-	// ConversationID is the conversation the launch that follows the restart
-	// resumes for this orchestrator.
-	ConversationID string `json:"conversationId,omitempty"`
-	// Notice is set when that is NOT the conversation this orchestrator's own
-	// session was working in -- naming both conversations, so the operator can
-	// tell which work is about to be left behind and attach it before the
-	// restart happens -- or when the launch after the restart would be refused,
-	// naming why. Empty is the ordinary case, and the only one that needs no
-	// reporting.
+	// Notice is set when the launch after the restart would refuse to reopen
+	// this orchestrator, naming why. Empty is the ordinary case, and the only
+	// one that needs no reporting.
 	Notice string `json:"notice,omitempty"`
 }
 
@@ -201,14 +194,13 @@ func DefaultDesktopRestartDeps() DesktopRestartDeps {
 // its control marker, verify it is actually alive before touching anything,
 // then — unless dryRun — ask it to restart itself. It never spawns a second
 // desktop instance itself and never signals a pid directly: the running
-// desktop is the only thing that can correctly write the resume hand-off (it
-// alone holds which conversation is live for orchestratorID), relaunch a
+// desktop is the only thing that can correctly write the hand-off, relaunch a
 // fresh copy, and quit, so this always defers to that single mechanism rather
 // than growing a second one beside it.
 //
 // A dry run asks that same process the one question that is still actionable
 // BEFORE it restarts: which orchestrators it would reopen, and which of them
-// would not come back to the conversation their own session was working in. The
+// the next launch would refuse to reopen. The
 // answer is the outcome's Preview, and it comes from the desktop rather than
 // from this caller reading state back for the same reason the restart does: the
 // resolution is the desktop's, and a second implementation of it here would be

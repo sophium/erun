@@ -23,10 +23,10 @@ func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopR
 	}
 }
 
-// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the boot path
-// consumes the hand-off before the start is refused, so a preview that reported
-// the task coming back would be the last thing the operator read before
-// losing it.
+// TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused: the agent keeps
+// running through a restart, but a desktop that refuses to reopen it leaves the
+// operator without a terminal on it, so the preview says so while it can still
+// be fixed.
 func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	var credentialErr error
@@ -39,20 +39,18 @@ func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	_, err = app.StartOrchestrator(created.ID, 80, 24)
 	mustNoErr(t, err, "StartOrchestrator")
 	id := created.ID
-	stageOrchestratorConversation(t, orchestratorSessionID(id))
 
 	preview := app.orchestratorRestartPreview(id)
-	if len(preview) != 1 || preview[0].ConversationID != orchestratorSessionID(id) || preview[0].Notice != "" {
-		t.Fatalf("expected the hand-off delivered with nothing to report, got %+v", preview)
+	if len(preview) != 1 || preview[0].OrchestratorID != id || preview[0].Notice != "" {
+		t.Fatalf("expected the orchestrator reopened with nothing to report, got %+v", preview)
 	}
 
 	credentialErr = errors.New("no gateway credential: nothing is saved under \"claude-gateway\"")
 	requireLoneRestartPreviewNotice(t, app.orchestratorRestartPreview(id), id,
-		"The restart will not start "+id,
-		"its task will not be continued",
+		"The restart will not reopen "+id,
 		"no gateway credential",
 		"save the gateway key in the desktop's ERun settings",
-		orchestratorReturnNoteName(id))
+		"Its background agent keeps running")
 	if entries, err := os.ReadDir(restoreDir); err == nil && len(entries) != 0 {
 		t.Fatalf("a preview must write no hand-off, found %d", len(entries))
 	}

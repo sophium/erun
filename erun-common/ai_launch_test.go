@@ -386,3 +386,34 @@ func TestAISessionLaunchCommandKeepsScheduleWakeup(t *testing.T) {
 		t.Fatalf("the persistent AI session must keep ScheduleWakeup available, got %q", got)
 	}
 }
+
+// TestClaudeBackgroundEffortKeepsMaxAsAFlag pins the split: every level the
+// effortLevel setting accepts goes to the settings file a restart re-reads, and
+// max, which that setting silently drops, stays a launch flag.
+func TestClaudeBackgroundEffortKeepsMaxAsAFlag(t *testing.T) {
+	cases := []struct {
+		effort   string
+		settings map[string]any
+		flags    []string
+	}{
+		{"low", map[string]any{"effortLevel": "low"}, nil},
+		{"xhigh", map[string]any{"effortLevel": "xhigh"}, nil},
+		{"max", map[string]any{}, []string{"--effort", "max"}},
+		{"ultracode", map[string]any{"ultracode": true}, nil},
+		{"bogus", map[string]any{}, nil},
+	}
+	for _, tc := range cases {
+		settings, flags := ClaudeBackgroundEffort(tc.effort)
+		if len(settings) != len(tc.settings) {
+			t.Fatalf("%s: settings = %v, want %v", tc.effort, settings, tc.settings)
+		}
+		for key, want := range tc.settings {
+			if settings[key] != want {
+				t.Fatalf("%s: settings[%s] = %v, want %v", tc.effort, key, settings[key], want)
+			}
+		}
+		if strings.Join(flags, " ") != strings.Join(tc.flags, " ") {
+			t.Fatalf("%s: flags = %v, want %v", tc.effort, flags, tc.flags)
+		}
+	}
+}

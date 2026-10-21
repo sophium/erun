@@ -35,7 +35,6 @@ import {
   orchestratorAliasOptions,
   orchestratorAliasValue,
 } from '@/components/app/OrchestratorDialog.Alias.helpers';
-import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
 import { DirectoriesField } from '@/components/app/OrchestratorDialog.Directories';
 import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
 import {
@@ -238,8 +237,8 @@ export function OrchestratorDialog(): React.ReactElement {
       <DialogContent
         // Bound the panel to the viewport and let the field region scroll, so the
         // footer — and with it Save — stays reachable on a short window. The form
-        // carries the linked environments, the orchestrator's own directories, its
-        // conversations and its guidance, which together outgrow a window; without
+        // carries the linked environments, the orchestrator's own directories and
+        // its guidance, which together outgrow a window; without
         // this the dialog simply grew past the bottom edge and the Save button sat
         // half off-screen, where it reads as a save that does nothing. Same
         // treatment, and the same reason, as EnvironmentDialogView.
@@ -328,10 +327,7 @@ function OrchestratorForm({
           onRemove={form.removeDirectory}
         />
         {editing && !editing.transient ? (
-          <>
-            <OrchestratorConversationsSection orchestratorId={editing.id} />
-            <OrchestratorGuidanceSection orchestratorId={editing.id} />
-          </>
+          <OrchestratorGuidanceSection orchestratorId={editing.id} />
         ) : null}
         {error ? <InlineAlert>{error}</InlineAlert> : null}
       </div>

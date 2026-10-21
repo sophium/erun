@@ -140,6 +140,49 @@ export function openerCalls(): string[] {
   }
 }
 
+// claudeAgentsPath is the claude stub's stand-in for Claude Code's background
+// service: one line per background agent, `<id> <run|stopped> <name>`. The
+// desktop runs every persisted orchestrator as a background agent named after
+// its id, so the stub answers `agents --json`, `--bg`, `stop`, `rm` and
+// `attach` from this file. Per worker, removed with the isolated root.
+export function claudeAgentsPath(): string {
+  return path.join(isolatedRoot(), 'claude-agents');
+}
+
+// ClaudeStubAgent is one background agent the claude stub is holding.
+export interface ClaudeStubAgent {
+  id: string;
+  running: boolean;
+  name: string;
+}
+
+// claudeAgents returns every background agent the claude stub holds, so a
+// spec can see which agent an orchestrator was attached to.
+export function claudeAgents(): ClaudeStubAgent[] {
+  let text = '';
+  try {
+    text = fs.readFileSync(claudeAgentsPath(), 'utf8');
+  } catch {
+    return [];
+  }
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [id = '', state = '', name = ''] = line.split(' ');
+      return { id, running: state === 'run', name };
+    });
+}
+
+// seedClaudeAgent stages a background agent the desktop did not create, as an
+// operator running `claude --bg -n <name>` by hand would.
+export function seedClaudeAgent(agent: ClaudeStubAgent): void {
+  fs.appendFileSync(
+    claudeAgentsPath(),
+    `${agent.id} ${agent.running ? 'run' : 'stopped'} ${agent.name}\n`,
+  );
+}
+
 export function tabSetupHoldsDir(): string {
   return path.join(isolatedRoot(), 'tab-setup-holds');
 }
@@ -284,6 +327,8 @@ export function backendEnv(): Record<string, string> {
     ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS: tabSetupHoldsDir(),
     // Where the OS-opener stubs record each request (openerCalls above).
     ERUN_PLAYWRIGHT_OPENER_LOG: openerLogPath(),
+    // The claude stub's background agents (claudeAgentsPath above).
+    ERUN_PLAYWRIGHT_CLAUDE_AGENTS: claudeAgentsPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -529,8 +574,12 @@ export function seedGitRemoteAgentForK3d(
 //   the row reads "stopped", and the spec times out; where a real session does
 //   start (a developer's machine, an agent pod), every orchestrator the suite
 //   opens spends the shared agent account on a nested agent nobody asked for.
-//   The stub prints a shell-prompt line (the action runner's setup-complete
-//   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
+//   A persisted orchestrator runs as a background agent the desktop finds with
+//   `claude agents --json`, creates with `claude --bg`, and opens with
+//   `claude attach <id>`, so the stub keeps those agents in claudeAgentsPath()
+//   and answers each command from it. `attach`, and a transient (Investigate)
+//   session, print a shell-prompt line (the action runner's setup-complete
+//   marker, see signalSessionReadyOnLine) and then sleep, so the session is
 //   live, quiet, and killable.
 //
 // Both long-lived stubs register the pid they park under before blocking, so the
@@ -584,7 +633,41 @@ function writeStubBinary(name: string): void {
   } else if (name === 'claude') {
     body = [
       ...stubRegisterPreamble(name),
-      '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      '# claude playwright stub: an inert background service and session.',
+      'agents="${ERUN_PLAYWRIGHT_CLAUDE_AGENTS:-$HOME/.claude-playwright-agents}"',
+      'touch "$agents"',
+      'set_state() {',
+      '  tmp="$agents.$$"',
+      '  while read -r id state name; do',
+      '    [ "$id" = "$1" ] && state="$2"',
+      '    [ "$2" = gone ] && [ "$id" = "$1" ] && continue',
+      '    printf \'%s %s %s\\n\' "$id" "$state" "$name"',
+      '  done < "$agents" > "$tmp"',
+      '  mv "$tmp" "$agents"',
+      '}',
+      'case "$1" in',
+      '  agents)',
+      '    sep=""',
+      "    printf '['",
+      '    while read -r id state name; do',
+      '      pid=""',
+      '      [ "$state" = run ] && pid=\'"pid":1,\'',
+      '      printf \'%s{%s"id":"%s","kind":"background","name":"%s","sessionId":"%s-0000-4000-8000-000000000000"}\' "$sep" "$pid" "$id" "$name" "$id"',
+      '      sep=","',
+      '    done < "$agents"',
+      "    printf ']\\n'",
+      '    exit 0 ;;',
+      '  --bg)',
+      '    name=""',
+      '    while [ $# -gt 0 ]; do [ "$1" = -n ] && name="$2"; shift; done',
+      "    id=$(printf '%08x' $$)",
+      '    printf \'%s run %s\\n\' "$id" "$name" >> "$agents"',
+      '    printf \'backgrounded · %s · %s\\n\' "$id" "$name"',
+      '    exit 0 ;;',
+      '  stop) set_state "$2" stopped; printf \'stopped %s\\n\' "$2"; exit 0 ;;',
+      '  rm) set_state "$2" gone; printf \'removed %s\\n\' "$2"; exit 0 ;;',
+      '  attach) set_state "$2" run ;;',
+      'esac',
       'register_stub',
       "printf 'claude@playwright:~$ \\n'",
       'exec sleep 2147483647',

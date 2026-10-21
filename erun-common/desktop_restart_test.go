@@ -88,7 +88,7 @@ func TestRestartDesktopApp_DryRunAsksForThePlanAndNotARestart(t *testing.T) {
 			t.Fatalf("port = %d, want 4242", port)
 		}
 		return DesktopRestartResponse{OK: true, Preview: []DesktopRestartReopen{
-			{OrchestratorID: "orch-2", ConversationID: "conv-anchor", Notice: "reopened on its anchor"},
+			{OrchestratorID: "orch-2", Notice: "will not reopen orch-2"},
 		}}, nil
 	})
 	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", true)
@@ -381,7 +381,7 @@ func TestPostDesktopRestartPlan_CarriesThePlanBack(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(DesktopRestartResponse{OK: true, Preview: []DesktopRestartReopen{
-			{OrchestratorID: "petios-ops", ConversationID: "anchor-1", Notice: "left 3bde477f behind"},
+			{OrchestratorID: "petios-ops", Notice: "will not reopen petios-ops"},
 		}})
 	}))
 	defer server.Close()
@@ -397,7 +397,7 @@ func TestPostDesktopRestartPlan_CarriesThePlanBack(t *testing.T) {
 	if gotBody.OrchestratorID != "orch-9" {
 		t.Fatalf("orchestratorId sent = %q, want %q", gotBody.OrchestratorID, "orch-9")
 	}
-	if len(response.Preview) != 1 || response.Preview[0].ConversationID != "anchor-1" {
+	if len(response.Preview) != 1 || response.Preview[0].Notice != "will not reopen petios-ops" {
 		t.Fatalf("response = %+v, want the plan decoded off the wire", response)
 	}
 }

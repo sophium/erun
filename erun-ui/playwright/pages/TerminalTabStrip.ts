@@ -29,4 +29,10 @@ export class TerminalTabStrip {
   async waitForTab(label: string): Promise<void> {
     await this.tab(label).waitFor({ state: 'visible' });
   }
+
+  // closeTab presses a tab's close control. On an orchestrator tab that stops
+  // the orchestrator.
+  async closeTab(label: string): Promise<void> {
+    await this.page.getByRole('button', { name: `Close ${label}`, exact: true }).click();
+  }
 }

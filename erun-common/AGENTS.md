@@ -92,11 +92,13 @@ this file for the conventions below.
   Surface the count in status. A plain nonzero exit without started work is not
   eligible. Claude continuation was verified live; Codex context survival remains
   a disclosed live-verification gap, not a reason to remove its resume support.
-- Keep dtach for interactive sessions. The evaluated native background lifecycle
-  lacked reliable passive logs, non-interactive input, and cross-tool takeover
-  parity; revisit only when those guarantees are verified. This decision does not
-  prohibit non-interactive job resume. Build launch commands in
-  `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
+- Keep dtach for interactive **pod** sessions. The evaluated native background
+  lifecycle lacked reliable passive logs, non-interactive input, and cross-tool
+  takeover parity inside a runtime pod; revisit only when those guarantees are
+  verified there. This decision does not prohibit non-interactive job resume, and
+  it does not cover host orchestrators, which run as Claude background agents
+  attached from a PTY the desktop owns (`erun-ui/AGENTS.md`). Build launch
+  commands in `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
 - Host bootstrap may seed missing pod config, never overwrite existing values.
   Environment-owned reconciliation belongs to `doctor --sync-config`.
 - An in-cluster cloud context names the cluster the current process itself runs
