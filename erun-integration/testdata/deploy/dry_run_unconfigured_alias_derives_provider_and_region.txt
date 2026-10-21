@@ -10,3 +10,5 @@ cd <TMP> && helm upgrade --install --wait --wait-for-jobs --server-side true --f
 deploy: would watch pods in team-prod on context erun-001-team-eu-west-2 for early container failure (release team-devops)
 kubectl --context erun-001-team-eu-west-2 --namespace team-prod get pods -o json
 dedup: ready (release=erun-001-team-eu-west-2-team-prod-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context erun-001-team-eu-west-2 -n team-prod delete secret erun-claude-gateway --ignore-not-found

@@ -22,4 +22,6 @@ helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflic
 deploy: would watch pods in team-agent on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-agent get pods -o json
 dedup: ready (release=test-context-team-agent-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n team-agent delete secret erun-claude-gateway --ignore-not-found
 ==> Dry run: would upgrade 1, 0 up to date, 0 unresolved, 0 failed
