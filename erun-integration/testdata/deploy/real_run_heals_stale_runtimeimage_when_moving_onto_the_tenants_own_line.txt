@@ -16,6 +16,7 @@ dedup: claim (release=test-context-frs-build-frs-devops, hash=<HASH>, pid=<PID>)
     namespace frs-build on context test-context
     waiting for helm rollout (timeout 15m0s)...
 ==> Deployed frs/build <VERSION> in <ELAPSED>
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
 step timing (ordered by duration):
   deploy [<ELAPSED>]
     frs/build <VERSION> [<ELAPSED>]

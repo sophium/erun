@@ -8,6 +8,7 @@ import type {
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
+import { loadManageGatewayRouting } from './gatewayRedeployThunks';
 import {
   clearManageDeployComponentsRefresh,
   refreshManageDeployComponents,
@@ -297,6 +298,7 @@ export const loadManageConfig = (): AppThunk<Promise<void>> => async (dispatch, 
       }),
     );
     void dispatch(loadManageResourceStatus(result.kubernetesContext, selection));
+    void dispatch(loadManageGatewayRouting(selection));
   } catch (error) {
     dispatch(
       patchManageDialog({

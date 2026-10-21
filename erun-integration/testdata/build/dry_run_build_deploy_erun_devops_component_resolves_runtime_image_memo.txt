@@ -23,3 +23,5 @@ cd <TMP> && helm upgrade --install --wait --wait-for-jobs --server-side true --f
 deploy: would watch pods in erun-dev on context test-context for early container failure (release erun-devops)
 kubectl --context test-context --namespace erun-dev get pods -o json
 dedup: ready (release=test-context-erun-dev-erun-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n erun-dev delete secret erun-claude-gateway --ignore-not-found

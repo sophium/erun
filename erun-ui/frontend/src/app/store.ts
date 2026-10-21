@@ -31,6 +31,7 @@ import diffReviewStatusReducer from './slices/diffReviewStatusSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import envStatusReducer from './slices/envStatusSlice';
+import gatewayRedeployReducer from './slices/gatewayRedeploySlice';
 import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
 import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
@@ -85,6 +86,7 @@ export const store = configureStore({
     aiOccupancyPrompt: aiOccupancyPromptReducer,
     contribute: contributeReducer,
     upgradeAll: upgradeAllReducer,
+    gatewayRedeploy: gatewayRedeployReducer,
     outputsDialog: outputsDialogReducer,
     pinVersion: pinVersionReducer,
     orchestrators: orchestratorsReducer,

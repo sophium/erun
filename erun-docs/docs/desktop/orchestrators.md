@@ -31,19 +31,23 @@ For the exact files behind these two layers and how they're injected into a sess
 
 ## The conversation an orchestrator comes back to {#orchestrator-conversations}
 
-An orchestrator keeps one long conversation, and starting it — after a quit, a reboot, a crash, or a rebuild-and-restart — resumes that conversation rather than beginning a new one. By default that is the conversation derived from the orchestrator's own name: the same one on every launch and on every machine, so nothing on disk can point it somewhere else. A session that ends up in a conversation of its own — after a `/clear`, after a compaction, or because the harness declined the id it was asked to resume — does not move that default on its own. Its conversation is kept and offered, and **Attach** in the manage dialog is how you make it the one that comes back.
+Each orchestrator runs as a Claude Code **background agent** named after the orchestrator — an orchestrator with id `erun` is the agent `erun` in `claude agents`. The orchestrator's pane is a window onto that agent, not the agent itself, so the agent keeps its own conversation whatever happens to the pane: a `/clear` or a compaction moves the agent onto its next conversation, and the pane follows it, because opening the orchestrator always attaches to the agent rather than naming a conversation for it to resume.
 
-When a session's own conversation is still on this machine and differs from the one the launch resumes, ERun says so instead of coming back looking healthy with hours of the work missing. The message names both conversations — the one it resumed and the one the session was actually working in — and the manage dialog is where you settle it.
+What that means in practice:
 
-The dialog's **Conversation** section lists every conversation this orchestrator could resume, newest first, each with when it was last written, how large it is, the folder it was started in, and how it opens, so you can recognise the one holding your work. Each row says what it is to this orchestrator:
+- **Opening** an orchestrator attaches to its agent, and creates the agent the first time. A stopped agent starts again on its latest conversation — after a reboot too.
+- **Quitting or restarting the desktop** leaves every agent running, mid-turn included. The next desktop reattaches each orchestrator that was open. A rebuild-and-restart therefore no longer interrupts the orchestrator that asked for it.
+- **Closing an orchestrator's tab** stops its agent. Its conversation is kept, and the next open starts the agent again on it.
+- **Restart** stops the agent and starts it again on the orchestrator's current settings, on the same conversation.
+- **Deleting** an orchestrator removes its agent too. The conversation's transcript is Claude Code's and is not deleted.
 
-- **Live** — its own session reported being in this one.
-- **Stranded** — recorded as live by a session ERun can no longer confirm. This is the row to look at when work has gone missing.
-- **Attached** — the one you chose.
-- **Default** — the conversation this orchestrator's name resolves to, used until anything else is known.
-- **Unclaimed** — a conversation on this machine that no orchestrator is using.
+**Settings a restart cannot apply are applied by recreating the agent.** Model, gateway and every effort except `max` reach the agent on its next restart. Moving effort to or from `max` — and an agent of the orchestrator's name that ERun did not create, such as one you started by hand with `claude --bg -n erun` — needs the agent recreated: ERun says so in a notification, removes the old agent, and starts a new one on the same conversation.
 
-**Attach** restarts the orchestrator in the conversation you picked and remembers the choice, so later starts honour it rather than going back to the default; **Use the default** clears it again. Conversations belonging to your other orchestrators are never offered here — the list says how many it left out — because handing one orchestrator another's history is worse than starting fresh.
+**When ERun cannot tell which agent is the orchestrator's, it asks you rather than guessing.** Claude Code allows two agents with the same name; when it finds more than one named after an orchestrator, opening it is refused with each agent's id, and `claude rm <id>` on the ones that are not yours settles it.
+
+**The orchestrators folder has to be trusted once.** Claude Code will not start a background agent in a folder nobody has trusted. If opening an orchestrator reports that the orchestrators folder is not trusted, run `claude` once in that folder (`~/orchestrators`), accept the trust prompt, exit, and open the orchestrator again.
+
+An orchestrator created before this release continues the conversation it was on: its first agent resumes the conversation you had attached to it, or else the one derived from its id.
 
 ## Where next
 

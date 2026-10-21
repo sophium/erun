@@ -74,3 +74,16 @@ export interface UIGatewayCredentialStatus {
   // another gateway rather than claiming there is none.
   hostEndpoint?: string;
 }
+
+// UIGatewayRouting is one environment whose running pod routes Claude Code
+// somewhere its saved configuration no longer asks for. The gateway is rendered
+// into the runtime at deploy time, so a switch in ERun settings or the AI tab
+// reaches the pod only through a redeploy.
+export interface UIGatewayRouting {
+  tenant: string;
+  environment: string;
+  // The gateway the running pod uses, "" for Anthropic directly.
+  deployed: string;
+  // The gateway the saved configuration resolves to, "" for none.
+  wanted: string;
+}

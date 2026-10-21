@@ -299,26 +299,25 @@ exit 0`)
 		golden.Equal(t, "app/restart_dry_run_orchestrator_defaults_from_env_var", normalize.Apply(result.Combined))
 	})
 
-	t.Run("restart_dry_run_names_the_orchestrators_it_would_not_resume", func(t *testing.T) {
-		// The reported flow, one step earlier than it was reported: a restart is
-		// about to strand an orchestrator that has no conversation attached, and
-		// the dry run is the last moment attaching it can still change the
-		// outcome. The stub answers with the plan the desktop computes, so this
-		// pins what a plan turns into on the operator's terminal -- including the
-		// orchestrator that asks for the restart, which must NOT be reported as
-		// stranded because the restart hands it back its own live conversation.
+	t.Run("restart_dry_run_names_the_orchestrators_it_would_not_reopen", func(t *testing.T) {
+		// A restart reattaches every orchestrator to its running background
+		// agent; the one thing the dry run still has to say is an orchestrator
+		// the next desktop would refuse to reopen, while it can be fixed. The stub
+		// answers with the plan the desktop computes, so this pins what a plan
+		// turns into on the operator's terminal -- including the orchestrator
+		// that asks for the restart, which reopens and is not reported.
 		skipIfPortsBusy(t, restartControlPort)
 		setup := env.New(t)
 		writeDesktopControlMarker(t, setup, os.Getpid(), restartControlPort)
 		stub := stubDesktopControlServer(t, restartControlPort,
 			`{"ok":true,"preview":[`+
-				`{"orchestratorId":"erun","conversationId":"3bde477f-6a1c-4a2e-9f0d-2c5b8e7a1d34"},`+
-				`{"orchestratorId":"petios-ops","conversationId":"1cbe8921-0f4a-4c5e-9d21-8b6f3a2e5c70","notice":"Reopened petios-ops on the conversation derived from its id (1cbe8921-0f4a-4c5e-9d21-8b6f3a2e5c70), not the one its last session was working in (6942fcd4-2f8b-4c6d-8e10-7a3d9b5c4e21). That conversation is still there; manage the orchestrator to attach it."}]}`)
+				`{"orchestratorId":"erun"},`+
+				`{"orchestratorId":"petios-ops","notice":"The restart will not reopen petios-ops: the gateway is turned on but no gateway catalog is configured. Its background agent keeps running; fix that and open it again."}]}`)
 		result := erun.Run(t, []string{"app", "restart", "--orchestrator", "erun", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "app/restart_dry_run_names_the_orchestrators_it_would_not_resume", normalize.Apply(result.Combined))
+		golden.Equal(t, "app/restart_dry_run_names_the_orchestrators_it_would_not_reopen", normalize.Apply(result.Combined))
 		assertAskedExactly(t, stub, eruncommon.DesktopControlPlanPath, "a dry run")
 		if bodies := stub.bodies(); !strings.Contains(bodies, `"orchestratorId":"erun"`) {
 			t.Fatalf("expected the dry run to name the orchestrator to resume, sent %q", bodies)
@@ -332,7 +331,7 @@ exit 0`)
 		setup := env.New(t)
 		writeDesktopControlMarker(t, setup, os.Getpid(), restartControlPort)
 		stub := stubDesktopControlServer(t, restartControlPort,
-			`{"ok":true,"preview":[{"orchestratorId":"erun-ideas","conversationId":"9f90b94f-3c2a-4b71-8d05-6e4f1a9c2b83","notice":"Reopened erun-ideas on the conversation derived from its id (9f90b94f-3c2a-4b71-8d05-6e4f1a9c2b83), not the one its last session was working in (6942fcd4-2f8b-4c6d-8e10-7a3d9b5c4e21). That conversation is still there; manage the orchestrator to attach it."}]}`)
+			`{"ok":true,"preview":[{"orchestratorId":"erun-ideas","notice":"The restart will not reopen erun-ideas: the gateway is turned on but no gateway catalog is configured. Its background agent keeps running; fix that and open it again."}]}`)
 		result := erun.Run(t, []string{"app", "restart", "--dry-run", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

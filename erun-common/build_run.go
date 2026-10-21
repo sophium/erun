@@ -206,6 +206,11 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	// the sequential loop below and the concurrent dispatch share it.
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
+	stopDaemonEndpoint, err := ensureBuildDaemonEndpoint(ctx, ordered)
+	if err != nil {
+		return err
+	}
+	defer stopDaemonEndpoint()
 	jobs := resolveBuildJobs(ctx, len(ordered))
 	if jobs <= 1 {
 		// Sequential keeps each image's decision lines next to its own build

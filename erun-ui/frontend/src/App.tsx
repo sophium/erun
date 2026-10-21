@@ -13,6 +13,7 @@ import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { CloseConfirmDialog } from '@/components/app/CloseConfirmDialog';
 import { CreateReviewDialog } from '@/components/app/CreateReviewDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
+import { GatewayRedeployDialog } from '@/components/app/GatewayRedeployDialog';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -122,6 +123,7 @@ export function App(): React.ReactElement {
         <ReconnectStatusPanel />
         <TenantDialogView />
         <UpgradeAllDialog />
+        <GatewayRedeployDialog />
         <OutputsDialog />
         <PinVersionDialog />
         <OrchestratorDialog />

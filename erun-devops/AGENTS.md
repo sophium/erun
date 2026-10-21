@@ -348,6 +348,13 @@ composition and release invariants belong to root/shared logic, not chart policy
   `--host=tcp://0.0.0.0:2375` listener bound to *all* interfaces, with no
   authentication, reachable by anything sharing the pod's network namespace. That is
   a real pre-existing exposure this repo has not hardened to loopback-only.
+- **`erun build` provides that endpoint where nothing listens on it.** A build
+  with a `test` stage first checks `127.0.0.1:2375`; inside a pod the dind listener
+  answers and is used. Anywhere else (a host environment, a laptop) it starts a
+  loopback-only forwarder from that address to the build's own daemon socket on the
+  daemon host's network — the network a `RUN --network=host` step joins — and
+  removes it when the build ends (`ensureBuildDaemonEndpoint`). A test stage can
+  therefore start container fixtures the same way on every venue.
 - **Under that entitlement a test may start its own container-runtime fixture; two
   classes never belong in a `test` stage.** In scope: a Testcontainers-style
   ephemeral dependency (a postgres, a compose-style sidecar) via

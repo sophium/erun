@@ -1108,7 +1108,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	defer handle.Release()
 
 	if ctx.DryRun {
-		return nil
+		return pruneGatewayCredentialsSecret(ctx, deployInput)
 	}
 	stepCtx, finish := ctx.startTimingStep(target)
 	err = runHelmDeployExecute(stepCtx, deployInput, valuesPull, depBuild, deploy, target)
@@ -1129,7 +1129,13 @@ func runHelmDeployExecute(ctx Context, deployInput HelmDeploySpec, valuesPull *p
 	if err := runChartDependencyBuild(ctx, deployInput, depBuild, target); err != nil {
 		return err
 	}
-	return runHelmDeployRollout(ctx, deployInput, deploy, target)
+	if err := runHelmDeployRollout(ctx, deployInput, deploy, target); err != nil {
+		return err
+	}
+	if err := pruneGatewayCredentialsSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	return nil
 }
 
 // helmDeployTargetLabel builds the label used in deploy feedback. It names the

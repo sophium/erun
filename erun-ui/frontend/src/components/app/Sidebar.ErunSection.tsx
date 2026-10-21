@@ -31,7 +31,6 @@ import { openOrchestratorDialog } from '@/app/slices/orchestratorsSlice';
 import { InlineAlert } from '@/components/app/InlineAlert';
 import { BusyRowSpinner } from '@/components/app/Sidebar.BusyRowSpinner';
 import { OrchestratorHoverCard } from '@/components/app/Sidebar.OrchestratorHoverCard';
-import { OrchestratorNoticeList } from '@/components/app/Sidebar.OrchestratorNotice';
 import { StatusDotGlyph } from '@/components/app/Sidebar.StatusDot';
 
 // ErunSection is the top-level "ERUN" sidebar block above ENVIRONMENTS: the
@@ -137,7 +136,6 @@ function OrchestratorsArea(): React.ReactElement {
   const dispatch = useAppDispatch();
   const items = useAppSelector((state) => state.orchestrators.items);
   const error = useAppSelector((state) => state.orchestrators.error);
-  const restoreNotices = useAppSelector((state) => state.orchestrators.restoreNotices);
   const focus = useAppSelector(selectSidebarFocus);
 
   // The orchestrator a rebuild+restart returns to is restored by boot(), which
@@ -186,7 +184,6 @@ function OrchestratorsArea(): React.ReactElement {
           ))}
         </ul>
       )}
-      <OrchestratorNoticeList notices={restoreNotices} />
       {error ? (
         // The same primitive the panel this list opens uses, so the sidebar
         // and the pane behind it report one failure one way: icon as well as

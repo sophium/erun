@@ -21,6 +21,7 @@ export { AutoStartPromptDialog } from './AutoStartPromptDialog';
 export { CloseConfirmDialog } from './CloseConfirmDialog';
 export { AIOccupancyPromptDialog } from './AIOccupancyPromptDialog';
 export { OrchestratorDialog } from './OrchestratorDialog';
+export { GatewayRedeployDialog } from './GatewayRedeployDialog';
 export { OutputsDialog } from './OutputsDialog';
 export {
   captureInvokes,

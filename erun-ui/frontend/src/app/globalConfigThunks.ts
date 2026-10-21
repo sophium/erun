@@ -3,6 +3,7 @@ import type { UICloudContextInitInput, UIERunConfig } from '@/types';
 import { globalConfigApi } from './api/globalConfigApi';
 import { cloudContextDraftForConfig } from './cloudContextState';
 import { readError } from './errors';
+import { checkGatewayRedeploy } from './gatewayRedeployThunks';
 import { showNotification, showTerminalError } from './notificationThunks';
 import { seedOpenRouterCatalog } from './openRouterCatalogSeed';
 import { patchGlobalConfigDialog, setGlobalConfigDialog } from './slices/globalConfigDialogSlice';
@@ -145,6 +146,9 @@ export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch
     );
     dispatch(showNotification('success', 'Saved ERun config.'));
     dispatch(closeGlobalConfigDialog());
+    // The gateway reaches a pod only through a redeploy, so a save is when to
+    // say which running environments are still routed the old way.
+    void dispatch(checkGatewayRedeploy());
   } catch (error) {
     const message = readError(error);
     dispatch(

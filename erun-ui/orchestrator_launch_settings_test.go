@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -58,8 +60,11 @@ func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 	t.Helper()
 	app := orchestratorTestApp(t)
 	rec := &orchestratorLaunchRecorder{token: testGatewayToken}
-	app.deps.resolveOrchestratorLaunch = func(launch eruncommon.OrchestratorLaunch, sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error) {
-		shell, args := buildOrchestratorLaunch("linux", launch, sessionID, false, initialPrompt, resumePrompt, mcpConfigPath)
+	app.deps.resolveOrchestratorLaunch = func(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
+		shell, args := buildOrchestratorLaunch("linux", launch, initialPrompt, mcpConfigPath)
+		if agentID != "" {
+			shell, args = orchestratorAttachCommand("linux", agentID)
+		}
 		rec.mu.Lock()
 		rec.launches = append(rec.launches, launch)
 		rec.mu.Unlock()
@@ -100,23 +105,6 @@ func editStoredOrchestrator(app *App, id string, edit func(*eruncommon.Orchestra
 		if config.Orchestrators[i].ID == id {
 			edit(&config.Orchestrators[i])
 		}
-	}
-}
-
-func envWithPrefix(env []string, prefix string) []string {
-	var out []string
-	for _, entry := range env {
-		if strings.HasPrefix(entry, prefix) {
-			out = append(out, entry)
-		}
-	}
-	return out
-}
-
-func requireEnvEntry(t *testing.T, env []string, want string) {
-	t.Helper()
-	if !slices.Contains(env, want) {
-		t.Fatalf("expected the session env to carry %q, got %q", want, env)
 	}
 }
 
@@ -165,48 +153,96 @@ func mustCreateOrchestratorWithLaunch(t *testing.T, app *App, launch orchestrato
 	return info
 }
 
-// TestAnOrchestratorWithNoSettingsLaunchesExactlyAsBefore pins the unset launch
-// byte for byte, on both shells, so these settings cost an orchestrator that
-// declares none nothing at all.
-func TestAnOrchestratorWithNoSettingsLaunchesExactlyAsBefore(t *testing.T) {
+// agentSettingsOf reads the settings file an orchestrator's background agent
+// starts from: what its launch actually runs on.
+func agentSettingsOf(t *testing.T, id string) (map[string]any, map[string]string) {
+	t.Helper()
+	path := orchestratorAgentSettingsPath(id)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read agent settings: %v", err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected the agent settings private to the operator, got %v (err %v)", info.Mode().Perm(), err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("decode agent settings: %v\n%s", err, data)
+	}
+	env := map[string]string{}
+	if raw, ok := settings["env"].(map[string]any); ok {
+		for key, value := range raw {
+			env[key], _ = value.(string)
+		}
+	}
+	return settings, env
+}
+
+// lastAgentCreate is the `claude --bg` argv the most recent agent was created with.
+func lastAgentCreate(t *testing.T, app *App) []string {
+	t.Helper()
+	fake := fakeAgentsOf(t, app)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.creates) == 0 {
+		t.Fatal("no background agent was created")
+	}
+	return fake.creates[len(fake.creates)-1]
+}
+
+// requireAgentEnv fails unless the agent's settings env carries every pair.
+func requireAgentEnv(t *testing.T, env map[string]string, want map[string]string) {
+	t.Helper()
+	for key, value := range want {
+		if got, ok := env[key]; !ok || got != value {
+			t.Fatalf("expected the agent's settings env to carry %s=%q, got %v", key, value, env)
+		}
+	}
+}
+
+// requireNoGatewayEnv fails when an orchestrator off the gateway was handed any
+// of the gateway's routing.
+func requireNoGatewayEnv(t *testing.T, env map[string]string) {
+	t.Helper()
+	for key := range env {
+		if strings.HasPrefix(key, "ANTHROPIC_") {
+			t.Fatalf("an orchestrator off the gateway must add no ANTHROPIC_ env, got %v", env)
+		}
+	}
+}
+
+// TestATransientSessionWithNoSettingsLaunchesExactlyAsBefore pins the unset
+// transient launch byte for byte, on both shells.
+func TestATransientSessionWithNoSettingsLaunchesExactlyAsBefore(t *testing.T) {
 	launch := defaultOrchestratorLaunch()
 	if !slices.Equal(launch.Env, []string{"CLAUDE_CODE_SUBAGENT_MODEL=opus"}) {
 		t.Fatalf("expected the default env to be exactly the subagent model, got %q", launch.Env)
 	}
-	const sid = "11111111-2222-3333-4444-555555555555"
-	cases := []struct {
-		goos, sessionID string
-		exists          bool
-		want            string
-	}{
-		{"linux", "", false, "claude --continue" + defaultOrchestratorFlags + " || claude" + defaultOrchestratorFlags},
-		{"linux", sid, true, "claude --resume " + sid + defaultOrchestratorFlags + " || claude --resume " + sid + defaultOrchestratorFlags},
-		{"linux", sid, false, "claude --session-id " + sid + defaultOrchestratorFlags + " || claude --session-id " + sid + defaultOrchestratorFlags},
-		{"windows", "", false, "claude --continue" + defaultOrchestratorFlags + "; if ($LASTEXITCODE -ne 0) { claude" + defaultOrchestratorFlags + " }"},
-		{"windows", sid, true, "claude --resume " + sid + defaultOrchestratorFlags + "; if ($LASTEXITCODE -ne 0) { claude --resume " + sid + defaultOrchestratorFlags + " }"},
-	}
-	for _, tc := range cases {
-		_, args := buildOrchestratorLaunch(tc.goos, launch, tc.sessionID, tc.exists, "", "", "")
-		if got := args[len(args)-1]; got != tc.want {
-			t.Fatalf("%s session=%q exists=%v:\n got %q\nwant %q", tc.goos, tc.sessionID, tc.exists, got, tc.want)
+	for _, goos := range []string{"linux", "windows"} {
+		_, args := buildOrchestratorLaunch(goos, launch, "", "")
+		if got := args[len(args)-1]; got != "claude"+defaultOrchestratorFlags {
+			t.Fatalf("%s:\n got %q\nwant %q", goos, got, "claude"+defaultOrchestratorFlags)
 		}
 	}
+}
 
+// TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults pins a persisted
+// orchestrator's unset agent: ultracode Opus, off the gateway.
+func TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults(t *testing.T) {
 	app, rec := launchSettingsTestApp(t)
 	defer app.shutdown(context.Background())
 	created := mustCreateOrchestratorWithLaunch(t, app, orchestratorLaunchInput{})
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	_, args, env := rec.last(t)
-	if !strings.Contains(args[len(args)-1], defaultOrchestratorFlags) {
-		t.Fatalf("expected the default flags, got %q", args[len(args)-1])
+	settings, env := agentSettingsOf(t, created.ID)
+	if settings["model"] != "opus" || settings["ultracode"] != true || settings["effortLevel"] != nil {
+		t.Fatalf("expected ultracode Opus, got %v", settings)
 	}
-	if got := envWithPrefix(env, "CLAUDE_CODE_SUBAGENT_MODEL="); !slices.Equal(got, []string{"CLAUDE_CODE_SUBAGENT_MODEL=opus"}) {
-		t.Fatalf("expected exactly one subagent model, opus, got %q", got)
-	}
-	if got := envWithPrefix(env, "ANTHROPIC_"); len(got) != 0 {
-		t.Fatalf("an orchestrator off the gateway must add no ANTHROPIC_ env, got %q", got)
+	requireAgentEnv(t, env, map[string]string{"CLAUDE_CODE_SUBAGENT_MODEL": "opus"})
+	requireNoGatewayEnv(t, env)
+	if args := strings.Join(lastAgentCreate(t, app), " "); strings.Contains(args, "--effort") || strings.Contains(args, "--model") {
+		t.Fatalf("model and effort belong in the settings a restart re-reads, not the launch arguments: %q", args)
 	}
 	if len(rec.tokenFor) != 0 {
 		t.Fatal("an orchestrator off the gateway must not read the gateway credential")
@@ -224,10 +260,10 @@ func TestEveryEffortLevelReachesTheLaunchFlags(t *testing.T) {
 			want = ` --settings '{"ultracode":true}'` + orchestratorNoAskFlag + " --model sonnet"
 		}
 		for _, goos := range []string{"linux", "windows"} {
-			_, args := buildOrchestratorLaunch(goos, launch, "", false, "", "", "")
+			_, args := buildOrchestratorLaunch(goos, launch, "", "")
 			cmd := args[len(args)-1]
-			if strings.Count(cmd, want) != 2 {
-				t.Fatalf("%s effort %q: expected %q on both the primary and the fallback, got %q", goos, level, want, cmd)
+			if strings.Count(cmd, want) != 1 {
+				t.Fatalf("%s effort %q: expected %q once, got %q", goos, level, want, cmd)
 			}
 			if level != "ultracode" && strings.Contains(cmd, "ultracode") {
 				t.Fatalf("%s effort %q must not also launch ultracode: %q", goos, level, cmd)
@@ -243,16 +279,16 @@ func TestAConfiguredModelReachesTheLaunchAndItsSubagents(t *testing.T) {
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	launch, args, env := rec.last(t)
+	launch, _, _ := rec.last(t)
 	if launch.Model != "sonnet" || launch.Effort != "high" {
 		t.Fatalf("expected the configured model and effort, got %+v", launch)
 	}
-	if cmd := args[len(args)-1]; !strings.Contains(cmd, " --effort high"+orchestratorNoAskFlag+" --model sonnet") {
-		t.Fatalf("expected the configured flags, got %q", cmd)
+	settings, env := agentSettingsOf(t, created.ID)
+	if settings["model"] != "sonnet" || settings["effortLevel"] != "high" {
+		t.Fatalf("expected the configured model and effort in the agent's settings, got %v", settings)
 	}
-	requireEnvEntry(t, env, "CLAUDE_CODE_SUBAGENT_MODEL=sonnet")
-	if got := envWithPrefix(env, "ANTHROPIC_"); len(got) != 0 {
-		t.Fatalf("an orchestrator off the gateway must add no ANTHROPIC_ env, got %q", got)
+	if env["CLAUDE_CODE_SUBAGENT_MODEL"] != "sonnet" {
+		t.Fatalf("expected the subagent model to follow, got %v", env)
 	}
 }
 
@@ -266,24 +302,26 @@ func TestAGatewayLaunchDeliversItsCredentialOnlyThroughTheEnvironment(t *testing
 	if _, err := app.StartOrchestrator(created.ID, 80, 24); err != nil {
 		t.Fatalf("StartOrchestrator failed: %v", err)
 	}
-	launch, args, env := rec.last(t)
+	launch, args, _ := rec.last(t)
 	if launch.Model != "acme/coder" {
 		t.Fatalf("expected the catalog's default model through the gateway, got %q", launch.Model)
 	}
-	for _, want := range []string{
-		"ANTHROPIC_BASE_URL=" + testGatewayURL,
-		"ANTHROPIC_API_KEY=",
-		"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1",
-		"CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000",
-		"CLAUDE_CODE_SUBAGENT_MODEL=acme/coder",
-		"ANTHROPIC_AUTH_TOKEN=" + testGatewayToken,
-	} {
-		requireEnvEntry(t, env, want)
+	// A background agent never inherits the environment of the command that
+	// started it, so the gateway reaches it through its settings file.
+	settings, env := agentSettingsOf(t, created.ID)
+	requireAgentEnv(t, env, map[string]string{
+		"ANTHROPIC_BASE_URL":                         testGatewayURL,
+		"ANTHROPIC_API_KEY":                          "",
+		"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+		"CLAUDE_CODE_MAX_CONTEXT_TOKENS":             "200000",
+		"CLAUDE_CODE_SUBAGENT_MODEL":                 "acme/coder",
+		"ANTHROPIC_AUTH_TOKEN":                       testGatewayToken,
+	})
+	if settings["model"] != "acme/coder" {
+		t.Fatalf("expected the gateway model in the agent's settings, got %v", settings)
 	}
-	if cmd := strings.Join(args, " "); strings.Contains(cmd, testGatewayToken) {
-		t.Fatalf("the gateway credential leaked into the command line: %q", cmd)
-	} else if !strings.Contains(cmd, "--model acme/coder") {
-		t.Fatalf("expected the gateway model on the command line, got %q", cmd)
+	if cmd := strings.Join(append(args, lastAgentCreate(t, app)...), " "); strings.Contains(cmd, testGatewayToken) {
+		t.Fatalf("the gateway credential leaked into a command line: %q", cmd)
 	}
 	if len(rec.tokenFor) != 1 || rec.tokenFor[0].Endpoint() != testGatewayURL {
 		t.Fatalf("expected the credential resolved once for the catalog's gateway, got %+v", rec.tokenFor)
@@ -410,15 +448,18 @@ func TestACrashRespawnKeepsTheLaunchItContinues(t *testing.T) {
 	if _, err := respawn(); err != nil {
 		t.Fatalf("respawn failed: %v", err)
 	}
-	launch, args, env := rec.last(t)
+	launch, _, _ := rec.last(t)
 	if launch.Model != "acme/coder" || launch.Effort != "max" || launch.Gateway == nil {
 		t.Fatalf("expected the respawn to keep the original launch, got %+v", launch)
 	}
-	if cmd := args[len(args)-1]; !strings.Contains(cmd, " --effort max"+orchestratorNoAskFlag+" --model acme/coder") {
-		t.Fatalf("expected the original flags on respawn, got %q", cmd)
+	settings, env := agentSettingsOf(t, created.ID)
+	if settings["model"] != "acme/coder" {
+		t.Fatalf("expected the respawn to keep the original model, got %v", settings)
 	}
-	requireEnvEntry(t, env, "ANTHROPIC_AUTH_TOKEN="+testGatewayToken)
-	requireEnvEntry(t, env, "CLAUDE_CODE_SUBAGENT_MODEL=acme/coder")
+	requireAgentEnv(t, env, map[string]string{"ANTHROPIC_AUTH_TOKEN": testGatewayToken, "CLAUDE_CODE_SUBAGENT_MODEL": "acme/coder"})
+	if args := strings.Join(lastAgentCreate(t, app), " "); !strings.Contains(args, "--effort max") {
+		t.Fatalf("max effort is a launch argument of the agent, got %q", args)
+	}
 }
 
 // TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit is the round trip the

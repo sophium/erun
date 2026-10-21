@@ -13,7 +13,6 @@ func orchestratorAllHookCommands() []string {
 		orchestratorShellActivityStartHookCommand(),
 		orchestratorShellActivityClearHookCommand(),
 		orchestratorShellActivityResetHookCommand(),
-		orchestratorLiveConversationHookCommand(),
 		orchestratorNoAskStopGuardCommand(),
 	}
 }

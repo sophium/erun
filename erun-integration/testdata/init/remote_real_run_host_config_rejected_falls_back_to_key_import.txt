@@ -20,6 +20,7 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 15m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
 Import this SSH public key into your git host before continuing:
 ssh-ed25519 AAAA-test-ed25519-key erun-test
 Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.

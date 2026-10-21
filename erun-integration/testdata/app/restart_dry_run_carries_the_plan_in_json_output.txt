@@ -5,8 +5,7 @@
   "preview": [
     {
       "orchestratorId": "erun-ideas",
-      "conversationId": "<UUID>",
-      "notice": "Reopened erun-ideas on the conversation derived from its id (<UUID>), not the one its last session was working in (<UUID>). That conversation is still there; manage the orchestrator to attach it."
+      "notice": "The restart will not reopen erun-ideas: the gateway is turned on but no gateway catalog is configured. Its background agent keeps running; fix that and open it again."
     }
   ]
 }

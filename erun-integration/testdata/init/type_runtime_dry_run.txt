@@ -27,6 +27,8 @@ helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflic
 deploy: would watch pods in team-prod on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-prod get pods -o json
 dedup: ready (release=test-context-team-prod-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n team-prod delete secret erun-claude-gateway --ignore-not-found
 kubectl --context test-context --namespace team-prod wait --for=condition=Available --timeout 2m0s deployment/team-devops
 kubectl --context test-context --namespace team-prod exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
 remote-worktree:

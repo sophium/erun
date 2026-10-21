@@ -81,11 +81,10 @@ func enrollERunPlatformUserError(err error) error {
 	if err == nil {
 		return nil
 	}
-	handoff := "You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation."
 	switch {
 	case errors.Is(err, eruncommon.ErrPlatformForbidden):
 		log.Printf("erun-app: enroll self refused: %v", err)
-		return errors.New(handoff)
+		return enrollmentHandoffError{}
 	case errors.Is(err, eruncommon.ErrPlatformUnauthorized):
 		switch eruncommon.PlatformAuthErrorCode(err) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
@@ -94,8 +93,18 @@ func enrollERunPlatformUserError(err error) error {
 			return err
 		}
 		log.Printf("erun-app: enroll self refused: %v", err)
-		return errors.New(handoff)
+		return enrollmentHandoffError{}
 	default:
 		return err
 	}
+}
+
+// enrollmentHandoffError is the administrator hand-off a refused
+// self-enrollment shows. It is a sentence the operator reads beside the control
+// they used, not an error string to be wrapped, so it is capitalised and
+// punctuated as one.
+type enrollmentHandoffError struct{}
+
+func (enrollmentHandoffError) Error() string {
+	return "You do not have permission to enroll yourself in this tenant. Ask an administrator to run the command below, or request an invitation."
 }

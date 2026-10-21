@@ -35,6 +35,7 @@ func (s pushNoticeSecrets) SaveCloudSecret(ref, value string) error {
 func (s pushNoticeSecrets) LoadCloudSecret(ref string) (string, error) {
 	return s.secrets[ref], nil
 }
+
 func (s pushNoticeSecrets) DeleteCloudSecret(ref string) error { delete(s.secrets, ref); return nil }
 
 const pushNoticeAlias = "dev@erun"

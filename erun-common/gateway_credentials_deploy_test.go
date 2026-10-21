@@ -275,3 +275,79 @@ func TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff(t *testing.T) {
 		t.Fatalf("an environment that left the gateway must not render it:\n%s", set)
 	}
 }
+
+func stubGatewaySecretDelete(t *testing.T) *[][]string {
+	t.Helper()
+	var calls [][]string
+	previous := deleteGatewayCredentialsSecret
+	deleteGatewayCredentialsSecret = func(args []string) error {
+		calls = append(calls, args)
+		return nil
+	}
+	t.Cleanup(func() { deleteGatewayCredentialsSecret = previous })
+	return &calls
+}
+
+// TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff is the second
+// half of switching the gateway off: before this, deploy only ever applied the
+// credential, so a namespace kept it after the environment left the gateway.
+func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T) {
+	no := false
+	for name, spec := range map[string]HelmDeploySpec{
+		"catalog switched off": {OpenRouter: &OpenRouterConfig{Models: []OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
+		"no catalog":           {},
+		"environment opted out": {
+			Claude:     EnvironmentClaudeConfig{UseGateway: &no},
+			OpenRouter: &OpenRouterConfig{BaseURL: testGatewayURL},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			calls := stubGatewaySecretDelete(t)
+			spec.ReleaseName, spec.Tenant, spec.Namespace, spec.KubernetesContext = "erun-devops", "erun", "erun-build", "erun-build"
+			if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+				t.Fatal(err)
+			}
+			want := "--context erun-build -n erun-build delete secret " + GatewaySecretName + " --ignore-not-found"
+			if len(*calls) != 1 || strings.Join((*calls)[0], " ") != want {
+				t.Fatalf("calls = %v, want %q", *calls, want)
+			}
+		})
+	}
+}
+
+func TestPruneGatewayCredentialsSecretKeepsItWhileTheGatewayApplies(t *testing.T) {
+	calls := stubGatewaySecretDelete(t)
+	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build", OpenRouter: &OpenRouterConfig{BaseURL: testGatewayURL}}
+	if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("deleted the credential an environment on the gateway reads: %v", *calls)
+	}
+}
+
+// A component release shares the namespace but does not carry the env's Claude
+// configuration, so it must not decide the runtime's credential away.
+func TestPruneGatewayCredentialsSecretLeavesItToTheRuntimeRelease(t *testing.T) {
+	calls := stubGatewaySecretDelete(t)
+	spec := HelmDeploySpec{ReleaseName: "erun-backend-postgres", Tenant: "erun", Namespace: "erun-build"}
+	if err := pruneGatewayCredentialsSecret(Context{}, spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 {
+		t.Fatalf("a component release pruned the runtime's credential: %v", *calls)
+	}
+}
+
+func TestPruneGatewayCredentialsSecretDryRunOnlyTraces(t *testing.T) {
+	calls := stubGatewaySecretDelete(t)
+	ctx, trace := traceCapturingContext()
+	ctx.DryRun = true
+	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build"}
+	if err := pruneGatewayCredentialsSecret(ctx, spec); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 0 || !strings.Contains(trace.String(), GatewaySecretName) {
+		t.Fatalf("calls=%v trace:\n%s", *calls, trace.String())
+	}
+}

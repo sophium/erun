@@ -11,5 +11,6 @@ dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 15m0s)...
 ==> Deployed team/dev <VERSION> in <ELAPSED>
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
 ==> SSHD init failed team/dev: sync remote authorized_keys from <TMP> exit status 1: error: unable to upgrade connection: Forbidden (user cannot exec into pod)
 sync remote authorized_keys from <TMP> exit status 1: error: unable to upgrade connection: Forbidden (user cannot exec into pod)
