@@ -20,6 +20,8 @@ helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflic
 deploy: would watch pods in team-zzz-build on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-zzz-build get pods -o json
 dedup: ready (release=test-context-team-zzz-build-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n team-zzz-build delete secret erun-claude-gateway --ignore-not-found
 ==> Would upgrade team/aaa-dev <VERSION> -> <VERSION> (stable)
 deploy: component selection source default (runtime only); deploying the runtime chart alone
 deploy: runtime chart team-devops <VERSION> not found in registry.example/test (the tenant's own umbrella)
@@ -32,4 +34,6 @@ helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflic
 deploy: would watch pods in team-aaa-dev on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-aaa-dev get pods -o json
 dedup: ready (release=test-context-team-aaa-dev-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n team-aaa-dev delete secret erun-claude-gateway --ignore-not-found
 ==> Dry run: would upgrade 2, 0 up to date, 0 unresolved, 0 failed

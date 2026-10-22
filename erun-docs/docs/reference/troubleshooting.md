@@ -67,7 +67,7 @@ If the expected context is missing, restore your `~/.kube/config` from the cloud
 
 ```bash
 # From your laptop:
-cat <UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json
+cat <config-root>/portforward/mcp/<tenant>/<env>.json
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<localPort>/mcp
 ```
 
@@ -105,6 +105,8 @@ erun mcp call --tool list --output json                      # keep working mean
 ```
 
 If `erun mcp call` reports `MCP endpoint rejected the bearer token`, the env does not trust this machine at all — redeploy it from the desktop app. If it reports `MCP endpoint is not reachable`, the port-forward is down: re-run `erun open`. The proxy surfaces both of those as JSON-RPC errors carrying the same recovery text, so a client wired through it shows the fix instead of going silent.
+
+If instead it reports `the MCP edge answered, but without a session it recognizes for this client`, the environment is **not** down: the edge answered, so only this client's MCP session failed. Retry the call to re-handshake, and dispatch with `erun exec job start --tenant <tenant> --environment <env> …` in the meantime — the CLI reaches the environment without needing that session. Reading this one as an unreachable environment leaves a working environment idle.
 
 ## Orchestrator started without its environment tools
 
@@ -227,6 +229,28 @@ If you don't — the pairing just drifted — realign the persisted `runtimeimag
 
 ```bash
 erun doctor <tenant> <env>
+```
+
+## `erun deploy` refuses: runtime chart release line mismatch {#runtime-chart-line-mismatch}
+
+**Symptoms:** `erun deploy` exits non-zero immediately, before any `helm upgrade` or `kubectl` line appears in its output, with an error like:
+
+```
+deploy: frs/build's last confirmed deploy ran ghcr.io/sophium/frs-devops:1.0.138, so this environment is on the frs release line, but this deploy resolved the erun-devops chart, which is versioned on erun's own release line -- a version from erun's line does not name anything frs publishes, so the pod would wait on an image tag that does not exist; pass --version from frs's line, or --runtime-chart to install this chart on purpose
+```
+
+**Cause:** the environment's last confirmed deploy ran its own product's line (`<tenant>-devops`), but the runtime **chart** this deploy resolved came from the chart search falling through to the shared `erun-devops` chart — which happens exactly when `--version` is a version from *another product's* release line. A released version number from the wrong product is a reachable mistake, not a typo: every environment in the org publishes version numbers, `erun-devops` genuinely exists at ERun's version, and the search finds it. The image half does not catch this, because the image is still derived from the tenant (`<registry>/<tenant>-devops:<version>`) and so agrees with itself — the two halves of one coordinate are being read against two different products, and only one of them can be right. Left alone, it installs ERun's chart onto your release and the pod waits on an image tag your product never published, which surfaces minutes later as helm's `Progress deadline exceeded` — a rollout timeout naming anything but the cause — with the previous pod already torn down by the `Recreate` strategy. `erun deploy` refuses before touching the cluster instead. See the image half at [runtime image release line mismatch](#runtime-image-line-mismatch).
+
+**Fix:** pass a version from the environment's own release line:
+
+```bash
+erun deploy <tenant> <env> --version <version-from-that-products-line>
+```
+
+If you *do* mean to install a chart from another line, say so explicitly with `--runtime-chart <chart-reference>`, or state it once on the environment with [`runtimechart`](/reference/configuration#envconfig) — a chart stated there is your own coordinate and is never second-guessed. `erun list` reports which release line each environment's recorded version belongs to, so the number to deploy is readable from config alone:
+
+```bash
+erun list
 ```
 
 ## An agent environment can fetch but can't push a branch or use `gh` {#git-push-access}

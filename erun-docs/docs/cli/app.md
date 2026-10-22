@@ -62,8 +62,8 @@ erun app restart [flags]
 
 | Flag | Description |
 |---|---|
-| `--orchestrator` | Id of the orchestrator to resume after the restart. Defaults to `$ERUN_ORCHESTRATOR_ID`. |
-| `--dry-run` | Resolve and report the target without restarting anything. |
+| `--orchestrator` | Id of the orchestrator that owns the terminal pane after the restart. Defaults to `$ERUN_ORCHESTRATOR_ID`. |
+| `--dry-run` | Resolve the target and report what a restart would reopen, without restarting anything. |
 | `--output` | `text` (default) or `json`. |
 
 ### Examples
@@ -74,6 +74,24 @@ erun app restart --orchestrator my-orchestrator
 erun app restart --dry-run
 ```
 
+### What a restart reopens {#erun-app-restart-what-reopens}
+
+Every orchestrator that was open comes back, and the one named by `--orchestrator` owns the terminal pane. Orchestrators run as Claude Code background agents, so the restart does not interrupt them — the one that asked for the restart included — and the new desktop reattaches each one to its agent, on whatever conversation that agent is on (see [Desktop app · The conversation an orchestrator comes back to](/desktop/orchestrators#orchestrator-conversations)).
+
+What can still go wrong is a desktop that would refuse to reopen one: an orchestrator whose gateway has no catalog behind it, say, or whose gateway key is gone. `--dry-run` names those before the restart, while they can still be fixed:
+
+```
+would restart the running desktop app (pid 41827)
+it would reopen 2 orchestrators, and 1 of them would NOT be reopened:
+  The restart will not reopen petios-ops: the gateway is turned on but no gateway catalog is configured. Its background agent keeps running; fix that and open it again.
+```
+
+When every orchestrator would reopen, it says so in one line.
+
+The plan is computed by the running desktop — the only process that can resolve it — and asking for it writes nothing, launches nothing, and quits nothing. With `--output json` the same plan arrives as a `preview` array on the result.
+
+The question travels on an address of its own, so a desktop older than this command cannot mistake it for the command. Such a desktop does not serve that address at all: the dry run reports that it is too old to answer rather than restarting it, and the desktop is left running.
+
 ### Error behaviour
 
 | Failure | Behaviour |
@@ -81,3 +99,6 @@ erun app restart --dry-run
 | No desktop app is running. | Refuses with "no desktop app is currently running"; exit code 1. |
 | The desktop process recorded as running has exited (a stale record). | Refuses, naming the stale pid; exit code 1. |
 | The desktop app is running but declines the restart. | Reports the failure it returned; exit code 1. |
+| The desktop app is running but does not answer the `--dry-run` plan. | Reports that the plan could not be read, alongside the restart it still would have performed; exit code 0. |
+| The desktop app is older than the `--dry-run` plan request. | Reports that it does not serve the plan request; the desktop is left running; exit code 0. |
+| The desktop has no orchestrator open. | `--dry-run` reports that it has none to reopen; exit code 0. |

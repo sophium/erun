@@ -208,6 +208,13 @@ func TestEnsureBuildCacheRetentionWith(t *testing.T) {
 func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 	t.Helper()
 
+	// The node's own bound is read from the environment rather than injected,
+	// so it is cleared here: these cases are all about the volume share, and a
+	// declaration left in the ambient environment would silently rebind every
+	// one of them.
+	t.Setenv(buildCacheNodeBytesEnv, "")
+	t.Setenv(buildCacheCoTenantsEnv, "")
+
 	readCalls := 0
 	readCacheBytes := func(time.Duration) (uint64, error) {
 		readCalls++

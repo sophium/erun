@@ -1,0 +1,3 @@
+Dry run: orchestrator platform alias update planned.
+audit: erun orchestrator set-alias --alias erun+api.example.test@erun --dry-run eng-1
+write orchestrator eng-1 alias

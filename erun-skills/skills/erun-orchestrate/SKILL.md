@@ -232,11 +232,11 @@ and refactoring rules stay in the repository root, not this workflow.
 - Replace a CLI binary safely while retaining rollback. For desktop restarts use
   `erun app restart --orchestrator "$ERUN_ORCHESTRATOR_ID"`, not a custom persistent
   relauncher that may resurrect the app after every quit.
-- Before restart, write `RESUME-NOTE.$ERUN_ORCHESTRATOR_ID.md` in the orchestrator
-  workspace: requested task, delivered work, in-flight job IDs, first verification,
-  and expensive facts. Do not overwrite another orchestrator's note.
-- On resume, read your note, inspect existing jobs rather than duplicating them,
-  and continue the authorized task. Re-discover channels after registration settles.
+- A host orchestrator runs as a Claude Code background agent, so a desktop restart
+  does not end your session: the `erun app restart` call returns, your turn
+  continues, and the new desktop reattaches to you. Carry on with the task and
+  verify the rebuilt desktop yourself; there is no resume prompt to wait for.
+  Re-discover channels after registration settles.
 - Follow the tool's configured source pointer; verify commit before build and the
   actual running process/version afterward. A restart-shaped message is not proof:
   inspect process identity/start time.

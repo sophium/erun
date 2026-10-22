@@ -23,19 +23,13 @@ startListening({
     if (sessionId === previousSessionId) {
       return;
     }
-    // Snapshot the outgoing session's rendered screen BEFORE resetting the
-    // shared xterm instance -- reset clears exactly the state a snapshot
-    // needs to capture (#1322).
-    controller.snapshotSession(previousSessionId);
-    if (sessionId <= 0) {
-      controller.resetTerminal();
-      return;
-    }
-    controller.resetTerminal();
-    controller.activateSession(sessionId);
-    // Push the pane geometry to the newly-active PTY so a session spawned at a
-    // default size (an orchestrator starts at 80x24) redraws at the real width
-    // instead of rendering its UI clipped.
-    controller.resizeActiveSession();
+    // The switch is a request, not a hand-off this effect can perform here:
+    // what it has to move from is the session on the pane, and two dispatches
+    // arriving before that pane has moved have to coalesce rather than each
+    // snapshot, reset and activate in turn. Both of those are the controller's
+    // to decide -- see requestSessionSwitch. The hand-off itself still runs
+    // after everything already written for the outgoing session has parsed, or
+    // its bytes land in the incoming session's pane.
+    controller.requestSessionSwitch(sessionId);
   },
 });

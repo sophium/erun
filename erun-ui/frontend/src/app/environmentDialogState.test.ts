@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import type { UIRuntimeResourceMetric, UIRuntimeResourceStatus } from '@/types';
+import type {
+  UIRuntimeResourceMetric,
+  UIRuntimeResourceReading,
+  UIRuntimeResourceStatus,
+} from '@/types';
 
 import {
   environmentDialogResourceLimitMessage,
@@ -63,9 +67,10 @@ test('not selecting the hosted registry still requires a container registry as b
   assert.equal(missingRequiredFieldReason(dialog), 'Select a container registry.');
 });
 
-// A reading whose only node is fully committed, which is what makes the
-// capacity message non-empty: no node can fit the dialog's runtime pod.
-function fullyCommittedNodeStatus(): UIRuntimeResourceStatus {
+// A reading whose only node has no request capacity left, which is what makes
+// the capacity message non-empty: the scheduler has nothing to admit a pod
+// with, so a new one stays Pending wherever it is placed.
+function schedulerExhaustedNodeStatus(): UIRuntimeResourceStatus {
   const metric = (unit: string): UIRuntimeResourceMetric => ({
     total: 0,
     used: 0,
@@ -74,14 +79,18 @@ function fullyCommittedNodeStatus(): UIRuntimeResourceStatus {
     formatted: `0 ${unit}`,
     floored: true,
   });
+  const reading = (): UIRuntimeResourceReading => ({ cpu: metric('cores'), memory: metric('GiB') });
   return {
     kubernetesContext: 'orbstack',
     available: true,
     floored: true,
     measuredUsage: true,
-    cpu: metric('cores'),
-    memory: metric('GiB'),
-    nodes: [{ name: 'node-1', cpu: metric('cores'), memory: metric('GiB') }],
+    schedulable: reading(),
+    schedulableComplete: true,
+    worstCase: reading(),
+    nodes: [
+      { name: 'node-1', schedulable: reading(), schedulableComplete: true, worstCase: reading() },
+    ],
   };
 }
 
@@ -89,7 +98,7 @@ test('the runtime-capacity requirement is asked of a pod-backed env', () => {
   const dialog: EnvironmentDialogState = {
     ...submittableDialog(),
     envType: 'local-agent',
-    resourceStatus: fullyCommittedNodeStatus(),
+    resourceStatus: schedulerExhaustedNodeStatus(),
   };
   assert.notEqual(environmentDialogResourceLimitMessage(dialog), '');
 });
@@ -104,7 +113,7 @@ test('the runtime-capacity requirement is skipped for a host env', () => {
   const dialog: EnvironmentDialogState = {
     ...submittableDialog(),
     envType: 'host',
-    resourceStatus: fullyCommittedNodeStatus(),
+    resourceStatus: schedulerExhaustedNodeStatus(),
   };
   assert.equal(environmentDialogResourceLimitMessage(dialog), '');
 });

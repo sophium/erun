@@ -31,7 +31,10 @@ type MergeWorkingTreeBranchResult struct {
 // — a distinct, named outcome rather than a generic failure, since the
 // worktree is left half-merged and the caller (an operator or an agent) must
 // resolve the conflicted files and commit, or run `git merge --abort`,
-// before doing anything else with it.
+// before doing anything else with it. A conflict confined to atlas.sum never
+// reaches this: resolveAtlasSumConflicts regenerates and stages it and the
+// merge completes, so only the files that could not be resolved that way are
+// reported here.
 type MergeConflictError struct {
 	TargetBranch    string
 	ConflictedFiles []string
@@ -80,7 +83,10 @@ func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDepe
 // rebase. A conflicted merge is reported as *MergeConflictError, distinct
 // from any other failure, and the worktree is left exactly as git left it
 // (mid-merge) for the caller to resolve or abort; nothing here cleans that up
-// automatically.
+// automatically. The one conflict that is not reported is one confined to
+// atlas.sum: resolveAtlasSumConflicts regenerates and stages it from the
+// migration files already on disk, the merge commit is completed, and the
+// merge lands like a clean one.
 func MergeWorkingTreeBranch(ctx Context, root string, params MergeWorkingTreeBranchParams, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {

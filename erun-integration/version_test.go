@@ -97,7 +97,10 @@ func TestVersion(t *testing.T) {
 		var page2Path string
 		var stableLatest, snapshotLatest string
 		var server *httptest.Server
-		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assigned before Start so the handler's reads of server and page2Path
+		// have a happens-before edge to them; see erun-integration/AGENTS.md.
+		page2Path = "/v2/repositories/acme/erun-devops/tags?page=2"
+		server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.Path + "?" + r.URL.RawQuery {
 			case page1Path:
@@ -111,8 +114,8 @@ func TestVersion(t *testing.T) {
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
 		}))
+		server.Start()
 		t.Cleanup(server.Close)
-		page2Path = "/v2/repositories/acme/erun-devops/tags?page=2"
 
 		setup := env.New(t)
 		writeRuntimeRegistryConfig(t, setup, "runtimeregistry:\n"+
@@ -411,7 +414,9 @@ func TestVersion(t *testing.T) {
 		// terminate pagination rather than loop forever.
 		var server *httptest.Server
 		var pages []string
-		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assigned before Start so the handler's read of server has a
+		// happens-before edge to it; see erun-integration/AGENTS.md.
+		server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case r.URL.Path == "/token":
@@ -428,6 +433,7 @@ func TestVersion(t *testing.T) {
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
 		}))
+		server.Start()
 		t.Cleanup(server.Close)
 
 		setup := env.New(t)
@@ -452,7 +458,9 @@ func TestVersion(t *testing.T) {
 		// Tag classification ignores malformed stable tags and non-digit snapshot
 		// timestamps, dedupes tags across pages, and compares minor versions correctly.
 		var server *httptest.Server
-		server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assigned before Start so the handler's read of server has a
+		// happens-before edge to it; see erun-integration/AGENTS.md.
+		server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch r.URL.RawQuery {
 			case "page_size=100":
@@ -463,6 +471,7 @@ func TestVersion(t *testing.T) {
 				http.Error(w, "unexpected request "+r.URL.String(), http.StatusNotFound)
 			}
 		}))
+		server.Start()
 		t.Cleanup(server.Close)
 
 		setup := env.New(t)

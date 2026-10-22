@@ -4,6 +4,10 @@ Usage:
   erun orchestrator [command]
 
 Available Commands:
+  set-alias   Set the erun platform alias an orchestrator acts as
+  set-effort  Set the effort an orchestrator's Claude session launches at
+  set-gateway Turn an orchestrator's use of the gateway catalog on or off
+  set-model   Set the model an orchestrator's Claude session launches on
   set-role    Set the role an orchestrator uses one of its linked environments for
 
 Flags:

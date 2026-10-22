@@ -5,6 +5,7 @@ import type { UIContainerRegistryCluster } from './uiDiagnosticsTypes';
 import type { UIEnvironmentActivity } from './uiEnvironmentActivityTypes';
 import type { UIEnvironmentNodeSnapshot } from './uiEnvironmentNodeTypes';
 import type { UIEnvironmentUsageSnapshot } from './uiEnvironmentUsageTypes';
+import type { UIHostedEnvironment } from './uiHostedDefinitionTypes';
 import type { UIHostGatewayDefaults, UIOpenRouterConfig } from './uiOpenRouterTypes';
 import type {
   UIErunVersion,
@@ -461,6 +462,9 @@ export interface UIEnvironmentConfig {
   };
   claude: UIEnvironmentClaudeConfig;
   claudeDefaults: UIEnvironmentClaudeDefaults;
+  // aiLaunchSignature is the launch command the AI tab runs for the persisted
+  // config, resolved by the backend; a save that changes it reopens AI tabs.
+  aiLaunchSignature: string;
   localPorts: UIEnvironmentLocalPorts;
   type?: string;
   localRepoPath?: string;
@@ -494,6 +498,11 @@ export interface UIEnvironmentConfig {
   repoURL: string;
   // The per-machine saved deploy selection; empty means "no saved selection".
   deployComponents?: string[];
+  // hosted is the platform row this environment corresponds to, when it has
+  // one. Absent means the environment is not marked as hosted, which is the
+  // normal state. See uiHostedEnvironment on the Go side
+  // (erun-ui/hosted_definition.go, erun-common/hosted_environment.go).
+  hosted?: UIHostedEnvironment;
 }
 
 export interface UIEnvironmentClaudeConfig {
@@ -523,6 +532,11 @@ export interface UIEnvironmentClaudeDefaults {
   // gatewayConfigured reports whether the erun-level catalog names a gateway.
   // Without one there is nothing for the per-environment controls to override.
   gatewayConfigured: boolean;
+  // gatewayModels / gatewayDefaultModel are the catalog's selectable models and
+  // the one a gateway launch falls back to. models/knownModels stay the
+  // environment's own, so the AI tab picks a set from the draft's useGateway.
+  gatewayModels: string[];
+  gatewayDefaultModel: string;
 }
 
 export interface UIRuntimePodConfig {
@@ -530,22 +544,41 @@ export interface UIRuntimePodConfig {
   memory: string;
 }
 
-// A reading of node capacity taken at one instant, not a fixed ceiling. `notice`
-// explains what the number alone cannot: `floored` means the maximum equals what
-// this env already holds because the node is full, and `unmeasuredContainers`
-// counts capacity the reading cannot see.
+// A reading of node capacity taken at one instant, not a fixed ceiling. It
+// carries two readings because the two capacity questions have different
+// answers, and each states which question it answers: `schedulable` is what the
+// scheduler will do -- it admits a pod on what it requests -- while `worstCase`
+// is what would be left if every container on the node ran to its declared
+// limit at once. `floored` means the worst-case maximum equals what this env
+// already holds because the node is full, and `unmeasuredContainers` counts
+// capacity the worst-case reading cannot see.
 export interface UIRuntimeResourceStatus {
   kubernetesContext: string;
   available: boolean;
+  // message is why no reading was taken; empty whenever one was, because the
+  // headline an operator reads then belongs to a reading.
   message?: string;
-  notice?: string;
   node?: string;
+  schedulable: UIRuntimeResourceReading;
+  // schedulableComplete is false when a pod on the chosen node declares a
+  // request the reading could not parse, which makes its free figure an upper
+  // bound rather than an answer.
+  schedulableComplete: boolean;
+  worstCase: UIRuntimeResourceReading;
   floored: boolean;
   measuredUsage: boolean;
   unmeasuredContainers?: number;
+  unreadableRequests?: number;
+  nodes?: UIRuntimeResourceNode[];
+}
+
+// UIRuntimeResourceReading is one node's answer to one capacity question, and
+// says which question that is.
+export interface UIRuntimeResourceReading {
   cpu: UIRuntimeResourceMetric;
   memory: UIRuntimeResourceMetric;
-  nodes?: UIRuntimeResourceNode[];
+  message?: string;
+  notice?: string;
 }
 
 export interface UIRuntimeResourceMetric {
@@ -559,8 +592,9 @@ export interface UIRuntimeResourceMetric {
 
 export interface UIRuntimeResourceNode {
   name: string;
-  cpu: UIRuntimeResourceMetric;
-  memory: UIRuntimeResourceMetric;
+  schedulable: UIRuntimeResourceReading;
+  schedulableComplete: boolean;
+  worstCase: UIRuntimeResourceReading;
 }
 
 export interface StartSessionResult {
@@ -587,6 +621,11 @@ export interface TerminalOutputPayload {
 export interface TerminalExitPayload {
   sessionId: number;
   reason?: string;
+  // deliberate marks an exit the desktop itself caused — the session was
+  // already torn down (env close, tab close, AI-session end) when its read
+  // ended, so its reason describes that kill rather than a failure. Set by the
+  // backend per session; absent on an exit nothing deliberate caused.
+  deliberate?: boolean;
 }
 
 export interface PastedFileResult {

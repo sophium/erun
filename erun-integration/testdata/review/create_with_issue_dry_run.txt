@@ -1,0 +1,4 @@
+Dry run: erun review creation planned.
+audit: erun review create --dry-run --issue sophium/erun#2683 --name Add widget --repository https://github.com/sophium/erun --source-branch bug/2212-issue-ref-from-branch --target-branch main
+review create: repository = https://github.com/sophium/erun
+platform: POST https://api.example.test/v1/reviews (repository=https://github.com/sophium/erun, name=Add widget, targetBranch=main, sourceBranch=bug/2212-issue-ref-from-branch, issueRef=sophium/erun#2683)

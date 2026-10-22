@@ -1,4 +1,4 @@
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   SEED_TENANT,
   removeEnvironment,
@@ -58,21 +58,30 @@ test.describe('diagnostics erun-trace clear', () => {
 
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
     const pane = app.debugPanel.erunTracePane();
-    await expect(pane).toContainText('TRACE-OLD-1', { timeout: 10_000 });
+    // withTestBudget, not the 10s cap this carried: the content arrives from
+    // the environment open's own trace load, which this test declared 30s for,
+    // so a 10s inner cap expires a step that was still running with a third of
+    // its budget unspent.
+    await expect(pane).toContainText('TRACE-OLD-1', withTestBudget());
 
     await app.debugPanel.erunTraceClearButton().click();
-    await expect(page.getByText('Showing entries since you cleared.')).toBeVisible();
+    const clearedNotice = page.getByText('Showing entries since you cleared.');
+    // waitFor (not expect) converges the clear's own render against this
+    // test's budget rather than expect's fixed one.
+    await clearedNotice.waitFor({ state: 'visible' });
+    await expect(clearedNotice).toBeVisible();
     await expect(pane).not.toContainText('TRACE-OLD-1');
-    await expect(pane).toContainText('No new entries since you cleared.');
+    await expect(pane).toContainText('No new entries since you cleared.', withTestBudget());
 
     extra = 'TRACE-NEW-1\n';
-    await expect(pane).toContainText('TRACE-NEW-1', { timeout: 10_000 });
+    await expect(pane).toContainText('TRACE-NEW-1', withTestBudget());
     await expect(pane).not.toContainText('TRACE-OLD-1');
 
     // Show all restores the full log, proving Clear hid rather than truncated it.
     await app.debugPanel.erunTraceShowAllButton().click();
-    await expect(pane).toContainText('TRACE-OLD-1');
-    await expect(page.getByText('Showing entries since you cleared.')).toBeHidden();
+    await expect(pane).toContainText('TRACE-OLD-1', withTestBudget());
+    await clearedNotice.waitFor({ state: 'hidden' });
+    await expect(clearedNotice).toBeHidden();
   });
 
   test('the baseline is per-env: switching envs resets it', async ({ app, page, seededEnv }) => {
@@ -108,14 +117,19 @@ test.describe('diagnostics erun-trace clear', () => {
 
       await app.sidebar.openEnvironment(SEED_TENANT, envA);
       const pane = app.debugPanel.erunTracePane();
-      await expect(pane).toContainText(`LINE-FOR-${envA}-1`, { timeout: 10_000 });
+      await expect(pane).toContainText(`LINE-FOR-${envA}-1`, withTestBudget());
 
       await app.debugPanel.erunTraceClearButton().click();
-      await expect(page.getByText('Showing entries since you cleared.')).toBeVisible();
+      const clearedNotice = page.getByText('Showing entries since you cleared.');
+      await clearedNotice.waitFor({ state: 'visible' });
+      await expect(clearedNotice).toBeVisible();
 
       await app.sidebar.openEnvironment(SEED_TENANT, envB);
-      await expect(page.getByText('Showing entries since you cleared.')).toBeHidden();
-      await expect(pane).toContainText(`LINE-FOR-${envB}-1`, { timeout: 10_000 });
+      // The switch's own render, not expect's fixed clock, decides when this
+      // baseline has been reset.
+      await clearedNotice.waitFor({ state: 'hidden' });
+      await expect(clearedNotice).toBeHidden();
+      await expect(pane).toContainText(`LINE-FOR-${envB}-1`, withTestBudget());
     } finally {
       removeEnvironment(SEED_TENANT, envB);
     }

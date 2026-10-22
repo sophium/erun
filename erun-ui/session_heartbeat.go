@@ -108,11 +108,10 @@ func (a *App) reconcileOrchestratorActivity() {
 	now := time.Now()
 	a.mu.Lock()
 	type row struct {
-		id             string
-		serial         int
-		alive          bool
-		launchID       string
-		conversationID string
+		id      string
+		serial  int
+		alive   bool
+		agentID string
 	}
 	rows := make([]row, 0, len(a.orchestrators))
 	for id, session := range a.orchestrators {
@@ -125,14 +124,14 @@ func (a *App) reconcileOrchestratorActivity() {
 		// "working" past the short bound, because nothing will ever clear it.
 		managed := a.sessions[orchestratorSessionKey(id)]
 		rows = append(rows, row{
-			id:             id,
-			serial:         session.serial,
-			alive:          managed != nil && !managed.closed,
-			launchID:       session.launchID,
-			conversationID: session.conversationID,
+			id:      id,
+			serial:  session.serial,
+			alive:   managed != nil && !managed.closed,
+			agentID: session.agentID,
 		})
 	}
 	a.mu.Unlock()
+	conversations := a.orchestratorAgentConversations(len(rows) > 0)
 
 	for _, r := range rows {
 		activity, ok := readOrchestratorActivity(r.id, now, r.alive)
@@ -145,12 +144,10 @@ func (a *App) reconcileOrchestratorActivity() {
 		// The report has to name the session that wrote it and be checked against
 		// this orchestrator's own session: sessionAlive alone is computed per
 		// orchestrator id, not per session, so a report a replaced session left
-		// behind would otherwise borrow its successor's liveness. The comparison
-		// is against what the CURRENT launch's session reports being on, not the
-		// derived id — a session that moved to a conversation of its own is still
-		// this orchestrator's session, and comparing against the derivation would
-		// reject every report it writes.
-		liveConversationID := orchestratorLiveConversationForLaunch(r.id, r.launchID, r.conversationID)
+		// behind -- before a `/clear`, say -- would otherwise borrow its
+		// successor's liveness. The agent's current conversation is what it is
+		// on now.
+		liveConversationID := conversations[r.agentID]
 		shell, shellOK := readOrchestratorShellActivity(r.id, now, r.alive, liveConversationID)
 		shellRunning := shellOK && shell.Running
 		a.mu.Lock()
@@ -345,4 +342,23 @@ func (a *App) forgetSessionHeartbeats(selection uiSelection) {
 	a.mu.Lock()
 	delete(a.sessionHeartbeats, key)
 	a.mu.Unlock()
+}
+
+// orchestratorAgentConversations maps each background agent's id to the
+// conversation it is on now, read once per pass. An unreadable listing is no
+// answer rather than an error: the shell report is then accepted without the
+// replaced-session check, as it is for an orchestrator that has no agent.
+func (a *App) orchestratorAgentConversations(needed bool) map[string]string {
+	out := map[string]string{}
+	if !needed {
+		return out
+	}
+	agents, err := a.deps.claudeAgents.List()
+	if err != nil {
+		return out
+	}
+	for _, agent := range agents {
+		out[agent.ID] = agent.SessionID
+	}
+	return out
 }

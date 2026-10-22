@@ -38,6 +38,26 @@ stub_erun() {
 	cat >"${bin_dir}/erun" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
+# `erun version` is how agent-gate.sh names the binary that will run the gate.
+# The default answer carries the lines a real `erun version` prints after its
+# identity line -- a project VERSION resolved from the working directory, and
+# the registry's latest stable -- so a case can prove the wrapper reads the
+# `erun <version>` line rather than whichever line happens to come first or
+# last. STUB_VERSION_OUTPUT set but empty stands in for a binary whose version
+# is unreadable; STUB_NO_VERSION_NO_REGISTRY=1 stands in for one that predates
+# the flag this wrapper prefers.
+if [ "$1" = "version" ]; then
+	if [ "${STUB_NO_VERSION_NO_REGISTRY:-}" = "1" ] && [ "${2:-}" = "--no-registry" ]; then
+		printf 'Error: unknown flag: --no-registry\n' >&2
+		exit 1
+	fi
+	if [ -n "${STUB_VERSION_OUTPUT+x}" ]; then
+		printf '%s' "$STUB_VERSION_OUTPUT"
+	else
+		printf 'erun 9.9.9 (abc1234 built 2026-01-01T00:00:00Z)\nproject erun 9.9.11\nlatest stable: 9.9.10\n'
+	fi
+	exit 0
+fi
 case "$1 $2 $3" in
 "exec job start")
 	# The capability probe agent-gate.sh reads --exclusive support off. Defaults
@@ -52,6 +72,23 @@ case "$1 $2 $3" in
 			exit 0
 		fi
 	done
+	# A case that sets STUB_STATUS_LINE_FILE gets the job's recorded line
+	# written out the way a real store records it -- the name this start was
+	# given, which is where agent-gate.sh's environment marker rides. A case
+	# that needs a record it can trust as *this* environment's derives it from
+	# a real invocation rather than reproducing the key by hand. It is written
+	# to a file rather than handed back through the environment on purpose: the
+	# key covers the whole environment, so anything a case exports between two
+	# invocations would read as a different run to the very check under test.
+	if [ -n "${STUB_STATUS_LINE_FILE:-}" ]; then
+		prev=""
+		for a in "$@"; do
+			if [ "$prev" = "--name" ]; then
+				printf 'exited %s: %s' "${STUB_START_EXIT_CODE:-0}" "$a" >"$STUB_STATUS_LINE_FILE"
+			fi
+			prev="$a"
+		done
+	fi
 	if [ -n "${STUB_START_STDERR:-}" ]; then
 		printf '%s' "$STUB_START_STDERR" >&2
 	fi
@@ -77,6 +114,14 @@ case "$1 $2 $3" in
 	exit "${STUB_OUTPUT_STATUS:-0}"
 	;;
 "exec job status")
+	# A record this same stub wrote out from a real start (see
+	# STUB_STATUS_LINE_FILE) is reported back verbatim, exactly as a real store
+	# would report the job it recorded.
+	if [ -n "${STUB_STATUS_LINE_FILE:-}" ] && [ -s "$STUB_STATUS_LINE_FILE" ]; then
+		cat "$STUB_STATUS_LINE_FILE"
+		printf '\n'
+		exit 0
+	fi
 	# A test that sets STUB_STATUS_QUEUE (one "<exitstatus>|<line>" per line)
 	# gets a different answer on each successive status call, popped in order.
 	# The wrapper probes the record once before deciding whether to replay or
@@ -124,11 +169,30 @@ stub_erun_stateful() {
 printf '%s\n' "$*" >>"$STUB_ARGV_FILE"
 mkdir -p "$STUB_STORE_DIR"
 
+# Same `erun version` answer as stub_erun above, so a case that needs a real
+# job store can still observe the version banner the wrapper prints first.
+if [ "$1" = "version" ]; then
+	if [ "${STUB_NO_VERSION_NO_REGISTRY:-}" = "1" ] && [ "${2:-}" = "--no-registry" ]; then
+		printf 'Error: unknown flag: --no-registry\n' >&2
+		exit 1
+	fi
+	if [ -n "${STUB_VERSION_OUTPUT+x}" ]; then
+		printf '%s' "$STUB_VERSION_OUTPUT"
+	else
+		printf 'erun 9.9.9 (abc1234 built 2026-01-01T00:00:00Z)\nproject erun 9.9.11\nlatest stable: 9.9.10\n'
+	fi
+	exit 0
+fi
+
 job_id=""
+job_name=""
 prev=""
 for a in "$@"; do
 	if [ "$prev" = "--id" ]; then
 		job_id="$a"
+	fi
+	if [ "$prev" = "--name" ]; then
+		job_name="$a"
 	fi
 	prev="$a"
 done
@@ -165,7 +229,10 @@ if [ "$verb" = "exec job start" ]; then
 	set -e
 	printf '%s' "$out" >"${STUB_STORE_DIR}/${job_id}.output"
 	printf '%s' "$code" >"${STUB_STORE_DIR}/${job_id}.exitcode"
-	printf 'exited %s: stateful job' "$code" >"${STUB_STORE_DIR}/${job_id}.status"
+	# The recorded name, reported back exactly as a real store reports it: the
+	# name is where agent-gate.sh's environment marker rides, so a stub that
+	# dropped it would answer every replay probe with an unattributable record.
+	printf 'exited %s: %s' "$code" "$job_name" >"${STUB_STORE_DIR}/${job_id}.status"
 	exit 0
 fi
 
@@ -271,6 +338,125 @@ stub_erun "${case_dir}/bin"
 	grep -q -- 'make check-gate' "$STUB_ARGV_FILE" || fail "happy path: the real command was not forwarded to job start"
 	grep -q 'exec job await' "$STUB_ARGV_FILE" || fail "happy path: job await was never called"
 	grep -q 'exec job output' "$STUB_ARGV_FILE" || fail "happy path: job output was never read back"
+)
+
+# --- the pod's own `erun` -- not the checkout being gated -- is what runs this
+# gate and `erun exec gate-merge`, and the two are routinely a release or two
+# apart. That skew is what makes a merged fix to erun's own build/gate/landing
+# layer look ineffective: merging changes nothing until the environment is
+# upgraded, so a gate that passes over the old behaviour, or a landing whose
+# trailer still comes back the old way, reads as that fix having failed when it
+# has not run at all. The reported failure is the silence rather than the skew,
+# so what these cases pin is the announcement: it is on stdout (the channel a
+# lane captures a gate's result from), it is the `erun <version>` line and not
+# the project or registry line printed beside it, and it says which binary it
+# is naming.
+case_dir="${work_root}/pod-erun-version"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	set +e
+	stdout=$("$gate" check "make check" -- make check-gate 2>/dev/null)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "pod erun version: expected exit 0, got $STATUS ($stdout)"
+	case "$stdout" in
+	*"erun 9.9.9"*) ;;
+	*) fail "pod erun version: the pod's own erun version must be named on stdout, the channel a gate's result is read from, got: $stdout" ;;
+	esac
+	# The stub answers with the project VERSION and the registry lines a real
+	# `erun version` prints alongside its identity line, so a wrapper that read
+	# the wrong one -- or the last one -- would report one of these instead.
+	case "$stdout" in
+	*9.9.10* | *9.9.11*)
+		fail "pod erun version: must report erun's own build version, not the project or registry line printed beside it, got: $stdout"
+		;;
+	*) ;;
+	esac
+	case "$stdout" in
+	*"gate-merge"*) ;;
+	*) fail "pod erun version: must say this same binary is what runs the gate and \`erun exec gate-merge\`, got: $stdout" ;;
+	esac
+	case "$stdout" in
+	*"job output line"*) ;;
+	*) fail "pod erun version: the gate itself must still run and report, got: $stdout" ;;
+	esac
+)
+
+# --- an environment whose installed erun predates `--no-registry` is exactly
+# the case this banner exists for, so the flag's rejection must not be read as
+# "no version to report": the wrapper falls back to the plain form and still
+# names the version, and the gate keeps its verdict either way.
+case_dir="${work_root}/pod-erun-version-old-binary"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_NO_VERSION_NO_REGISTRY=1
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	set +e
+	stdout=$("$gate" check "make check" -- make check-gate 2>/dev/null)
+	STATUS=$?
+	set -e
+	[ "$STATUS" -eq 0 ] || fail "pod erun version old binary: expected exit 0, got $STATUS ($stdout)"
+	case "$stdout" in
+	*"erun 9.9.9"*) ;;
+	*) fail "pod erun version old binary: must still name the version after falling back to plain \`erun version\`, got: $stdout" ;;
+	esac
+	grep -q '^version --no-registry$' "$STUB_ARGV_FILE" || fail "pod erun version old binary: must prefer the registry-free form"
+	grep -q '^version$' "$STUB_ARGV_FILE" || fail "pod erun version old binary: must fall back to plain \`erun version\` when the installed binary predates the flag"
+)
+
+# --- a version that cannot be read is reported as exactly that and nothing
+# more. The banner is a fact, not a check: an unreadable binary must not fail
+# the gate, but it must not go quiet either, because silence is the
+# invisibility this exists to remove -- and it must never invent a version to
+# fill the gap, which would be worse than no line at all.
+case_dir="${work_root}/pod-erun-version-unreadable"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_VERSION_OUTPUT=
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='job output line'
+
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "pod erun version unreadable: an unreadable version must not fail the gate, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"could not read the pod"*) ;;
+	*) fail "pod erun version unreadable: must name the version as unreadable rather than passing it over in silence, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*9.9.*) fail "pod erun version unreadable: must never report a version it could not read, got: $OUT" ;;
+	*) ;;
+	esac
+	case "$OUT" in
+	*"job output line"*) ;;
+	*) fail "pod erun version unreadable: the gate must still run and report, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "pod erun version unreadable: the gate must still be started"
 )
 
 # --- an outer `timeout` wrapping this invocation is warned about: it can only
@@ -398,10 +584,25 @@ stub_erun "${case_dir}/bin"
 	export STUB_ARGV_FILE
 	export ERUN_ENV_TYPE=local-agent
 	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
-	export STUB_STATUS_STATUS=0
-	export STUB_STATUS_LINE='exited 0: make check'
 	export STUB_AWAIT_STATUS=0
 	export STUB_JOB_OUTPUT='earlier passing output'
+	export STUB_STATUS_LINE_FILE="${case_dir}/recorded-line"
+
+	# A replayed pass has to be one this environment could have produced, so the
+	# record this case replays is written by a real invocation -- the name it
+	# records is what carries the environment marker -- rather than a literal
+	# this case would have to keep in step with the key by hand. Nothing else is
+	# exported between the two invocations below: the key covers the whole
+	# environment, so an environment change here would read as a different run
+	# to the very check under test. AGENT_GATE_RERUN is the one exception, and
+	# only because it is this wrapper's own control -- it decides whether a
+	# replay is considered at all, never what the gated command does.
+	export AGENT_GATE_RERUN=1
+	run_gate check "make check" -- make check-gate >/dev/null
+	unset AGENT_GATE_RERUN
+	[ -s "$STUB_STATUS_LINE_FILE" ] || fail "status finished pass: could not learn the line a real invocation records"
+	: >"$STUB_ARGV_FILE"
+
 	run_gate check "make check" -- make check-gate
 	[ "$STATUS" -eq 0 ] || fail "status finished pass: expected exit 0, got $STATUS ($OUT)"
 	case "$OUT" in
@@ -426,6 +627,114 @@ stub_erun "${case_dir}/bin"
 		fail "status finished pass: must never start a new run over a finished record"
 	fi
 	grep -q -- '--timeout 1s' "$STUB_ARGV_FILE" || fail "status finished pass: must await the finished job to learn its real exit status"
+)
+
+# --- a replayed pass must announce itself on STDOUT, the channel the run's own
+# result travels on, not only on stderr. A caller captures, pipes, or records
+# stdout -- that is the log a lane reads a gate's verdict from -- and the
+# replayed record is written to exactly that channel by `erun exec job output`,
+# so a notice on stderr alone left the replay's stdout byte-identical to a real
+# run's. Every lane that hit this had the mechanism right and still could not
+# tell, because the one line naming it was the one line their capture dropped.
+# The reproduction is the first assertion below: on the pre-fix wrapper the
+# replay's stdout EQUALS the fresh run's, byte for byte. It must differ, say
+# "nothing was executed", and still carry the recorded output -- and the fresh
+# run must never carry the banner, since labelling real work a replay would be
+# a worse defect than the silence being fixed.
+case_dir="${work_root}/replay-announced-on-stdout"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	# AGENT_GATE_RERUN is this wrapper's own control and is held out of the
+	# environment key, so setting it here forces the first invocation to be a
+	# real run without changing which run the second invocation is asking for.
+	export AGENT_GATE_RERUN=1
+	set +e
+	fresh_stdout=$("$gate" check "make check" -- sh -c 'echo gate-verdict: GREEN' 2>/dev/null)
+	set -e
+	unset AGENT_GATE_RERUN
+	: >"$STUB_ARGV_FILE"
+
+	set +e
+	replay_stdout=$("$gate" check "make check" -- sh -c 'echo gate-verdict: GREEN' 2>/dev/null)
+	replay_status=$?
+	set -e
+	[ "$replay_status" -eq 0 ] || fail "replay-announced-on-stdout: expected exit 0 from the replay, got $replay_status"
+
+	case "$fresh_stdout" in
+	*"gate-verdict: GREEN"*) ;;
+	*) fail "replay-announced-on-stdout: the fresh run must actually run and print its output, got: $fresh_stdout" ;;
+	esac
+	case "$fresh_stdout" in
+	*REPLAYED*) fail "replay-announced-on-stdout: must never label a genuinely fresh run a replay, got: $fresh_stdout" ;;
+	*) ;;
+	esac
+
+	if [ "$replay_stdout" = "$fresh_stdout" ]; then
+		fail "replay-announced-on-stdout: the replay's stdout is byte-identical to a real run's -- nothing on the channel a lane reads says it did not execute"
+	fi
+	case "$replay_stdout" in
+	*"NOTHING WAS EXECUTED"*) ;;
+	*) fail "replay-announced-on-stdout: stdout must say in as many words that nothing was executed, got: $replay_stdout" ;;
+	esac
+	case "$replay_stdout" in
+	*"gate-verdict: GREEN"*) ;;
+	*) fail "replay-announced-on-stdout: the replay must still carry the recorded output, got: $replay_stdout" ;;
+	esac
+	# Both ends, because the verdict is read at the bottom of a long log and a
+	# banner at the head of it scrolls away.
+	case "$replay_stdout" in
+	*"END OF REPLAYED RECORD"*) ;;
+	*) fail "replay-announced-on-stdout: the replay must also be named after the record it replayed, got: $replay_stdout" ;;
+	esac
+	if grep -q 'exec job start' "$STUB_ARGV_FILE"; then
+		fail "replay-announced-on-stdout: a replayed pass must not start a fresh run"
+	fi
+)
+
+# --- a recorded pass carrying no environment marker is not attributable to any
+# environment, so it is not replayed either. Records written before the marker
+# existed stay readable for the store's own retention window, and a pass no one
+# can attribute is exactly the case where treating it as this environment's
+# would be a guess about the one input the record cannot vouch for. Refusing
+# costs one fresh run; replaying it costs a verdict nobody produced.
+case_dir="${work_root}/status-finished-pass-unattributable"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='exited 0: make check'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='fresh output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "status finished pass unattributable: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"fresh output"*) ;;
+	*) fail "status finished pass unattributable: expected a fresh run's captured output, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"replaying a cached PASS"*) fail "status finished pass unattributable: must never replay a pass it cannot attribute to this environment, got: $OUT" ;;
+	*) ;;
+	esac
+	case "$OUT" in
+	*"no environment marker"*) ;;
+	*) fail "status finished pass unattributable: expected the refusal to say the record carries no marker, got: $OUT" ;;
+	esac
+	grep -q 'exec job start' "$STUB_ARGV_FILE" || fail "status finished pass unattributable: must start a genuinely fresh run instead of replaying"
 )
 
 # --- a FAILING finished job is never replayed: a stale failure has no value
@@ -1288,6 +1597,162 @@ runs_file="${case_dir}/runs"
 
 	runs=$(wc -l <"$runs_file" | tr -d ' ')
 	[ "$runs" -eq 2 ] || fail "gate scope replay: a request under a different selection must actually run rather than replaying the other selection's recorded pass, ran $runs of 2"
+)
+
+# --- the environment a run executes under is part of what its recorded result
+# is a result *of*: a cached pass recorded under one environment must never
+# stand in for a request under another, or the second configuration is
+# reported green without ever having executed.
+#
+# This is the reported failure, in the shape it actually happened: a lane
+# proved a fix under three starvation delays set by an environment variable,
+# with an identical command and tree each iteration, so iterations 2 and 3
+# replayed iteration 1 and only one job ever ran -- reported as "15/15 green
+# across 200/750/2000 ms" when two of those three numbers never executed.
+#
+# The two requests below are identical in argv and tree and differ only in
+# ERUN_2696_KNOB, and execution is observed through a side effect rather than
+# through the command's own output. Argv is already part of the job id and the
+# tree is already part of it, so a case whose two runs differed in either would
+# separate them whether or not the environment is ever consulted, and would
+# pass against a key that ignores it. Same argv, same tree, one channel of
+# difference: only the environment can tell them apart.
+case_dir="${work_root}/env-state-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	ERUN_2696_KNOB=200 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: first environment expected exit 0, got $STATUS ($OUT)"
+
+	ERUN_2696_KNOB=750 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: second environment expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "env state replay: a run under a different environment must actually execute rather than replaying the other environment's recorded pass, ran $runs of 2"
+	case "$OUT" in
+	*"refusing to replay"*) ;;
+	*) fail "env state replay: a refused replay must say so on stderr rather than silently re-running, got: $OUT" ;;
+	esac
+
+	# Same tree and command, and now the same environment too: that one is a
+	# genuine replay, and losing it would defeat the whole point of the cache.
+	ERUN_2696_KNOB=750 run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "env state replay: identical re-run expected exit 0, got $STATUS ($OUT)"
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "env state replay: an identical command, tree and environment must still replay rather than re-execute, ran $runs of 2"
+	case "$OUT" in
+	*"replaying a cached PASS"*) ;;
+	*) fail "env state replay: expected the replay notice for a fully identical run, got: $OUT" ;;
+	esac
+)
+
+# --- a job already RUNNING under a different environment is the same hole on
+# the live path: this invocation has nothing to do but attach to it (starting a
+# second gate beside it is what the exclusive claim refuses), so the outcome it
+# reports is that run's -- and saying nothing would let a caller record a
+# verdict produced for a configuration it never asked about.
+case_dir="${work_root}/env-state-running"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun "${case_dir}/bin"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE
+	export ERUN_ENV_TYPE=remote-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+	export STUB_STATUS_STATUS=0
+	export STUB_STATUS_LINE='running: make check [env 0000000000000000], pid 123'
+	export STUB_START_STATUS=1
+	export STUB_START_STDERR='job "check" is already running (pid 123); pass a different id or cancel it first'
+	export STUB_AWAIT_STATUS=0
+	export STUB_JOB_OUTPUT='resumed output'
+	run_gate check "make check" -- make check-gate
+	[ "$STATUS" -eq 0 ] || fail "env state running: expected exit 0, got $STATUS ($OUT)"
+	case "$OUT" in
+	*"resumed output"*) ;;
+	*) fail "env state running: the running job must still be attached to, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"WARNING"*"started under environment"*) ;;
+	*) fail "env state running: attaching to a run started under a different environment must say so, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"0000000000000000"*) ;;
+	*) fail "env state running: the warning must name the environment that run actually ran under, got: $OUT" ;;
+	esac
+)
+
+# --- the pod a run executed on is part of what its recorded pass is a pass
+# *of*, and it is already in the environment key without being named: the
+# container runtime sets HOSTNAME to the pod name -- the same value a job
+# record keeps as its Hostname -- and the key hashes the whole environment. A
+# replaced pod carries a different runtime image and toolchain, so a pass from
+# the pod it replaced is not evidence about it.
+#
+# Nothing else separates these invocations: same argv, same tree, same store,
+# one channel of difference. A key that lost the pod -- by enumerating the
+# variables it covers instead of hashing what it is given, or by scrubbing
+# HOSTNAME -- would replay the first pod's pass for the second and report a pod
+# that executed nothing as green.
+case_dir="${work_root}/pod-replacement-replay"
+mkdir -p "$case_dir"
+STUB_ARGV_FILE="${case_dir}/argv"
+: >"$STUB_ARGV_FILE"
+stub_erun_stateful "${case_dir}/bin"
+runs_file="${case_dir}/runs"
+: >"$runs_file"
+(
+	export PATH="${case_dir}/bin:$PATH"
+	export STUB_ARGV_FILE STUB_STORE_DIR="${case_dir}/store"
+	export ERUN_ENV_TYPE=local-agent
+	export ERUN_TENANT=acme ERUN_ENVIRONMENT=dev
+
+	export HOSTNAME=erun-devops-pod-a
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: the first pod's run expected exit 0, got $STATUS ($OUT)"
+
+	# The marker the first pod's own invocation recorded, read back from the
+	# store rather than reproduced by hand -- a hand-built marker could agree
+	# with the wrapper's key for a reason this case never exercised.
+	first_marker=$(sed -n 's/.*\[env \([0-9a-f]\{16\}\)\].*/\1/p' "${STUB_STORE_DIR}"/*.status | head -1)
+	[ -n "$first_marker" ] || fail "pod replacement replay: the first pod's run recorded no environment marker, so this case would prove nothing"
+
+	export HOSTNAME=erun-devops-pod-b
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: the replacing pod's run expected exit 0, got $STATUS ($OUT)"
+
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "pod replacement replay: a pod that replaced the one which produced the recorded pass must actually execute rather than replaying it, ran $runs of 2"
+	case "$OUT" in
+	*"refusing to replay"*) ;;
+	*) fail "pod replacement replay: refusing a pass recorded on another pod must say so on stderr rather than silently re-running, got: $OUT" ;;
+	esac
+	case "$OUT" in
+	*"$first_marker"*) ;;
+	*) fail "pod replacement replay: the refusal must name the environment that run actually ran under ($first_marker), got: $OUT" ;;
+	esac
+
+	# Same pod as the run above, which is now this invocation's own
+	# environment: that one is a genuine replay, and losing it would cost every
+	# gate on this pod its cache.
+	run_gate check "make check" -- sh -c "echo run >>'${runs_file}'"
+	[ "$STATUS" -eq 0 ] || fail "pod replacement replay: identical re-run on the same pod expected exit 0, got $STATUS ($OUT)"
+	runs=$(wc -l <"$runs_file" | tr -d ' ')
+	[ "$runs" -eq 2 ] || fail "pod replacement replay: a second run on the same pod must still replay rather than re-execute, ran $runs of 2"
+	case "$OUT" in
+	*"replaying a cached PASS"*) ;;
+	*) fail "pod replacement replay: expected the replay notice for a same-pod re-run, got: $OUT" ;;
+	esac
 )
 
 echo "ok: agent-gate.sh"

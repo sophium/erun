@@ -559,6 +559,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   },
   claude: {},
   claudeDefaults: defaultClaudeDefaults(),
+  aiLaunchSignature: '',
   localPorts: {
     rangeStart: 0,
     rangeEnd: 0,
@@ -605,6 +606,8 @@ export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] =
   // False until the backend reports the erun-level catalog, so the per-env
   // gateway controls never flash before the read lands.
   gatewayConfigured: false,
+  gatewayModels: [],
+  gatewayDefaultModel: '',
   models: ['sonnet', 'haiku'],
   maxOutputTokens: 4096,
   knownModels: ['opus', 'sonnet', 'haiku', 'fable'],

@@ -45,8 +45,8 @@ func TestIntegrationSuiteTimeoutBudgetIsDerivedAndCappedUnderTheHangNet(t *testi
 	// what GO_TEST_GOMAXPROCS already divides into this suite's -parallel
 	// share, so a constant here would under-serve a small environment and
 	// over-serve a large one. Read the definition itself rather than the file
-	// around it -- LINT_TIMEOUT above reads the same cpu-quota helper, so a
-	// whole-file search would still pass on a definition that had been
+	// around it -- GO_TEST_GOMAXPROCS above reads the same cpu-quota helper,
+	// so a whole-file search would still pass on a definition that had been
 	// replaced outright with a literal.
 	definition := makeVariableDefinition(t, makefileText, "INTEGRATION_TEST_TIMEOUT")
 	if !strings.Contains(definition, "parallel-gate.sh cpu-quota") {

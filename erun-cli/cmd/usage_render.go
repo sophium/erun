@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 
 	common "github.com/sophium/erun/erun-common"
 )
@@ -12,6 +13,9 @@ func writeUsageResult(ctx common.Context, report common.RuntimeUsageReport) erro
 		return err
 	}
 	if err := writeUsageMemory(ctx, "", usage.Memory); err != nil {
+		return err
+	}
+	if err := writeUsageRequests(ctx, usage.Requests); err != nil {
 		return err
 	}
 	if err := writeUsageDindReading(ctx, usage); err != nil {
@@ -62,6 +66,11 @@ func writeUsageCPU(ctx common.Context, prefix string, cpu common.RuntimeCPUUsage
 	return err
 }
 
+// writeUsageMemory names the denominator a memory percentage is taken against
+// as a *limit*. Unqualified, `394.4MiB / 2.0GiB (19.3%)` reads as "this
+// environment holds 2.0GiB": a cgroup ceiling is what the container may grow to
+// under pressure, and it reserves nothing at all. The reservation is the line
+// writeUsageRequests prints beneath it.
 func writeUsageMemory(ctx common.Context, prefix string, memory common.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
@@ -74,10 +83,67 @@ func writeUsageMemory(ctx common.Context, prefix string, memory common.RuntimeMe
 			prefix, formatUsageBytes(memory.CurrentBytes), peak, oomKills)
 		return err
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: %s / %s (%.1f%%), peak %s, OOM kills %s\n",
+	_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: %s / %s limit (%.1f%%), peak %s, OOM kills %s\n",
 		prefix, formatUsageBytes(memory.CurrentBytes), formatUsageBytes(memory.LimitBytes), memory.PercentOfLimit,
 		peak, oomKills)
 	return err
+}
+
+// writeUsageRequests prints the reservation the scheduler admits this
+// environment's pod on, which is a different number from every limit above and
+// the one that decides whether the pod can be placed on a node at all. Without
+// it the only figures on this output are ceilings, and a ceiling reads as
+// provisioned: ~135 CPU and ~198GiB of limits on one node against 2.5 CPU and
+// 10GiB of actual reservation is indistinguishable here from five environments
+// holding their limits.
+//
+// It names each container's own request as well as the pod's effective total,
+// because the container is what each limit above belongs to -- the runtime
+// container's 1GiB request is the figure to read against its own 27GiB limit.
+func writeUsageRequests(ctx common.Context, requests *common.RuntimeUsageRequests) error {
+	if requests == nil {
+		// A dry run read nothing, and the reading is omitted rather than
+		// printed as a reservation of nothing.
+		return nil
+	}
+	if requests.Unavailable != "" {
+		_, err := fmt.Fprintf(ctx.Stdout, "Requests: unavailable (%s)\n", requests.Unavailable)
+		return err
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Requests: %s for the pod\n", formatUsageRequests(requests.Pod)); err != nil {
+		return err
+	}
+	for _, name := range sortedUsageRequestContainers(requests.Containers) {
+		if _, err := fmt.Fprintf(ctx.Stdout, "  %s: %s\n", name, formatUsageRequests(requests.Containers[name])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sortedUsageRequestContainers(containers map[string]common.KubernetesRequests) []string {
+	names := make([]string, 0, len(containers))
+	for name := range containers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// formatUsageRequests renders one request pair, naming the parts rather than
+// emitting two bare numbers ("0.5 CPU / 2.0GiB"), and stating a resource the
+// container declares nothing for as "none" -- an undeclared request reserves
+// nothing, and a bare 0 would read as a measured reservation of zero.
+func formatUsageRequests(requests common.KubernetesRequests) string {
+	cpu := "none"
+	if requests.CPUMilli > 0 {
+		cpu = common.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+	}
+	memory := "none"
+	if requests.MemoryBytes > 0 {
+		memory = formatUsageBytes(requests.MemoryBytes)
+	}
+	return cpu + " / " + memory
 }
 
 // formatUsagePeak and formatUsageOOMKills report "unavailable" rather than a

@@ -1,4 +1,4 @@
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // theme covers the class-based `.dark` toggle (#1356). Before this, erun-ui
@@ -31,13 +31,16 @@ test.describe('theme', () => {
       await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
 
       await app.titlebar.toggleTheme();
-      await expect(app.documentElement()).not.toHaveClass(/dark/);
+      // withTestBudget, not expect's 10s default: the class is the app's own
+      // reaction to the toggle, and preserving that reaction across the
+      // relaunch below is the whole assertion.
+      await expect(app.documentElement()).not.toHaveClass(/dark/, withTestBudget());
       await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
 
       // The OS still prefers dark, so only a persisted explicit choice can
       // keep a relaunch light.
       await app.open();
-      await expect(app.documentElement()).not.toHaveClass(/dark/);
+      await expect(app.documentElement()).not.toHaveClass(/dark/, withTestBudget());
     });
 
     test('the sidebar and terminal pane stay legible and reachable', async ({ app }) => {
@@ -61,7 +64,7 @@ test.describe('theme', () => {
       await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
 
       await app.titlebar.toggleTheme();
-      await expect(app.documentElement()).toHaveClass(/dark/);
+      await expect(app.documentElement()).toHaveClass(/dark/, withTestBudget());
       await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
     });
   });

@@ -41,6 +41,34 @@ func markPlatformAliasUnusable(err error) error {
 	return platformAliasUnusableError{err: err}
 }
 
+// errPlatformAliasAmbiguous marks the one alias-resolution failure that names a
+// choice rather than a gap: several erun-type aliases are configured and none
+// was selected. Its remedy is the selection itself, so a caller that only knows
+// the call failed -- and reports the zero-alias remedy, which adds a fourth
+// alias to a config that already had too many -- is answering a question it
+// cannot tell apart. Reading the marker is how a caller distinguishes them
+// without matching on wording, which the transports vary by name.
+var errPlatformAliasAmbiguous = errors.New("multiple erun platform cloud provider aliases are configured")
+
+// platformAliasAmbiguityError marks the ambiguity while leaving the message the
+// caller rendered it with -- the selection is spelled per transport -- so the
+// operator-facing text is unchanged and the classification travels alongside it.
+type platformAliasAmbiguityError struct{ err error }
+
+func (e platformAliasAmbiguityError) Error() string { return e.err.Error() }
+func (e platformAliasAmbiguityError) Unwrap() error { return e.err }
+func (e platformAliasAmbiguityError) Is(target error) bool {
+	return target == errPlatformAliasAmbiguous
+}
+
+func platformAliasAmbiguity(err error) error { return platformAliasAmbiguityError{err: err} }
+
+// isPlatformAliasAmbiguity reports whether err is that ambiguity, through any
+// markPlatformAliasUnusable the resolver applied on the way out.
+func isPlatformAliasAmbiguity(err error) bool {
+	return errors.Is(err, errPlatformAliasAmbiguous)
+}
+
 // platformAliasSelection names, in the vocabulary of the transport the
 // operator is actually using, the argument that picks one alias out of
 // several. The CLI and the MCP server resolve aliases through this same
@@ -118,7 +146,8 @@ func resolveERunPlatformAlias(store CloudReadStore, alias string, selection plat
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass %s to choose one", selection))
+		return CloudProviderConfig{}, markPlatformAliasUnusable(platformAliasAmbiguity(
+			fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass %s to choose one", selection)))
 	}
 }
 
@@ -360,16 +389,190 @@ func RunPlatformGetEnvironment(ctx Context, store CloudReadStore, alias, environ
 // RunPlatformRegisterEnvironment registers an environment, optionally
 // starting a server-side deploy (see PlatformClient.CreateEnvironment).
 func RunPlatformRegisterEnvironment(ctx Context, store CloudReadStore, alias string, params PlatformCreateEnvironmentParams, deps CloudDependencies) (PlatformEnvironment, error) {
+	environment, _, err := RunPlatformRegisterEnvironmentWithDefinition(ctx, store, alias, params, nil, deps)
+	return environment, err
+}
+
+// RunPlatformRegisterEnvironmentWithDefinition registers (or adopts) an
+// environment and, when local names a local environment, uploads that
+// environment's portable settings and records its hosted marker in the same
+// step.
+//
+// The two are one call rather than two the caller sequences because recording
+// the marker only after the upload succeeds is what makes the marker mean "the
+// platform holds this revision": a marker written first would claim a sync that
+// never happened.
+func RunPlatformRegisterEnvironmentWithDefinition(ctx Context, store CloudReadStore, alias string, params PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams, deps CloudDependencies) (PlatformEnvironment, EnvDefinitionPushResult, error) {
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
-		return PlatformEnvironment{}, err
+		return PlatformEnvironment{}, EnvDefinitionPushResult{}, err
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/environments",
-		"name="+params.Name, "type="+params.Type, "contextId="+params.ContextID, "runtimeVersion="+params.RuntimeVersion)
+	if err := checkRegistrationDefinitionInput(params, local); err != nil {
+		return PlatformEnvironment{}, EnvDefinitionPushResult{}, err
+	}
+	tracePlatformRegistration(ctx, provider, params)
+	if local != nil {
+		ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s definition revision %d", local.Tenant, local.Environment, provider.ERun.APIURL, 1))
+		tracePlatformCall(ctx, provider, "PUT", "/v1/environments/<adopted>/definition",
+			"revision=1", "fields="+strings.Join(populatedPortableFieldsForLocal(*local), ","))
+	}
 	if ctx.DryRun {
-		return PlatformEnvironment{}, nil
+		return PlatformEnvironment{}, EnvDefinitionPushResult{}, nil
 	}
-	return client.CreateEnvironment(context.Background(), params)
+
+	environment, err := client.CreateEnvironment(context.Background(), params)
+	if err != nil {
+		return PlatformEnvironment{}, EnvDefinitionPushResult{}, err
+	}
+	if local == nil {
+		return environment, EnvDefinitionPushResult{}, nil
+	}
+	result, err := AdoptEnvironmentDefinition(context.Background(), ConfigStore{}, client, environment, *local)
+	if err != nil {
+		return environment, EnvDefinitionPushResult{}, err
+	}
+	return environment, result, nil
+}
+
+// checkAdoptInput mirrors the platform's own adopt contract before the request
+// is sent, so a caller that omitted the context gets the reason rather than a
+// 400 it has to interpret. The platform remains the authority; this is the
+// same early refusal the desktop's registration flow performs.
+func checkAdoptInput(params PlatformCreateEnvironmentParams) error {
+	if !params.Adopt {
+		return nil
+	}
+	if strings.TrimSpace(params.KubernetesContext) == "" {
+		return fmt.Errorf("--adopt requires --kubernetes-context: adopting records the context the environment already runs against, and the platform refuses a runtime version or context id alongside it")
+	}
+	return nil
+}
+
+// checkRegistrationDefinitionInput runs the two client-side preconditions both
+// halves of a registration share, before anything is sent: adopting records the
+// context the environment already runs against, and uploading a definition is
+// what records this machine as following the row.
+func checkRegistrationDefinitionInput(params PlatformCreateEnvironmentParams, local *EnvDefinitionAdoptParams) error {
+	if err := checkAdoptInput(params); err != nil {
+		return err
+	}
+	if local != nil && !params.Adopt {
+		return fmt.Errorf("--definition requires --adopt: uploading a local environment's settings records this machine as following that row, which is what adopting means")
+	}
+	return nil
+}
+
+// tracePlatformRegistration traces the registration call itself, shared by the
+// plain and definition-carrying paths so the two cannot drift in what they
+// report. The adopt/tenant/context keys appear only when they carry a value, so
+// an ordinary registration's trace is exactly what it has always been.
+func tracePlatformRegistration(ctx Context, provider CloudProviderConfig, params PlatformCreateEnvironmentParams) {
+	details := []string{
+		"name=" + params.Name,
+		"type=" + params.Type,
+		"contextId=" + params.ContextID,
+		"runtimeVersion=" + params.RuntimeVersion,
+	}
+	if params.Adopt {
+		details = append(details, "adopt=true")
+	}
+	if strings.TrimSpace(params.KubernetesContext) != "" {
+		details = append(details, "kubernetesContext="+params.KubernetesContext)
+	}
+	if strings.TrimSpace(params.TenantID) != "" {
+		details = append(details, "tenantId="+params.TenantID)
+	}
+	tracePlatformCall(ctx, provider, "POST", "/v1/environments", details...)
+}
+
+// populatedPortableFieldsForLocal reports which portable fields a named local
+// environment would upload, for the dry-run trace. A local environment that
+// cannot be read reports nothing rather than failing the whole dry run: the
+// trace is a plan, and the real run is where a missing config is a refusal.
+func populatedPortableFieldsForLocal(local EnvDefinitionAdoptParams) []string {
+	config, _, err := ConfigStore{}.LoadEnvConfig(local.Tenant, local.Environment)
+	if err != nil {
+		return nil
+	}
+	return PopulatedPortableEnvConfigFields(config)
+}
+
+// RunPlatformPushEnvDefinition uploads a local environment's portable settings
+// to the platform row its hosted marker names.
+//
+// Under --dry-run it traces the resolved local environment, the row the marker
+// names, and the portable fields that would travel — never the fields that
+// would not, so the trace reads as the allowlist itself rather than as an
+// inventory of the config.
+func RunPlatformPushEnvDefinition(ctx Context, store CloudReadStore, alias string, params EnvDefinitionPushParams, deps CloudDependencies) (EnvDefinitionPushResult, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return EnvDefinitionPushResult{}, err
+	}
+	config, _, err := ConfigStore{}.LoadEnvConfig(params.Tenant, params.Environment)
+	if err != nil {
+		return EnvDefinitionPushResult{}, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, err)
+	}
+	marker, ok := HostedEnvironmentFromConfig(config)
+	if !ok {
+		return EnvDefinitionPushResult{}, notHostedError(params.Tenant, params.Environment)
+	}
+	ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s", params.Tenant, params.Environment, marker.Describe()))
+
+	portable := PopulatedPortableEnvConfigFields(config)
+	tracePlatformCall(ctx, provider, "GET", "/v1/environments/"+marker.EnvironmentID)
+	tracePlatformCall(ctx, provider, "PUT", "/v1/environments/"+marker.EnvironmentID+"/definition",
+		"revision="+fmt.Sprintf("%d", marker.DefinitionRevision+1),
+		"fields="+strings.Join(portable, ","))
+	if ctx.DryRun {
+		return EnvDefinitionPushResult{}, nil
+	}
+	return PushEnvironmentDefinition(context.Background(), ConfigStore{}, client, params)
+}
+
+// RunPlatformPullEnvDefinition pulls the platform's stored definition into a
+// local environment, creating it first when it does not exist yet.
+//
+// The confirmation rides in through confirm: a two-sided portable edit is a
+// question for the operator, and a transport with no way to ask (MCP, a
+// non-interactive run) passes nil and gets a refusal carrying the diff instead
+// of a silent overwrite.
+func RunPlatformPullEnvDefinition(ctx Context, store CloudReadStore, alias string, params EnvDefinitionPullParams, confirm func(EnvDefinitionPlan) (bool, error), deps CloudDependencies) (EnvDefinitionPullResult, error) {
+	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
+	if err != nil {
+		return EnvDefinitionPullResult{}, err
+	}
+	config, _, loadErr := ConfigStore{}.LoadEnvConfig(params.Tenant, params.Environment)
+	creating := errors.Is(loadErr, ErrNotInitialized)
+	if loadErr != nil && !creating {
+		return EnvDefinitionPullResult{}, fmt.Errorf("load %s/%s: %w", params.Tenant, params.Environment, loadErr)
+	}
+
+	environmentID := strings.TrimSpace(params.EnvironmentID)
+	if creating {
+		if environmentID == "" {
+			return EnvDefinitionPullResult{}, fmt.Errorf(
+				"%s/%s does not exist on this machine: a pull into a new environment must name the platform row with --environment-id (find it with `erun platform env list`)",
+				params.Tenant, params.Environment)
+		}
+		ctx.Trace(fmt.Sprintf("definition: creating local environment %s/%s from platform row %s", params.Tenant, params.Environment, environmentID))
+		tracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
+	} else {
+		marker, ok := HostedEnvironmentFromConfig(config)
+		if !ok {
+			return EnvDefinitionPullResult{}, notHostedError(params.Tenant, params.Environment)
+		}
+		environmentID = marker.EnvironmentID
+		ctx.Trace(fmt.Sprintf("definition: %s/%s is hosted at %s", params.Tenant, params.Environment, marker.Describe()))
+		tracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID)
+	}
+	tracePlatformCall(ctx, provider, "GET", "/v1/environments/"+environmentID+"/definition")
+	ctx.Trace("definition: only portable fields are written; host-owned and platform-owned fields are left alone")
+
+	if ctx.DryRun {
+		return EnvDefinitionPullResult{}, nil
+	}
+	return PullEnvironmentDefinition(context.Background(), ConfigStore{}, client, params)
 }
 
 // RunPlatformDeployEnvironment starts a server-side deploy of an

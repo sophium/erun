@@ -1,0 +1,6 @@
+Dry run: erun platform environment definition pull planned.
+audit: erun platform env pull --dry-run acme prod
+definition: acme/prod is hosted at https://api.example.test (tenant tenant-1, environment env-1), definition revision 1
+platform: GET https://api.example.test/v1/environments/env-1
+platform: GET https://api.example.test/v1/environments/env-1/definition
+definition: only portable fields are written; host-owned and platform-owned fields are left alone

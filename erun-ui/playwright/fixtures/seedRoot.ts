@@ -31,6 +31,30 @@ export const SEED_ENV_BETA = 'beta';
 // two independent selectors, one per provider type, each pre-selected to the
 // env's attachment.
 export const SEED_ENV_GAMMA = 'gamma';
+// An environment marked as hosted on a platform row, so the Manage dialog's
+// Hosted environment panel is stageable without a live platform: the marker is
+// a purely local config fact, and the drift comparison is stubbed over
+// /__erun_invoke by the spec that needs it. The api host is deliberately a
+// host the harness never contacts.
+//
+// Deliberately NOT part of seedBaseline: the seeded environment population is
+// itself an assertion several specs make (the titlebar's group-select
+// shortcuts count it), so a fourth baseline environment changes the subject
+// under test for every spec that never asked for one. The spec that needs a
+// hosted environment stages this one for the length of its own test — see
+// seedHostedEnvironment below.
+export const SEED_ENV_DELTA = 'delta';
+export const SEED_HOSTED_API_HOST = 'api.example.test';
+export const SEED_HOSTED_TENANT_ID = 'seeded-platform-tenant';
+export const SEED_HOSTED_ENVIRONMENT_ID = 'seeded-platform-env';
+export const SEED_HOSTED_REVISION = 4;
+// A fingerprint of a definition revision this machine is no longer carrying.
+// Any value that is not the digest of the seeded environment's own portable
+// settings reads as "this copy has moved since its last transfer", which is
+// the state the hand-authored marker cannot otherwise express: the real digest
+// is a sha256 of that projection, so a fixture that reproduced it by hand would
+// be a second implementation of the thing under test.
+export const SEED_HOSTED_STALE_DIGEST = 'digest-of-an-earlier-revision';
 // One configured cloud provider alias so the Manage dialog's Cloud alias
 // select renders deterministically. The matching `aws` stub keeps its token
 // status check instant and offline.
@@ -93,6 +117,87 @@ export function stubsDir(): string {
 // fixtures/stubProcesses.ts owns reading and reaping it.
 export function stubRegistryPath(): string {
   return path.join(isolatedRoot(), 'stub-pids');
+}
+
+// tabSetupHoldsDir is where a spec parks a tab's setup phase: while
+// `<tenant>.<environment>` exists here, the erun stub holds an interactive tab
+// open short of printing its setup-complete marker, so the desktop's gated
+// session stays in setup for exactly as long as the spec needs. Per worker,
+// removed with the isolated root.
+// openerLogPath is where the inert OS-opener stubs (open, xdg-open, explorer)
+// record each request, one line of arguments per call. A spec reads it back to
+// prove a host path reached the stub rather than the operator's real opener.
+export function openerLogPath(): string {
+  return path.join(isolatedRoot(), 'opener-calls');
+}
+
+// openerCalls returns every request the opener stubs received so far.
+export function openerCalls(): string[] {
+  try {
+    return fs.readFileSync(openerLogPath(), 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// claudeAgentsPath is the claude stub's stand-in for Claude Code's background
+// service: one line per background agent, `<id> <run|stopped> <name>`. The
+// desktop runs every persisted orchestrator as a background agent named after
+// its id, so the stub answers `agents --json`, `--bg`, `stop`, `rm` and
+// `attach` from this file. Per worker, removed with the isolated root.
+export function claudeAgentsPath(): string {
+  return path.join(isolatedRoot(), 'claude-agents');
+}
+
+// ClaudeStubAgent is one background agent the claude stub is holding.
+export interface ClaudeStubAgent {
+  id: string;
+  running: boolean;
+  name: string;
+}
+
+// claudeAgents returns every background agent the claude stub holds, so a
+// spec can see which agent an orchestrator was attached to.
+export function claudeAgents(): ClaudeStubAgent[] {
+  let text = '';
+  try {
+    text = fs.readFileSync(claudeAgentsPath(), 'utf8');
+  } catch {
+    return [];
+  }
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [id = '', state = '', name = ''] = line.split(' ');
+      return { id, running: state === 'run', name };
+    });
+}
+
+// seedClaudeAgent stages a background agent the desktop did not create, as an
+// operator running `claude --bg -n <name>` by hand would.
+export function seedClaudeAgent(agent: ClaudeStubAgent): void {
+  fs.appendFileSync(
+    claudeAgentsPath(),
+    `${agent.id} ${agent.running ? 'run' : 'stopped'} ${agent.name}\n`,
+  );
+}
+
+export function tabSetupHoldsDir(): string {
+  return path.join(isolatedRoot(), 'tab-setup-holds');
+}
+
+// holdTabSetup keeps every interactive tab the desktop opens for the
+// environment in its setup phase until the returned release is called. Release
+// it in a finally: a held tab's stub polls for the release and never parks.
+export function holdTabSetup(tenant: string, environment: string): () => void {
+  const dir = tabSetupHoldsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const hold = path.join(dir, `${tenant}.${environment}`);
+  fs.writeFileSync(hold, '');
+  return () => {
+    fs.rmSync(hold, { force: true });
+  };
 }
 
 // stubBinPath is the on-disk path of a stub tool. On Windows the backend
@@ -163,12 +268,40 @@ export function e2eK3dEnabled(): boolean {
 // share one isolated kubeconfig and never read the developer's ~/.kube.
 // global-setup must write the live cluster's kubeconfig here before the backend
 // boots.
+// desktopConfigDir is where the desktop keeps its own state (the orchestrator
+// open set, live-conversation records, nudge history): Go's os.UserConfigDir()
+// plus "ERun", resolved for the backend's environment. That is XDG_CONFIG_HOME
+// only on Linux; macOS ignores it for ~/Library/Application Support, and
+// Windows reads %AppData%, which backendEnv points inside the isolated root.
+export function desktopConfigDir(): string {
+  const home = isolatedHomeDir();
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support', 'ERun');
+  }
+  if (process.platform === 'win32') {
+    return path.join(windowsRoamingAppData(home), 'ERun');
+  }
+  return path.join(home, '.config', 'ERun');
+}
+
+// The isolated root's stand-ins for %AppData% and %LocalAppData%. On Windows
+// Go's os.UserConfigDir/UserCacheDir read those and os.UserHomeDir reads
+// %USERPROFILE%, never HOME or XDG_*, so they are redirected separately.
+function windowsRoamingAppData(home: string): string {
+  return path.join(home, 'AppData', 'Roaming');
+}
+
+function windowsLocalAppData(home: string): string {
+  return path.join(home, 'AppData', 'Local');
+}
+
 export function kubeconfigPath(): string {
   return path.join(isolatedHomeDir(), '.kube', 'config');
 }
 
 // backendEnv redirects both erun roots — xdg config home and os.UserHomeDir +
-// ".erun" — into the isolated root via HOME + XDG_*, and the PATH-prepended
+// ".erun" — into the isolated root via HOME + XDG_* (plus USERPROFILE and the
+// AppData pair on Windows), and the PATH-prepended
 // stubs keep the backend and every `erun`/shell child it spawns off any real
 // cluster, cloud, or docker daemon.
 export function backendEnv(): Record<string, string> {
@@ -178,10 +311,24 @@ export function backendEnv(): Record<string, string> {
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    ...(process.platform === 'win32'
+      ? {
+          USERPROFILE: home,
+          APPDATA: windowsRoamingAppData(home),
+          LOCALAPPDATA: windowsLocalAppData(home),
+        }
+      : {}),
     // Where a long-lived stub records the pid it parks under, so the harness can
     // reap a session it opened and never closed (fixtures/stubProcesses.ts).
     // Inherited by every child the backend spawns, the stubs included.
     ERUN_PLAYWRIGHT_STUB_REGISTRY: stubRegistryPath(),
+    // Where a spec parks an interactive tab short of its setup-complete marker
+    // (holdTabSetup above). Read by the erun stub only.
+    ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS: tabSetupHoldsDir(),
+    // Where the OS-opener stubs record each request (openerCalls above).
+    ERUN_PLAYWRIGHT_OPENER_LOG: openerLogPath(),
+    // The claude stub's background agents (claudeAgentsPath above).
+    ERUN_PLAYWRIGHT_CLAUDE_AGENTS: claudeAgentsPath(),
   };
   if (e2eK3dEnabled()) {
     // k3d mode drives a live cluster with the real docker/kubectl/helm and
@@ -277,7 +424,13 @@ export function createIsolatedLayout(): void {
   ]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  const stubs = e2eK3dEnabled() ? ['aws'] : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
+  // The OS openers are stubbed in every mode: OpenHostPath and RevealHostPath
+  // exec them from PATH, so a spec that clicks a host path would otherwise
+  // open a real file on the operator's desktop.
+  const openers = isWindows ? ['explorer'] : ['open', 'xdg-open'];
+  const stubs = e2eK3dEnabled()
+    ? ['aws', ...openers]
+    : ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude', ...openers];
   for (const name of stubs) {
     writeStubBinary(name);
   }
@@ -400,7 +553,8 @@ export function seedGitRemoteAgentForK3d(
 //   prints a shell-prompt line (the action runner's setup-complete marker,
 //   see signalSessionReadyOnLine in erun-ui/activity_queue_app.go) and then
 //   sleeps, so the tab behaves like a healthy opened session: alive, quiet,
-//   and killable on env close.
+//   and killable on env close. A spec holding the env's tab setup
+//   (holdTabSetup) delays that marker until it releases the hold.
 //
 //   `--no-shell` is the non-interactive probe form (`erun open <t> <e>
 //   --no-shell --reconnect`, see buildOpenNoShellArgs in erun-ui/session.go):
@@ -420,8 +574,12 @@ export function seedGitRemoteAgentForK3d(
 //   the row reads "stopped", and the spec times out; where a real session does
 //   start (a developer's machine, an agent pod), every orchestrator the suite
 //   opens spends the shared agent account on a nested agent nobody asked for.
-//   The stub prints a shell-prompt line (the action runner's setup-complete
-//   marker, see signalSessionReadyOnLine) and then sleeps, so the session is
+//   A persisted orchestrator runs as a background agent the desktop finds with
+//   `claude agents --json`, creates with `claude --bg`, and opens with
+//   `claude attach <id>`, so the stub keeps those agents in claudeAgentsPath()
+//   and answers each command from it. `attach`, and a transient (Investigate)
+//   session, print a shell-prompt line (the action runner's setup-complete
+//   marker, see signalSessionReadyOnLine) and then sleep, so the session is
 //   live, quiet, and killable.
 //
 // Both long-lived stubs register the pid they park under before blocking, so the
@@ -463,6 +621,8 @@ function writeStubBinary(name: string): void {
       'case "$1" in',
       '  open)',
       '    register_stub',
+      '    hold="$ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS/$2.$3"',
+      '    while [ -n "$ERUN_PLAYWRIGHT_TAB_SETUP_HOLDS" ] && [ -e "$hold" ]; do sleep 0.05; done',
       "    printf 'erun@playwright:~$ \\n'",
       '    exec sleep 2147483647',
       '    ;;',
@@ -473,7 +633,41 @@ function writeStubBinary(name: string): void {
   } else if (name === 'claude') {
     body = [
       ...stubRegisterPreamble(name),
-      '# claude playwright stub: keeps an orchestrator session alive and inert.',
+      '# claude playwright stub: an inert background service and session.',
+      'agents="${ERUN_PLAYWRIGHT_CLAUDE_AGENTS:-$HOME/.claude-playwright-agents}"',
+      'touch "$agents"',
+      'set_state() {',
+      '  tmp="$agents.$$"',
+      '  while read -r id state name; do',
+      '    [ "$id" = "$1" ] && state="$2"',
+      '    [ "$2" = gone ] && [ "$id" = "$1" ] && continue',
+      '    printf \'%s %s %s\\n\' "$id" "$state" "$name"',
+      '  done < "$agents" > "$tmp"',
+      '  mv "$tmp" "$agents"',
+      '}',
+      'case "$1" in',
+      '  agents)',
+      '    sep=""',
+      "    printf '['",
+      '    while read -r id state name; do',
+      '      pid=""',
+      '      [ "$state" = run ] && pid=\'"pid":1,\'',
+      '      printf \'%s{%s"id":"%s","kind":"background","name":"%s","sessionId":"%s-0000-4000-8000-000000000000"}\' "$sep" "$pid" "$id" "$name" "$id"',
+      '      sep=","',
+      '    done < "$agents"',
+      "    printf ']\\n'",
+      '    exit 0 ;;',
+      '  --bg)',
+      '    name=""',
+      '    while [ $# -gt 0 ]; do [ "$1" = -n ] && name="$2"; shift; done',
+      "    id=$(printf '%08x' $$)",
+      '    printf \'%s run %s\\n\' "$id" "$name" >> "$agents"',
+      '    printf \'backgrounded · %s · %s\\n\' "$id" "$name"',
+      '    exit 0 ;;',
+      '  stop) set_state "$2" stopped; printf \'stopped %s\\n\' "$2"; exit 0 ;;',
+      '  rm) set_state "$2" gone; printf \'removed %s\\n\' "$2"; exit 0 ;;',
+      '  attach) set_state "$2" run ;;',
+      'esac',
       'register_stub',
       "printf 'claude@playwright:~$ \\n'",
       'exec sleep 2147483647',
@@ -487,6 +681,14 @@ function writeStubBinary(name: string): void {
       '  *"config get-contexts"*) exit 0 ;;',
       '  *) echo "kubectl stub: no cluster in the Playwright harness" >&2; exit 1 ;;',
       'esac',
+      '',
+    ].join('\n');
+  } else if (name === 'open' || name === 'xdg-open') {
+    body = [
+      '#!/bin/sh',
+      `# erun playwright stub for ${name}: records the request and opens nothing.`,
+      '[ -n "$ERUN_PLAYWRIGHT_OPENER_LOG" ] && printf \'%s\\n\' "$*" >> "$ERUN_PLAYWRIGHT_OPENER_LOG"',
+      'exit 0',
       '',
     ].join('\n');
   } else {
@@ -587,6 +789,39 @@ export function seedEnvironment(tenant: string, environment: string, extraYaml =
   );
 }
 
+// seedHostedEnvironment writes an inert local-agent env like seedEnvironment
+// plus the hosted marker, so the Manage dialog's Hosted environment panel has
+// a row to render without a live platform. The marker is the only difference
+// between this env and alpha, which is what lets a spec read the panel's
+// absence for an unmarked env as "not hosted" rather than as "nothing is".
+//
+// Staged per-test by the spec that needs one (see SEED_ENV_DELTA) rather than
+// seeded in seedBaseline, so the default environment population every other
+// spec asserts against is unchanged.
+//
+// definitionDigest is written only when the caller supplies one, which stages
+// the two divergence states a marker can be in: omitted (the default, and what
+// every marker written before the desktop tracked a digest looks like) reads as
+// "cannot tell", and SEED_HOSTED_STALE_DIGEST reads as "this copy has moved".
+// definitionRevision defaults to the seeded marker's own revision, and is how a
+// spec stages a marker that has moved without rewriting the YAML by hand.
+export function seedHostedEnvironment(
+  tenant: string,
+  environment: string,
+  options: { definitionDigest?: string; definitionRevision?: number } = {},
+): void {
+  seedEnvironment(
+    tenant,
+    environment,
+    'hosted:\n' +
+      `  apihost: ${SEED_HOSTED_API_HOST}\n` +
+      `  tenantid: ${SEED_HOSTED_TENANT_ID}\n` +
+      `  environmentid: ${SEED_HOSTED_ENVIRONMENT_ID}\n` +
+      `  definitionrevision: ${options.definitionRevision ?? SEED_HOSTED_REVISION}\n` +
+      (options.definitionDigest ? `  definitiondigest: ${options.definitionDigest}\n` : ''),
+  );
+}
+
 // seedEnvironmentWithRuntimeVersions writes an inert local-agent env like
 // seedEnvironment, but with the caller's own runtime-version fields instead
 // of the fixed 1.0.0 default -- for specs exercising the env hover card's
@@ -671,21 +906,49 @@ export function removeEnvironment(tenant: string, environment: string): void {
   fs.rmSync(path.join(erunConfigDir(), tenant, environment), { recursive: true, force: true });
 }
 
+// environmentActivityDir is eruncommon.EnvironmentActivityDir:
+// XDG_CACHE_HOME/erun/activity/<tenant>/<environment>.
+function environmentActivityDir(tenant: string, environment: string): string {
+  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment);
+}
+
 // activityLeaseDir is where eruncommon.TakeEnvironmentActivityLease persists
-// leases: XDG_CACHE_HOME/erun/activity/<tenant>/<environment>/leases.
+// leases.
 function activityLeaseDir(tenant: string, environment: string): string {
-  return path.join(isolatedHomeDir(), '.cache', 'erun', 'activity', tenant, environment, 'leases');
+  return path.join(environmentActivityDir(tenant, environment), 'leases');
+}
+
+// writeTruncatedActivitySnapshot stages the state a snapshot is in between an
+// in-place rewrite's truncate and its write: present and empty, so every
+// reader that parses it fails. Pass a kind nothing in the inert harness
+// records, or the next real record replaces it before the spec reads it.
+export function writeTruncatedActivitySnapshot(
+  tenant: string,
+  environment: string,
+  kind: string,
+): void {
+  const dir = environmentActivityDir(tenant, environment);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${kind}.json`), '');
+}
+
+export function removeActivitySnapshot(tenant: string, environment: string, kind: string): void {
+  fs.rmSync(path.join(environmentActivityDir(tenant, environment), `${kind}.json`), {
+    force: true,
+  });
 }
 
 // writeHeldLease stages a real activity lease file — the same on-disk shape
 // eruncommon.TakeEnvironmentActivityLease writes — so a headless spec can
-// drive the AI-tab occupancy check (erun#1221) without a live orchestrator job.
+// drive the AI-tab occupancy check without a live orchestrator job. It is
+// renamed into place like the backend's own: a lease reader reclaims a lease
+// it cannot parse, and the idle poll reads this directory every second.
 export function writeHeldLease(tenant: string, environment: string, name: string): void {
   const dir = activityLeaseDir(tenant, environment);
   fs.mkdirSync(dir, { recursive: true });
   const startedAt = new Date();
   const expiresAt = new Date(startedAt.getTime() + 15 * 60 * 1000);
-  fs.writeFileSync(
+  writeConfigFile(
     path.join(dir, `${name}.json`),
     JSON.stringify({
       id: name,
@@ -859,7 +1122,7 @@ export function addOrchestrators(ids: string[], tenant: string, environment: str
 // It is a SEPARATE record from config.yaml -- erun-ui/orchestrator_open_state.go
 // writes it on open and only ever reads it back at launch.
 function orchestratorOpenStatePath(): string {
-  return path.join(isolatedHomeDir(), '.config', 'ERun', 'orchestrator-open.json');
+  return path.join(desktopConfigDir(), 'orchestrator-open.json');
 }
 
 // removeOrchestratorOpenState drops one orchestrator from that open set.
@@ -994,6 +1257,55 @@ export function addERunCloudProviderAlias(alias: string, apiURL: string): () => 
   const configPath = path.join(erunConfigDir(), 'config.yaml');
   const before = fs.readFileSync(configPath, 'utf8');
   writeConfigFile(configPath, withERunCloudProviderAlias(before, alias, apiURL));
+  return () => {
+    writeConfigFile(configPath, before);
+  };
+}
+
+const OPENROUTER_KEY = 'openrouter:';
+
+// withoutTopLevelBlock returns `lines` without the top-level `key` block: the
+// key's own line and every indented line under it, wherever the key sits.
+function withoutTopLevelBlock(lines: string[], key: string): string[] {
+  const start = lines.findIndex((line) => line.trimEnd() === key);
+  if (start < 0) {
+    return lines;
+  }
+  let end = start + 1;
+  while (end < lines.length && /^\s+\S/.test(lines[end] ?? '')) {
+    end += 1;
+  }
+  return [...lines.slice(0, start), ...lines.slice(end)];
+}
+
+// setOpenRouterCatalog stages the erun-level gateway catalog
+// (ERunConfig.OpenRouter) in the shared root config.yaml, replacing any catalog
+// already there. The block is removed wherever the current writer placed it and
+// the new one is appended as a top-level key, which is valid whatever precedes
+// it; its nested indentation is this block's own, never the file's. No
+// credential is written: the catalog alone is what makes the gateway
+// selectable. Returns a restore function that puts the file back exactly as
+// found, mirroring addERunCloudProviderAlias.
+export function setOpenRouterCatalog(catalog: {
+  baseUrl: string;
+  models: string[];
+  defaultModel?: string;
+}): () => void {
+  const configPath = path.join(erunConfigDir(), 'config.yaml');
+  const before = fs.readFileSync(configPath, 'utf8');
+  const kept = withoutTopLevelBlock(before.split('\n'), OPENROUTER_KEY);
+  while (kept.length > 0 && (kept[kept.length - 1] ?? '').trim() === '') {
+    kept.pop();
+  }
+  const block = [
+    OPENROUTER_KEY,
+    `  baseurl: ${catalog.baseUrl}`,
+    ...(catalog.defaultModel ? [`  defaultmodel: ${catalog.defaultModel}`] : []),
+    ...(catalog.models.length > 0
+      ? ['  models:', ...catalog.models.map((id) => `    - id: ${id}`)]
+      : []),
+  ];
+  writeConfigFile(configPath, `${[...kept, ...block].join('\n')}\n`);
   return () => {
     writeConfigFile(configPath, before);
   };

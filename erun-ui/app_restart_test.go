@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // restartTestApp is an app whose restart records live in a temp dir and whose
@@ -25,7 +27,7 @@ func restartTestApp(t *testing.T) (*App, string) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorRestoreDir: restoreDir,
@@ -34,7 +36,8 @@ func restartTestApp(t *testing.T) (*App, string) {
 		quitApp:                func() {},
 		// beforeClose reads the window's maximised state on its way out, and
 		// the real probe needs a Wails context a test does not have.
-		windowMaximised: func(context.Context) bool { return false },
+		windowMaximised:             func(context.Context) bool { return false },
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app, restoreDir
@@ -115,24 +118,6 @@ func TestQuitDesktopApp_ReportsWhenThereWasNoWindowToAsk(t *testing.T) {
 	}
 }
 
-// stageOrchestratorConversation writes the transcript the AI harness leaves for a
-// conversation, which is how the resume path tells a conversation it can still
-// continue from one that is gone.
-func stageOrchestratorConversation(t *testing.T, conversationID string) {
-	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatalf("resolve home: %v", err)
-	}
-	dir := filepath.Join(home, ".claude", "projects", "-orchestrators")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("create transcript dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, conversationID+".jsonl"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
-}
-
 // readRestoreState reads the hand-off staged in one orchestrator's own slot,
 // asserting the persisted file rather than what the resolver reports about it.
 func readRestoreState(t *testing.T, dir, orchestratorID string) orchestratorRestoreState {
@@ -146,36 +131,6 @@ func readRestoreState(t *testing.T, dir, orchestratorID string) orchestratorRest
 		t.Fatalf("decode restore file for %s: %v", orchestratorID, err)
 	}
 	return state
-}
-
-// noticeText joins every notice's text with a space, so a test that only cares
-// whether some notice named a given substring can keep asserting on one
-// string rather than searching a slice by hand.
-func noticeText(notices []orchestratorNotice) string {
-	texts := make([]string, 0, len(notices))
-	for _, notice := range notices {
-		texts = append(texts, notice.Text)
-	}
-	return strings.Join(texts, " ")
-}
-
-// stagedRestoreIDs lists the orchestrators with a hand-off still on disk, so a
-// test can assert that consuming one did not silently take another with it.
-func stagedRestoreIDs(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		t.Fatalf("read restore dir: %v", err)
-	}
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, strings.TrimSuffix(entry.Name(), ".json"))
-	}
-	sort.Strings(out)
-	return out
 }
 
 func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
@@ -209,192 +164,68 @@ func TestRestartAppPersistsTargetRelaunchesAndQuits(t *testing.T) {
 	}
 }
 
-// Nothing was running for that id, so there is no conversation a resume could
-// name — the restart reopens the orchestrator and hands it no task rather than
-// telling whichever conversation the id resolves to to carry on.
-func TestRestartAppWithNoLiveSessionRecordsNoTask(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-
-	if err := app.RestartApp("agent-1"); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	state := readRestoreState(t, restoreDir, "agent-1")
-	if state.OrchestratorID != "agent-1" {
-		t.Fatalf("expected the orchestrator to be recorded, got %+v", state)
-	}
-	if state.ConversationID != "" || state.ResumePrompt != "" {
-		t.Fatalf("expected no conversation and no task without a live session, got %+v", state)
-	}
-}
-
-// The restart records the conversation that asked for it and the scope that
-// conversation is wired to, and resume delivers the task to that exact
-// conversation.
-func TestRestartAppRecordsTheLiveConversationAndResumesIt(t *testing.T) {
+// A restart does not interrupt an orchestrator's background agent, so the
+// hand-off names the pane owner and nothing else: no conversation to resume and
+// no prompt to send into a turn that never stopped.
+func TestRestartHandOffNamesOnlyThePaneOwner(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
 
 	if err := app.RestartApp(id); err != nil {
 		t.Fatalf("RestartApp failed: %v", err)
 	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the live conversation to be recorded, got %+v", state)
-	}
-	if len(state.Environments) != 1 || state.Environments[0] != "frs/dev" {
-		t.Fatalf("expected the live scope to be recorded, got %+v", state.Environments)
-	}
-	if state.ResumePrompt != orchestratorRestartResumePrompt(id) {
-		t.Fatalf("expected the restart to carry a task, got %q", state.ResumePrompt)
-	}
-
-	stageOrchestratorConversation(t, state.ConversationID)
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ConversationID != state.ConversationID {
-		t.Fatalf("expected the recorded conversation to be resumed, got %+v", target)
-	}
-	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || noticeText(target.Notices) != "" {
-		t.Fatalf("expected the task to be delivered with no notice, got %+v", target)
-	}
-	// The resume prompt has to name the note it means: the working directory is
-	// shared, so "the note you wrote here" is satisfied by anyone's.
-	assertNamesOwnNote(t, "the resume prompt", id, target.ResumePrompt)
-	assertNoHandOffsLeftStaged(t, restoreDir)
-}
-
-// A restart resumes the orchestrator's OWN conversation, derived from its id.
-// This is the whole contract: the derivation is a pure function, so it is the
-// same on every launch and there is nothing on disk that can point it
-// elsewhere.
-func TestRestartHandoffResumesTheOrchestratorsDerivedConversation(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-	id := createAndStartOrchestrator(t, app)
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the derived conversation %q, got %+v", orchestratorSessionID(id), state)
-	}
-}
-
-// The failure this replaced: a record could name ANOTHER orchestrator's
-// conversation, and a restart adopted it -- handing this orchestrator somebody
-// else's history, and then confirming the mistake on every later launch. A
-// conversation derived for one orchestrator can never be resumed for another.
-func TestRestartHandoffNeverResumesAnotherOrchestratorsConversation(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-	id := createAndStartOrchestrator(t, app)
-
-	stranger := orchestratorSessionID("some-other-orchestrator")
-	stageOrchestratorConversation(t, stranger)
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID == stranger {
-		t.Fatal("resumed another orchestrator's conversation")
-	}
-	if state.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected its own derived conversation, got %+v", state)
-	}
-}
-
-// assertNamesOwnNote fails unless text points at the return note belonging to
-// this orchestrator rather than at the shared directory holding everyone's.
-func assertNamesOwnNote(t *testing.T, what, orchestratorID, text string) {
-	t.Helper()
-	note := orchestratorReturnNoteName(orchestratorID)
-	if !strings.Contains(text, note) {
-		t.Fatalf("expected %s to name %q, got %q", what, note, text)
-	}
-}
-
-// assertNoHandOffsLeftStaged checks the launch cleared every hand-off it read. A
-// hand-off left behind would fire at a later launch, against a world that has
-// moved on.
-func assertNoHandOffsLeftStaged(t *testing.T, restoreDir string) {
-	t.Helper()
-	if ids := stagedRestoreIDs(t, restoreDir); len(ids) != 0 {
-		t.Fatalf("expected every hand-off to be consumed, got %v still staged", ids)
-	}
-}
-
-// restartTwoOrchestrators starts two orchestrators and has each trigger a
-// rebuild+restart, which under the shared slot meant the second wrote over the
-// first. Returns their ids in creation order.
-func restartTwoOrchestrators(t *testing.T) (*App, string, string, string) {
-	t.Helper()
-	app, restoreDir := restartTestApp(t)
-	first := createAndStartOrchestrator(t, app)
-	second, err := app.CreateOrchestrator("other", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil)
+	data, err := os.ReadFile(orchestratorRestorePath(restoreDir, id))
 	if err != nil {
-		t.Fatalf("CreateOrchestrator failed: %v", err)
+		t.Fatalf("read hand-off: %v", err)
 	}
-	if _, err := app.StartOrchestrator(second.ID, 80, 24); err != nil {
-		t.Fatalf("StartOrchestrator failed: %v", err)
-	}
-	for _, id := range []string{first, second.ID} {
-		if err := app.RestartApp(id); err != nil {
-			t.Fatalf("RestartApp failed for %s: %v", id, err)
+	for _, field := range []string{"conversationId", "resumePrompt", "environments"} {
+		if strings.Contains(string(data), field) {
+			t.Fatalf("expected the hand-off to carry no %s, got %s", field, data)
 		}
 	}
-	return app, restoreDir, first, second.ID
+	if state := readRestoreState(t, restoreDir, id); state.OrchestratorID != id {
+		t.Fatalf("expected the hand-off to name %s, got %+v", id, state)
+	}
 }
 
-// The bug: several orchestrators shared one restart slot, so the second restart
-// replaced the first and that orchestrator was simply never resumed. Each now
-// stages its own hand-off, naming its own conversation and its own note.
-func TestConcurrentRestartsStageAHandOffEach(t *testing.T) {
-	_, restoreDir, first, second := restartTwoOrchestrators(t)
-
-	staged := stagedRestoreIDs(t, restoreDir)
-	if len(staged) != 2 || staged[0] != first || staged[1] != second {
-		t.Fatalf("expected both hand-offs staged, got %v", staged)
+// Every orchestrator that was open comes back: the hand-off decides which one
+// owns the pane, and the rest are reopened beside it in recorded order.
+func TestReopenGivesThePaneToTheHandOffAndReopensTheRest(t *testing.T) {
+	app, restoreDir := restartTestApp(t)
+	for _, id := range []string{"alpha", "beta", "gamma"} {
+		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
+			t.Fatalf("record %s: %v", id, err)
+		}
 	}
-	firstState := readRestoreState(t, restoreDir, first)
-	secondState := readRestoreState(t, restoreDir, second)
-	if firstState.ConversationID == secondState.ConversationID {
-		t.Fatalf("expected each hand-off to name its own conversation, got %q twice", firstState.ConversationID)
+	if err := writeOrchestratorRestoreTarget(restoreDir, orchestratorRestoreState{OrchestratorID: "beta"}, time.Now()); err != nil {
+		t.Fatalf("write hand-off: %v", err)
 	}
-	assertNamesOwnNote(t, first+"'s prompt", first, firstState.ResumePrompt)
-	assertNamesOwnNote(t, second+"'s prompt", second, secondState.ResumePrompt)
-}
-
-// A launch reopens one orchestrator, so one hand-off is delivered — whole, with
-// its own conversation and its own note — and the other is named in the notice
-// rather than disappearing with the session that staged it.
-func TestTheHandOffThatIsNotReopenedIsReported(t *testing.T) {
-	app, restoreDir, first, second := restartTwoOrchestrators(t)
-	stageOrchestratorConversation(t, orchestratorSessionID(first))
-	stageOrchestratorConversation(t, orchestratorSessionID(second))
 
 	target := app.ResolveOrchestratorToReopen()
-	delivered, notReopened := second, first
-	if target.OrchestratorID == first {
-		delivered, notReopened = first, second
-	} else if target.OrchestratorID != second {
-		t.Fatalf("expected one of the two restarts to be reopened, got %+v", target)
+	if target.OrchestratorID != "beta" {
+		t.Fatalf("expected the hand-off's orchestrator to own the pane, got %+v", target)
 	}
-	if target.ConversationID != orchestratorSessionID(delivered) {
-		t.Fatalf("expected %s's own conversation to be resumed, got %+v", delivered, target)
+	if len(target.AlsoReopen) != 2 || target.AlsoReopen[0].OrchestratorID != "alpha" || target.AlsoReopen[1].OrchestratorID != "gamma" {
+		t.Fatalf("expected alpha and gamma reopened beside it, got %+v", target.AlsoReopen)
 	}
-	assertNamesOwnNote(t, "the resume prompt", delivered, target.ResumePrompt)
-	if !strings.Contains(noticeText(target.Notices), notReopened) {
-		t.Fatalf("expected the notice to name %s, got %q", notReopened, noticeText(target.Notices))
+}
+
+// With no hand-off, the most recently (re)started orchestrator owns the pane.
+func TestReopenWithoutAHandOffGivesThePaneToTheMostRecent(t *testing.T) {
+	app, _ := restartTestApp(t)
+	for _, id := range []string{"alpha", "beta"} {
+		if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id); err != nil {
+			t.Fatalf("record %s: %v", id, err)
+		}
 	}
-	assertNamesOwnNote(t, "the notice", notReopened, noticeText(target.Notices))
-	assertNoHandOffsLeftStaged(t, restoreDir)
+	target := app.ResolveOrchestratorToReopen()
+	if target.OrchestratorID != "beta" || len(target.AlsoReopen) != 1 || target.AlsoReopen[0].OrchestratorID != "alpha" {
+		t.Fatalf("expected beta to own the pane with alpha beside it, got %+v", target)
+	}
 }
 
 // Which of several pending hand-offs a launch acts on is the most recent one —
-// the restart the operator triggered last.
+// the restart the operator triggered last — and every one of them is consumed.
 func TestTheMostRecentHandOffIsTheOneDelivered(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -402,51 +233,36 @@ func TestTheMostRecentHandOffIsTheOneDelivered(t *testing.T) {
 		id  string
 		age time.Duration
 	}{{"zeta", 3 * time.Minute}, {"alpha", time.Minute}, {"mid", 2 * time.Minute}} {
-		state := orchestratorRestoreState{OrchestratorID: staged.id, ResumePrompt: "carry on"}
-		if err := writeOrchestratorRestoreTarget(dir, state, now.Add(-staged.age)); err != nil {
+		if err := writeOrchestratorRestoreTarget(dir, orchestratorRestoreState{OrchestratorID: staged.id}, now.Add(-staged.age)); err != nil {
 			t.Fatalf("write hand-off for %s: %v", staged.id, err)
 		}
 	}
 
-	delivered, notReopened := consumeOrchestratorRestoreTargets(dir, now)
-	if delivered.OrchestratorID != "alpha" {
+	if delivered := consumeOrchestratorRestoreTarget(dir, now); delivered.OrchestratorID != "alpha" {
 		t.Fatalf("expected the newest hand-off to be delivered, got %q", delivered.OrchestratorID)
 	}
-	if len(notReopened) != 2 || notReopened[0].OrchestratorID != "mid" || notReopened[1].OrchestratorID != "zeta" {
-		t.Fatalf("expected the older hand-offs returned newest-first, got %+v", notReopened)
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Fatalf("expected every hand-off consumed, got %v (err %v)", entries, err)
 	}
 }
 
-// The upgrade that introduces the per-orchestrator slot arrives through a
-// restart the previous release staged in the single shared one, so that slot is
-// still read once — otherwise the fix loses exactly the hand-off delivering it.
-func TestHandOffLeftInTheSharedSlotIsStillDeliveredOnce(t *testing.T) {
+// The upgrade arrives through a restart the previous release staged, in its
+// own shape and possibly in the single shared slot, so that hand-off is still
+// read once; the fields it carried for a resume are ignored.
+func TestHandOffLeftByAnEarlierReleaseIsStillDeliveredOnce(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
-	id := createAndStartOrchestrator(t, app)
-	conversationID := orchestratorSessionID(id)
-	stageOrchestratorConversation(t, conversationID)
-
 	legacy := legacyOrchestratorRestorePath(restoreDir)
 	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
 		t.Fatalf("create legacy dir: %v", err)
 	}
-	data, err := json.Marshal(orchestratorRestoreState{
-		OrchestratorID: id,
-		ConversationID: conversationID,
-		Environments:   []string{"frs/dev"},
-		ResumePrompt:   "finish the task",
-		SavedAtUnix:    time.Now().Unix(),
-	})
-	if err != nil {
-		t.Fatalf("encode legacy hand-off: %v", err)
-	}
-	if err := os.WriteFile(legacy, data, 0o644); err != nil {
+	data := `{"orchestratorId":"erun","conversationId":"3bde477f-6a1c-4a2e-9f0d-2c5b8e7a1d34",` +
+		`"environments":["frs/dev"],"resumePrompt":"finish the task","savedAtUnix":` + strconv.FormatInt(time.Now().Unix(), 10) + `}`
+	if err := os.WriteFile(legacy, []byte(data), 0o644); err != nil {
 		t.Fatalf("write legacy hand-off: %v", err)
 	}
 
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ResumePrompt != "finish the task" {
-		t.Fatalf("expected the shared-slot hand-off to be delivered, got %+v", target)
+	if target := app.ResolveOrchestratorToReopen(); target.OrchestratorID != "erun" {
+		t.Fatalf("expected the earlier release's hand-off to be delivered, got %+v", target)
 	}
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("expected the shared slot to be cleared, stat err %v", err)
@@ -470,126 +286,6 @@ func TestRestoreSlotRejectsAnIDThatIsNotAPlainFileName(t *testing.T) {
 	}
 }
 
-// The bug: an orchestrator id is mutable and reusable, so a hand-off recorded
-// under one scope must not wake a conversation into another. The refusal is
-// visible — the orchestrator still reopens, idle, carrying the reason. It still
-// resumes its own last-recorded conversation rather than nothing: the refusal
-// is about not auto-running a task into the wrong scope, not about whether the
-// conversation itself is safe to reopen idle.
-func TestResumeIsRefusedWhenTheScopeChanged(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-	id := createAndStartOrchestrator(t, app)
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-	liveConversation := readRestoreState(t, restoreDir, id).ConversationID
-	stageOrchestratorConversation(t, liveConversation)
-	if _, err := app.UpdateOrchestrator(id, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
-		t.Fatalf("UpdateOrchestrator failed: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id {
-		t.Fatalf("expected the orchestrator to still be reopened, got %+v", target)
-	}
-	if target.ResumePrompt != "" {
-		t.Fatalf("expected no task to be delivered into a changed scope, got %+v", target)
-	}
-	if target.ConversationID != liveConversation {
-		t.Fatalf("expected the orchestrator's own conversation to still be resumed idle, got %+v", target)
-	}
-	if !strings.Contains(noticeText(target.Notices), "frs/dev") || !strings.Contains(noticeText(target.Notices), "frs/laptop") {
-		t.Fatalf("expected the notice to name both scopes, got %q", noticeText(target.Notices))
-	}
-	// A refusal points at the note it declined to act on, by name — the operator
-	// is reading it in a directory holding every orchestrator's.
-	if !strings.Contains(noticeText(target.Notices), orchestratorReturnNoteName(id)) {
-		t.Fatalf("expected the notice to name %q, got %q", orchestratorReturnNoteName(id), noticeText(target.Notices))
-	}
-	// A refusal is not a steady state; it must never read at the same severity
-	// as a routine, successful resume.
-	assertAllNoticesAreWarnings(t, target.Notices)
-}
-
-// assertAllNoticesAreWarnings fails unless every notice given is a warning —
-// used where a refused hand-off leaves nothing routine to report.
-func assertAllNoticesAreWarnings(t *testing.T, notices []orchestratorNotice) {
-	t.Helper()
-	for _, notice := range notices {
-		if notice.Kind != orchestratorNoticeWarning {
-			t.Fatalf("expected every notice to be a warning, got %+v", notice)
-		}
-	}
-}
-
-// The heart of the bug this fixes: several orchestrators resolving on the same
-// restore must each carry their own notice, attributed to the right one rather
-// than flattened into one string. Both causes here are warnings -- a launch
-// resumes the derived anchor with nothing to report unless something the
-// operator asked for could not be honoured (erun#1696), so a mixed restore's
-// two notices are two warnings, not a routine one beside a genuine one.
-func TestMixedRestoreAttributesEachWarningToItsOwnOrchestrator(t *testing.T) {
-	app, openPath, _ := openStateTestApp(t)
-	defer app.shutdown(context.Background())
-
-	stale := createAndStartOrchestrator(t, app)
-	stageOrchestratorConversation(t, orchestratorSessionID(stale))
-	if _, err := app.UpdateOrchestrator(stale, "agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "laptop"}}, nil); err != nil {
-		t.Fatalf("UpdateOrchestrator failed: %v", err)
-	}
-
-	current := createAndStartNamedOrchestrator(t, app, "other", "laptop")
-	const gone = "0c01340d-65bd-4ed9-bb9e-91bdff59a6ec"
-	stageOrchestratorConversation(t, orchestratorSessionID(current))
-	if err := setAttachedOrchestratorConversation(openPath, current, gone); err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != current {
-		t.Fatalf("expected %q (started last) to own the pane, got %q", current, target.OrchestratorID)
-	}
-	assertTwoWarningsEachAttributed(t, target.Notices, current, stale)
-}
-
-// assertTwoWarningsEachAttributed fails unless notices carries exactly two
-// warning notices, one attributed to each of the given orchestrators, kept
-// distinct rather than merged into one.
-func assertTwoWarningsEachAttributed(t *testing.T, notices []orchestratorNotice, first, second string) {
-	t.Helper()
-	seen := map[string]bool{}
-	for _, notice := range notices {
-		if notice.Kind != orchestratorNoticeWarning {
-			t.Fatalf("expected every notice here to be a warning, got %+v", notice)
-		}
-		seen[notice.OrchestratorID] = true
-	}
-	if len(notices) != 2 || !seen[first] || !seen[second] {
-		t.Fatalf("expected one warning for %q (unhonourable attachment) and one for %q (changed scope), got %+v",
-			first, second, notices)
-	}
-}
-
-// A conversation that is no longer on disk cannot be the one that asked, so the
-// task is withheld rather than delivered to whatever else the id would resume.
-func TestResumeIsRefusedWhenTheConversationIsGone(t *testing.T) {
-	app, _ := restartTestApp(t)
-	id := createAndStartOrchestrator(t, app)
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id {
-		t.Fatalf("expected the orchestrator to still be reopened, got %+v", target)
-	}
-	if target.ResumePrompt != "" || noticeText(target.Notices) == "" {
-		t.Fatalf("expected the task withheld with a visible reason, got %+v", target)
-	}
-}
-
 func TestConsumeOrchestratorRestoreTargetIgnoresStale(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Unix(1_700_000_000, 0)
@@ -598,7 +294,7 @@ func TestConsumeOrchestratorRestoreTargetIgnoresStale(t *testing.T) {
 	if err := writeOrchestratorRestoreTarget(dir, stale, now.Add(-2*orchestratorRestoreMaxAge)); err != nil {
 		t.Fatalf("write stale restore target: %v", err)
 	}
-	if got, _ := consumeOrchestratorRestoreTargets(dir, now); got.OrchestratorID != "" {
+	if got := consumeOrchestratorRestoreTarget(dir, now); got.OrchestratorID != "" {
 		t.Fatalf("expected a stale target to be ignored, got %+v", got)
 	}
 
@@ -606,181 +302,7 @@ func TestConsumeOrchestratorRestoreTargetIgnoresStale(t *testing.T) {
 	if err := writeOrchestratorRestoreTarget(dir, fresh, now); err != nil {
 		t.Fatalf("write fresh restore target: %v", err)
 	}
-	got, _ := consumeOrchestratorRestoreTargets(dir, now)
-	if got.OrchestratorID != "agent-y" {
+	if got := consumeOrchestratorRestoreTarget(dir, now); got.OrchestratorID != "agent-y" {
 		t.Fatalf("expected fresh target agent-y, got %+v", got)
 	}
-}
-
-// The hand-off round-trips everything resume needs to decide: which conversation
-// asked, the scope it knew, and the task it staged.
-func TestConsumeOrchestratorRestoreTargetCarriesTheHandOff(t *testing.T) {
-	dir := t.TempDir()
-	now := time.Unix(1_700_000_000, 0)
-	written := orchestratorRestoreState{
-		OrchestratorID: "va1",
-		ConversationID: "conv-1",
-		Environments:   []string{"erun/local", "petios/local"},
-		ResumePrompt:   "verify the rebuild is live, then finish the task",
-	}
-
-	if err := writeOrchestratorRestoreTarget(dir, written, now); err != nil {
-		t.Fatalf("write restore target: %v", err)
-	}
-	got, _ := consumeOrchestratorRestoreTargets(dir, now)
-	if got.OrchestratorID == "" {
-		t.Fatal("expected the hand-off to be readable")
-	}
-	if got.OrchestratorID != written.OrchestratorID || got.ConversationID != written.ConversationID {
-		t.Fatalf("expected the orchestrator and conversation to round-trip, got %+v", got)
-	}
-	if got.ResumePrompt != written.ResumePrompt {
-		t.Fatalf("expected the resume prompt to round-trip, got %q", got.ResumePrompt)
-	}
-	if !equalOrchestratorScope(got.Environments, written.Environments) {
-		t.Fatalf("expected the scope to round-trip, got %+v", got.Environments)
-	}
-}
-
-// A restart taken for an orchestrator this desktop holds no session for -- one
-// it did not launch, or one whose session object is gone -- used to record no
-// conversation and no task, so the next launch fell through to the conversation
-// derived from the orchestrator id and the conversation that was actually live
-// was stranded, silently. Both halves the hand-off needs are already durable:
-// the open-set entry names the launch and the scope, and the live-conversation
-// record names the conversation, once its echoed nonce matches that launch.
-func TestRestartAppResumesTheLiveConversationWithoutASession(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-	id, live := stageUnmanagedLiveConversation(t, app, "launch-1", "launch-1")
-
-	// The precondition, not a detail: this desktop has no session for it, so
-	// everything below is answered from what is durable.
-	if conversationID, _, _ := app.runningOrchestratorConversation(id); conversationID != "" {
-		t.Fatalf("expected no in-memory session for %s, got %q", id, conversationID)
-	}
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != live {
-		t.Fatalf("expected the live conversation %q to be recorded, got %+v", live, state)
-	}
-	if !equalOrchestratorScope(state.Environments, []string{"frs/dev"}) {
-		t.Fatalf("expected the recorded scope to be frs/dev, got %v", state.Environments)
-	}
-	if state.ResumePrompt != orchestratorRestartResumePrompt(id) {
-		t.Fatalf("expected the restart to carry a task, got %q", state.ResumePrompt)
-	}
-
-	// And the launch that follows delivers that task to that conversation
-	// rather than re-deriving the anchor.
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ConversationID != live {
-		t.Fatalf("expected the live conversation %q to be resumed, got %+v", live, target)
-	}
-	if target.ResumePrompt != orchestratorRestartResumePrompt(id) || noticeText(target.Notices) != "" {
-		t.Fatalf("expected the task to be delivered with no notice, got %+v", target)
-	}
-}
-
-// stageUnmanagedLiveConversation stages what a restart can still read when this
-// desktop holds no session for the orchestrator: the open-set entry a launch
-// wrote (its nonce, and the scope that session was wired to) plus the
-// live-conversation record that session's own hooks left behind. The entry's
-// launch and the record's are separate arguments so a fixture can stage a
-// record from a launch that is not the entry's -- the case the confirmation
-// exists to refuse.
-func stageUnmanagedLiveConversation(t *testing.T, app *App, entryLaunch, recordLaunch string) (string, string) {
-	t.Helper()
-	id := createStoppedOrchestrator(t, app)
-	live := "a-conversation-that-is-not-the-anchor"
-	stageOrchestratorConversation(t, live)
-	if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id, entryLaunch, []string{"frs/dev"}); err != nil {
-		t.Fatalf("record open orchestrator: %v", err)
-	}
-	writeLiveConversationRecord(t, id, orchestratorLiveConversation{ConversationID: live, LaunchID: recordLaunch})
-	return id, live
-}
-
-// The confirmation is unchanged, and it is the whole safety of the fallback: a
-// record only counts while it echoes the nonce of the launch the entry names.
-// A record from an earlier launch -- or from a writer that no longer exists --
-// must not decide what this restart hands a task to, so the hand-off stays
-// empty exactly as it did before the fallback existed.
-func TestRestartHandoffIgnoresALiveRecordFromAnotherLaunch(t *testing.T) {
-	app, restoreDir := restartTestApp(t)
-	id, _ := stageUnmanagedLiveConversation(t, app, "the-current-launch", "an-earlier-launch")
-
-	if err := app.RestartApp(id); err != nil {
-		t.Fatalf("RestartApp failed: %v", err)
-	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != "" || state.ResumePrompt != "" {
-		t.Fatalf("expected an unconfirmed record not to be adopted, got %+v", state)
-	}
-
-	// The orchestrator still comes back -- on the anchor, idle, with no task.
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the derived conversation for the next launch, got %+v", target)
-	}
-	if target.ResumePrompt != "" {
-		t.Fatalf("expected no task for an unconfirmed conversation, got %q", target.ResumePrompt)
-	}
-}
-
-// Nothing durable naming the launch means nothing can vouch for what was
-// running, and a restart must never hand a task to a conversation nothing can
-// vouch for: today's empty hand-off is the correct answer, both when there is
-// no open-set entry at all and when the entry predates launch recording.
-func TestRestartHandoffStaysEmptyWhenNoLaunchIsNamed(t *testing.T) {
-	cases := []struct {
-		name  string
-		stage func(t *testing.T, app *App, id string)
-	}{
-		{"no open entry at all", func(*testing.T, *App, string) {}},
-		{"an entry that names no launch", func(t *testing.T, app *App, id string) {
-			if err := recordOpenOrchestrator(app.deps.orchestratorOpenPath, id, "", []string{"frs/dev"}); err != nil {
-				t.Fatalf("record open orchestrator: %v", err)
-			}
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			app, restoreDir := restartTestApp(t)
-			id := createStoppedOrchestrator(t, app)
-			stageOrchestratorConversation(t, "a-conversation-nothing-can-confirm")
-			tc.stage(t, app, id)
-			// A record exists either way, so the empty hand-off is the launch
-			// check refusing it rather than the record being absent.
-			writeLiveConversationRecord(t, id, orchestratorLiveConversation{
-				ConversationID: "a-conversation-nothing-can-confirm",
-				LaunchID:       "some-launch",
-			})
-
-			if err := app.RestartApp(id); err != nil {
-				t.Fatalf("RestartApp failed: %v", err)
-			}
-
-			state := readRestoreState(t, restoreDir, id)
-			if state.ConversationID != "" || state.ResumePrompt != "" {
-				t.Fatalf("expected today's empty hand-off, got %+v", state)
-			}
-		})
-	}
-}
-
-// createStoppedOrchestrator persists a configured orchestrator without starting
-// it, which is the shape every case above begins from: a definition with no
-// session object anywhere in this desktop.
-func createStoppedOrchestrator(t *testing.T, app *App) string {
-	t.Helper()
-	created, err := app.CreateOrchestrator("agent", []orchestratorEnvInput{{Tenant: "frs", Environment: "dev"}}, nil)
-	if err != nil {
-		t.Fatalf("CreateOrchestrator failed: %v", err)
-	}
-	return created.ID
 }

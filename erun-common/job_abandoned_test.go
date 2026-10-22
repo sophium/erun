@@ -121,8 +121,11 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 // the leftover was running under a pgid and sid of its own, and the record said
 // `succeeded: true`.
 func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSuccess(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("process-group/session survivor detection is POSIX-only")
+	// A leftover that left both the job's process group and its session is
+	// found only by the descendant scan, which needs Linux's child subreaper
+	// (job_process_descendant_other.go documents the gap elsewhere).
+	if runtime.GOOS != "linux" {
+		t.Skip("own-session survivor detection needs the Linux child subreaper")
 	}
 	isolateActivityCache(t)
 

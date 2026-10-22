@@ -1,7 +1,7 @@
 import type { Locator, Page, Route, Request } from '@playwright/test';
 
 import { boundingBoxOf } from '../../../fixtures/boundingBox.js';
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import type { AppShell } from '../../../pages/index.js';
 import {
   SEED_TENANT,
@@ -128,6 +128,13 @@ async function openReviewsTab(app: AppShell, page: Page, environment: string): P
   await app.tenantDashboard.selectTab('Reviews');
 }
 
+// Every `expect.poll` in this file is a convergence step: it waits for the app
+// to finish reacting to a resize or a toggle, then asserts the geometry that
+// reaction produced. Each carries `withTestBudget()` rather than inheriting
+// `expect`'s 10s default (playwright.config.ts) — that default is a second,
+// tighter clock than the 30s scenario around it, so a contended worker expired
+// the step while the layout it waits on was still settling and reported a
+// geometry failure that had not happened.
 async function hasHorizontalOverflow(page: Page): Promise<boolean> {
   return page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -173,20 +180,20 @@ for (const width of [480, 640, 900, 1440]) {
       try {
         await openReviewsTab(app, page, environment);
 
-        await expect.poll(() => hasHorizontalOverflow(page)).toBe(false);
+        await expect.poll(() => hasHorizontalOverflow(page), withTestBudget()).toBe(false);
         await expect
-          .poll(() => mainClientWidth(page))
+          .poll(() => mainClientWidth(page), withTestBudget())
           .toBeGreaterThanOrEqual(expectedMinMainWidth(width));
 
         const button = app.tenantDashboard.newReviewButton();
         await expect(button).toBeVisible();
-        await expect.poll(() => isFullyOnScreen(button, width)).toBe(true);
+        await expect.poll(() => isFullyOnScreen(button, width), withTestBudget()).toBe(true);
 
         // The tab strip's last tab (API log) is the widest-reaching sibling
         // in the row; if it fits, none of the others were clipped either.
         const lastTab = app.tenantDashboard.tab('API log');
         await expect(lastTab).toBeVisible();
-        await expect.poll(() => isFullyOnScreen(lastTab, width)).toBe(true);
+        await expect.poll(() => isFullyOnScreen(lastTab, width), withTestBudget()).toBe(true);
       } finally {
         removeEnvironment(SEED_TENANT, environment);
       }
@@ -211,27 +218,27 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
       // breakpoint, so the sidebar now gives up the column entirely instead
       // of reclamping to a squeeze that still clips the dashboard content.
       await page.setViewportSize({ width: 640, height: 900 });
-      await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
-      await expect.poll(() => hasHorizontalOverflow(page)).toBe(false);
+      await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
+      await expect.poll(() => hasHorizontalOverflow(page), withTestBudget()).toBe(false);
       await expect
-        .poll(() => mainClientWidth(page))
+        .poll(() => mainClientWidth(page), withTestBudget())
         .toBeGreaterThanOrEqual(expectedMinMainWidth(640));
       const button = app.tenantDashboard.newReviewButton();
       await expect(button).toBeVisible();
-      await expect.poll(() => isFullyOnScreen(button, 640)).toBe(true);
+      await expect.poll(() => isFullyOnScreen(button, 640), withTestBudget()).toBe(true);
       const lastTab = app.tenantDashboard.tab('API log');
       await expect(lastTab).toBeVisible();
-      await expect.poll(() => isFullyOnScreen(lastTab, 640)).toBe(true);
+      await expect.poll(() => isFullyOnScreen(lastTab, 640), withTestBudget()).toBe(true);
 
       // Below the hard collapse threshold the sidebar must give up the column
       // entirely — there is no room for both it and a usable <main>.
       await page.setViewportSize({ width: 300, height: 900 });
-      await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+      await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
 
       // Widening back out restores the sidebar automatically: nothing here
       // was an explicit user override.
       await page.setViewportSize(DEFAULT_VIEWPORT);
-      await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+      await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
     } finally {
       await page.setViewportSize(DEFAULT_VIEWPORT);
       removeEnvironment(SEED_TENANT, environment);
@@ -246,7 +253,7 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
     // Confirm against the rendered <aside>, not only the CSS var, so this
     // also proves the grid column actually reflects the reconciled state.
     await expect(app.sidebar.locator()).not.toHaveCSS('width', '0px');
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
 
     // Nudge by a pixel repeatedly around the breakpoint; the hysteresis band
     // means the sidebar must hold its current (open) state throughout rather
@@ -259,7 +266,7 @@ test.describe('narrow-viewport shell — resize behavior (#1385)', () => {
       SIDEBAR_COLLAPSE_BREAKPOINT,
     ]) {
       await page.setViewportSize({ width, height: 900 });
-      await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+      await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
     }
     await page.setViewportSize(DEFAULT_VIEWPORT);
   });
@@ -272,19 +279,19 @@ test.describe('narrow-viewport shell — user intent survives a resize (#1385)',
   }) => {
     // Above the breakpoint the sidebar still shows on its own.
     await page.setViewportSize({ width: 900, height: 900 });
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
 
     // Auto-collapse it first, then override the automatic decision.
     await page.setViewportSize({ width: 480, height: 900 });
-    await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
     await app.titlebar.toggleSidebar();
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
 
     // The override must survive both directions of a later resize.
     await page.setViewportSize(DEFAULT_VIEWPORT);
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
     await page.setViewportSize({ width: 480, height: 900 });
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
 
     await page.setViewportSize(DEFAULT_VIEWPORT);
   });
@@ -293,19 +300,19 @@ test.describe('narrow-viewport shell — user intent survives a resize (#1385)',
     app,
     page,
   }) => {
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
     await app.titlebar.toggleSidebar();
-    await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
 
     // A resize must not reopen a sidebar the operator deliberately closed.
     await page.setViewportSize({ width: 480, height: 900 });
-    await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
     await page.setViewportSize(DEFAULT_VIEWPORT);
-    await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
 
     // Restore for later specs in this shared backend.
     await app.titlebar.toggleSidebar();
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
   });
 });
 
@@ -315,7 +322,7 @@ test.describe('narrow-viewport shell — collapsed sidebar stays re-openable (#1
     page,
   }) => {
     await page.setViewportSize({ width: 480, height: 900 });
-    await expect.poll(() => sidebarWidthVar(page)).toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).toBe('0px');
 
     const toggle = app.titlebar.toggleButton();
     await expect(toggle).toBeVisible();
@@ -324,12 +331,12 @@ test.describe('narrow-viewport shell — collapsed sidebar stays re-openable (#1
     expect(box.x + box.width).toBeLessThanOrEqual(480);
 
     await toggle.click();
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
 
     // Each test gets a fresh browser context, so this override doesn't
     // outlive the test; only the backend-side terminal session's cols do
     // (per terminal-scroll-on-resize.spec.ts), hence restoring the viewport.
     await page.setViewportSize(DEFAULT_VIEWPORT);
-    await expect.poll(() => sidebarWidthVar(page)).not.toBe('0px');
+    await expect.poll(() => sidebarWidthVar(page), withTestBudget()).not.toBe('0px');
   });
 });

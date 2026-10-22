@@ -624,6 +624,12 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
 		return err
 	}
+	if err := writeOrchestratorAlias(ctx, orchestrator.Alias); err != nil {
+		return err
+	}
+	if err := writeOrchestratorLaunchSettings(ctx, orchestrator); err != nil {
+		return err
+	}
 	if len(orchestrator.Environments) == 0 {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    environments: none"); err != nil {
 			return err
@@ -639,6 +645,41 @@ func writeOrchestratorEntry(ctx common.Context, orchestrator common.ListOrchestr
 		}
 	}
 	return writeOrchestratorDirectories(ctx, orchestrator.Directories)
+}
+
+// writeOrchestratorAlias prints the erun platform alias this orchestrator
+// declares as its own, and nothing at all when it declares none: the default is
+// this machine's own alias, so an empty line would report a setting the
+// operator never made. Same rule as writeOrchestratorDirectories below.
+func writeOrchestratorAlias(ctx common.Context, alias string) error {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(ctx.Stdout, "    platform alias: %s\n", alias)
+	return err
+}
+
+// writeOrchestratorLaunchSettings prints the gateway, model and effort the
+// orchestrator records, each only when set, by the same rule as
+// writeOrchestratorAlias: unset is the default launch, not a setting.
+func writeOrchestratorLaunchSettings(ctx common.Context, orchestrator common.ListOrchestratorResult) error {
+	var lines []string
+	if orchestrator.UseGateway {
+		lines = append(lines, "gateway: on")
+	}
+	if model := strings.TrimSpace(orchestrator.Model); model != "" {
+		lines = append(lines, "model: "+model)
+	}
+	if effort := strings.TrimSpace(orchestrator.Effort); effort != "" {
+		lines = append(lines, "effort: "+effort)
+	}
+	for _, line := range lines {
+		if _, err := fmt.Fprintf(ctx.Stdout, "    %s\n", line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeOrchestratorDirectories prints the orchestrator's own directories, and
@@ -838,6 +879,7 @@ func environmentDetailLines(tenantName string, env common.ListEnvironmentResult)
 	lines = append(lines, runtimeSizingLines(env.Sizing, indent)...)
 	lines = append(lines, []string{
 		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
+		indent + "hosted: " + hostedEnvironmentLabel(env.Hosted),
 		indent + "ai-tool: " + valueOrNone(env.AITool),
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
@@ -1072,6 +1114,18 @@ func enabledDisabledLabel(enabled bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+// hostedEnvironmentLabel renders the hosted marker beside managed-cloud, which
+// is where an operator already looks to learn whether the platform has any
+// relationship with this environment. The two answer different questions --
+// managed-cloud is lifecycle, hosted is definition -- so both are shown rather
+// than one standing in for the other.
+func hostedEnvironmentLabel(hosted *common.HostedEnvironment) string {
+	if hosted == nil {
+		return "no"
+	}
+	return hosted.Describe()
 }
 
 func portRangeLabel(ports common.EnvironmentLocalPorts) string {

@@ -1,4 +1,4 @@
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // The Manage dialog Runtime tab's "Platform account" toggle binds the env's
 // runtime ServiceAccount to cluster-admin so in-pod platform Terraform (the
@@ -20,14 +20,24 @@ test.describe('manage dialog platform-account toggle (#804)', () => {
     const toggle = app.manageDialog.platformAccountCheckbox();
     await expect(toggle).toBeVisible();
     await expect(toggle).not.toBeChecked();
-    expect(await app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    // A one-shot read compares once and gives up; the dot's own state is the
+    // dialog's to settle, so it is polled on this test's clock instead.
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(false);
 
     await toggle.click();
     await expect(toggle).toBeChecked();
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(true);
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(true);
 
     await app.manageDialog.save();
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    // The dot clearing is this save's own round-trip answer, so it waits on the
+    // budget the test declared rather than expect's 10s default.
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(false);
     // Deploy-relevant change → the pending-redeploy banner tells the operator the
     // grant takes effect on the next deploy (visibility of system status).
     await app.manageDialog.waitForRedeployBanner();
@@ -42,13 +52,17 @@ test.describe('manage dialog platform-account toggle (#804)', () => {
     );
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
-    await expect(app.manageDialog.platformAccountCheckbox()).toBeChecked();
+    // The reopened dialog's own config load is what answers this, so it carries
+    // the clock this test declared rather than expect's 10s default.
+    await expect(app.manageDialog.platformAccountCheckbox()).toBeChecked(withTestBudget());
 
     // Turning it back off persists too (reconciles both ways).
     await app.manageDialog.platformAccountCheckbox().click();
     await expect(app.manageDialog.platformAccountCheckbox()).not.toBeChecked();
     await app.manageDialog.save();
-    await expect.poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime')).toBe(false);
+    await expect
+      .poll(() => app.manageDialog.tabHasUnsavedChanges('Runtime'), withTestBudget())
+      .toBe(false);
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
@@ -58,7 +72,9 @@ test.describe('manage dialog platform-account toggle (#804)', () => {
     );
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('Runtime');
-    await expect(app.manageDialog.platformAccountCheckbox()).not.toBeChecked();
+    // The clear persisted to the config, so the third open's own load is what
+    // this read waits on -- on this test's clock, not expect's 10s default.
+    await expect(app.manageDialog.platformAccountCheckbox()).not.toBeChecked(withTestBudget());
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

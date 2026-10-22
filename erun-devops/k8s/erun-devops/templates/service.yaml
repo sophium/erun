@@ -97,6 +97,15 @@ emitted; type is the single source of truth.
        and none of them can tell what it is actually sized for. Defaults to the
        50Gi the claim has always requested. */ -}}
 {{- $dockerVolumeGi := int (default 50 .Values.dockerVolumeGi) -}}
+{{- /* The node this environment's build cache shares, and how many such caches
+       share it. Neither can be discovered from inside the pod: the environment's
+       RBAC is namespace-scoped, so it cannot see, let alone count, its
+       co-tenants, and a node-local claim reports the node's capacity rather than
+       its own size. Both are unset by default, which leaves every environment
+       bounded by its own docker volume exactly as before — a deployment that
+       says nothing about its node is not silently given a share of it. */ -}}
+{{- $buildCacheNodeGi := int (default 0 .Values.buildCacheNodeGi) -}}
+{{- $buildCacheCoTenants := int (default 0 .Values.buildCacheCoTenants) -}}
 {{- $cacheTrim := default dict .Values.cacheTrim -}}
 {{- /* The cap the runtime container bounds the go build cache by. It travels as
        a rendered byte count for the same reason the docker volume's does: the
@@ -861,6 +870,20 @@ spec:
             {{- if $dindEnabled }}
             - name: ERUN_DOCKER_VOLUME_BYTES
               value: {{ mul $dockerVolumeGi 1073741824 | quote }}
+            {{- if $buildCacheNodeGi }}
+            {{- /* The node's disk, so the build can bound this environment's
+                   BuildKit cache by a share of it rather than by the share of
+                   its own volume alone. Four environments each honouring 80% of
+                   a declared 50Gi volume hold 160Gi between them with every one
+                   of them inside its own ceiling; only a figure that describes
+                   the node can bound their sum. Rendered only when the
+                   deployment declares it: a pod that says nothing about its
+                   node keeps exactly the volume bound it had. */}}
+            - name: ERUN_BUILD_CACHE_NODE_BYTES
+              value: {{ mul $buildCacheNodeGi 1073741824 | quote }}
+            - name: ERUN_BUILD_CACHE_CO_TENANTS
+              value: {{ $buildCacheCoTenants | quote }}
+            {{- end }}
             {{- end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster

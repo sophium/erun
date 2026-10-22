@@ -119,12 +119,12 @@ func TestBuildOrchestratorMCPConfigSkipsEveryEnvWithoutAnExecutable(t *testing.T
 }
 
 func TestBuildOrchestratorLaunchInjectsMCPConfig(t *testing.T) {
-	_, withMCP := buildOrchestratorLaunch("linux", "", false, "", "", "/cfg/orchestrator-mcp-petios3.json")
+	_, withMCP := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", "/cfg/orchestrator-mcp-petios3.json")
 	if joined := strings.Join(withMCP, " "); !strings.Contains(joined, `--mcp-config '/cfg/orchestrator-mcp-petios3.json'`) {
 		t.Fatalf("expected --mcp-config in launch, got: %s", joined)
 	}
 
-	_, withoutMCP := buildOrchestratorLaunch("linux", "", false, "", "", "")
+	_, withoutMCP := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), "", "")
 	if joined := strings.Join(withoutMCP, " "); strings.Contains(joined, "--mcp-config") {
 		t.Fatalf("expected no --mcp-config when path empty, got: %s", joined)
 	}
@@ -621,7 +621,7 @@ func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(string, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		canReachMCPEndpoint: orchestratorTestAlwaysReachable,

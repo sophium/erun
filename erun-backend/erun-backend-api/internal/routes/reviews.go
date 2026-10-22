@@ -111,16 +111,18 @@ type addReviewerRequest struct {
 // review, and deliberately not model.Review, which also carries fields the
 // platform owns.
 //
-// IssueRef and IssueRefSource are the reason the two are separate. They are
-// derived on read and nothing persists them, so `Returning("*")` cannot
-// overwrite a caller-supplied value the way it does for a stored column: a
-// body carrying `issueRefSource: "DECLARED"` was echoed back verbatim as
-// though the platform had established it, and on a branch outside the
-// convention nothing even overwrote it. That is precisely the claim the whole
-// derivation is built to keep honest -- an inferred link is marked inferred,
-// and never written back as if it were declared. A request struct cannot hold
-// either field, so a forged one has nowhere on the wire to arrive from at all,
-// rather than merely nowhere to be read from after decoding.
+// IssueRef is a declaration, not a derivation: `issueRef` is the issue the
+// review's work belongs to, and stating it is exactly what makes the link
+// authoritative. The other half of that pair, IssueRefSource, stays absent
+// deliberately. It is derived on read — a reference parsed out of a branch
+// name is marked inferred, and never written back as if it were declared —
+// so a body carrying `issueRefSource: "DECLARED"` would be echoed back
+// verbatim as though the platform had established it, including on a branch
+// outside the convention where nothing would otherwise have produced a
+// source at all. That is precisely the claim the whole derivation exists to
+// keep honest. A request struct cannot hold the field, so a forged one has
+// nowhere on the wire to arrive from, rather than merely nowhere to be read
+// from after decoding.
 //
 // Status is absent for the same reason one step removed: it belongs to the
 // platform (PrepareCreate opens a review OPEN), and accepting it let a caller
@@ -131,6 +133,38 @@ type createReviewRequest struct {
 	Name         string `json:"name"`
 	TargetBranch string `json:"targetBranch"`
 	SourceBranch string `json:"sourceBranch"`
+	// IssueRef is the issue this work belongs to: the canonical
+	// owner/repo#number, or the bare number the branch convention already
+	// teaches, which PrepareCreate joins to the review's own repository.
+	IssueRef string `json:"issueRef"`
+}
+
+// canonicalRepositoryParam canonicalizes a repository a caller named for this
+// call -- the `?repository=` filter on both listings, the body's repository on
+// the two queue advances -- into the identity the rows it is matched against
+// were recorded under.
+//
+// It is the same canonicalization `PrepareCreate` applies to a new review's
+// repository, and the same function: a review records its repository through
+// eruncommon.RepositoryIdentity, so a filter compared verbatim against that
+// column only ever finds the rows a caller happened to spell exactly as this
+// one did. An SSH remote and its HTTPS form name one repository, so a filter
+// holding either has to reach both -- otherwise the caller is handed a silent
+// subset of the repository they named, which is what `--repository owner/repo`
+// and `--repository git@host:owner/repo` each did. A value that names no
+// repository is refused here rather than passed through, for the same reason
+// an unrecognised `?status=` is: an unusable filter must not answer as an
+// empty one. An absent or blank one still narrows nothing, which is what a
+// target branch alone has always meant.
+func canonicalRepositoryParam(repository string) (string, error) {
+	if strings.TrimSpace(repository) == "" {
+		return "", nil
+	}
+	identity, err := eruncommon.RepositoryIdentity(repository)
+	if err != nil {
+		return "", err
+	}
+	return identity, nil
 }
 
 // listReviews answers GET /v1/reviews. The `?status=` filter is normalized and
@@ -148,8 +182,13 @@ func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
 		return
 	}
+	repository, err := canonicalRepositoryParam(query.Get("repository"))
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
 	filter := apirepository.ReviewFilter{
-		Repository:     query.Get("repository"),
+		Repository:     repository,
 		TargetBranch:   query.Get("targetBranch"),
 		SourceBranch:   query.Get("sourceBranch"),
 		Status:         status,
@@ -198,23 +237,37 @@ func (r ReviewRoutes) removeReviewer(w http.ResponseWriter, req *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// writeReviewPrepareError names which part of a new review the platform could
+// not accept. The two refusals share a status and a shape but not a field: a
+// caller told only INVALID_REPOSITORY for a mistyped --issue would go and
+// change a repository that was never the problem.
+func writeReviewPrepareError(w http.ResponseWriter, err error) {
+	var invalidIssueRef *service.InvalidIssueRefError
+	if errors.As(err, &invalidIssueRef) {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_ISSUE_REF", invalidIssueRef.Error())
+		return
+	}
+	writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+}
+
 func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 	var input createReviewRequest
 	if err := decodeJSON(req, &input); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	// Assembled field by field from createReviewRequest: these four are the
+	// Assembled field by field from createReviewRequest: these five are the
 	// only values a caller can put into a review, and the fields it has no
 	// request-side counterpart for start zeroed rather than caller-set.
 	prepared, err := r.service.PrepareCreate(model.Review{
-		Repository:   input.Repository,
-		Name:         input.Name,
-		TargetBranch: input.TargetBranch,
-		SourceBranch: input.SourceBranch,
+		Repository:       input.Repository,
+		Name:             input.Name,
+		TargetBranch:     input.TargetBranch,
+		SourceBranch:     input.SourceBranch,
+		DeclaredIssueRef: input.IssueRef,
 	})
 	if err != nil {
-		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		writeReviewPrepareError(w, err)
 		return
 	}
 	review, err := r.reviews.Create(req.Context(), prepared)
@@ -226,7 +279,13 @@ func (r ReviewRoutes) createReview(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r ReviewRoutes) listMergeQueue(w http.ResponseWriter, req *http.Request) {
-	reviews, err := r.reviews.ListMergeQueue(req.Context(), req.URL.Query().Get("repository"), req.URL.Query().Get("targetBranch"))
+	query := req.URL.Query()
+	repository, err := canonicalRepositoryParam(query.Get("repository"))
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	reviews, err := r.reviews.ListMergeQueue(req.Context(), repository, query.Get("targetBranch"))
 	if err != nil {
 		writeRepositoryError(w, req, err)
 		return
@@ -240,7 +299,12 @@ func (r ReviewRoutes) advanceMergeQueue(w http.ResponseWriter, req *http.Request
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.AdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch)
+	repository, err := canonicalRepositoryParam(input.Repository)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	review, err := r.service.AdvanceMergeQueue(req.Context(), repository, input.TargetBranch)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return
@@ -254,7 +318,12 @@ func (r ReviewRoutes) overrideAdvanceMergeQueue(w http.ResponseWriter, req *http
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", err.Error())
 		return
 	}
-	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), input.Repository, input.TargetBranch, input.Reason)
+	repository, err := canonicalRepositoryParam(input.Repository)
+	if err != nil {
+		writeErrorCode(w, http.StatusBadRequest, "INVALID_REPOSITORY", err.Error())
+		return
+	}
+	review, err := r.service.OverrideAdvanceMergeQueue(req.Context(), repository, input.TargetBranch, input.Reason)
 	if err != nil {
 		writeAdvanceMergeQueueError(w, req, err)
 		return

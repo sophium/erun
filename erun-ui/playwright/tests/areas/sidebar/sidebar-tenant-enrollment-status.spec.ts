@@ -109,7 +109,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
     // (WCAG 1.4.1) -- checked via getByRole so this also proves the control
     // is exposed as a real button, not a decorative element.
     await expect(
-      app.page.getByRole('button', { name: `${SEED_TENANT} is not on erunpaas.com yet` }),
+      app.page.getByRole('button', { name: `${SEED_TENANT} is not on the hosted platform yet` }),
     ).toBeVisible();
   });
 
@@ -291,6 +291,59 @@ test.describe('sidebar tenant enrollment status icon', () => {
     }
   });
 
+  // The sidebar glyph's own half of the tenant-mismatch verdict the dashboard
+  // already renders (TenantPlatformState.tsx): the credential authenticated
+  // and resolved, just to a tenant that is not this row's. The Go test that
+  // produces this state from a real whoami is
+  // tenant_platform_invite_requests_test.go::
+  // TestListTenantPlatformEnrollmentStatusesRefusesAPlatformTenantThatIsNotTheLocalOne;
+  // what this spec proves is that the row renders it as its own state, names
+  // both the tenant the platform answered for and the host that answered, and
+  // offers the dashboard rather than a false enrolment claim.
+  test('renders a mismatch, naming the tenant and host that answered, when the platform resolves another tenant', async ({
+    app,
+    page,
+  }) => {
+    const tenant = uniqueEnvironmentName('enrollment-mismatch');
+    const environment = uniqueEnvironmentName('env');
+    seedTenant(tenant, environment);
+    seedEnvironment(tenant, environment);
+    try {
+      stubRPC(page, 'ListTenantPlatformEnrollmentStatuses', {
+        data: [
+          {
+            tenant,
+            state: 'tenant-mismatch',
+            platformHost: 'api.erunpaas.com',
+            platformTenant: 'someone-else',
+          },
+        ],
+      });
+
+      await app.reloadEnvironments();
+      const icon = app.sidebar.tenantEnrollmentStatus(tenant);
+      await expect(icon).toHaveAttribute('data-enrollment-state', 'tenant-mismatch');
+      // The accessible name says what happened, names the platform that
+      // actually answered (never a fixed hostname this machine may not have
+      // talked to), and never claims enrolment for this row.
+      await expect(
+        app.page.getByRole('button', {
+          name: `${tenant}'s connection to api.erunpaas.com belongs to the tenant someone-else`,
+        }),
+      ).toBeVisible();
+
+      await app.sidebar.openTenantEnrollmentStatusPopover(tenant);
+      const popover = app.sidebar.tenantEnrollmentStatusPopover();
+      await expect(popover).toContainText('Different tenant on api.erunpaas.com');
+      await expect(popover).toContainText('someone-else');
+      // And the one action that can actually change this: the dashboard owns
+      // the connect form, so the row does not re-implement it.
+      await expect(popover.getByRole('button', { name: 'Open the dashboard' })).toBeVisible();
+    } finally {
+      removeTenant(tenant);
+    }
+  });
+
   // The bug this guards: nextEnrollmentPollingInterval used to return 0 for
   // 'unknown' (treating a genuine round-trip failure as terminal, same as
   // 'local-only' and 'enrolled'), so a transient outage never recovered on
@@ -382,7 +435,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       const icon = app.sidebar.tenantEnrollmentStatus(tenant);
       await expect(icon).toHaveAttribute('data-enrollment-state', 'local-only');
       await expect(
-        app.page.getByRole('button', { name: `${tenant} is not on erunpaas.com yet` }),
+        app.page.getByRole('button', { name: `${tenant} is not on the hosted platform yet` }),
       ).toBeVisible();
 
       await app.sidebar.openTenantEnrollmentStatusPopover(tenant);
@@ -403,7 +456,7 @@ test.describe('sidebar tenant enrollment status icon', () => {
       // the row, not on the dashboard the operator navigated away from.
       await expect(icon).toHaveAttribute('data-enrollment-state', 'enrolled');
       await expect(
-        app.page.getByRole('button', { name: `${tenant} is enrolled in erunpaas.com` }),
+        app.page.getByRole('button', { name: `${tenant} is enrolled in the hosted platform` }),
       ).toBeVisible();
     } finally {
       removeTenant(tenant);

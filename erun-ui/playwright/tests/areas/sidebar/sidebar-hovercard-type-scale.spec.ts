@@ -104,7 +104,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       expect(Number.isFinite(titleSize)).toBe(true);
       expect(Number.isFinite(titleWeight)).toBe(true);
       expect(Number.isFinite(valueWeight)).toBe(true);
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);
     expect(labelSizes.size, 'every dt in the card must share one font-size').toBe(1);
@@ -176,7 +176,7 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
       expect(Number.isFinite(titleSize)).toBe(true);
       expect(Number.isFinite(titleWeight)).toBe(true);
       expect(Number.isFinite(valueWeight)).toBe(true);
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
 
     expect(valueSizes.size, 'every dd in the card must share one font-size').toBe(1);
     expect(labelSizes.size, 'every dt in the card must share one font-size').toBe(1);
@@ -208,6 +208,6 @@ test.describe('sidebar hover card type scale (#1694, #1901)', () => {
           timeout: READ_TIMEOUT_MS,
         });
       expect(variant).toContain('tabular-nums');
-    }).toPass({ timeout: 20_000 });
+    }).toPass();
   });
 });

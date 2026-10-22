@@ -115,8 +115,10 @@ func filterDockerfileCopyArgs(args []string) (filtered []string, fromStage bool)
 // input taken from the pod would move the identity on every roll and make a
 // warm environment rebuild from cold. The one pod-scoped value a build carries
 // is CgroupParent, derived from the pod's own hostname; it is a runtime
-// placement for the RUN containers and nothing else, so it stays out of this
-// set (see buildContainerCPUCapCgroupParent). TestBuildFingerprintSurvivesAPodRoll
+// placement for the RUN containers rather than an input to the image they
+// produce, so it stays out of this set (see buildContainerCPUCapCgroupParent,
+// which also records what a roll pays for it in BuildKit's own layer cache).
+// TestBuildFingerprintSurvivesAPodRoll
 // pins that, including for a content change that must still move the identity.
 func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	contextDir := strings.TrimSpace(buildInput.ContextDir)

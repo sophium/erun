@@ -262,7 +262,7 @@ This is a per-env decision: agent envs typically need broad outbound (image pull
 
 ## Port-forward state files
 
-The CLI owns the local port-forwards: `erun open` starts one detached `kubectl port-forward` process per channel (MCP, SSH, API) and records each in a state file at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json`. They are **best-effort**: the shell/AI session runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`. The desktop app does not write these files — it reads the convention (that is how the local MCP port reaches laptop-side Agent clients) and re-runs `erun open --no-shell` when a forward needs re-establishing; because that re-run only fails when the runtime is genuinely undeployed (not on a forward that can't bind), the "deploy this environment" prompt it drives stays accurate.
+The CLI owns the local port-forwards: `erun open` starts one detached `kubectl port-forward` process per channel (MCP, SSH, API) and records each in a state file at `<config-root>/portforward/{mcp,sshd,api}/<tenant>/<env>.json`. They are **best-effort**: the shell/AI session runs in-pod via `kubectl exec` and does not use them, so a forward that cannot bind is logged as a warning and skipped rather than aborting `open`. The desktop app does not write these files — it reads the convention (that is how the local MCP port reaches laptop-side Agent clients) and re-runs `erun open --no-shell` when a forward needs re-establishing; because that re-run only fails when the runtime is genuinely undeployed (not on a forward that can't bind), the "deploy this environment" prompt it drives stays accurate.
 
 ```json
 {
@@ -303,12 +303,12 @@ Each forward log is capped at 5 MiB: a log that has outgrown the cap is renamed 
 
 Two things remove a forward log, and both remove the `.1` generation beside it:
 
-- `erun delete` removes the deleted environment's state file and log for all three channels.
-- `erun open` reclaims records whose tenant or environment the config store no longer knows, together with the directories they leave empty. This runs on the forward-setup path, alongside the cap — never on a timer, and never from a command that has nothing to do with forwards.
+- `erun delete` removes the deleted environment's state file and log for all three channels, at the config root and at every earlier location listed below that still holds an unmigrated record.
+- `erun open` reclaims records whose tenant or environment the config store no longer knows, together with the directories they leave empty. It walks both the config root's tree and the earlier `os.UserConfigDir` tree when that tree is a different directory. This runs on the forward-setup path, alongside the cap — never on a timer, and never from a command that has nothing to do with forwards.
 
 A log is kept when something may still be writing to it. The record's `processId` is checked first; a log — or the `.1` generation beside it, which is what a rotated log a live forward holds is named — that a process still holds open is kept even when no record names it. Deleting an environment whose forward was still running therefore removes the state file and leaves that running forward's log in place. Reclaiming is skipped entirely when the config store was never initialized, so "the config could not be read" is never answered as "no environment exists".
 
-`UserConfigDir` follows Go's `os.UserConfigDir`: `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows. Installs that predate this layout kept the state under `os.UserCacheDir` (`<UserCacheDir>/erun/{mcp,sshd,api}/...`); the first access after upgrading silently renames each file (and its log) into the config-dir path.
+`<config-root>` is the per-user config root ([Config file locations](/reference/config-locations)), the same tree the tenant and environment configs live in, so a record always sits beside the config it is checked against. Earlier releases kept the records elsewhere — under `os.UserCacheDir` (`<UserCacheDir>/erun/{mcp,sshd,api}/...`), and later under Go's `os.UserConfigDir` (`<UserConfigDir>/erun/portforward/{mcp,sshd,api}/...`), which differs from the config root on macOS when `XDG_CONFIG_HOME` is set and on Windows. The first real `erun open` of an environment after upgrading renames its record, its log and the log's `.1` generation into the config root; `erun open --dry-run` moves nothing and reads the record where it is. A record nothing reopens is never migrated, which is why `erun delete` and the orphan sweep above cover the earlier locations too.
 
 ## What ERun doesn't manage
 

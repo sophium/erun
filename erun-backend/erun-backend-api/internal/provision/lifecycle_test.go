@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/deployexec"
@@ -70,7 +71,7 @@ func testLifecycleConfig() EnvDeployConfig {
 
 func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -89,7 +90,7 @@ func TestEnvLifecycleStopRunsJobWithRunningVersion(t *testing.T) {
 
 func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1"})
 	if err == nil {
@@ -102,7 +103,7 @@ func TestEnvLifecycleStopRejectsNeverDeployed(t *testing.T) {
 
 func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace not found"}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -120,7 +121,7 @@ func TestEnvLifecycleStopSurfacesJobFailure(t *testing.T) {
 func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	checker := &stubImageChecker{missing: true}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
@@ -137,7 +138,7 @@ func TestEnvLifecycleStopFallsBackToCanonicalImage(t *testing.T) {
 func TestEnvLifecycleDeleteFallsBackToCanonicalImage(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	checker := &stubImageChecker{missing: true}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, checker, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "operations", Environment: "probe7", EnvironmentID: "env-1", RunningVersion: "1.0.185",
@@ -154,7 +155,7 @@ func TestEnvLifecycleDeleteFallsBackToCanonicalImage(t *testing.T) {
 func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -170,13 +171,84 @@ func TestEnvLifecycleDeleteRunsJobThenDeletesRow(t *testing.T) {
 	}
 }
 
+// stubMachineIdentityRevoker records the revocations a delete performed, so a
+// test can tell "the identity was revoked" from "the delete succeeded".
+type stubMachineIdentityRevoker struct {
+	revoked []string
+	err     error
+}
+
+func (s *stubMachineIdentityRevoker) Revoke(_ context.Context, environmentID string) error {
+	s.revoked = append(s.revoked, environmentID)
+	return s.err
+}
+
+// TestEnvLifecycleDeleteRevokesTheEnvironmentPlatformIdentity is the shape of
+// "an environment delete leaves nothing usable behind": an environment
+// provisioned with its own platform identity has that identity revoked as part
+// of the delete, rather than the delete succeeding while a credential that can
+// still mint tokens outlives the environment it was minted for.
+//
+// It covers both halves of the ordering that makes the revocation recoverable:
+// the revoke happens after the namespace teardown (until the pod is gone the
+// credential is still the one the environment uses) and before the row removal
+// (which is the last thing holding the environment's id, so a failure
+// afterwards would have no retryable record naming what was not revoked).
+func TestEnvLifecycleDeleteRevokesTheEnvironmentPlatformIdentity(t *testing.T) {
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	rows := &stubRowDeleter{}
+	identities := &stubMachineIdentityRevoker{}
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, identities)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
+		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if len(identities.revoked) != 1 || identities.revoked[0] != "env-1" {
+		t.Fatalf("revocations = %v, want [env-1]", identities.revoked)
+	}
+	if len(rows.deleted) != 1 {
+		t.Fatalf("row deletions = %v, want the row removed after the revocation", rows.deleted)
+	}
+}
+
+// TestEnvLifecycleDeleteBlocksWhenRevokingThePlatformIdentityFails: a delete
+// that cannot revoke must not delete the row anyway. Deleting it would orphan
+// the identity with nothing left naming it -- the row is the last record of the
+// environment's id, which is the only thing the revocation is derived from --
+// so the attempt blocks and is retried instead, with the reason named.
+func TestEnvLifecycleDeleteBlocksWhenRevokingThePlatformIdentityFails(t *testing.T) {
+	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
+	rows := &stubRowDeleter{}
+	identities := &stubMachineIdentityRevoker{err: errors.New("identity provider unreachable")}
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, identities)
+
+	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
+		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
+	})
+	if err == nil {
+		t.Fatal("expected an error when the identity could not be revoked")
+	}
+	if len(rows.deleted) != 0 {
+		t.Fatal("an environment whose identity was not revoked must not have its row removed")
+	}
+	if len(rows.blocked) != 1 || rows.blocked[0].environmentID != "env-1" {
+		t.Fatalf("blocked deletions = %+v, want one naming env-1", rows.blocked)
+	}
+	if reason := rows.blocked[0].reason; !strings.Contains(reason, "identity") {
+		t.Fatalf("deletion-blocked reason = %q, want it to name the identity revocation", reason)
+	}
+}
+
 // TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed: a remote-agent/local-agent
 // row (or a runtime row that never successfully deployed) has no namespace to
 // tear down, so delete is a plain row removal.
 func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 	runner := &stubLifecycleRunner{}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "agents", EnvironmentID: "env-2"})
 	if err != nil {
@@ -196,7 +268,7 @@ func TestEnvLifecycleDeleteSkipsJobWhenNeverDeployed(t *testing.T) {
 func TestEnvLifecycleDeleteMarksBlockedOnJobFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeFailed, Failure: "namespace stuck terminating"}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -220,7 +292,7 @@ func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *test
 	output := `{"tenant":"acme","environment":"prod","namespaceDeleteError":` + jsonQuote(blocker) + `}`
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded, Output: output}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -240,7 +312,7 @@ func TestEnvLifecycleDeleteMarksBlockedOnNamespaceStuckDespiteJobSuccess(t *test
 func TestEnvLifecycleDeleteMarksBlockedWhenJobCannotBeLaunched(t *testing.T) {
 	runner := &stubLifecycleRunner{err: errors.New("create job: connection refused")}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if err == nil {
@@ -268,7 +340,7 @@ func jsonQuote(s string) string {
 func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil, nil)
 
 	if err := lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("stop: %v", err)
@@ -281,7 +353,7 @@ func TestEnvLifecycleStopRecordsUsageEvent(t *testing.T) {
 func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeFailed}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil, nil)
 
 	_ = lifecycle.Stop(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"})
 	if len(usage.events) != 0 {
@@ -292,7 +364,7 @@ func TestEnvLifecycleStopRecordsNoUsageEventOnFailure(t *testing.T) {
 func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	usage := &recordingUsageRecorder{}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), usage, nil, nil, nil)
 
 	if err := lifecycle.Delete(context.Background(), EnvLifecycleInput{Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3"}); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -307,7 +379,7 @@ func TestEnvLifecycleDeleteRecordsUsageEvent(t *testing.T) {
 // clearly rather than running the stop Job unauthenticated (#1112).
 func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3", ContextID: "ctx-1",
@@ -326,7 +398,7 @@ func TestEnvLifecycleStopRefusesWhenPlacementCredentialUnavailable(t *testing.T)
 func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 	runner := &stubLifecycleRunner{stopResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	credentials := stubLifecycleCredentials{token: "live-token"}
-	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, credentials)
+	lifecycle := NewEnvLifecycle(runner, &stubRowDeleter{}, testLifecycleConfig(), nil, nil, credentials, nil)
 
 	err := lifecycle.Stop(context.Background(), EnvLifecycleInput{
 		TenantID: "tenant-1", Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3",
@@ -352,7 +424,7 @@ func TestEnvLifecycleStopThreadsThePlacementCredential(t *testing.T) {
 func TestEnvLifecycleDeleteRefusesWhenPlacementCredentialUnavailable(t *testing.T) {
 	runner := &stubLifecycleRunner{deleteResult: deployexec.Result{Outcome: deployexec.OutcomeSucceeded}}
 	rows := &stubRowDeleter{}
-	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil)
+	lifecycle := NewEnvLifecycle(runner, rows, testLifecycleConfig(), nil, nil, nil, nil)
 
 	err := lifecycle.Delete(context.Background(), EnvLifecycleInput{
 		Tenant: "acme", Environment: "prod", EnvironmentID: "env-1", RunningVersion: "1.2.3", ContextID: "ctx-1",

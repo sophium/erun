@@ -19,9 +19,9 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-func postRestartControl(t *testing.T, port int, orchestratorID string) restartControlResponse {
+func postRestartControl(t *testing.T, port int, orchestratorID string) eruncommon.DesktopRestartResponse {
 	t.Helper()
-	body, err := json.Marshal(restartControlRequest{OrchestratorID: orchestratorID})
+	body, err := json.Marshal(eruncommon.DesktopRestartRequest{OrchestratorID: orchestratorID})
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
@@ -30,7 +30,7 @@ func postRestartControl(t *testing.T, port int, orchestratorID string) restartCo
 		t.Fatalf("POST restart control: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var decoded restartControlResponse
+	var decoded eruncommon.DesktopRestartResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -93,11 +93,10 @@ func TestRestartControlServer_ReportsRestartAppFailure(t *testing.T) {
 	}
 }
 
-// TestRestartControlServer_ResumesTheHandoffsExactConversation ties the
-// trigger to the same resume path the button uses: a restart triggered
-// through the control server must hand the next launch the exact conversation
-// the live orchestrator session was on, not a re-derived one.
-func TestRestartControlServer_ResumesTheHandoffsExactConversation(t *testing.T) {
+// TestRestartControlServer_HandsThePaneToTheOrchestratorThatAsked ties the
+// trigger to the same hand-off the button writes: a restart triggered through
+// the control server makes the orchestrator that asked own the pane next.
+func TestRestartControlServer_HandsThePaneToTheOrchestratorThatAsked(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	id := createAndStartOrchestrator(t, app)
 
@@ -111,16 +110,11 @@ func TestRestartControlServer_ResumesTheHandoffsExactConversation(t *testing.T) 
 	if !resp.OK {
 		t.Fatalf("expected ok=true, got %+v", resp)
 	}
-
-	state := readRestoreState(t, restoreDir, id)
-	if state.ConversationID != orchestratorSessionID(id) {
-		t.Fatalf("expected the live conversation to be recorded, got %+v", state)
+	if state := readRestoreState(t, restoreDir, id); state.OrchestratorID != id {
+		t.Fatalf("expected the hand-off to name %q, got %+v", id, state)
 	}
-	stageOrchestratorConversation(t, state.ConversationID)
-
-	target := app.ResolveOrchestratorToReopen()
-	if target.OrchestratorID != id || target.ConversationID != state.ConversationID {
-		t.Fatalf("expected the hand-off's exact conversation to be resumed, got %+v", target)
+	if target := app.ResolveOrchestratorToReopen(); target.OrchestratorID != id {
+		t.Fatalf("expected %q to own the pane, got %+v", id, target)
 	}
 }
 
@@ -166,12 +160,13 @@ func restartControlTestApp(t *testing.T, markerPath string) *App {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("HOME", home)
 	app := NewApp(erunUIDeps{
-		store:                    newOrchestratorStubStore(t.TempDir()),
-		orchestratorRestoreDir:   filepath.Join(home, "state", orchestratorRestoreDirName),
-		orchestratorOpenPath:     filepath.Join(home, "orchestrator-open.json"),
-		relaunchApp:              func() error { return nil },
-		quitApp:                  func() {},
-		desktopControlMarkerPath: markerPath,
+		store:                       newOrchestratorStubStore(t.TempDir()),
+		orchestratorRestoreDir:      filepath.Join(home, "state", orchestratorRestoreDirName),
+		orchestratorOpenPath:        filepath.Join(home, "orchestrator-open.json"),
+		relaunchApp:                 func() error { return nil },
+		quitApp:                     func() {},
+		desktopControlMarkerPath:    markerPath,
+		runOrchestratorLabelCommand: stubOrchestratorClaimLabel,
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app
@@ -712,9 +707,9 @@ func assertCrashedRecordReadsAsStale(t *testing.T, path string) {
 		MarkerPath:   path,
 		ReadMarker:   eruncommon.ReadDesktopControlMarker,
 		ProcessAlive: eruncommon.DesktopProcessAlive,
-		Post: func(context.Context, int, string) (bool, string, error) {
+		Post: func(context.Context, int, string) (eruncommon.DesktopRestartResponse, error) {
 			posted = true
-			return true, "", nil
+			return eruncommon.DesktopRestartResponse{OK: true}, nil
 		},
 	}, "orch-1", false)
 	if posted {

@@ -16,7 +16,7 @@ Flags:
   -h, --help                    help for list
       --issue string            Filter by the issue the work belongs to, e.g. owner/repo#2109
       --scope string            Filter by the scope a job claims
-      --status string           Filter by status: RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED
+      --status string           Filter by status: PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED
 
 Global Flags:
       --erun-alias string   erun platform cloud alias to target (defaults to the sole configured erun-type alias)

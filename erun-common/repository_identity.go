@@ -28,6 +28,9 @@ func RepositoryIdentity(remote string) (string, error) {
 	if trimmed == "" {
 		return "", fmt.Errorf("a repository remote is required: pass the repository's own git remote, e.g. the output of `git remote get-url origin`")
 	}
+	if !namesOneRepository(trimmed) {
+		return "", fmt.Errorf("repository remote %q names no repository: a bare owner/repo shorthand, or a path relative to the caller's own working tree, is a different repository to every caller — pass the repository's own git remote, e.g. the output of `git remote get-url origin`", trimmed)
+	}
 	canonical := trimmed
 	if httpsForm, ok := sshRemoteHTTPSForm(trimmed); ok {
 		canonical = httpsForm
@@ -54,6 +57,47 @@ func RepositoryIdentity(remote string) (string, error) {
 		return "", fmt.Errorf("repository remote %q names no repository", trimmed)
 	}
 	return canonical, nil
+}
+
+// namesOneRepository reports whether remote says which repository it is
+// without depending on who is asking. A remote carries a scheme
+// (`https://host/owner/repo`, `file:///srv/git/erun`), an scp-like host prefix
+// (`git@host:owner/repo`), or an absolute local path (`/srv/git/erun`,
+// `C:\src\erun`).
+//
+// Everything else is refused rather than stored, for the same reason a bare
+// host is: it does not name one repository. `owner/repo` names a repository on
+// whichever forge the caller had in mind, so an identity recorded against one
+// forge would answer for another's; `../repo` and `repo` are resolved against
+// the caller's own working tree, so two callers spelling the same string mean
+// two different repositories. Both give one repository a second identity, and
+// a filter naming one of them silently answers a subset of that repository's
+// reviews instead of refusing.
+func namesOneRepository(remote string) bool {
+	if strings.Contains(remote, "://") {
+		return true
+	}
+	if _, ok := scpLikeHTTPSForm(remote); ok {
+		return true
+	}
+	return isAbsoluteLocalPath(remote)
+}
+
+// isAbsoluteLocalPath reports whether path is rooted rather than relative: a
+// POSIX path (`/srv/git/erun`) or a Windows drive path (`C:\src\erun`,
+// `C:/src/erun`). Only a rooted path is the same place for every caller.
+func isAbsoluteLocalPath(path string) bool {
+	if strings.HasPrefix(path, "/") {
+		return true
+	}
+	if len(path) < 3 || path[1] != ':' {
+		return false
+	}
+	drive := path[0]
+	if ('a' > drive || drive > 'z') && ('A' > drive || drive > 'Z') {
+		return false
+	}
+	return path[2] == '/' || path[2] == '\\'
 }
 
 // ResolveReviewRepository answers which repository a review belongs to: the

@@ -69,6 +69,9 @@ test.describe('UX tooltip rules', () => {
     const clearAll = app.activityDrawer
       .locator()
       .getByRole('button', { name: /Force dismiss all/ });
+    // waitFor (not expect) converges the staged entries' own render against
+    // the enclosing test's budget rather than expect's fixed one.
+    await clearAll.waitFor({ state: 'visible' });
     await expect(clearAll).toBeVisible();
     await expect(clearAll).not.toHaveAttribute('title', /.*/);
     await expect(clearAll).toHaveAttribute('aria-label', /Force dismiss all/);
@@ -103,6 +106,7 @@ test.describe('UX tooltip rules', () => {
       .locator()
       .getByRole('button', { name: 'Dismiss', exact: true })
       .first();
+    await dismissButton.waitFor({ state: 'visible' });
     await expect(dismissButton).toBeVisible();
     await expect(dismissButton).not.toHaveAttribute('title', /.*/);
   });

@@ -29,6 +29,9 @@ test.describe('deploy-progress overlay stays on-screen (#713)', () => {
     await emitActivityLock(page, sessionId);
 
     const overlay = page.getByRole('status').filter({ hasText: 'frs/prod 1.0.106' });
+    // waitFor (not expect) converges against the enclosing test's own budget
+    // rather than the staged lock's render racing expect's fixed one.
+    await overlay.waitFor({ state: 'visible' });
     await expect(overlay).toBeVisible();
     await expect(overlay).toContainText('Waiting for deploy to complete');
 

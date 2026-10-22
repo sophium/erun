@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // The Diagnostics panel used to derive its evidence from the sidebar's
@@ -69,6 +69,10 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
 
+    // waitFor (not expect) converges the panel's own re-labeling against the
+    // enclosing test's budget rather than expect's fixed one: the primary tab
+    // renames itself once the selected context resolves.
+    await app.debugPanel.tab('orchestrator').waitFor({ state: 'visible' });
     await expect(app.debugPanel.tab('orchestrator')).toBeVisible();
     await expect(app.debugPanel.tab('orchestrator')).toHaveAttribute('aria-selected', 'true');
     await expect(app.debugPanel.tab('erun trace')).toHaveCount(0);
@@ -97,12 +101,18 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     await stubRunningOrchestrator(page);
     await app.reboot();
     await app.sidebar.openOrchestratorSession(ORCHESTRATOR_ID);
+    // waitFor (not expect) converges the panel's own re-labeling against the
+    // enclosing test's budget rather than expect's fixed one: the primary tab
+    // renames itself once the selected context resolves.
+    await app.debugPanel.tab('orchestrator').waitFor({ state: 'visible' });
     await expect(app.debugPanel.tab('orchestrator')).toBeVisible();
 
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
+    await app.debugPanel.tab('erun trace').waitFor({ state: 'visible' });
     await expect(app.debugPanel.tab('erun trace')).toBeVisible();
     await expect(app.debugPanel.tab('orchestrator')).toHaveCount(0);
+    await app.debugPanel.erunTracePane().waitFor({ state: 'visible' });
     await expect(app.debugPanel.erunTracePane()).toBeVisible();
   });
 
@@ -149,6 +159,8 @@ test.describe('diagnostics panel — orchestrator context (#1241)', () => {
     const written = req.postData() ?? '';
     expect(written).toContain(`orchestrator: ${ORCHESTRATOR_ID}`);
 
-    await expect(app.debugPanel.reportIssueButton()).toHaveText(/Opened/);
+    // The label flips once the popup the click opened has loaded, so it
+    // converges on this test's own budget rather than expect's 10s default.
+    await expect(app.debugPanel.reportIssueButton()).toHaveText(/Opened/, withTestBudget());
   });
 });

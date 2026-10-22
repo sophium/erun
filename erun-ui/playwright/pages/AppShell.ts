@@ -7,6 +7,7 @@ import { CloseConfirmDialog } from './CloseConfirmDialog';
 import { CreateReviewDialog } from './CreateReviewDialog';
 import { DebugPanel } from './DebugPanel';
 import { EnvironmentInitDialog } from './EnvironmentInitDialog';
+import { GatewayRedeployDialog } from './GatewayRedeployDialog';
 import { GlobalConfigDialog } from './GlobalConfigDialog';
 import { ManageDialog } from './ManageDialog';
 import { OrchestratorDialog } from './OrchestratorDialog';
@@ -157,6 +158,10 @@ export class AppShell {
 
   get orchestratorDialog(): OrchestratorDialog {
     return new OrchestratorDialog(this.page);
+  }
+
+  get gatewayRedeployDialog(): GatewayRedeployDialog {
+    return new GatewayRedeployDialog(this.page);
   }
 
   get outputsDialog(): OutputsDialog {

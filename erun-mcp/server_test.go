@@ -1,9 +1,11 @@
 package erunmcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -1341,5 +1344,74 @@ func decodeStructuredVersion(t *testing.T, content any) map[string]any {
 	default:
 		t.Fatalf("unexpected structured content type %T", content)
 		return nil
+	}
+}
+
+// lockedBuffer collects what a logger writes from whichever goroutine serves a
+// request, so a test can read it after the response without racing the write.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestARefusedToolCallOnAnUnknownSessionIsLogged drives the real edge the way
+// the report did: a tools/call that arrives with no session the edge knows, so
+// the SDK's session-initialization guard refuses it. That refusal is a
+// JSON-RPC error on an HTTP 200, and it is exactly the shape whose absence
+// from a pod log was misread as "the call never arrived".
+//
+// The SDK's own logger has to say so, which is the whole point: with
+// ServerOptions.Logger nil the SDK writes to slog.DiscardHandler and the edge
+// is silent about every refusal it makes. The assertion is on the log line the
+// SDK emits, not on the response, because the response was always correct --
+// it is the visibility that was missing.
+func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
+	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
+		t.Setenv(key, "")
+	}
+
+	previous := mcpServerLogger
+	logs := &lockedBuffer{}
+	mcpServerLogger = slog.New(slog.NewTextHandler(logs, nil))
+	t.Cleanup(func() { mcpServerLogger = previous })
+
+	cfg := HTTPConfig{Path: "/mcp"}
+	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	t.Cleanup(httpServer.Close)
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`
+	req, err := http.NewRequest(http.MethodPost, httpServer.URL+cfg.Path, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("build tools/call request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST tools/call with no session: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	reply, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	if !strings.Contains(string(reply), "invalid during session initialization") {
+		t.Fatalf("expected the session-initialization guard to refuse the call, got HTTP %d: %s", resp.StatusCode, reply)
+	}
+
+	if got := logs.String(); !strings.Contains(got, "invalid during initialization") {
+		t.Fatalf("the SDK refused a tool call without logging it; the edge reports refusals to nowhere. Captured log: %q", got)
 	}
 }

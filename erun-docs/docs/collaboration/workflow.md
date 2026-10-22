@@ -76,6 +76,14 @@ ERun isn't tied to a specific workflow tool or a fixed set of states. It slots u
 
 `PR / QA / DONE` map cleanly to the ERun review lifecycle (`OPEN → READY → MERGE → MERGED`). `TRIAGE / TODO / IN PROGRESS` sit above ERun as project-management states the team owns. Rename any of them; ERun's behaviour doesn't change underneath. `READY` becomes `MERGE` and then `MERGED` through the [merge queue](/collaboration/merge-queue), never by a caller asserting either status directly.
 
+The boundary is a naming choice, not a blind spot: erun still records the work above the line, so one surface can show both halves. A job claimed in `PLANNED` is work sitting in `TRIAGE`/`TODO`, and it becomes `RUNNING` — `IN PROGRESS` — when the work starts. The **pipeline view** (`GET /v1/pipeline`, the console's Pipeline section) unions those jobs with the reviews below the line on the issue each belongs to and labels every piece of work with the rung it is on:
+
+```
+PLANNED → IN_PROGRESS → REVIEW_OPEN → READY → MERGING → MERGED
+```
+
+Call your states whatever your team calls them. The view is what makes "what is going on" answerable in one place across the line, without erun taking ownership of the states above it.
+
 ## What flows through — Stories, Epics, Tasks
 
 The unit ERun's workflow tracks is the **Story**. Stories group into **Epics** (longer-term goals) and break into **Tasks** (parallel sub-activities inside a Story).

@@ -112,9 +112,28 @@ func writeReviewLine(ctx common.Context, review common.PlatformReview) error {
 	if strings.TrimSpace(repository) == "" {
 		repository = "(no repository recorded)"
 	}
-	_, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) %s %s -> %s status=%s\n",
-		review.Name, review.ReviewID, repository, review.SourceBranch, review.TargetBranch, review.Status)
+	_, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) %s %s -> %s status=%s%s\n",
+		review.Name, review.ReviewID, repository, review.SourceBranch, review.TargetBranch, review.Status,
+		reviewIssueSuffix(review))
 	return err
+}
+
+// reviewIssueSuffix renders the review's issue link and its provenance, or an
+// empty string when it is linked to none.
+//
+// The provenance is not decoration: a reference parsed out of a branch name is
+// a guess that the branch was named honestly, and printing it the way a
+// declared one prints would tell an operator the author had recorded an issue
+// they never mentioned. Both are shown, told apart.
+func reviewIssueSuffix(review common.PlatformReview) string {
+	if strings.TrimSpace(review.IssueRef) == "" {
+		return ""
+	}
+	source := "declared"
+	if review.IssueRefSource == common.IssueReferenceInferred {
+		source = "inferred from branch"
+	}
+	return fmt.Sprintf(" issue=%s (%s)", review.IssueRef, source)
 }
 
 func newReviewShowCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
@@ -186,11 +205,16 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 			"The review records the repository its branches belong to: --repository if given, otherwise " +
 			"your checkout's origin. That identity is what keeps two repositories your tenant serves " +
 			"from sharing one merge queue or colliding on a branch pair.\n\n" +
+			"--issue records the issue this work belongs to, as owner/repo#number or as a bare number to " +
+			"join to the recorded repository. A recorded issue is a declared one: it outranks the number " +
+			"a branch like `bug/2212-...` names, which is only ever reported as an inferred link. Leave it " +
+			"out and the branch is the whole link, exactly as before.\n\n" +
 			"A real, immediate write, not a preview.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example: "  erun exec push feature/add-widget\n" +
 			"  erun review create --name \"Add widget\" --source-branch feature/add-widget --target-branch main\n" +
+			"  erun review create --name \"Add widget\" --issue sophium/erun#2212 --source-branch feature/add-widget --target-branch main\n" +
 			"  erun review create --name \"Add widget\" --repository https://github.com/org/repo.git --source-branch feature/add-widget --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
@@ -214,6 +238,7 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 	cmd.Flags().StringVar(&params.Name, "name", "", "Review name (unique per tenant and repository; the eventual squash-merge message)")
 	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch this review proposes merging into")
 	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch this review proposes merging (must already be pushed)")
+	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Issue this work belongs to (owner/repo#number, or a bare number joined to the recorded repository)")
 	addDryRunFlag(cmd)
 	return cmd
 }

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/golden"
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
@@ -79,9 +81,41 @@ func controlPlaneStubWithDocs(t testing.TB, version, consoleURL, docsURL string)
 		}
 		_, _ = fmt.Fprintf(w, `{"version":"%s","apiUrl":"%s","consoleUrl":"%s","docsUrl":"%s"}`, version, apiURL, consoleURL, docsURL)
 	})
-	server = httptest.NewServer(mux)
+	// Assigned before Start so the handler's read of server has a
+	// happens-before edge to it; see erun-integration/AGENTS.md.
+	server = httptest.NewUnstartedServer(mux)
+	server.Start()
 	t.Cleanup(server.Close)
 	return server
+}
+
+// TestControlPlaneStubAssignsItsServerBeforeItServes is the same pin as
+// TestGithubRulesetStubServerAssignsItsURLBeforeItServes, one stub over:
+// controlPlaneStubWithDocs' /v1/platform handler reads the captured server to
+// report its own listener address as apiUrl, and assigning that variable from
+// httptest.NewServer's return leaves the read unordered against it. Its
+// ordering half needs -race, which no gated venue runs for this module -- see
+// that test's comment for the gate and the exact command.
+//
+// The probe's client is a process of its own for the reason recorded there: an
+// in-process client's own netpoll round trip orders the two accesses and hides
+// the pair. Both requests are asserted, so the probe cannot pass by never
+// reaching the read.
+func TestControlPlaneStubAssignsItsServerBeforeItServes(t *testing.T) {
+	curl, err := osexec.LookPath("curl")
+	if err != nil {
+		t.Fatalf("this probe needs curl as an out-of-process HTTP client: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		server := controlPlaneStubWithDocs(t, "1.2.3", "", "")
+		out, err := harnessexec.Command(curl, "-sS", server.URL+"/v1/platform").CombinedOutput()
+		if err != nil {
+			t.Fatalf("request %d: %v\n%s", attempt, err, out)
+		}
+		if want := `"apiUrl":"` + server.URL + `"`; !strings.Contains(string(out), want) {
+			t.Fatalf("request %d: response does not report %s:\n%s", attempt, want, out)
+		}
+	}
 }
 
 // controlPlaneStubAt is like controlPlaneStub but reports identityAPIURL as

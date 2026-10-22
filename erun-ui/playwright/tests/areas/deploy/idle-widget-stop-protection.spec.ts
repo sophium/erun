@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // Two invariants of the idle widget:
@@ -146,8 +146,13 @@ test.describe('idle widget stop protection', () => {
     const buttonWhileLocked = page.getByRole('button', {
       name: new RegExp(`^Unlock ${ctxName}`),
     });
-    await expect(buttonWhileLocked).toBeVisible();
-    await expect(buttonWhileLocked).toHaveAttribute('aria-pressed', 'true');
+    // The widget mounts only after a LoadIdleStatus poll reports a managed
+    // cloud context, so the control's own arrival is what these steps converge
+    // on -- the poll round trip is the state, not a render that has already
+    // happened. Every read here is that poll's answer, so it waits on the
+    // budget this test declares rather than expect's 10s default.
+    await buttonWhileLocked.waitFor({ state: 'visible' });
+    await expect(buttonWhileLocked).toHaveAttribute('aria-pressed', 'true', withTestBudget());
 
     const describesBeforeClick = describeCalls;
     await buttonWhileLocked.click();
@@ -155,8 +160,8 @@ test.describe('idle widget stop protection', () => {
     const buttonWhileUnlocked = page.getByRole('button', {
       name: new RegExp(`^Lock ${ctxName}`),
     });
-    await expect(buttonWhileUnlocked).toBeVisible();
-    await expect(buttonWhileUnlocked).toHaveAttribute('aria-pressed', 'false');
+    await buttonWhileUnlocked.waitFor({ state: 'visible' });
+    await expect(buttonWhileUnlocked).toHaveAttribute('aria-pressed', 'false', withTestBudget());
 
     expect(enableCalls).toBe(1);
 
@@ -207,18 +212,18 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await expect(stopButton).toBeVisible();
+    await stopButton.waitFor({ state: 'visible' });
     await stopButton.click();
 
     // The transition pill replaces the idle-time pill while busy.
     const transitionPill = page.getByTestId('titlebar-idle-transition');
-    await expect(transitionPill).toBeVisible();
-    await expect(transitionPill).toContainText('Stopping');
-    await expect(transitionPill).toContainText(ctxName);
+    await transitionPill.waitFor({ state: 'visible' });
+    await expect(transitionPill).toContainText('Stopping', withTestBudget());
+    await expect(transitionPill).toContainText(ctxName, withTestBudget());
     // The pill must persist across a real poll cycle, not flash as a transient overlay.
     await waitForNextIdlePoll(page);
-    await expect(transitionPill).toBeVisible();
-    await expect(transitionPill).toContainText('Stopping');
+    await transitionPill.waitFor({ state: 'visible' });
+    await expect(transitionPill).toContainText('Stopping', withTestBudget());
 
     // Release the held RPC or the route handler leaks into test teardown.
     releaseStop();
@@ -262,20 +267,20 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await expect(stopButton).toBeVisible();
+    await stopButton.waitFor({ state: 'visible' });
     await stopButton.click();
 
     // Precondition: confirm we reached the busy-stopping state before
     // asserting against it.
     const transitionPill = page.getByTestId('titlebar-idle-transition');
-    await expect(transitionPill).toBeVisible();
+    await transitionPill.waitFor({ state: 'visible' });
 
     // Pure-UI affordance — stays enabled by the design choice we
     // codified (env-touching only). A regression here
     // would mean someone added the env-running gate to the wrong
     // button group.
     const diffPanelToggle = page.getByRole('button', { name: 'Toggle diff panel' });
-    await expect(diffPanelToggle).toBeEnabled();
+    await expect(diffPanelToggle).toBeEnabled(withTestBudget());
 
     releaseStop();
   });
@@ -335,23 +340,25 @@ test.describe('idle widget stop protection', () => {
     // The warning banner replaces the idle-time pill when stopPendingSince
     // is set in the idle status.
     const warning = page.getByTestId('titlebar-idle-stop-warning');
-    await expect(warning).toBeVisible();
-    await expect(warning).toContainText('Auto-stop in 2m 17s');
+    await warning.waitFor({ state: 'visible' });
+    await expect(warning).toContainText('Auto-stop in 2m 17s', withTestBudget());
 
     const cancelBtn = page.getByTestId('titlebar-idle-stop-cancel');
-    await expect(cancelBtn).toBeVisible();
+    await cancelBtn.waitFor({ state: 'visible' });
     await cancelBtn.click();
     // Wait for the cancel to be in flight and parked, then release it. The
     // finally keeps a cancel that never arrives from leaving the handler
     // parked for the rest of the worker's life.
     try {
-      await expect.poll(() => cancelArrived).toBe(1);
+      await expect.poll(() => cancelArrived, withTestBudget()).toBe(1);
     } finally {
       releaseCancel();
     }
     // Polled rather than read once: the increment belongs to the route handler
-    // above and lands after this statement's synchronous block yields.
-    await expect.poll(() => cancelCalls).toBe(1);
+    // above and lands after this statement's synchronous block yields. Both
+    // polls wait on the budget this test declares -- the increment is a round
+    // trip through the handler, which is exactly what a loaded machine slows.
+    await expect.poll(() => cancelCalls, withTestBudget()).toBe(1);
     await expect(warning).toBeHidden();
   });
 
@@ -418,7 +425,7 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await expect(stopButton).toBeVisible();
+    await stopButton.waitFor({ state: 'visible' });
 
     // Opening the env legitimately fires StartSession once, so baseline the
     // counts here rather than asserting zero after the stop.
@@ -429,7 +436,7 @@ test.describe('idle widget stop protection', () => {
 
     // A full poll round-trip after the stop bounds the window in which any
     // follow-up restart RPC would have fired; then assert none did.
-    await expect.poll(() => stopCloudContextCalls).toBe(1);
+    await expect.poll(() => stopCloudContextCalls, withTestBudget()).toBe(1);
     await waitForNextIdlePoll(page);
 
     expect(startCloudContextCalls).toBe(0);
@@ -491,10 +498,12 @@ test.describe('idle widget stop protection', () => {
 
     await app.manageDialog.selectTab('History');
     const list = page.getByTestId('manage-history-list');
-    await expect(list).toBeVisible();
+    await list.waitFor({ state: 'visible' });
 
+    // The rows are the answer to the LoadStopHistory read this spec's own stub
+    // owns, so the count waits on the budget the test declares.
     const rows = page.getByTestId('manage-history-row');
-    await expect(rows).toHaveCount(history.length);
+    await expect(rows).toHaveCount(history.length, withTestBudget());
 
     // Newest first: row 0 is the pod-monitor auto-stop, and must carry enough
     // (source, grace, timestamps, policy) for a user to answer "what triggered
@@ -589,17 +598,17 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
-    await expect(stopButton).toBeVisible();
+    await stopButton.waitFor({ state: 'visible' });
     await stopButton.click();
 
     // The failure reason renders where the user acted (Nielsen #1/#9):
     // the titlebar error pill names stop protection as the cause.
     const errorPill = page.getByRole('alert').filter({ hasText: 'stop protection' });
-    await expect(errorPill).toBeVisible();
+    await errorPill.waitFor({ state: 'visible' });
 
     // The widget must keep reporting reality: still running, stop still
     // offered — never a silent flip to "stopped".
-    await expect(stopButton).toBeVisible();
+    await expect(stopButton).toBeVisible(withTestBudget());
   });
 
   // Regression for erun#1216 bug 3: a reading LoadIdleStatus assembled on
@@ -632,7 +641,60 @@ test.describe('idle widget stop protection', () => {
     await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const badge = app.titlebar.idleStatusBadge();
-    await expect(badge).toBeVisible();
-    await expect(badge).toHaveAttribute('aria-label', /^not confirmed with the pod/);
+    await badge.waitFor({ state: 'visible' });
+    await expect(badge).toHaveAttribute(
+      'aria-label',
+      /^not confirmed with the pod/,
+      withTestBudget(),
+    );
+  });
+
+  // The widget mounts only after a LoadIdleStatus poll reports a managed
+  // cloud context, so everything below it is a state transition owned by that
+  // poll round trip rather than a render that has already happened. Asserting
+  // the control with a bare `toBeVisible()` capped the step at expect's 10s
+  // default inside a test that declares 30s, so a poll that is merely slow
+  // reds the test with two thirds of its own clock unspent. The hold below is
+  // deliberately just past that default: the smallest delay that
+  // discriminates, applied at the read the mount waits on rather than by
+  // loading the machine, so the reproduction is deterministic on a quiet host.
+  //
+  // Pre-fix this case reds at exactly 10_000ms with 50s of its own budget
+  // unused; converged on the control's own arrival, it passes when the poll
+  // actually answers.
+  test('a widget that mounts past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const ctxName = 'mock-ctx-slow-mount';
+    const idle: IdleStatusFixture = {
+      cloudContextName: ctxName,
+      cloudContextStatus: 'running',
+      cloudContextLabel: ctxName,
+    };
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadIdleStatus') {
+        // Deliberate stimulus, not a wait for the app: this hold *is* the
+        // contention the case exists to reproduce. Every poll is held, since
+        // the widget mounts on whichever response arrives first.
+        await new Promise<void>((resolve) => setTimeout(resolve, 12_000));
+        return route.fulfill(envelope(managedRunningIdleStatus(idle)));
+      }
+      if (body.method === 'DescribeCloudContextApiStop') {
+        return route.fulfill(envelope(apiStopStatus(ctxName, true)));
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+
+    const buttonWhileLocked = page.getByRole('button', {
+      name: new RegExp(`^Unlock ${ctxName}`),
+    });
+    await buttonWhileLocked.waitFor({ state: 'visible' });
+    await expect(buttonWhileLocked).toHaveAttribute('aria-pressed', 'true', withTestBudget());
   });
 });

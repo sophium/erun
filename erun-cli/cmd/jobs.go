@@ -63,7 +63,7 @@ func newJobsListCmd(store common.CloudReadStore, alias *string, deps common.Clou
 			return ctx.WriteResult(jobs)
 		},
 	}
-	cmd.Flags().StringVar(&params.Status, "status", "", "Filter by status: RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED")
+	cmd.Flags().StringVar(&params.Status, "status", "", "Filter by status: PLANNED, RUNNING, SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED")
 	cmd.Flags().StringVar(&params.EnvironmentID, "environment-id", "", "Filter by the platform's environment id")
 	cmd.Flags().StringVar(&params.IssueRef, "issue", "", "Filter by the issue the work belongs to, e.g. owner/repo#2109")
 	cmd.Flags().StringVar(&params.Scope, "scope", "", "Filter by the scope a job claims")
@@ -110,12 +110,17 @@ func newJobsStartCmd(store common.CloudReadStore, alias *string, deps common.Clo
 			"actor can see it.\n\n" +
 			"With --scope set this is a claim: if another open job already holds that scope, this fails with " +
 			"409 naming who holds it, what they are doing, and since when -- so you can pick up something " +
-			"else instead of duplicating the work.\n\n" +
+			"else instead of duplicating the work. A PLANNED job holds its scope too.\n\n" +
+			"--status PLANNED records work that has not started -- a triage or plan item parked against its " +
+			"issue, visible in the pipeline view before any code exists. It is not swept to ABANDONED: there " +
+			"is no actor yet to go quiet. `erun jobs finish <job-id> --status RUNNING` is how it begins.\n\n" +
 			"The summary is prose describing the work, never the command that performs it.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		Example: "  erun jobs start --type fix --issue sophium/erun#2109 --scope sophium/erun#2109 \\\n" +
-			"    --summary \"fixing the jobs claim race\" --actor erun/code4",
+			"    --summary \"fixing the jobs claim race\" --actor erun/code4\n" +
+			"  erun jobs start --type triage --status PLANNED --issue sophium/erun#2109 --scope sophium/erun#2109 \\\n" +
+			"    --summary \"planning the jobs claim fix\" --actor erun/ideas",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
 			job, err := common.RunJobClaim(ctx, store, *alias, params, deps)
@@ -135,6 +140,7 @@ func newJobsStartCmd(store common.CloudReadStore, alias *string, deps common.Clo
 		},
 	}
 	cmd.Flags().StringVar(&params.JobType, "type", "", "Job type: fix, review, gate, release, deploy, investigate, plan, triage, or maintenance")
+	cmd.Flags().StringVar(&params.Status, "status", "", "PLANNED to record work that has not started, RUNNING (the default) to record work already underway")
 	cmd.Flags().StringVar(&params.Summary, "summary", "", "What the work is, in prose (not the command that performs it)")
 	cmd.Flags().StringVar(&params.ActorID, "actor", "", "Who is doing the work: the orchestrator id or agent identity")
 	cmd.Flags().StringVar(&params.ActorKind, "actor-kind", "agent", "What kind of actor this is: agent, orchestrator, or human")
@@ -152,10 +158,14 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 		Use:   "finish <job-id>",
 		Short: "Report a job's progress or its outcome",
 		Long: "Report how a job ended (or refresh what it is doing). A job that has already finished cannot be " +
-			"updated: its outcome is the record coordination and reporting both read.",
+			"updated: its outcome is the record coordination and reporting both read.\n\n" +
+			"--status RUNNING on a PLANNED job is the one move that reopens any work: it says the plan has " +
+			"begun. Every other status closes the job, and none of them reopens a job that already finished.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
-		Example:      "  erun jobs finish job_01H... --status SUCCEEDED\n  erun jobs finish job_01H... --summary \"waiting on the gate build\"",
+		Example: "  erun jobs finish job_01H... --status SUCCEEDED\n" +
+			"  erun jobs finish job_01H... --status RUNNING   # the planned work has begun\n" +
+			"  erun jobs finish job_01H... --summary \"waiting on the gate build\"",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
 			params.JobID = args[0]
@@ -175,7 +185,7 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 			return ctx.WriteResult(job)
 		},
 	}
-	cmd.Flags().StringVar(&params.Status, "status", "", "Close the job as SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED")
+	cmd.Flags().StringVar(&params.Status, "status", "", "Move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it")
 	cmd.Flags().StringVar(&params.Summary, "summary", "", "Refresh what the job is doing, in prose")
 	cmd.Flags().StringVar(&params.LocalJobID, "local-job-id", "", "Record the in-pod job id this mirrors")
 	addDryRunFlag(cmd)

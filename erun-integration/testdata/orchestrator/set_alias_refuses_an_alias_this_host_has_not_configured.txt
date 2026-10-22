@@ -1,0 +1,2 @@
+audit: erun orchestrator set-alias --alias erun+elsewhere.example@erun eng-1
+orchestrator eng-1: cloud provider alias "erun+elsewhere.example@erun" is not configured -- name an erun platform alias this host has configured (`erun cloud init erun --api-url <url>` adds one), or pass "none" to declare none

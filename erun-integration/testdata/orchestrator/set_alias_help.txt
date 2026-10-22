@@ -1,0 +1,17 @@
+Set which erun platform alias this host-side orchestrator declares as its own -- the orchestrator-scoped counterpart of a tenant's own cloud alias, stored on the orchestrator's entry in config.yaml and read back by `erun list`. The alias must already be configured on this host: `erun cloud init erun --api-url <url>` adds one, and `erun list` shows the aliases this machine has. The command refuses one it cannot resolve rather than recording a declaration nothing could honour, and it selects among aliases this host already has -- it never creates or signs in to one. Pass "none" to declare no alias of its own again, which is the default and leaves the orchestrator following this machine's own alias.
+
+Usage:
+  erun orchestrator set-alias ORCHESTRATOR_ID [flags]
+
+Examples:
+  erun orchestrator set-alias my-orchestrator --alias erun+erunpaas.com@erun
+
+Flags:
+      --alias string   erun platform alias to act as, or "none" to declare none
+      --dry-run        Resolve and trace mutating actions without executing them.
+  -h, --help           help for set-alias
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

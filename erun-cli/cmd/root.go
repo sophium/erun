@@ -35,11 +35,20 @@ type (
 // os.Stdin is a no-op for a real interactive terminal — that is already the
 // default source — and lets piped input drive the prompt on every host.
 func runPrompt(prompt promptui.Prompt) (string, error) {
-	if writerIsTerminal(os.Stdout) && (runtime.GOOS != "windows" || prompt.Mask != 0) {
+	if promptRepaints(prompt) {
 		prompt.Stdin = os.Stdin
 		return prompt.Run()
 	}
 	return runPlainPrompt(prompt)
+}
+
+// promptRepaints reports whether promptui would own this prompt's render, i.e.
+// whether runPrompt would call Prompt.Run and so start the readline ioloop that
+// repaints concurrently with the caller. A caller that renders the prompt
+// itself takes the same decision from here rather than testing the terminal
+// again, so the two branches cannot disagree about which renderer a prompt got.
+func promptRepaints(prompt promptui.Prompt) bool {
+	return writerIsTerminal(os.Stdout) && (runtime.GOOS != "windows" || prompt.Mask != 0)
 }
 
 func runSelect(prompt promptui.Select) (int, string, error) {

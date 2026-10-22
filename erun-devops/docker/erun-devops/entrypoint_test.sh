@@ -33,6 +33,26 @@ stop_run() {
     run_pid=""
 }
 
+# A `shell` boot returns in the foreground but leaves the environment monitor
+# looping behind it, so it runs in its own session as well and is reaped once it
+# returns. Left alone, the loop outlives the test and calls the real erun once
+# the stub bin directory is gone.
+reap_shell() {
+    wait "$1" 2>/dev/null || true
+    kill -TERM "-$1" 2>/dev/null || true
+}
+
+# run_leftovers names every live process still carrying a run's HOME: each run
+# gets one under work_root, so whatever still has it is something a run left
+# behind.
+run_leftovers() {
+    for _proc in /proc/[0-9]*; do
+        tr '\0' '\n' <"${_proc}/environ" 2>/dev/null | grep -q "^HOME=${work_root}/" &&
+            printf '%s ' "${_proc#/proc/}"
+    done
+    true
+}
+
 # wait_for polls a condition rather than sleeping a fixed interval, so the test
 # never races the entrypoint's boot steps or the supervisor's restart delay.
 wait_for() {
@@ -211,7 +231,8 @@ env -i \
     ERUN_ENVIRONMENT=dev \
     ERUN_APP_SESSION_DIR="${session_dir_override}" \
     ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
-    sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+    setsid sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 &
+reap_shell "$!"
 [ "$(wc -l <"${run_dir}/prune-argv")" -eq 1 ] ||
     fail "an in-container shell must not prune live session sockets"
 session_dir_override=""
@@ -524,6 +545,100 @@ for name in ANTHROPIC_BASE_URL ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS; d
 done
 stop_run
 
+# --- 10b. Leaving the gateway removes what the relay wrote, and only that ---
+# settings.json lives on the persistent volume, so a pod redeployed off the
+# gateway boots with the catalog's model, context window and model list still in
+# it from the previous boot — and Claude Code, now on the environment's own
+# sign-in, would keep launching the gateway's model. The pod below predates the
+# ownership record, which is exactly the upgrade that turns the gateway off.
+prepare_run leave_gateway
+run_dir="${work_root}/leave_gateway"
+mkdir -p "${run_dir}/home/.claude"
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{
+  "theme": "dark",
+  "env": {
+    "ANTHROPIC_MODEL": "deepseek/deepseek-v4.1-flash",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1048576",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
+    "MAX_THINKING_TOKENS": "1024",
+    "OPERATOR_OWN_SETTING": "keep"
+  },
+  "availableModels": ["deepseek/deepseek-v4.1-flash"]
+}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for stale in ANTHROPIC_MODEL CLAUDE_CODE_MAX_CONTEXT_TOKENS availableModels deepseek; do
+    case "${settings}" in
+        *"${stale}"*) fail "leaving the gateway should remove the relayed ${stale}: ${settings}" ;;
+        *) ;;
+    esac
+done
+for kept in OPERATOR_OWN_SETTING '"theme"'; do
+    case "${settings}" in
+        *"${kept}"*) ;;
+        *) fail "the relay must not remove ${kept}, which it never wrote: ${settings}" ;;
+    esac
+done
+stop_run
+
+# A settings file the earlier relay never touched (no token defaults in it)
+# owns nothing, so an operator's own entries survive the first boot too.
+rm -f "${run_dir}/home/.claude/settings.json.erun-relayed.json"
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{"env": {"ANTHROPIC_MODEL": "sonnet", "MAX_THINKING_TOKENS": "4096"}, "availableModels": ["sonnet"]}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config-never-relayed" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+settings=$(cat "${run_dir}/home/.claude/settings.json")
+for kept in '"ANTHROPIC_MODEL": "sonnet"' '"MAX_THINKING_TOKENS": "4096"' availableModels; do
+    case "${settings}" in
+        *"${kept}"*) ;;
+        *) fail "a settings file the relay never wrote must keep ${kept}: ${settings}" ;;
+    esac
+done
+stop_run
+
+# Once the record exists, an entry the relay did not write survives a boot
+# that relays nothing, even under a name the relay could own.
+cat >"${run_dir}/home/.claude/settings.json" <<'EOF'
+{"env": {"ANTHROPIC_MODEL": "opus"}}
+EOF
+env -i \
+    HOME="${run_dir}/home" \
+    PATH="${run_dir}/bin:/usr/local/bin:/usr/bin:/bin" \
+    ERUN_TENANT=team \
+    ERUN_ENVIRONMENT=dev \
+    ERUN_MCP_PORT=17000 \
+    ERUN_MCP_ENABLED=false \
+    ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config-2" \
+    setsid sh "${entrypoint}" devops >"${run_dir}/log" 2>&1 &
+run_pid=$!
+wait_for booted || fail "the devops path should reach its idle foreground"
+grep -q '"ANTHROPIC_MODEL": "opus"' "${run_dir}/home/.claude/settings.json" ||
+    fail "an operator's own ANTHROPIC_MODEL must survive once the relay records what it owns: $(cat "${run_dir}/home/.claude/settings.json")"
+stop_run
+
 # --- 11. Agent MCP configuration is reconciled once per container boot, not once
 # per shell ---
 # Both configure scripts rewrite ~/.claude and ~/.codex from the image's baked
@@ -556,7 +671,8 @@ boot_shell() {
         ERUN_ENVIRONMENT=dev \
         ERUN_AGENT_CONFIG_STATE_DIR="${run_dir}/agent-config" \
         ERUN_GO_BUILD_CACHE_MAX_BYTES="${cache_trim_max_bytes:-17179869184}" \
-        sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 || true
+        setsid sh "${entrypoint}" shell </dev/null >>"${log}" 2>&1 &
+    reap_shell "$!"
 }
 
 # source_hook runs the installed hook the way a login shell does, in its own
@@ -756,4 +872,8 @@ wait_for 'booted'
 stop_run
 cache_trim_max_bytes=""
 
-echo "PASS: entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"
+# --- Nothing a run starts outlives it ---
+wait_for '[ -z "$(run_leftovers)" ]' ||
+    fail "processes outlived their run: $(for _pid in $(run_leftovers); do ps -o pid=,args= -p "${_pid}"; done)"
+
+echo "PASS:entrypoint MCP supervision, session reconciliation, activity sampling, registry credential sync, gateway settings relay and its reconciliation when the gateway is left, AI-session turn-boundary hooks, cloud-context default parity with the Go normalizer, once-per-boot agent configuration, and the bounded go build cache"

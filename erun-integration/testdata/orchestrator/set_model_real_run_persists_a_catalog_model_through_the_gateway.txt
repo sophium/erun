@@ -1,0 +1,2 @@
+Set model deepseek/deepseek-v4-pro-0813 for orchestrator eng-1
+audit: erun orchestrator set-model --model deepseek/deepseek-v4-pro-0813 eng-1

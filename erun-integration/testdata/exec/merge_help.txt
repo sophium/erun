@@ -1,6 +1,6 @@
 Fetch TARGET_BRANCH from the remote and merge it into the project working tree's current branch with an explicit merge commit. Never rebases: review comments anchor to a commit id, and a rewrite would orphan every thread on an open review.
 
-A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else.
+A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or run `git merge --abort` to back out, before doing anything else. A conflict confined to atlas.sum, the regenerable migration checksum, is the exception: each is regenerated from the migration files already on disk and staged, the merge commit is completed, and the merge is reported as landed rather than as a conflict.
 
 --dry-run traces the fetch and merge without running them.
 

@@ -23,11 +23,21 @@ const (
 	JobTypeMaintenance JobType = "maintenance"
 )
 
-// JobStatus is where a job is in its own lifecycle. RUNNING is the only open
-// state; every other value closes the job and pairs with an ended_at.
+// JobStatus is where a job is in its own lifecycle. PLANNED and RUNNING are
+// the open states; every other value closes the job and pairs with an
+// ended_at.
 type JobStatus string
 
 const (
+	// JobStatusPlanned is a job recorded before its work has started: a
+	// triage or plan item parked against the issue it belongs to, flipped to
+	// RUNNING when coding begins. It holds its scope no differently from a
+	// RUNNING job, so two actors cannot both plan the same branch.
+	//
+	// Nothing has begun that could be abandoned, which is why the abandonment
+	// sweep exempts it: ABANDONED means "its actor stopped updating it", and a
+	// parked plan has no actor to stop. See JobService.SweepAbandoned.
+	JobStatusPlanned JobStatus = "PLANNED"
 	JobStatusRunning JobStatus = "RUNNING"
 	// JobStatusSucceeded and JobStatusFailed are the outcomes the work
 	// itself reached.
@@ -85,13 +95,17 @@ type Job struct {
 	// the holder started, and an empty holder start time would make that
 	// refusal unactionable.
 	StartedAt time.Time `json:"startedAt" bun:"started_at"`
-	// EndedAt is set exactly when Status is no longer RUNNING, which the
-	// jobs table's own CHECK constraint enforces.
+	// EndedAt is set exactly when the job is no longer open -- no longer
+	// PLANNED or RUNNING -- which the jobs table's own CHECK constraint
+	// enforces.
 	EndedAt   *time.Time `json:"endedAt,omitempty" bun:"ended_at,nullzero"`
 	CreatedAt time.Time  `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt time.Time  `json:"updatedAt" bun:"updated_at,scanonly"`
 }
 
-// IsOpen reports whether this job still holds its scope. Only an open job
-// can collide with a later claim.
-func (j Job) IsOpen() bool { return j.Status == JobStatusRunning }
+// IsOpen reports whether this job still holds its scope -- PLANNED and
+// RUNNING alike, since a plan that has not started is as much a claim on the
+// work as one underway. Only an open job can collide with a later claim.
+func (j Job) IsOpen() bool {
+	return j.Status == JobStatusRunning || j.Status == JobStatusPlanned
+}

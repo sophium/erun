@@ -1,6 +1,6 @@
 import type { Page, Request, Route } from '@playwright/test';
 
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_TENANT } from '../../../fixtures/seedRoot.js';
 import type { GlobalConfigDialog } from '../../../pages/GlobalConfigDialog.js';
 
@@ -108,14 +108,25 @@ async function clearCatalog(dialog: GlobalConfigDialog): Promise<void> {
   // Remove from the end until none remain. This is driven by a poll rather than a
   // count read once: the loop's exit condition IS "no rows left", so it cannot
   // stop on a count that raced the render and leave one behind.
+  //
+  // The loop removes one row per attempt, so its budget has to scale with the
+  // catalog rather than sit at a cap of its own. Left bare, `expect.poll`
+  // resolves to expect's 10s default (playwright.config.ts) -- independent of
+  // the budget the calling test declared -- and its default intervals spend ~1s
+  // of that between attempts after the third, so a catalog of roughly a dozen
+  // rows exhausts it on a quiet host. A tight interval keeps that budget for
+  // the removals themselves.
   await expect
-    .poll(async () => {
-      const remaining = await dialog.openRouterModelRows().count();
-      if (remaining > 0) {
-        await dialog.openRouterRemoveModelButton(remaining - 1).click();
-      }
-      return remaining;
-    })
+    .poll(
+      async () => {
+        const remaining = await dialog.openRouterModelRows().count();
+        if (remaining > 0) {
+          await dialog.openRouterRemoveModelButton(remaining - 1).click();
+        }
+        return remaining;
+      },
+      { timeout: withTestBudget().timeout, intervals: [50] },
+    )
     .toBe(0);
 }
 
@@ -424,5 +435,50 @@ test.describe('erun-level gateway catalog', () => {
     await expect(app.globalConfigDialog.openRouterReasoningEchoCheckbox(0)).toBeChecked();
 
     await restoreCatalog(app.globalConfigDialog);
+  });
+
+  // The clear loop removes one row per attempt, and bare `expect.poll` runs on
+  // expect's 10s default rather than on the budget its test declared -- while
+  // spending ~1s of it between attempts on its default intervals. A catalog of
+  // this size therefore exhausts that cap on a quiet machine, with no load
+  // required to arrange it.
+  //
+  // What it costs is not only this test. The clear throws before
+  // restoreCatalog's save, so the dialog is left open and the catalog the save
+  // was going to clear stays in the shared root config: the next spec to read
+  // the catalog without clearing first -- the first test in this file, which
+  // asserts an unconfigured install -- reads this one's gateway instead. That is
+  // the cascade, and the reopen below is what pins the other end of it: the
+  // restore has to land in the shared config, not only in this page.
+  //
+  // Pre-fix this reds inside the clear at expect's 10s default with 50s of its
+  // own 60s unspent; with the loop pointed at the budget the test declared it
+  // clears, and the fresh dialog reads the empty catalog it left.
+  test('a catalog larger than a fixed step cap is cleared, not abandoned half-way', async ({
+    app,
+  }) => {
+    test.setTimeout(60_000);
+    const CATALOG_SIZE = 16;
+    const dialog = app.globalConfigDialog;
+
+    await app.sidebar.openSettings();
+    await dialog.waitForOpen();
+    await clearCatalog(dialog);
+    await dialog.setOpenRouterBaseURL('https://openrouter.ai/api');
+    for (let i = 0; i < CATALOG_SIZE; i++) {
+      await dialog.openRouterAddModelButton().click();
+      await expect(dialog.openRouterModelRows()).toHaveCount(i + 1);
+      await dialog.openRouterModelIdInput(i).fill('deepseek/deepseek-v4.1-flash');
+    }
+
+    await restoreCatalog(dialog);
+
+    await app.sidebar.openSettings();
+    await dialog.waitForOpen();
+    await expect(dialog.openRouterGatewayTrigger()).toContainText('Not configured');
+    await expect(dialog.openRouterModelRows()).toHaveCount(0);
+
+    await dialog.cancel();
+    await dialog.waitForClosed();
   });
 });

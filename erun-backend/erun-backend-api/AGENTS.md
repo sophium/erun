@@ -135,7 +135,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Permissions are stored in `role_permissions` as either exact API method/path pairs or regex method/path patterns.
 - Permission matching must use the canonical API path template set by route registration, such as `/v1/reviews/{review_id}`, not the concrete request URL.
 - Keep broad predefined roles pattern-based: `ReadAll` covers all read-style methods across all API paths, and `WriteAll` covers all write-style methods across all API paths.
-- **`TenantUser`/`TenantAdmin` are the narrower predefined roles, built from exact routes, never a hand-authored pattern.** `internal/routeroles` (`Routes`, a `map["METHOD /path"]Class`) is the single source of truth for which registered route each grants: `TenantUserClass` (both `TenantUser` and `TenantAdmin` grant it — reading the tenant, driving reviews/comments/builds/the merge queue, operating environments that already exist), `TenantAdminOnly` (only `TenantAdmin` — creating/deleting environments, registering contexts, managing users/invites/roles/org-adjacent settings), or `OperationsOnly` (neither — reachable only through `ReadAll`/`WriteAll`, even from inside an `OPERATIONS` tenant, so `TenantAdmin` stays a genuinely lesser position than the platform operator there). `routeroles.TenantUserPermissions()`/`TenantAdminPermissions()` derive each role's exact `role_permissions` grants directly from that map. `internal/repository/predefined_roles.go`'s `ensureNarrowerRolesExist` creates/re-grants both roles for a tenant lazily and idempotently — at every first-user bootstrap and every `RoleRepository.List` read — so an already-bootstrapped tenant (or one that predates a later route reclassification) picks up the current grant set the next time anything calls it, with no migration backfill.
+- **`TenantUser`/`TenantAdmin`/`TenantAgent` are the narrower predefined roles, built from exact routes, never a hand-authored pattern.** `internal/routeroles` (`Routes`, a `map["METHOD /path"]Roles`) is the single source of truth for which registered route each grants. `Roles` is a **membership set**, one bit per role, not one class per route: `TenantAgent` is a strict subset of TenantUser's reach, which no single-valued constant can express without over-granting the machine role or narrowing TenantUser for every tenant already holding it. Composed values name the sets that matter: `TenantUserClass` (TenantUser and TenantAdmin, not TenantAgent — reading the tenant, driving reviews/comments/builds/the merge queue, operating environments that already exist), `TenantAdminOnly` (TenantAdmin alone — creating/deleting environments, registering contexts, managing users/invites/roles/org-adjacent settings), `TenantAgentClass` (all three — the environment-run gate and self-report flow), and `OperationsOnly` (no narrower role at all — reachable only through `ReadAll`/`WriteAll`, even from inside an `OPERATIONS` tenant, so `TenantAdmin` stays a genuinely lesser position than the platform operator there). `routeroles.TenantUserPermissions()`/`TenantAdminPermissions()`/`TenantAgentPermissions()` derive each role's exact `role_permissions` grants directly from that map. `internal/repository/predefined_roles.go`'s `ensureNarrowerRolesExist` creates and reconciles all three roles for a tenant lazily and idempotently — at every first-user bootstrap and every `RoleRepository.List` read, in both directions — so an already-bootstrapped tenant (or one that predates a later route reclassification) picks up the current grant set the next time anything calls it, with no migration backfill.
 - **Every registered route must be classified.** `erun-integration`'s role-classification gate (`erun-integration/AGENTS.md` § "Role-classification gate") fails when a route registered in `internal/routes` has no entry in `routeroles.Routes` — the same "classify every route or fail" discipline as its desktop-surface gate, so a route added later cannot silently land inside or outside `TenantUser`/`TenantAdmin`.
 - Route handlers should not check role names directly. Authorization middleware should compute access from the authenticated user's assigned roles and permissions before the route handler runs.
 - **The caller's effective permission set is reported, not left to be guessed.** `GET /v1/whoami` carries `capabilities`: every registered route this caller would be let through to. It is resolved by the same authorizer that enforces access (`PermissionAuthorizer.PermittedRoutes`, one query and one matcher shared with `Authorize`), over the handler's own route catalog. A second implementation of the decision is a second place for it to be wrong — a client rendering from a capability set that disagrees with enforcement is worse than one with no set at all, because it teaches an operator to expect the wrong thing.
@@ -277,16 +277,108 @@ a substitute for GitHub-side enforcement.
   are attributed to whoever ran `init`, and two environments provisioned from one
   host are indistinguishable in the audit trail. Say so rather than letting it read
   as a per-environment credential.
-- **Still design, not implemented: a tenant Zitadel machine user with
-  client_credentials** through existing issuer-generic OIDC verification (no new
-  signing trust anchor), provisioned idempotently server-side with the first
-  agent-capable environment, delivered through the existing Kubernetes Secret
-  channel, and scoped by a purpose-built role rather than broad TenantUser —
-  review read, nested build report, gate-run create/update, review status update
-  only, extended only after identifying a real additional caller. Common's
-  login/token resolution must mint refreshable short-lived tokens through the new
-  grant. That is what makes queue participation attributable to the queue rather
-  than to an operator, and it is the thing to build next here.
+- **Implemented: the machine role's authorization model.** `routeroles.Routes`
+  classifies a route by a *membership set* (`Roles`, one bit per narrower role),
+  not one class per route, because the machine role is a strict subset of
+  `TenantUserClass` and no single-valued class can express that — a fourth
+  constant could only have made it a peer, or narrowed TenantUser for every
+  tenant already holding it. `TenantAgentPermissions()` derives the subset:
+  `GET /v1/whoami` and the review reads (`erun review show`'s review, comments
+  and builds fetches), the review-nested `GATE` build report, gate-run
+  create/update, the `MERGED` status report, and `POST /v1/builds` — the
+  unattached self-report `erun build` actually makes, which the original
+  subset missed and which would otherwise 403 the environment's own call. It
+  deliberately excludes `GET /v1/builds` (the tenant-wide history has no
+  environment caller), opening or promoting reviews, comment/reviewer writes,
+  and every release route. `ensureNarrowerRolesExist` seeds `TenantAgent` for
+  every tenant alongside TenantUser/TenantAdmin, lazily and reconciled in both
+  directions, so an operator can grant it today. **Reconciliation replaces a
+  derived role's grants outright, in both permission forms** — a route
+  reclassified *out* of one of these roles has to actually stop being granted
+  to a tenant seeded before the reclassification, which inserts alone
+  (`ON CONFLICT DO NOTHING`) never did. That is why the removal predicate
+  cannot be a bare `(api_method, api_path) NOT IN (...)`: a pattern row stores
+  both as NULL, so that comparison is NULL rather than TRUE and the row
+  survives, and the model has no pattern members to have named it. Coverage:
+  `internal/routeroles/route_roles_test.go` (the subset invariant and the
+  closed route list), `internal/repository/roles_e2e_test.go` (the seeded
+  grants, and both reconciliation removals — an exact pair, and the pattern
+  row), and this module root's `role_policy_e2e_test.go`
+  (`ERUN_E2E_ROLES_DATABASE_URL`, `ERUN_E2E_PERMISSIONS_DATABASE_URL`: a
+  TenantAgent holder permitted exactly its set against every real registered
+  route, and refused the rest).
+- **Implemented: the machine identity, and the privileged path that mints it.**
+  `MachineIdentityService` (`internal/service/machine_identity.go`) provisions
+  or returns one environment's own identity: it asks the tenant's own IdP for
+  an application under a login name *derived from the environment's id*
+  (`MachineIdentityLoginName`), enrols the `(issuer, subject)` pair as an erun
+  user, and converges the `TenantAgent` grant. Every step is idempotent, and
+  derivation rather than storage is the whole mechanism — nothing links an
+  environment to its identity but that arithmetic, so a second call can only
+  find what the first created. The route is
+  `POST /v1/environments/{environment_id}/machine-identity`, classified
+  `TenantUserClass`: the credential is strictly weaker than the mcp-token that
+  class already mints, and the caller is provisioning an environment that
+  already exists in their own tenant.
+  - **Who may grant it: a new privileged internal path, and never an operations
+    caller.** The enrolment and the role grant the identity needs are both
+    `TenantAdminOnly` as routes, while the session provisioning runs under is an
+    ordinary operator's delegated alias — so on any tenant whose operator is not
+    its genesis user (the common case) those routes could never be called. The
+    service therefore performs both itself, with the API's own authority, behind
+    a route whose own classification *is* the authorization. An operations
+    caller was the alternative and is rejected: it would put platform staff in
+    the middle of every tenant's own provisioning, and `OperationsOnly` names a
+    platform-operator position rather than a tenant's act.
+  - **It refuses rather than guesses where it cannot mint.** A tenant resolving
+    by no org-scoped issuer, or by several, is refused (`409
+    MACHINE_IDENTITY_UNAVAILABLE`, naming which); an unconfigured control plane
+    answers `501 MACHINE_IDENTITY_UNCONFIGURED` at the route, never a 404. The
+    identity is created in the tenant's *own* organization — minting it in
+    anyone else's is the attribution collapse this feature exists to remove.
+  - **Delivery reuses the existing channel**: `erun-common`'s
+    `provisionMachineIdentitySecret` writes the same
+    `<tenant>-devops-platform-alias` Secret the runtime chart already mounts,
+    carrying a `clientsecretref` in place of a `refreshtokenref`, and
+    `resolveERunAccessToken` picks the grant that reference implies. It
+    exchanges the credential for a token *before* writing anything, and falls
+    back to the delegating alias — traced, never silent — when any step cannot
+    be completed, so an environment never trades a working identity for a
+    broken one. Coverage: `internal/service/machine_identity_test.go`,
+    `internal/zitadel/machine_test.go` (the Management API binding, against a
+    fake), `internal/routes/machine_identity_test.go`, and
+    `machine_identity_e2e_test.go` (`ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL`:
+    two provisioning calls leave one user row, one mapping and one grant).
+  - **The issuer-generic token half is the verified go/no-go, and its artifact
+    is `machine_identity_token_e2e_test.go`** (same
+    `ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL`, against a real migrated
+    PostgreSQL). It drives a token minted by the real `client_credentials`
+    grant (`CloudProviderBearerToken` asks for
+    `urn:zitadel:iam:user:resourceowner`, the claim the shipped Zitadel
+    org-scoped mapping names) through the real bearer verifier and the real
+    `IdentityRepository.ResolveTenantByIssuer`, and pins both directions of the
+    one question source cannot settle: honoured, the token resolves its tenant;
+    refused by the issuer (the BYO case, and what a Zitadel that stopped
+    honouring the scope for machine users would produce), the scope is dropped
+    on one retry and the token is refused with the named
+    `security.ErrTenantUnresolved` rather than resolving to a wrong tenant. The
+    same file drives the environment's own routine `POST /v1/builds`
+    self-report through the real handler as the identity an environment now
+    holds, with its `GET /v1/builds` refusal as the negative control; the
+    integration suite's `TestMachineIdentityBuildSelfReport`
+    (`erun-integration/machine_identity_test.go`) covers the client half with a
+    real `erun build` and a stub platform that refuses that route to any bearer
+    but the machine token. What a stub cannot establish is whether Zitadel's own
+    token endpoint honours that scope on a `client_credentials` grant — that
+    remains a live-instance question.
+  - **Two things remain open, both tracked in #2684.** Revocation and the
+    migration of an environment already carrying the operator's credential are
+    separate work — `EnvConfig.PlatformAliasSecretName` is a single scalar, so
+    an environment is on one identity or the other and never both, and
+    re-running `erun init` is the switch. And the Management API binding
+    (`internal/zitadel/machine.go`) is exercised only against a fake: the
+    issuer-generic *token* half is the verified go/no-go, the provisioning
+    calls are not verified against a live instance.
 - GitHub queue identity and platform machine identity are two trust domains.
   Name them coherently for attribution but never share the literal secret.
   Release participation and hosted-orchestrator attribution remain separate decisions.
@@ -314,5 +406,6 @@ unconfigured-refusal tests.
 - `internal/gitverify` has its own unit tests against real local git repositories (`verifier_test.go`) — no cluster or database, the same style `internal/mergeexec/job_test.go` used before this package replaced it. `TestRemoteVerifierIsAncestor*` cover `IsAncestor` directly: a direct ancestor, an ancestor separated by unrelated commits in between, a commit compared against itself, an unrelated commit that never led to the descendant at all (both directions), and a malformed hash.
 - The environment delete state machine has the same shape of opt-in gate: `ERUN_E2E_ENVIRONMENT_DATABASE_URL` runs `ClaimDelete`/`MarkDeleteBlocked`/`Count`/`ListByStatuses`'s SQL contracts against a migrated PostgreSQL (`environment_delete_e2e_test.go`).
 - The capability contract has its own opt-in gate: `ERUN_E2E_PERMISSIONS_DATABASE_URL` runs the property the whole contract rests on — for a given role set, every route the capability answer claims is one `Authorize` permits, and every route it omits is one `Authorize` refuses — against a migrated PostgreSQL (`internal/repository/permissions_e2e_test.go`), across pattern rules, exact rules, a deliberately narrow anchored pattern, and a caller with no permissions at all.
+- **The derived-role proofs are opt-in on `ERUN_E2E_ROLES_DATABASE_URL`/`ERUN_E2E_PERMISSIONS_DATABASE_URL`, and no gate target sets either** — so `go test ./...` reports a clean `ok` for a package whose role-contract assertions never executed, the `NOT RUN:` caveat root AGENTS.md describes. They need a real migrated PostgreSQL, and the test-stage image `make check-gate` runs in carries neither a docker daemon nor the atlas CLI, so like `test-retention`/`test-schema-drift`/`test-postgres-restart` they are run by hand or via `erun exec job` in an agent env rather than by a gate target. Run them before merging a change to `internal/routeroles`, the derived-role reconciliation in `internal/repository/predefined_roles.go`, or any route's classification. The names that matter: `TestRoleReconciliationRemovesAGrantNoLongerInTheDerivedSet` and `TestRoleReconciliationRemovesAPatternGrantTheDerivedSetCannotName` (both removals a seeded role must actually take), `TestSeededTenantAgentGrantsAreTheDerivedSubsetOfTenantUser` (the strict containment), and this module root's `TestTenantAgentDrivesTheGateAndNothingElse` and `TestWriteAllHolderRetainsAccessAfterRolloutOfNarrowerRoles` (the machine role permitted exactly its set and refused the rest; an existing WriteAll holder unaffected).
 - The gate-run failure classifier (see "Gate Runs" above) has its own opt-in HTTP-level gate: `ERUN_E2E_GATE_RUN_DATABASE_URL` runs `gate_run_classifier_e2e_test.go` against a migrated PostgreSQL and a real handler — no dry-run, no mocked classifier. It drives `eruncommon.RunGateRunStart`/`RunGateRunReport` (the exact entry points the CLI and MCP tools call) with each of `GateRunInconclusiveSignatures()`'s known infrastructure signatures and confirms the persisted, read-back status is `INCONCLUSIVE`; drives a genuine, unmatched failure and confirms it stays `FAILED`; confirms `RunGateRunList`/its `status` filter let a caller tell the two apart (a caller filtering on `status=failed` must not see the classified run); and confirms `RunReviewRecordBuild --gate --failed` refuses a known-signature `--failure-detail` outright while still recording a genuine one. This closes the "verified end to end" claim in the "What a hand-run merge-queue script should hand off to erun" bullet above with a permanent, repeatable test — that verification had previously only ever been a manual, uncommitted session.
 - The mandatory unit-level refusal tests for `acceptMerged`'s three verification conditions live in `internal/service/reviews_test.go` (`TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch`, `TestAcceptMergedRefusesWhenGatedTipIsNotAnAncestorOfTheReportedCommit`, `TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded`), each driven by a fake `MergeVerifier` so the condition under test is isolated from the other two. `TestAcceptMergedSucceedsWhenParentIsTheGatedTip` and `TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting` are the corresponding acceptance cases for condition 2's ancestry check (erun#2250): the ordinary exact-parent-match case, and the case with unrelated commits landing in between.

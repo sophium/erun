@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 import { expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
@@ -84,4 +84,32 @@ test.describe('orchestrator busy renders from the list snapshot (#1087)', () => 
 
     await expect(app.sidebar.orchestratorBusyTooltip(SEED_ORCHESTRATOR)).toBeVisible();
   });
+
+  // hoverOrchestratorBusySpinner freezes `.animate-spin` before it reaches for
+  // the spinner, because Playwright's hover "stable" check can never be
+  // satisfied by a continuously-resizing box. That freeze is the helper's
+  // whole reason to exist, and a helper that quietly stopped performing it
+  // would leave the hover above flaking rather than failing with a cause.
+  //
+  // The direction is what gives the assertion meaning: the spinner really is
+  // animating beforehand, so this cannot pass vacuously against a spinner that
+  // never animated (chromium 153, the version this branch pins, is what made
+  // the addStyleTag that used to do this freeze stall).
+  test('hovering the busy spinner freezes its spin before the hover', async ({ app, page }) => {
+    await stubOrchestratorList(page, true);
+    await app.reboot();
+
+    const spinner = app.sidebar.orchestratorBusySpinner(SEED_ORCHESTRATOR);
+    await expect(spinner).toBeVisible();
+    expect(await spinnerAnimationName(spinner)).not.toBe('none');
+
+    await app.sidebar.hoverOrchestratorBusySpinner(SEED_ORCHESTRATOR);
+
+    expect(await spinnerAnimationName(spinner)).toBe('none');
+    await expect(app.sidebar.orchestratorBusyTooltip(SEED_ORCHESTRATOR)).toBeVisible();
+  });
 });
+
+async function spinnerAnimationName(spinner: Locator): Promise<string> {
+  return spinner.evaluate((el) => getComputedStyle(el).animationName);
+}

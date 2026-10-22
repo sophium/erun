@@ -295,16 +295,44 @@ export class Titlebar {
 
   // Renders only once every class icon has nothing unread but the session
   // still has history -- see Titlebar.MessageCenter.tsx's own doc comment.
+  // That condition is about the WHOLE titlebar, so a spec can assert this
+  // button directly only while it can also assert that nothing else is unread;
+  // a spec that has merely cleared its own entry point cannot, and wants
+  // messageCenterEntryPoint below instead.
   messageCenterHistoryButton(): Locator {
     return this.page.getByRole('button', { name: 'Message history' });
   }
 
-  // Converges on the dialog actually being open before returning, the same
-  // reason openMessageCenter does above -- this is the fallback entry point
-  // into the same dialog once every class icon has cleared.
-  async openMessageHistory(): Promise<void> {
-    await this.messageCenterHistoryButton().click();
+  // The titlebar's own way into the dialog, whichever one it is currently
+  // offering. Titlebar.MessageCenter.tsx offers exactly one at a time: the
+  // "Message history" fallback only while every class icon has nothing unread
+  // (`visibleKinds.length === 0 && historyCount > 0`), and otherwise an unread
+  // class's own icon. A spec that cleared its own entry point therefore cannot
+  // pin the fallback: any other class an earlier spec in this worker left
+  // unread -- a stray backend-originated notice arriving after this page
+  // booted, which a longer full-suite worker lifetime makes likely -- keeps
+  // that class's icon up and suppresses the fallback. The invariant such a
+  // spec can own is that the centre stays reachable from the titlebar, which
+  // is what this locator asserts, with either affordance as the entry.
+  messageCenterEntryPoint(): Locator {
+    return this.messageCenterIcon('error')
+      .or(this.messageCenterIcon('warning'))
+      .or(this.messageCenterIcon('info'))
+      .or(this.messageCenterIcon('success'))
+      .or(this.messageCenterHistoryButton())
+      .first();
+  }
+
+  // Opens the dialog through whichever entry point the titlebar is offering,
+  // then moves it to the All tab: an entry point that is a class icon opens
+  // the dialog filtered to that class, and a caller asserting a row of its
+  // own -- or of more than one class -- needs every row in view. Converges on
+  // the dialog actually being open first, the same reason openMessageCenter
+  // does above.
+  async openMessageCenterFromTitlebar(): Promise<void> {
+    await this.messageCenterEntryPoint().click();
     await this.messageCenterDialog().waitFor({ state: 'visible' });
+    await this.messageCenterTab('All').click();
   }
 
   messageCenterDialog(): Locator {

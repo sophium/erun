@@ -23,6 +23,18 @@ erun usage --tenant my-tenant --environment dev --output json
 
 A crossed threshold (memory, memory's peak, or disk usage getting close to full) shows up as a plain-language warning in the output — you don't have to compute the percentages yourself.
 
+Those figures are **limits**, and a limit is a ceiling: it reserves nothing at scheduling time, so `394.4MiB / 27.0GiB limit` is a reading against a ceiling rather than a claim that the environment holds 27.0GiB. What the scheduler actually admits the pod on is its `resources.requests`, so the reading reports those too, under a `Requests:` line — each container's own request, beneath the pod's effective total, which is the rule Kubernetes itself admits on: the larger of the init containers' peak and the sum of the containers'. No cgroup file records a request, so it is read from the live pod spec:
+
+```
+CPU: 0.7% of a 14.00-core quota (sampled over 1.0s)
+Memory: 394.4MiB / 27.0GiB limit (1.4%), peak 979.7MiB, OOM kills 0
+Requests: 0.5 CPU / 2.0GiB for the pod
+  erun-devops: 0.25 CPU / 1.0GiB
+  erun-dind: 0.25 CPU / 1.0GiB
+```
+
+The reservation is a small fraction of the ceiling on every environment erun deploys, because `deploy` sets limits only and the chart's request defaults stand — which is exactly the distinction the two columns keep apart. The JSON carries the same figures as `requests.containers` (keyed by container name) and `requests.pod`. A pod spec that could not be read is stated as `requests.unavailable` with the reason, never as a reservation of nothing.
+
 Under the warnings, the environment's standing sizing recommendation prints as `sizing:` and `sizing-evidence:` — the same two lines [`erun list`](/cli/list#the-sizing-recommendation) shows, computed from this reading plus whatever history is retained. A reading that trips a memory warning always comes with a raise verdict naming the size that would fix it, so a saturated environment is never reported without the thing to do about it. The recommendation is advisory: acting on it is [`erun resize --apply-recommendation`](/cli/resize).
 
 ```bash

@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { disablePopoverEntranceAnimation, expect, test } from '../../../fixtures/erunApp.js';
 import { SEED_ORCHESTRATOR } from '../../../fixtures/seedRoot.js';
 
 // The orchestrator card's "Doing" row rendered the background shell's raw
@@ -68,16 +68,6 @@ async function stubOrchestratorList(page: Page, body: unknown): Promise<void> {
       });
     }
     await route.continue();
-  });
-}
-
-// Radix's PopoverContent runs an entrance transform on every open, so a
-// height read taken right after `toBeVisible` can land mid-transition.
-// Mirrors sidebar-hovercard-layout.spec.ts.
-async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
-  await page.addStyleTag({
-    content:
-      '[role="dialog"][data-state] { animation: none !important; transform: none !important; }',
   });
 }
 

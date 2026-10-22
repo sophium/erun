@@ -88,26 +88,45 @@ appears to do nothing.
 
 ## Reading the resource figures
 
-The CPU and memory figures on the Runtime tab are **one reading of the node right now**, not a
-ceiling on what an environment supports. Two things move underneath them: a node's allocatable
-capacity changes as its own reservations change, and the free figure depends on what every other
-pod on that node currently holds. So the number you see is a snapshot, and the tab says which node
-it came from.
+The CPU and memory figures on the Runtime tab are **readings of the node right now**, not a ceiling
+on what an environment supports. Two things move underneath them: a node's allocatable capacity
+changes as its own reservations change, and every free figure depends on what the other pods on that
+node currently hold. So the numbers you see are a snapshot, and the tab says which node they came
+from.
 
-Two cases the number alone cannot explain, so the tab spells them out:
+There are **two of them, because there are two questions**, and each states which one it answers:
+
+- **Schedulable capacity — what a deploy depends on.** This is the scheduler's own arithmetic:
+  allocatable minus what the pods on the node *request*. Kubernetes admits a pod on its requests, so
+  this is the figure that decides whether an environment can be placed at all, and it is what the
+  sliders are bounded by. For an environment not yet on the node it is stated exactly — a node with
+  nothing left says zero — and where a pod on the node declares a request the reading could not
+  parse, the figure is stated as the upper bound it is rather than as an answer. An environment
+  already on the node keeps the floor below, because a pod that exists has already been admitted.
+- **Worst-case headroom — what is left if everything bursts.** The same node, with every container on
+  it running to its declared *limit* at once. This is a real capacity-planning question and it is
+  labelled as one, kept visually apart from the scheduling figure. It is not a scheduling limit:
+  `erun deploy` sets limits only, a limit reserves nothing, and on a healthy cluster the requests are
+  a small fraction of the limits — so a node can read zero here and still place a pod immediately.
+  Its remedy is a namespace quota or fewer environments per node, never a smaller limit: the runtime
+  limit is sized for the cold `make check-gate` an agent runs inside that container, and lowering it
+  re-creates the out-of-memory kills that destroy the run and its unpushed work.
+
+Two cases neither figure alone can explain, so the tab spells them out:
 
 - **The maximum equals what this environment already has.** An environment can always keep what it
-  is already running with, so when the node has nothing left the slider's maximum is floored at the
-  current value. That reads like a product limit but means the opposite — the node is fully
-  committed. The remedy is to [stop an environment](/cli/stop) nobody is using on that node, after
-  which the figure rises.
-- **Some usage is not counted.** The reading prefers a container's declared limits, falls back to
-  its measured usage when the cluster reports metrics, and says how many containers it could not
-  account for at all when neither is available. The runtime pod's own two containers (`erun-devops`,
-  `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves them — so this gap
-  is about the application services deployed alongside them: any of those that declares no limit of
-  its own is invisible to the reading on a cluster without metrics, and the tab warns that the true
-  usage is higher than shown.
+  is already running with, so both readings floor their free figure at the current value for an
+  environment that is already on the node. That reads like a product limit but means the opposite —
+  the node is fully committed, by limits in the worst-case reading and by requests in the scheduling
+  one. The remedy that raises either is capacity on the node: [stop an environment](/cli/stop)
+  nobody is using there.
+- **Some usage is not counted.** The worst-case reading prefers a container's declared limits, falls
+  back to its measured usage when the cluster reports metrics, and says how many containers it could
+  not account for at all when neither is available. The runtime pod's own two containers
+  (`erun-devops`, `erun-dind`) always declare limits — [`erun resize`](/cli/resize) is what moves
+  them — so this gap is about the application services deployed alongside them: any of those that
+  declares no limit of its own is invisible to the reading on a cluster without metrics, and the tab
+  warns that the true usage is higher than shown.
 
 That is the node's answer to "how full is the machine". The environment's own answer to "how close
 am I to my own limits" is a different reading — CPU against its own quota, memory current and peak
@@ -116,6 +135,19 @@ no cluster metrics add-on at all, so it works on the same metrics-server-less cl
 node reading above falls back to declared limits. **This environment's usage**, directly below the
 resource sliders on the Runtime tab, is the direct route to it; [`erun usage`](/cli/usage) gives the
 same reading from a terminal or an MCP-connected orchestrator.
+
+That reading also carries the other half of the same question, because a **limit is a ceiling and a
+ceiling reserves nothing**. What the scheduler admits a pod on is its `resources.requests`: a pod
+whose sum of limits is tens of CPU-cores and hundreds of GiB may still reserve a single core and a
+couple of GiB, and an environment with a large limit and a small request is both the easiest to
+place and among the first evicted under node pressure — because eviction is reclaimed from the pods
+using more than they requested, and every environment requests the same small fixed value at
+priority 0. The limit does not set a container's OOM score; see [Resources and usage · What an
+environment's memory limit does under contention](/desktop/resources-and-usage#memory-limit-contention).
+Requests are not in any cgroup file, so the reading takes them from the live pod spec and reports
+them separately from the limits: the card states each row's own request beside its limit, and
+[`erun usage`](/cli/usage) prints the pod's effective reservation (the larger of the init containers'
+peak and the sum of the containers') with each container's own beneath it.
 
 **On an agent env, that reading excludes the environment's own builds.** An agent env's runtime pod
 carries a second container, `erun-dind`, and every `erun build`/`erun release` actually runs there —
@@ -207,6 +239,83 @@ share of that volume is a limit no single environment can exceed on the others' 
 cache is exactly what that costs: the disk-headroom guard that prunes when the node runs low frees
 *the node's* space, so every other environment's next build repays its layers from cold.
 
+A share of one environment's volume does not bound the node, though. Four environments each honouring
+80% of a declared 50 GiB volume hold up to 160 GiB between them, every one of them inside its own
+ceiling, and the sum is what fills the node. Two more values describe that: `buildCacheNodeGi`, the
+node's disk in GiB, and `buildCacheCoTenants`, how many build caches share it. When both are set the
+bound is tightened to 80% of `(buildCacheNodeGi − the disk-headroom reserve) ÷ buildCacheCoTenants`,
+where the reserve is the floor every build already keeps clear — 20 GiB or 10% of the node, whichever
+is larger, and `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` overrides both. The tighter of the two ceilings
+wins, so the node's share can only lower the bound and never raise it. A share the node's own figures
+leave unusable is refused rather than installed: the volume ceiling stays in force, and the build log
+says the sum across the node went unbounded by the declared one. What is unusable is read off the same
+division the share came from rather than measured against a fixed cache size — the node's room above
+its reserve is divided among the caches that share it, and that reserve is divided the same way, so a
+ceiling below this environment's own share of the reserve is refused as a cache bounded smaller than
+the non-cache state sitting beside it on the same disk.
+
+Both values default to `0`, which passes nothing to the pod and leaves an environment bounded by its
+own docker volume exactly as before — a deployment that says nothing about its node is not given a
+share of one. Work out whether the pair bites before setting it; it does only above
+`(node − reserve) ÷ the environment's docker volume` co-tenants. On a 120 GiB node with the default
+50 GiB volume that count is 3: at 2 co-tenants the node's share is *equal* to the volume, not below
+it (`(120 − 20) ÷ 2 = 50 GiB`, whose own 80% ceiling is the same 40 GiB the 50 GiB volume already
+allows), and the comparison between the two ceilings is strict, so an equal share is not applied.
+Setting both at that count therefore leaves the ceiling, the 70% warning and the log line
+all describing the volume — a declaration that reads like a bound in force while changing no ceiling
+at all. The build log's own line names the bound actually applied, and names the node's share and the
+co-tenant count it divided by only once that share is the one in use. A runtime env has no build cache
+to bound, so the pair does nothing there.
+
+There is a second gate on the same count, in the other direction: the share is refused wherever no
+co-tenant count makes it usable. Both terms it compares are divided by that same count, so on a node
+below `2.25 ×` its reserve no count makes the share usable and the declaration is refused — with the
+reserve at its flat 20 GiB, every node under 200 GiB, that is a node under 45 GiB. A 21 GiB node
+therefore refuses the share at one co-tenant as surely as at a million, and setting the pair on such
+a node changes nothing; the build log says the node's share was unusable rather than passing the
+declaration over in silence.
+
+**That gate bounds the node, not the ceiling, and it does not catch every share too small to serve a
+build.** Strictly above that line the untruncated comparison can never refuse — `80%` of the room
+divided by the count stays above the reserve divided by the same count, however small the absolute
+numbers get — but the line itself is exactly where those two quantities are equal, and the division
+on both sides is integer division. At the line it is therefore the co-tenant count that decides, not
+the node. On a 45 GiB node — exactly `2.25 ×` the reserve — a count of 1, 2, 4, 8, 16, 32
+or 64 installs the share, and 3, 5, 6, 7 or 1000 refuses it, every one of those refusals landing
+between 16 and 53 bytes short of the tie. The same rounding refuses shares above the line wherever the
+two sides are close enough for it to matter: a 46 GiB node declaring 50 million co-tenants resolves to
+a 400-byte ceiling against a 429-byte share of the reserve, and is refused. So the refusal is not a
+function of the node alone — it moves with the co-tenant count and the node's exact byte size — and no
+count-independent description of it holds at the edge.
+
+**The refusal has no lower edge, and the sizes it refuses are not a band.** Nothing here defines a
+byte floor for a working set: what the guard tests is whether the ceiling came out below this
+environment's own share of the node's reserve, and that is a question about the division rather than
+about size. Its refusals are consequently not ordered by size — the 21 GiB node refuses a 204.8 MiB
+ceiling at four co-tenants and a 51.2 MiB one at sixteen, and the 45 GiB node above refuses a 6.7 GiB
+ceiling at three — while the 65.5 MiB share below is installed. The message calls those refusals a
+cache holding no working set, but that is the message's word for the relation, not a size test a
+reader can locate a threshold in: the largest ceiling refused on these figures is over a hundred times
+the smallest one installed. That is why the count stays the operator's responsibility — the guard can
+refuse a share its arithmetic leaves unusable, and it cannot tell you that the share it installs is
+big enough to serve a build.
+
+The sizes this leaves installed are real ones. A 100 GiB node declaring 1000 co-tenants has 80 GiB
+above its reserve, and 80% of a thousandth of that is 68,719,440 bytes — 65.5 MiB — and that share
+*is* installed, because the gate compares it against 20.5 MiB (this environment's thousandth of the
+same reserve) and 65.5 is the larger of the two. The environment then reclaims its cache down to
+65.5 MiB on every build and drops the layers the next build would have used, which is exactly the
+outcome the refusal exists to prevent. No test covers that state: the refusals are exercised on 21 GiB
+and 32 GiB nodes only, so a node above 32 GiB resolving to a ceiling this small installs with nothing
+asserting either way.
+
+The remedy is the declaration and not the bound: since no byte floor is defined above, the judgement
+of what a build is served from is yours to make, and a `buildCacheCoTenants` large enough to divide
+the node's room down below it is a count the node cannot be holding — so lower it, or leave the pair
+unset and keep the volume ceiling. Nothing on erun's side can catch the drift for you —
+the pod's RBAC is namespace-scoped, so it cannot count its co-tenants and check the number against
+reality, which is why the build log names the count it divided by.
+
 The **go build cache** is the other half of that, and it lives on the home volume rather than the
 docker one. It has a bound of its own because the go command's own rule is not one: go evicts entries
 nothing has touched in five days, which is a rule about *recency* with no ceiling, and the five-day
@@ -246,7 +355,7 @@ ERun doesn't ship its own secret-management layer — it uses Kubernetes' native
 | Source | Used by | How |
 |---|---|---|
 | **Kubernetes `Secret` objects in the env's namespace** | Application services | Helm charts in `<tenant>-devops/k8s/<component>/` reference them via `envFrom: secretRef:` or volume mounts. Create them with `kubectl create secret` or template them in your chart. |
-| **OIDC service-account credentials** | Agents calling the erun API | Stored as a `Secret` in the env's namespace; mounted into the Agent's container at deploy time. See [Sign-in](/agent-reference/api-protocol#sign-in-oidc). |
+| **The environment's platform identity** | Agents calling the erun API | `erun init` mints `<tenant>-devops-platform-alias` and the runtime chart mounts it read-only; the entrypoint seeds the pod's cloud config from it at boot. Where the platform will mint the environment an identity of its own, it holds that — its API calls are attributed to the environment, and two envs of one tenant are distinguishable in the audit trail. Where it will not (a tenant on an identity provider erun does not administer, or a host with no signed-in alias to ask with), it holds the **delegating Operator's** own alias instead. `erun init`'s output says which. See [Service-account flow for Agents](/agent-reference/api-protocol#service-account-flow-for-agents). |
 | **Cloud credentials on the host** | The runtime pod (managed-cloud envs only) | When the env opts in via the desktop's env settings, the host's `~/.aws`, `~/.config/gcloud`, etc. are mounted into the pod read-only. |
 | **SSH key** | IDE attach over SSH | A locally-stored public key, injected by the helm chart into the runtime pod. Path configured per env in the desktop. |
 | **Registry auth** | `docker push` from inside the pod | Persisted at `~/.docker/config.json` in the pod's PVC. `erun push` reruns `docker login` interactively on a 401. |

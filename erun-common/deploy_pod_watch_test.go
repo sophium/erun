@@ -256,12 +256,19 @@ func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
 // a cold node reports a large one: kubelet alternates between ErrImagePull and
 // ImagePullBackOff while it retries.
 func pullingPod(name, container, reason, message string) podStatusItem {
+	return pullingPodOfImage(name, container, "", reason, message)
+}
+
+// pullingPodOfImage is pullingPod with the image kubelet reports the container
+// is using, which `kubectl get pods -o json` carries in
+// status.containerStatuses[].image for a container still waiting on its pull.
+func pullingPodOfImage(name, container, image, reason, message string) podStatusItem {
 	pod := podStatusItem{}
 	pod.Metadata.Name = name
 	pod.Status.Phase = "Pending"
 	pod.Status.Conditions = []podConditionEntry{{Type: "PodScheduled", Status: "True"}}
 	pod.Status.ContainerStatuses = []containerStatusEntry{
-		{Name: container, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
+		{Name: container, Image: image, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
 	}
 	return pod
 }
@@ -275,17 +282,27 @@ func pullingPod(name, container, reason, message string) podStatusItem {
 // The terminal image-pull rejection is the case that must NOT be reported as
 // progress: the watcher aborts on it and carries the registry's own message,
 // and describing a refused image as a slow one would misstate the failure.
+//
+// Each entry also names the image being pulled, because the two reasons a wait
+// can expire mid-pull need opposite answers and the container name alone does
+// not separate them: a legitimately slow cold pull is answered by a longer
+// deploy.timeout, an unpublished tag by deploying the right one. A container
+// status that carries no image keeps the bare locator rather than an empty
+// parenthesis.
 func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
 	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
 	pods := []podStatusItem{
-		pullingPod("team-devops-abc", "erun-devops", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
-		pullingPod("team-devops-def", "erun-dind", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
+		pullingPodOfImage("team-devops-abc", "erun-devops", "ghcr.io/sophium/erun-devops:1.0.296", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
+		pullingPodOfImage("team-devops-def", "erun-dind", "ghcr.io/sophium/erun-dind:1.0.296", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
 		rejected,
+		pullingPod("team-devops-mno", "erun-devops", "ImagePullBackOff", "Back-off pulling image"),
 		scheduledPod("team-devops-jkl"),
 	}
 
 	got := strings.Join(pullingContainers(pods), ",")
-	want := "team-devops-abc/erun-devops,team-devops-def/erun-dind"
+	want := "team-devops-abc/erun-devops (ghcr.io/sophium/erun-devops:1.0.296)," +
+		"team-devops-def/erun-dind (ghcr.io/sophium/erun-dind:1.0.296)," +
+		"team-devops-mno/erun-devops"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}

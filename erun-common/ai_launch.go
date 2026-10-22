@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -114,8 +115,31 @@ func resolveAvailableClaudeModel(config EnvironmentClaudeConfig) string {
 }
 
 // claudeModelTokenPattern guards a persisted model name so it can only reach the
-// launch script as a plain argv token, never shell or flag syntax.
-var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/-]+$`)
+// launch script as a plain argv token, never shell or flag syntax. The first
+// character excludes '-': a value such as `--dangerously-skip-permissions` is
+// made of allowed characters and would otherwise reach `--model` as a flag.
+var claudeModelTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:/][A-Za-z0-9._:/-]*$`)
+
+// ValidateClaudeModelID reports whether id is a model id a launch can pass:
+// letters, digits and . _ : / -, never starting with -.
+func ValidateClaudeModelID(id string) error {
+	if !claudeModelTokenPattern.MatchString(id) {
+		return fmt.Errorf("invalid model %q: a model id is letters, digits and . _ : / -, and cannot start with -", id)
+	}
+	return nil
+}
+
+// ClaudeEffortLevels returns the selectable effort levels in ascending order.
+// A fresh copy, so a caller offering them as choices cannot reorder the source.
+func ClaudeEffortLevels() []string {
+	out := make([]string, len(claudeEffortLevels))
+	copy(out, claudeEffortLevels)
+	return out
+}
+
+// DefaultClaudeEffortLevel is the effort a session launches with when nothing
+// chose one.
+const DefaultClaudeEffortLevel = defaultClaudeEffort
 
 // AISessionLaunchCommand returns the shell command the AI tab's persistent
 // remote session runs as its program — for claude, a guard that resumes the
@@ -229,15 +253,18 @@ var claudeSessionNameTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._
 //
 // The gateway credential is deliberately absent here. A launch command's argv
 // is visible to anything that can list processes, so the token reaches the pod
-// through Claude Code's settings env block instead — see OpenRouterConfig.
-// AuthTokenRef. Only non-secret routing values belong in this prefix.
+// as the container's ANTHROPIC_AUTH_TOKEN, read from the gateway Secret that
+// deploy writes from OpenRouterConfig.AuthTokenRef. Only non-secret routing
+// values belong in this prefix.
 func claudeLaunchEnvPrefix(claude EnvironmentClaudeConfig, gateway *OpenRouterConfig) string {
 	model := resolveClaudeLaunchModel(claude, gateway)
 	if model == "" {
 		return ""
 	}
 	prefix := "CLAUDE_CODE_SUBAGENT_MODEL=" + model + " "
-	if context := gateway.ContextFor(model); context > 0 {
+	// Through the opt-out: an environment that left the gateway is not running
+	// the catalog's model, even when its own choice shares a catalog id.
+	if context := EffectiveGateway(claude, gateway).ContextFor(model); context > 0 {
 		prefix = "CLAUDE_CODE_MAX_CONTEXT_TOKENS=" + strconv.Itoa(context) + " " + prefix
 	}
 	return prefix
@@ -254,4 +281,21 @@ func claudeEffortFlags(effort string) string {
 		return " --effort " + effort
 	}
 	return ""
+}
+
+// ClaudeBackgroundEffort splits a resolved effort level between the two places
+// a Claude background session carries it: settings keys, which the session
+// re-reads on every restart, and launch flags, which only a recreated session
+// picks up. The effortLevel setting rejects "max" (and ignores the effort
+// environment variable), so that one level stays a flag.
+func ClaudeBackgroundEffort(effort string) (map[string]any, []string) {
+	switch {
+	case effort == claudeEffortUltracode:
+		return map[string]any{"ultracode": true}, nil
+	case effort == "max":
+		return map[string]any{}, []string{"--effort", "max"}
+	case validClaudeEffort(effort):
+		return map[string]any{"effortLevel": effort}, nil
+	}
+	return map[string]any{}, nil
 }

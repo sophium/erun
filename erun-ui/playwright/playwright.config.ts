@@ -105,8 +105,16 @@ export default defineConfig({
   // redirects its artifacts through ERUN_PLAYWRIGHT_ARTIFACTS_DIR must not
   // leave the HTML report behind in the tree it was told to stay out of.
   outputDir: artifactPath(TEST_RESULTS_DIRNAME),
+  // The third reporter is a legibility surface, not a results one: a browser
+  // that dies at launch is reported by Playwright as a cause-free generic,
+  // charged to whichever spec happened to ask for the worker's browser first,
+  // with the diagnosis (the browser's own stderr and its process-exit line)
+  // buried several lines down the error. reporters/browserLaunchFailure.ts
+  // re-states that death as its own block, led by the cause, so it is not
+  // quoted away by its first line — see that file's own header.
   reporter: [
     ['list'],
+    ['./reporters/browserLaunchFailure.ts'],
     ['html', { open: 'never', outputFolder: artifactPath(PLAYWRIGHT_REPORT_DIRNAME) }],
   ],
   // Windows runs the heavier full Chromium build (see the chromium project) and

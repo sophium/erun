@@ -46,10 +46,14 @@ test('a failed pending-helm recovery announces as an alert, not a status update'
   const drawer = app.activityDrawer.locator();
   const card = drawer.locator('article').filter({ hasText: 'petios/rihards-recovery' }).first();
   const recoverButton = card.getByRole('button', { name: 'Clear pending helm release' });
+  // waitFor (not expect) so the staged card's render converges against the
+  // enclosing test's own budget rather than expect's fixed one.
+  await recoverButton.waitFor({ state: 'visible' });
   await expect(recoverButton).toBeVisible();
   await recoverButton.click();
 
   const alert = drawer.getByRole('alert').filter({ hasText: 'Recovery failed' });
+  await alert.waitFor({ state: 'visible' });
   await expect(alert).toBeVisible();
   await expect(alert).toContainText('activity not found');
   // The drawer's other role="status" region (the live status announcer) must

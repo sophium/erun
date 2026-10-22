@@ -161,10 +161,13 @@ test.describe('titlebar message centre layout and bulk clear', () => {
     await app.titlebar.closeMessageCenter();
     await expect(warningIcon).toHaveCount(0);
 
-    // Cleared, not deleted: the history fallback replaces the (now empty)
-    // icon row, and both messages are still listed in the dialog.
-    await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
-    await app.titlebar.openMessageHistory();
+    // Cleared, not deleted: the centre stays reachable and both messages are
+    // still listed in the dialog. Reached through whichever entry point the
+    // titlebar is offering -- this spec cleared its own two classes, but a
+    // notice another spec left arriving in this worker's page is a class it
+    // never raised, and an unread class suppresses the history fallback.
+    await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
+    await app.titlebar.openMessageCenterFromTitlebar();
     await expect(app.titlebar.messageCenterRow('Scoped clear: error message.')).toBeVisible();
     await expect(app.titlebar.messageCenterRow('Scoped clear: warning message.')).toBeVisible();
   });
@@ -196,9 +199,12 @@ test.describe('titlebar message centre layout and bulk clear', () => {
 
     await expect(errorIcon).toHaveCount(0);
     await expect(warningIcon).toHaveCount(0);
-    await expect(app.titlebar.messageCenterHistoryButton()).toBeVisible();
+    // Same reachability invariant as the scoped-clear case above: the class
+    // icons this spec raised are gone, and the centre must still be reachable
+    // through whatever entry point the titlebar offers in their place.
+    await expect(app.titlebar.messageCenterEntryPoint()).toBeVisible();
 
-    await app.titlebar.openMessageHistory();
+    await app.titlebar.openMessageCenterFromTitlebar();
     await expect(app.titlebar.messageCenterRow('Combined probe: error.')).toBeVisible();
     await expect(app.titlebar.messageCenterRow('Combined probe: warning.')).toBeVisible();
   });

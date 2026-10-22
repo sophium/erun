@@ -1,6 +1,9 @@
 import { expect, type Page } from '@playwright/test';
 
-import { expectDialogContentStaysWithinCard } from '../../../fixtures/boundingBox.js';
+import {
+  boundingBoxOf,
+  expectDialogContentStaysWithinCard,
+} from '../../../fixtures/boundingBox.js';
 import { test } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ORCHESTRATOR, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
@@ -43,8 +46,8 @@ test.describe('dialog content stays within its own card', () => {
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
     await app.orchestratorDialog.waitForOpen('Edit orchestrator');
     // The seeded orchestrator already renders a real, long CLAUDE.<id>.md
-    // guidance path and a real conversation UUID — the exact "long unbreakable
-    // value" shape that reproduced the defect, with no stubbing required.
+    // guidance path — the exact "long unbreakable value" shape that reproduced
+    // the defect, with no stubbing required.
     await expectDialogContentStaysWithinCard(
       app.orchestratorDialog.locator('Edit orchestrator'),
       'Edit orchestrator dialog',
@@ -53,14 +56,12 @@ test.describe('dialog content stays within its own card', () => {
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');
   });
 
-  test('Edit orchestrator dialog: a long Windows-style path and a UUID both stay within the card', async ({
+  test('Edit orchestrator dialog: a long Windows-style path stays within the card', async ({
     app,
     page,
   }) => {
     // Direct coverage for the issue's own validation case: an unbroken,
-    // backslash-separated Windows path with no space to wrap on, alongside
-    // the conversation section's real UUID — proving the fix holds
-    // independently of which unbreakable token is present.
+    // backslash-separated Windows path with no space to wrap on.
     const longWindowsPath =
       'C:\\Users\\operator\\workspaces\\' + 'project-segment-'.repeat(8) + 'repo';
     await stubOrchestratorEnvCandidate(page, {
@@ -140,7 +141,7 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
 
 // The vertical half of the same contract, which the width checks above cannot
 // see: the Edit orchestrator form carries the linked environments, the
-// orchestrator's own directories, its conversations and its guidance, and at a
+// orchestrator's own directories and its guidance, and at a
 // short window that outgrows the viewport. With no height bound on the panel the
 // footer — and with it Save — sat half off the bottom edge, so the dialog looked
 // like it simply would not save: no call was made, no error was shown, and
@@ -148,19 +149,15 @@ test.describe('dialog content stays within its own card — deviceScaleFactor 1.
 // footer stays fully on screen.
 test.describe('dialog footer stays reachable at a short window height', () => {
   test('the Edit orchestrator Save button is fully within the viewport', async ({ app, page }) => {
-    await page.setViewportSize({ width: 1280, height: 520 });
+    const viewportHeight = 520;
+    await page.setViewportSize({ width: 1280, height: viewportHeight });
     await app.sidebar.openOrchestratorDialog(SEED_ORCHESTRATOR);
     await app.orchestratorDialog.waitForOpen('Edit orchestrator');
 
     const save = app.orchestratorDialog.saveButton();
     await expect(save).toBeVisible();
-    const box = await save.boundingBox();
-    const viewport = page.viewportSize();
-    expect(box).not.toBeNull();
-    expect(viewport).not.toBeNull();
-    if (box && viewport) {
-      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
-    }
+    const box = await boundingBoxOf(save, 'the Edit orchestrator Save button');
+    expect(box.y + box.height).toBeLessThanOrEqual(viewportHeight);
 
     await app.orchestratorDialog.cancel('Edit orchestrator');
     await app.orchestratorDialog.waitForClosed('Edit orchestrator');

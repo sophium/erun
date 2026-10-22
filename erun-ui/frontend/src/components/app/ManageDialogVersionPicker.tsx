@@ -94,6 +94,19 @@ export function RuntimeDeployVersionPicker({
           // clipped the last components and the dialog buttons on shorter windows).
           className="max-h-[var(--radix-popover-content-available-height)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto p-0"
           align="start"
+          // This panel is a working surface, not a menu, so focus leaving it is
+          // routine rather than a dismissal: the operator tabs to the version
+          // field, clicks a chart checkbox, or presses a button that disables
+          // itself — and the dialog's focus scope then re-focuses the dialog
+          // container on the re-render that follows, which is a focusin outside
+          // this subtree. Radix reads any of those as "dismiss", so the panel
+          // would vanish under the operator mid-task. Preventing the focus-out
+          // dismissal keeps the panel open until it is actually closed — its own
+          // trigger, Escape, a click elsewhere (that is the pointer path, which
+          // still dismisses), or the dialog closing.
+          onFocusOutside={(event) => {
+            event.preventDefault();
+          }}
         >
           <Command>
             <CommandInput placeholder="Search versions..." />

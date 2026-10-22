@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 // #1230: the review panel used to flatten every MCP-unreachable LoadDiff
@@ -15,18 +15,39 @@ import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../../../fixtures/se
 // erun-ui/mcp_errors.go now emits (mcpUnreachableKindMarkers) rather than
 // driving a real unreachable MCP edge, matching the stubbing pattern already
 // used by orchestrator-cross-env-diff.spec.ts for this same RPC.
+//
+// Every status and alert asserted below is the answer to that LoadDiff round
+// trip, and a locator assertion carries no clock of its own: `toBeVisible`,
+// `toHaveCount` and `getByText` resolve to expect's 10s default rather than the
+// budget these tests declare. A read that is merely slow therefore reds the
+// step with the test's own clock unspent -- the class
+// fixtures/erunApp.ts's `withTestBudget` exists for, and what the held-read
+// case at the end of this file reproduces. `withTestBudget()` points each read
+// at the budget its test declared; a read that never converges still fails,
+// now at that deadline.
 
 const NOT_OPEN_MESSAGE =
   'ERUN_MCP_UNREACHABLE_NOT_OPEN: mcp unreachable: no port-forward is listening for pw/env on 127.0.0.1:17999';
 const STALE_MESSAGE =
   'ERUN_MCP_UNREACHABLE_STALE: mcp unreachable: the port-forward for pw/env on 127.0.0.1:17999 is not carrying traffic (the local port is held but the edge never answers) — re-establishing it';
 
-async function stubLoadDiffError(page: Page, message: string): Promise<void> {
+// stubLoadDiffError answers LoadDiff with `message`. holdMs delays the FIRST
+// LoadDiff of the test by a fixed window, so a status that is merely slow can
+// be told apart from one that never converges; anchored to that request's
+// arrival rather than to the stub's registration, so the delay is the same
+// however long the panel took to open. Only the first read is held -- the
+// panel's periodic reload is a separate step with its own convergence.
+async function stubLoadDiffError(page: Page, message: string, holdMs = 0): Promise<void> {
+  let held = false;
   await page.route('**/__erun_invoke', async (route, request) => {
     const body = JSON.parse(request.postData() ?? '{}') as { method?: string };
     if (body.method !== 'LoadDiff') {
       await route.continue();
       return;
+    }
+    if (holdMs && !held) {
+      held = true;
+      await new Promise((resolve) => setTimeout(resolve, holdMs));
     }
     return route.fulfill({
       contentType: 'application/json',
@@ -52,10 +73,14 @@ test.describe('review panel reachability framing (#1230)', () => {
 
     // Not a fault: no role="alert" anywhere, and the informational status
     // names the real situation instead of claiming a connection was lost.
-    await expect(review.errorAlerts()).toHaveCount(0);
+    // Converge on the status LoadDiff's own answer produces before reading the
+    // absences beside it: "no alert rendered yet" and "this is not a fault"
+    // are the same DOM state, so an absence read first would pass on a panel
+    // that had not rendered its answer at all.
     const status = review.reachabilityStatuses().filter({ hasText: 'Environment not running' });
-    await expect(status).toBeVisible();
-    await expect(status.getByRole('button', { name: 'Open' })).toBeVisible();
+    await expect(status).toBeVisible(withTestBudget());
+    await expect(review.errorAlerts()).toHaveCount(0);
+    await expect(status.getByRole('button', { name: 'Open' })).toBeVisible(withTestBudget());
     await expect(status.getByRole('button', { name: 'Reconnect…' })).toHaveCount(0);
   });
 
@@ -74,9 +99,11 @@ test.describe('review panel reachability framing (#1230)', () => {
     const review = app.reviewPanel;
 
     const alert = review.errorAlerts();
-    await expect(alert).toHaveCount(1);
-    await expect(alert.getByText('Cannot reach the environment runtime')).toBeVisible();
-    await expect(alert.getByRole('button', { name: 'Reconnect…' })).toBeVisible();
+    await expect(alert).toHaveCount(1, withTestBudget());
+    await expect(alert.getByText('Cannot reach the environment runtime')).toBeVisible(
+      withTestBudget(),
+    );
+    await expect(alert.getByRole('button', { name: 'Reconnect…' })).toBeVisible(withTestBudget());
     await expect(alert.getByRole('button', { name: 'Open' })).toHaveCount(0);
   });
 
@@ -97,8 +124,8 @@ test.describe('review panel reachability framing (#1230)', () => {
     // Both surfaces are visible at once here -- no collapseChangedFilesSection()
     // -- which is exactly the layout that used to render two copies of the
     // same alert (#1230).
-    await expect(review.changedFilesTree()).toBeVisible();
-    await expect(review.errorAlerts()).toHaveCount(1);
+    await expect(review.changedFilesTree()).toBeVisible(withTestBudget());
+    await expect(review.errorAlerts()).toHaveCount(1, withTestBudget());
   });
 
   test('the changed-files aside does not duplicate the informational not-open status either', async ({
@@ -115,10 +142,10 @@ test.describe('review panel reachability framing (#1230)', () => {
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
-    await expect(review.changedFilesTree()).toBeVisible();
+    await expect(review.changedFilesTree()).toBeVisible(withTestBudget());
     await expect(
       review.reachabilityStatuses().filter({ hasText: 'Environment not running' }),
-    ).toHaveCount(1);
+    ).toHaveCount(1, withTestBudget());
   });
 
   test('clicking Open surfaces honest copy for the stopped case, not the "restore the connection" fault script', async ({
@@ -141,10 +168,14 @@ test.describe('review panel reachability framing (#1230)', () => {
       .getByRole('button', { name: 'Open' })
       .click();
 
+    // The dialog is this click's own effect, so it converges on the budget the
+    // test declared rather than on expect's 10s default.
     const dialog = page.getByRole('dialog', { name: 'Open environment?' });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByText('This runs `erun open` to start the environment.')).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Open' })).toBeVisible();
+    await expect(dialog).toBeVisible(withTestBudget());
+    await expect(dialog.getByText('This runs `erun open` to start the environment.')).toBeVisible(
+      withTestBudget(),
+    );
+    await expect(dialog.getByRole('button', { name: 'Open' })).toBeVisible(withTestBudget());
   });
 
   test('clicking Reconnect… surfaces honest copy for the fault case, not a redeployment the reconnect cannot perform', async ({
@@ -167,10 +198,12 @@ test.describe('review panel reachability framing (#1230)', () => {
     // environment and never deploys, so that was a recovery it could not
     // perform at all.
     const dialog = page.getByRole('dialog', { name: 'Reconnect to environment?' });
-    await expect(dialog).toBeVisible();
+    await expect(dialog).toBeVisible(withTestBudget());
     await expect(dialog).not.toContainText('it will be redeployed');
     await expect(dialog).toContainText('It reattaches to the environment runtime');
-    await expect(dialog.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible(
+      withTestBudget(),
+    );
   });
 });
 
@@ -286,21 +319,61 @@ test.describe('review panel reconnect targeting in an orchestrator session (#123
     await app.reviewPanel.waitForOpen();
     const review = app.reviewPanel;
 
-    await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible();
-    await expect(review.envSectionHeader(BETA_ENV_KEY)).toBeVisible();
+    // Both sections are rendered from the orchestrator snapshot plus each
+    // environment's own LoadDiff answer, so each read is a round trip rather
+    // than a render that has already happened.
+    await expect(review.envSectionHeader(ALPHA_ENV_KEY)).toBeVisible(withTestBudget());
+    await expect(review.envSectionHeader(BETA_ENV_KEY)).toBeVisible(withTestBudget());
 
     const alphaStatus = review
       .reachabilityStatuses()
       .filter({ hasText: 'Environment not running' });
-    await expect(alphaStatus).toBeVisible();
+    await expect(alphaStatus).toBeVisible(withTestBudget());
     await alphaStatus.getByRole('button', { name: 'Open' }).click();
 
     const dialog = page.getByRole('dialog', { name: 'Open environment?' });
-    await expect(dialog).toBeVisible();
+    await expect(dialog).toBeVisible(withTestBudget());
     await dialog.getByRole('button', { name: 'Open' }).click();
 
+    // The recorded call is this click's own effect, one confirm away.
     await expect
-      .poll(() => reconnectCalls)
+      .poll(() => reconnectCalls, withTestBudget())
       .toEqual([{ tenant: SEED_TENANT, environment: SEED_ENV_ALPHA }]);
+  });
+
+  // The status and its action are the answer to a LoadDiff round trip, and the
+  // assertions on them carry no timeout of their own: `toBeVisible` and
+  // `toHaveCount` resolve to expect's 10s default rather than the budget this
+  // test declares. Under contention a read that is merely slow therefore reds
+  // the step with the test's own clock almost entirely unspent, which is how a
+  // loaded builder turns into a failing branch nobody touched.
+  //
+  // The hold below is deliberately just past that 10s default: the smallest
+  // delay that discriminates, so the suite pays seconds here rather than the
+  // tens a genuinely loaded machine would. Pre-fix this case reds at exactly
+  // 10_000ms with 20s of its own budget unused; with the read pointed at that
+  // budget it passes at the read's real arrival. The delay is injected at a
+  // named RPC (this spec's own LoadDiff stub) rather than by loading the
+  // machine, so the reproduction is deterministic on a quiet host.
+  test('a reachability status that lands past the step cap is waited out, not cut off', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // 60s, not the suite's 30s default: this case deliberately spends 12s of
+    // its own budget holding the read above, so the default is not a clock for
+    // the scenario -- it is a clock for the scenario minus the delay this case
+    // exists to introduce. Same pairing the sibling held-read cases use.
+    test.setTimeout(60_000);
+    await stubLoadDiffError(page, NOT_OPEN_MESSAGE, 12_000);
+    await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
+    await app.titlebar.toggleReviewPanel();
+    await app.reviewPanel.waitForOpen();
+
+    const status = app.reviewPanel
+      .reachabilityStatuses()
+      .filter({ hasText: 'Environment not running' });
+    await expect(status).toBeVisible(withTestBudget());
+    await expect(status.getByRole('button', { name: 'Open' })).toBeVisible(withTestBudget());
   });
 });

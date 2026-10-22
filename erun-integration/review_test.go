@@ -66,6 +66,15 @@ func reviewAPIStubServer(t testing.TB) *httptest.Server {
 			"name":       body["name"], "targetBranch": body["targetBranch"], "sourceBranch": body["sourceBranch"],
 			"status": "OPEN", "createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
 		}
+		// A declared issue is echoed the way the real API answers it: the
+		// reference the caller stated, and DECLARED as where it came from.
+		// Nothing here derives one from the source branch -- that is the
+		// real API's job, and a stub inventing it would hide a client that
+		// sent no issueRef at all.
+		if strings.TrimSpace(body["issueRef"]) != "" {
+			review["issueRef"] = body["issueRef"]
+			review["issueRefSource"] = "DECLARED"
+		}
 		reviews[id] = review
 		reviewOrder = append(reviewOrder, id)
 		w.WriteHeader(http.StatusCreated)
@@ -524,6 +533,47 @@ func TestReview(t *testing.T) {
 		}
 	})
 
+	// The reported failure: `--repository sophium/erun` names a repository on
+	// whichever forge the caller had in mind, so the platform answered it with
+	// the subset of rows a caller had once recorded under that same shorthand
+	// -- a silently short listing for a repository holding many reviews. It is
+	// refused as a bad argument, like a mistyped --status, and equally before
+	// the alias lookup: no alias is configured here on purpose.
+	t.Run("list_refuses_a_repository_that_names_no_repository", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"review", "list", "--repository", "sophium/erun"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("a --repository that names no repository must not list, got:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "no reviews") {
+			t.Fatalf("a --repository that names no repository must not be reported as an empty listing, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "git remote get-url origin") {
+			t.Fatalf("expected the refusal to name the form to pass instead, not an alias-resolution failure, got:\n%s", result.Combined)
+		}
+	})
+
+	// The other half: whichever spelling of the repository's own remote the
+	// caller holds reaches the rows the other spelling recorded. The stub
+	// matches the filter exactly, so a client that stopped canonicalizing
+	// would answer empty here.
+	t.Run("list_finds_a_repository_by_any_spelling_of_its_remote", func(t *testing.T) {
+		setup := env.New(t)
+		server := reviewAPIStubServer(t)
+		platformAlias(t, setup, server)
+		createReviewJSON(t, setup, "Add widget", "feature/widget", "main")
+
+		for _, spelling := range []string{"git@github.com:sophium/erun.git", "https://github.com/sophium/erun"} {
+			result := erun.Run(t, []string{"review", "list", "--repository", spelling}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if result.ExitCode != 0 {
+				t.Fatalf("review list --repository %s exit %d:\n%s", spelling, result.ExitCode, result.Combined)
+			}
+			if !strings.Contains(result.Combined, "Add widget") {
+				t.Fatalf("review list --repository %s did not find the review recorded under the same repository's other remote:\n%s", spelling, result.Combined)
+			}
+		}
+	})
+
 	// The refusal is a bad-argument error, so it must not depend on the platform
 	// being configured at all: a caller with no alias still learns their filter
 	// was wrong rather than being sent to set up an alias that would not help.
@@ -550,6 +600,21 @@ func TestReview(t *testing.T) {
 		golden.Equal(t, "review/create_dry_run", normalize.Apply(result.Combined))
 	})
 
+	// --issue is recorded, and recorded as declared: the trace has to name
+	// the reference, or a mistyped flag reads as a link the platform took.
+	t.Run("create_with_issue_dry_run", func(t *testing.T) {
+		setup := env.New(t)
+		seedERunCloudProviderAlias(t, setup, "erun+test@erun", "https://api.example.test", "cli-test-client")
+		args := []string{"review", "create", "--name", "Add widget", "--repository", reviewRepository,
+			"--source-branch", "bug/2212-issue-ref-from-branch", "--target-branch", "main",
+			"--issue", "sophium/erun#2683", "--dry-run"}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "review/create_with_issue_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("full_lifecycle_real_run", func(t *testing.T) {
 		// create -> list -> show -> comment -> reply -> close -> list again,
 		// against the real stub server, covering every review/comment
@@ -560,19 +625,29 @@ func TestReview(t *testing.T) {
 
 		create := erun.Run(t, []string{
 			"review", "create", "--name", "Add widget", "--repository", reviewRepository,
-			"--source-branch", "feature/widget", "--target-branch", "main", "--output", "json",
+			"--source-branch", "feature/widget", "--target-branch", "main",
+			"--issue", "sophium/erun#2683", "--output", "json",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if create.ExitCode != 0 {
 			t.Fatalf("create exit %d: %s", create.ExitCode, create.Combined)
 		}
 		var created struct {
-			ReviewID string `json:"reviewId"`
+			ReviewID       string `json:"reviewId"`
+			IssueRef       string `json:"issueRef"`
+			IssueRefSource string `json:"issueRefSource"`
 		}
 		if err := json.Unmarshal([]byte(create.Stdout), &created); err != nil {
 			t.Fatalf("decode create --output json: %v\n%s", err, create.Stdout)
 		}
 		if created.ReviewID == "" {
 			t.Fatalf("expected a non-empty reviewId, got:\n%s", create.Stdout)
+		}
+		// The declared issue travels the whole way: --issue into the request
+		// body, and the platform's answer back out through the shared client
+		// as a DECLARED link rather than one re-derived from the branch.
+		if created.IssueRef != "sophium/erun#2683" || created.IssueRefSource != "DECLARED" {
+			t.Fatalf("create --issue reported issueRef=%q issueRefSource=%q, want the declared link it recorded, got:\n%s",
+				created.IssueRef, created.IssueRefSource, create.Stdout)
 		}
 
 		list := erun.Run(t, []string{"review", "list", "--source-branch", "feature/widget"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -592,6 +667,9 @@ func TestReview(t *testing.T) {
 		show := erun.Run(t, []string{"review", "show", created.ReviewID}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if show.ExitCode != 0 || !strings.Contains(show.Combined, "nit: rename this") {
 			t.Fatalf("show exit %d: %s", show.ExitCode, show.Combined)
+		}
+		if !strings.Contains(show.Combined, "issue=sophium/erun#2683 (declared)") {
+			t.Fatalf("show did not render the review's declared issue, got:\n%s", show.Combined)
 		}
 		if !strings.Contains(show.Combined, "comments: 1") {
 			t.Fatalf("expected show to report one comment, got:\n%s", show.Combined)

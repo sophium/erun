@@ -1,8 +1,6 @@
 import {
-  AttachOrchestratorConversation,
   CreateOrchestrator,
   DeleteOrchestrator,
-  DetachOrchestratorConversation,
   InvestigateFailure,
   ListOrchestrators,
   ReportBugFailure,
@@ -11,7 +9,6 @@ import {
   RestartOrchestrator,
   RevealOrchestratorGuidance,
   StartOrchestrator,
-  StartOrchestratorWithResume,
   StopOrchestrator,
   UpdateOrchestrator,
 } from '../../wailsjs/go/main/App';
@@ -22,15 +19,16 @@ import { readError } from './errors';
 import type { IDEKind, OrchestratorGuidanceLayer } from './model';
 import { showNotification } from './notificationThunks';
 import { planOrchestratorBusySeed } from './orchestratorBusySeed';
-import { planOrchestratorRestore, readRestoreNotices } from './orchestratorRestore';
+import { planOrchestratorRestore } from './orchestratorRestore';
 import { planOrchestratorShellSeed } from './orchestratorShellActivitySeed';
 import { setAIBusyForSession } from './slices/aiActivitySlice';
 import { setShellActivityForSession } from './slices/orchestratorShellActivitySlice';
 import {
   closeOrchestratorDialog,
+  type OrchestratorAlias,
   type OrchestratorEnvRef,
   type OrchestratorInfo,
-  setOrchestratorRestoreNotices,
+  type OrchestratorLaunchSettings,
   setOrchestrators,
   setOrchestratorsBusy,
   setOrchestratorsError,
@@ -91,13 +89,20 @@ export const loadOrchestrators = (): AppThunk<Promise<void>> => async (dispatch)
 
 // createOrchestrator persists a new orchestrator linking the chosen agent
 // environments (each with the host directory it is reviewed in) plus the
-// directories of its own, and closes the dialog.
+// directories of its own, the platform alias it declares as its own and its
+// launch settings, and closes the dialog.
 export const createOrchestrator =
-  (name: string, envs: OrchestratorEnvRef[], directories: string[]): AppThunk<Promise<void>> =>
+  (
+    name: string,
+    envs: OrchestratorEnvRef[],
+    directories: string[],
+    alias: OrchestratorAlias,
+    launch: OrchestratorLaunchSettings,
+  ): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await CreateOrchestrator(name, envs, directories);
+      await CreateOrchestrator(name, envs, directories, alias, launch);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));
@@ -107,18 +112,23 @@ export const createOrchestrator =
   };
 
 // updateOrchestrator edits an existing orchestrator's linked environments, its
-// own directories, and its name.
+// own directories, its name, the platform alias it declares as its own, and
+// its launch settings. Every field is sent, not only the changed one: the
+// backend replaces the whole definition, so an omitted field is erased rather
+// than left alone.
 export const updateOrchestrator =
   (
     id: string,
     name: string,
     envs: OrchestratorEnvRef[],
     directories: string[],
+    alias: OrchestratorAlias,
+    launch: OrchestratorLaunchSettings,
   ): AppThunk<Promise<void>> =>
   async (dispatch) => {
     dispatch(setOrchestratorsBusy(true));
     try {
-      await UpdateOrchestrator(id, name, envs, directories);
+      await UpdateOrchestrator(id, name, envs, directories, alias, launch);
       dispatch(closeOrchestratorDialog());
       await dispatch(loadOrchestrators());
       dispatch(setOrchestratorsBusy(false));
@@ -166,44 +176,10 @@ export const restartOrchestrator =
     }
   };
 
-// attachOrchestratorConversation points an orchestrator at a conversation the
-// operator picked and lands them in it: the session restarts there and the
-// choice is remembered, so later launches honour it rather than recomputing the
-// default. The dialog closes because the terminal pane is where the result of
-// this is — a dialog left open over the session it just replaced hides the one
-// thing the operator asked for.
-export const attachOrchestratorConversation =
-  (id: string, conversationId: string): AppThunk<Promise<void>> =>
-  async (dispatch) => {
-    try {
-      const info = await AttachOrchestratorConversation(id, conversationId, 80, 24);
-      dispatch(closeOrchestratorDialog());
-      dispatch(focusOrchestratorSession(info.sessionId));
-      await dispatch(loadOrchestrators());
-    } catch (error) {
-      dispatch(setOrchestratorsError(readError(error)));
-    }
-  };
-
-// detachOrchestratorConversation drops an explicit choice and restarts the
-// orchestrator on whatever it resolves to on its own.
-export const detachOrchestratorConversation =
-  (id: string): AppThunk<Promise<void>> =>
-  async (dispatch) => {
-    try {
-      const info = await DetachOrchestratorConversation(id, 80, 24);
-      dispatch(closeOrchestratorDialog());
-      dispatch(focusOrchestratorSession(info.sessionId));
-      await dispatch(loadOrchestrators());
-    } catch (error) {
-      dispatch(setOrchestratorsError(readError(error)));
-    }
-  };
-
-// restartApp relaunches the desktop app and asks it to reopen the given
-// orchestrator on the way back up (empty id just restarts). The backend records
-// which conversation is live and hands it back its task on resume, so a restart
-// taken to pick up a rebuild continues rather than idling.
+// restartApp relaunches the desktop app and asks it to give the given
+// orchestrator the terminal pane on the way back up (empty id just restarts).
+// Orchestrators run as background agents, so the restart does not interrupt
+// them: the new desktop reattaches each one.
 export const restartApp =
   (returnToOrchestratorId: string): AppThunk<Promise<void>> =>
   async (dispatch) => {
@@ -215,34 +191,21 @@ export const restartApp =
   };
 
 // restoreOpenOrchestrators reopens every orchestrator this launch should come
-// back to — everything that was open when the desktop last ran, or a restart's
-// hand-off plus everything else that was open alongside it — and returns
+// back to — everything that was open when the desktop last ran — and returns
 // whether one of them ended up owning the terminal pane, so the caller (boot)
 // can skip the default environment selection. The pane is single but the
 // restored set is not: exactly one orchestrator (the restart hand-off's target,
-// or the most recently (re)started one) owns it, resumes its conversation and
-// clears the env selection — otherwise boot's default selection and the
-// selection-sync middleware would reconcile the terminal back to an
-// environment — while every other orchestrator in the set is started too but
-// left idle, off the pane, so the tab strip and the live sessions agree instead
-// of a tab surviving with no session behind it. Only the pane owner can carry a
-// resume prompt, so a plain launch resumes every restored orchestrator idle; a
-// restart hand-off's prompt auto-runs for the one orchestrator it named, never
-// for the rest of the set. A refused hand-off still reopens its orchestrator
-// and surfaces the backend's notice beside the orchestrator list, each at its
-// own kind, so a resume that declined to continue is never silent and never
-// reads at the same severity as the routine case beside it. Which conversation each
-// orchestrator resumes is the backend's call, not a re-derivation here: this
-// thunk just resumes whatever conversationId the target names, or starts
-// fresh when none was resolved.
+// or the most recently (re)started one) owns it and clears the env selection —
+// otherwise boot's default selection and the selection-sync middleware would
+// reconcile the terminal back to an environment — while every other
+// orchestrator in the set is reopened too, off the pane, so the tab strip and
+// the live sessions agree instead of a tab surviving with no session behind it.
+// Each one reattaches to its own background agent, on whatever conversation
+// that agent is on.
 export const restoreOpenOrchestrators =
   (): AppThunk<Promise<boolean>> => async (dispatch, getState) => {
     try {
       const target = await ResolveOrchestratorToReopen();
-      const notices = readRestoreNotices(target);
-      if (notices.length > 0) {
-        dispatch(setOrchestratorRestoreNotices(notices));
-      }
       const { primary, alsoReopen } = planOrchestratorRestore(
         target,
         getState().orchestrators.items,
@@ -251,16 +214,9 @@ export const restoreOpenOrchestrators =
         return false;
       }
 
-      for (const ref of alsoReopen) {
+      for (const id of alsoReopen) {
         try {
-          // A resolved conversation id resumes exactly that conversation; its
-          // absence means the backend found nothing safe to resume, so this
-          // orchestrator starts fresh instead.
-          if (ref.conversationId) {
-            await StartOrchestratorWithResume(ref.orchestratorId, ref.conversationId, '', 80, 24);
-          } else {
-            await StartOrchestrator(ref.orchestratorId, 80, 24);
-          }
+          await StartOrchestrator(id, 80, 24);
         } catch (error) {
           dispatch(setOrchestratorsError(readError(error)));
         }
@@ -268,21 +224,7 @@ export const restoreOpenOrchestrators =
 
       let restoredPane = false;
       if (primary) {
-        // A resolved conversation id resumes exactly that conversation — with
-        // the resume prompt handed to it so a rebuild+restart continues on its
-        // own instead of idling, or with none for a plain launch that just
-        // lands the operator back where they were. Its absence means the
-        // backend found nothing safe to resume, so this orchestrator starts
-        // fresh instead of a re-derivation that could land on the wrong one.
-        const info = primary.conversationId
-          ? await StartOrchestratorWithResume(
-              primary.id,
-              primary.conversationId,
-              primary.resumePrompt,
-              80,
-              24,
-            )
-          : await StartOrchestrator(primary.id, 80, 24);
+        const info = await StartOrchestrator(primary, 80, 24);
         dispatch(focusOrchestratorSession(info.sessionId));
         restoredPane = true;
       }

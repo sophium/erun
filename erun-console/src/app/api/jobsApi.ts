@@ -11,9 +11,17 @@ import { asOptionalString, asString, isRecord, parseList } from 'erun-kit';
 
 import { platformApi } from './platformApi';
 
-export type JobStatus = 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'ABANDONED' | 'SUPERSEDED' | 'UNKNOWN';
+export type JobStatus =
+  | 'PLANNED'
+  | 'RUNNING'
+  | 'SUCCEEDED'
+  | 'FAILED'
+  | 'ABANDONED'
+  | 'SUPERSEDED'
+  | 'UNKNOWN';
 
 const KNOWN_JOB_STATUSES: JobStatus[] = [
+  'PLANNED',
   'RUNNING',
   'SUCCEEDED',
   'FAILED',

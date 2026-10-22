@@ -1,5 +1,12 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 
+import { injectTestStylesheet } from './testStylesheet';
+
+// The rule hoverOrchestratorBusySpinner freezes the spinner with, and the
+// attribute that keys it so a repeat is a no-op.
+const SPINNER_ANIMATION_OFF_ATTR = 'data-erun-test-spinner-animation-off';
+const SPINNER_ANIMATION_OFF = '.animate-spin { animation: none !important; }';
+
 export class Sidebar {
   constructor(public readonly page: Page) {}
 
@@ -65,17 +72,9 @@ export class Sidebar {
     await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
-  // Delegates to the keyboard path rather than clicking. A mouse click here
-  // hovers the row first, which opens its IconTooltip, and that popper
-  // intercepts the click that was meant for the edit button:
-  //
-  //   <div data-slot="popover-anchor" ...> intercepts pointer events
-  //   Error: locator.click: Test timeout of 30000ms exceeded
-  //
-  // Whether the popper wins the race depends on how loaded the box is, so this
-  // passed alone and failed in the gate (erun#2399). Every caller here asserts
-  // what the dialog contains, not that a mouse specifically opened it, so the
-  // click bought nothing that the race did not cost back.
+  // The name every caller should use; see openManageDialogViaKeyboard for why
+  // the interaction is not a real mouse click. Every caller asserts what the
+  // dialog contains, never which input opened it.
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
     await this.openManageDialogViaKeyboard(tenant, env);
   }
@@ -86,31 +85,75 @@ export class Sidebar {
     await this.page.getByRole('button', { name: `Outputs for ${tenant} / ${env}` }).click();
   }
 
-  // Drive the edit button by keyboard, not mouse: a hover opens the row's
-  // IconTooltip whose popper would intercept the click. Focusing the row makes
-  // the pointer-events-none button interactive; Enter fires it without a hover.
+  // Activate the edit button directly, with neither a mouse nor a key. The
+  // name is historical -- this drove the button by key until the focus
+  // dependency below was removed; openManageDialogFor is the name to call.
   //
-  // Retry the Enter as one retryable unit, the same shape hoverEnvironmentRow
-  // and readEnvHoverCard below use: a boot-reattached env restores its
-  // terminal, which steals focus asynchronously and can swallow the keydown
-  // before the dialog opens. The inner probe stays short so a swallowed
-  // keydown is retried quickly, but the fixed 4-attempt loop this replaced
-  // capped the whole wait at 4x2s regardless of the test's real 30s budget --
-  // under contention a merely slow (not swallowed) render blew that cap and
-  // failed the step with over 20s of budget still unused.
+  // A mouse press is what this cannot use: pressing hovers the row first,
+  // which opens its IconTooltip, and that popper then intercepts the click
+  // meant for the button ("<div data-slot="popover-anchor" ...> intercepts
+  // pointer events"). Driving the button by key instead settled that pointer
+  // race and left a focus race in its place: a boot-reattached env restores its
+  // terminal, which takes focus asynchronously, so the keydown lands on
+  // whatever took it. Re-focusing on every retry makes that a lingering failure
+  // rather than a quick one -- a thief that keeps winning spends the calling
+  // test's whole budget. Neither input is required: the button's own onClick is
+  // the whole of the interaction, and a dispatched click reaches it whether or
+  // not the row is focused or hovered. The button is pointer-events-none
+  // opacity-0 until group-hover/group-focus-within applies, and dispatchEvent
+  // consults neither.
+  //
+  // Retry the activation as one retryable unit, the same shape
+  // hoverEnvironmentRow and readEnvHoverCard below use: the dialog mounts a
+  // render after the click (the store dispatch, then the dialog's own load),
+  // so one probe can still lose to a slow render. The inner probe stays short
+  // so a click that reached nothing is retried quickly, but the fixed
+  // 4-attempt loop this replaced capped the whole wait at 4x2s regardless of
+  // the test's real 30s budget -- under contention a merely slow (not failed)
+  // render blew that cap and failed the step with over 20s of budget still
+  // unused.
   //
   // A bare toPass() is what gives the probe that property, and it is why this
   // one must stay bare: `toPass({ timeout: N })` takes `min(test deadline,
   // now + N)`, so N is a second fixed cap of exactly the kind being replaced --
   // a calling test that declared 60s would still fail the step at N. Any N
   // here is a number the step's own test never chose.
+  //
+  // The activation itself has to be conditional, because the first click is
+  // what removes its own target. Clicking dispatches openManageDialog, which
+  // opens a modal Dialog; a modal marks everything outside it aria-hidden, and
+  // the row's edit button is one of those. `environmentRow` is a role query,
+  // so on the second attempt it resolves to nothing -- and dispatchEvent, like
+  // every locator action, waits for its selector rather than failing, with no
+  // per-action timeout to stop it. An unconditional retry therefore blocks on
+  // attempt 2 for the rest of the test's budget, and because the outer toPass
+  // reports the last attempt that COMPLETED, the red names attempt 1's short
+  // probe: one 2s look at a 30s test, reported as if that were the whole wait.
+  //
+  // So press only while the button is still there to press, and let the rest
+  // of each attempt be the probe. That is what the step actually waits for
+  // once the dialog is up: not a second click, but the config load the first
+  // click started, which is what clears configLoading and renders the tab the
+  // probe looks for. A row that was never pressable at all still fails
+  // outright rather than spinning, and a dialog that never finishes loading
+  // still converges to a red at the caller's own budget.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
     const dialog = this.page
       .getByRole('dialog')
       .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
       .first();
+    let activated = false;
     await expect(async () => {
-      await this.environmentRow(tenant, env).press('Enter');
+      const edit = this.environmentRow(tenant, env);
+      if ((await edit.count()) > 0) {
+        activated = true;
+        await edit.dispatchEvent('click');
+      }
+      if (!activated) {
+        throw new Error(
+          `${tenant} / ${env} has no reachable edit button, so this step would activate nothing`,
+        );
+      }
       await dialog.waitFor({ state: 'visible', timeout: 2_000 });
     }).toPass();
   }
@@ -124,12 +167,16 @@ export class Sidebar {
   // the card is actually up.
   //
   // A bare hover() proves nothing. The card's open state lives in the hovered
-  // row's own React state, so anything that re-renders that row drops it --
-  // most reliably the boot-time auto-open of the default environment landing
-  // while a spec is already hovering, since reboot() deliberately returns
-  // before that has happened. Nothing reopens it either: the pointer never
-  // left the row, so no fresh mouseenter fires. That is why a card lost this
-  // way does not fail the spec quickly but stalls it until its own timeout.
+  // row's own React state, and a release closes it with nothing left to reopen
+  // it: the pointer never left the row, so no fresh mouseenter fires. That is
+  // why a card lost this way does not fail the spec quickly but stalls it
+  // until its own timeout.
+  //
+  // A re-render is not what releases it. The row's two holders are the pointer
+  // and focus, tracked apart in useHoverCardOpenState, and focus leaving the
+  // row was the release that dropped a card out from under a parked pointer
+  // (sidebar-hovercard-focus-loss.spec.ts). The re-hover below is kept as a
+  // convergence device, not as the workaround for that release.
   //
   // Moving the pointer away first and re-hovering until the card is visible
   // converges on the observable condition instead. A row that genuinely raises
@@ -150,14 +197,12 @@ export class Sidebar {
   // `read` as one retryable unit, instead of a bare hover followed by a
   // sequence of independent assertions.
   //
-  // The card's open state belongs to the hovered row's own React state, so a
-  // re-render can drop it while the pointer still rests there -- and nothing
-  // reopens it, since the pointer never left (see hoverEnvironmentRow above).
-  // That re-render is not rare: besides the boot-time auto-open of a
-  // default-landing env, the periodic activity/usage sweep can touch any
-  // environment, not just that one. A sequence of separate `expect(card)...`
-  // calls after a single hover has no way back from a mid-sequence drop;
-  // retrying the whole hover-then-read as one unit recovers by re-hovering.
+  // The card's open state belongs to the hovered row's own React state, so it
+  // can be released while the pointer still rests there -- and nothing reopens
+  // it, since the pointer never left (see hoverEnvironmentRow above). A
+  // sequence of separate `expect(card)...` calls after a single hover has no
+  // way back from a mid-sequence release; retrying the whole hover-then-read as
+  // one unit recovers by re-hovering.
   async readEnvHoverCard(
     tenant: string,
     env: string,
@@ -183,6 +228,35 @@ export class Sidebar {
     return this.envRowButton(tenant, env).locator('..').getByTestId('env-node-indicator');
   }
 
+  // envCloseControl is the row's close affordance. The indicator renders under
+  // one testid in two shapes: this control while the row reports the env as
+  // opened here (data-env-opened="true"), and a passive status light when it
+  // does not (Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). "No dot" is
+  // therefore ambiguous, and a caller lands in it by accident: openEnvironment
+  // is a bare click with no convergence of its own, and the selection it sets
+  // is visible to the caller before the row's own isOpen follows -- that reads
+  // the desktop's tabs for the env, created once openSelection's StartSession
+  // resolves. A close issued in that window matched zero on its first pass and
+  // declared itself done without pressing anything, leaving the env open; the
+  // caller's next assertion then watched a state that could not arrive.
+  envCloseControl(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env)
+      .locator('..')
+      .locator('[data-testid="env-open-dot"][data-env-opened="true"]');
+  }
+
+  // activateEnvCloseControl presses that control exactly once, for the specs
+  // that hold the close RPC open and so cannot use the converging close below:
+  // with the RPC held the row stays open by design, and a loop that converges
+  // on it closing would spend the whole test budget pressing. The caller owns
+  // converging on whatever the close's own effects are.
+  async activateEnvCloseControl(tenant: string, env: string): Promise<void> {
+    const control = this.envCloseControl(tenant, env);
+    await control.waitFor({ state: 'visible' });
+    await control.focus();
+    await control.press('Enter');
+  }
+
   // closeEnvironment activates the row's indicator until the env's tabs are
   // actually gone.
   //
@@ -206,23 +280,10 @@ export class Sidebar {
   // it picked for itself.
   async closeEnvironment(tenant: string, env: string): Promise<void> {
     const dot = this.envOpenDot(tenant, env);
-    // The indicator renders under this one testid in two shapes: the close
-    // control while the row reports the env as opened here
-    // (data-env-opened="true"), and a passive status light when it does not
-    // (Sidebar.EnvironmentRow.tsx's EnvStatusIndicator). "No dot" is therefore
-    // ambiguous, and a caller lands in it by accident: openEnvironment above is
-    // a bare click with no convergence of its own, and the selection it sets is
-    // visible to the caller before the row's own isOpen follows -- that reads
-    // the desktop's tabs for the env, created once openSelection's StartSession
-    // resolves. A close issued in that window matched zero on its first pass and
-    // declared itself done without pressing anything, leaving the env open; the
-    // caller's next assertion then watched a state that could not arrive.
-    //
-    // So press the control, and accept a quiet row as a finished close only
-    // once this step has actually seen the control it was asked to press.
-    const control = this.envRowButton(tenant, env)
-      .locator('..')
-      .locator('[data-testid="env-open-dot"][data-env-opened="true"]');
+    // Accept a quiet row as a finished close only once this step has actually
+    // seen the control it was asked to press (see envCloseControl above for why
+    // "no dot" alone is ambiguous).
+    const control = this.envCloseControl(tenant, env);
     let sawControl = false;
     await expect(async () => {
       if ((await control.count()) > 0) {
@@ -322,26 +383,10 @@ export class Sidebar {
   }
 
   // The persistent alert under the orchestrator list: how the operator learns an
-  // orchestrator action failed, or that a restart hand-off was refused and the
-  // reopened session is idle rather than continuing. A 'warning'-kind restore
-  // notice (Sidebar.OrchestratorNotice.tsx) renders through this same role, but
-  // an 'info' or 'unknown'-kind one does not -- see orchestratorRestoreNotices()
-  // and orchestratorRestoreStatusNotices() for those.
+  // orchestrator action failed, including an orchestrator whose background
+  // agent could not be resolved.
   orchestratorsAlert(): Locator {
     return this.erunSection().getByRole('alert');
-  }
-
-  // Every notice a restore had to say about how it resolved this launch's
-  // reopened orchestrators, one list item per notice at its own severity.
-  orchestratorRestoreNotices(): Locator {
-    return this.erunSection().getByRole('list', { name: 'Orchestrator restore notices' });
-  }
-
-  // A non-alert restore notice ('info' or 'unknown' kind): role="status" so it
-  // is announced politely rather than interrupting the way orchestratorsAlert()
-  // does.
-  orchestratorRestoreStatusNotices(): Locator {
-    return this.orchestratorRestoreNotices().getByRole('status');
   }
 
   // A persisted orchestrator's row is identified by its "…" details button,
@@ -419,8 +464,19 @@ export class Sidebar {
 
   // The row's shape-encoded status light, labelled by state, is the same
   // StatusDotGlyph env rows use — so status is never colour-only.
+  //
+  // Matched exactly, and it has to be: `getByRole({ name })` is a
+  // case-insensitive *substring* match by default, and the restart-required
+  // light's label ("... is running but needs a restart to apply its new
+  // environments") opens with the plain running light's label. A substring
+  // match therefore resolves to the restart-required light whenever the plain
+  // one is absent, so "this row shows a plain running dot" would hold on a row
+  // that does not show one — the exact distinction the erun#1319 work is about.
   orchestratorStatusDot(name: string, state: 'running' | 'stopped'): Locator {
-    return this.erunSection().getByRole('img', { name: `Orchestrator ${name} is ${state}` });
+    return this.erunSection().getByRole('img', {
+      name: `Orchestrator ${name} is ${state}`,
+      exact: true,
+    });
   }
 
   // Distinct from a plain running dot (erun#1319): a live session whose
@@ -447,10 +503,16 @@ export class Sidebar {
   // satisfies Playwright's hover "stable" actionability check — so the
   // animation is frozen first. That is a test-only workaround for the
   // Chromium/Playwright interaction, not a product concern.
+  //
+  // The freeze goes through the shared injectTestStylesheet
+  // (pages/testStylesheet.ts) rather than page.addStyleTag: a stalled
+  // addStyleTag round trip issues no timeout of its own and spends the whole
+  // test budget, then reports the stall as if the test had been slow. The
+  // helper's own comment carries the full reasoning.
   async hoverOrchestratorBusySpinner(name: string): Promise<void> {
     const spinner = this.orchestratorBusySpinner(name);
     await spinner.waitFor({ state: 'visible' });
-    await this.page.addStyleTag({ content: '.animate-spin { animation: none !important; }' });
+    await injectTestStylesheet(this.page, SPINNER_ANIMATION_OFF_ATTR, SPINNER_ANIMATION_OFF);
     await spinner.hover();
   }
 

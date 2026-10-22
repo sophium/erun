@@ -44,4 +44,43 @@ var OperatorSettableConfigFields = []OperatorSettableConfigField{
 		Name:  "OrchestratorEnvConfig.Role",
 		Token: "orchestratorenvrole",
 	},
+	{
+		// Written by `erun platform env register --adopt --definition` and by
+		// `erun platform env pull`, and shown as a read-only row in the
+		// desktop's environment General tab (HostedDefinitionSection.tsx,
+		// whose uiHostedEnvironment mirror is what this token matches). It is
+		// registered rather than declared Internal because the operator does
+		// act on it — from the desktop by pulling, from the CLI by
+		// registering — and the surface is where they see which platform row
+		// this environment corresponds to.
+		Name:  "EnvConfig.Hosted",
+		Token: "hostedenvironment",
+	},
+	{
+		// Set by the desktop's Edit orchestrator dialog (OrchestratorDialog's
+		// Platform alias control) and by `erun orchestrator set-alias`. The
+		// frontend type mirroring this field (orchestratorsSlice.ts) is what
+		// this token matches. Unlike Role this is a *selection* among aliases
+		// the host already has, which is why the control is a picker over the
+		// resolved erun alias list rather than a free-text field.
+		Name:  "OrchestratorConfig.Alias",
+		Token: "orchestratoralias",
+	},
+	{
+		// Set by the desktop's Edit orchestrator dialog (its launch settings
+		// controls) and by `erun orchestrator set-gateway`. The frontend type
+		// mirroring this field (orchestratorsSlice.ts) is what this token matches.
+		Name:  "OrchestratorConfig.UseGateway",
+		Token: "orchestratorusegateway",
+	},
+	{
+		// Set by the same dialog and by `erun orchestrator set-model`.
+		Name:  "OrchestratorConfig.Model",
+		Token: "orchestratormodel",
+	},
+	{
+		// Set by the same dialog and by `erun orchestrator set-effort`.
+		Name:  "OrchestratorConfig.Effort",
+		Token: "orchestratoreffort",
+	},
 }

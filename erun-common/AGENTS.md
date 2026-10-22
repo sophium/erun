@@ -30,6 +30,31 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
+### Platform identity: one per environment, and its form says which grant
+
+- An environment carries **one** platform identity, delivered as the single
+  `<tenant>-devops-platform-alias` Secret the runtime chart mounts. Which kind
+  it is lives in the alias entry inside: a `refreshtokenref` is a signed-in
+  person's delegated session, a `clientsecretref` is a machine identity erun
+  provisioned for that environment, and `resolveERunAccessToken` picks the
+  grant the reference implies. Never set both on one entry
+  (`ERunProviderConfig.IsMachineIdentity`), and never read a credential down
+  the other kind's path — a machine identity that acts as its operator, or a
+  pod holding a person's session, is the failure this split exists to prevent.
+- `platform_machine_identity.go` mints the machine form and
+  `platform_alias_secret.go` the delegated one, over the same channel and at
+  the same point in `erun init`; the machine form is asked for first and every
+  way it can fail falls back to the delegated one, traced rather than silent.
+  A credential is exchanged for a token **before** anything is written: a
+  machine identity nothing accepts is worse than none, and provisioning is the
+  only moment erun can tell the two apart.
+- `EnvConfig.PlatformAliasSecretName` is a single scalar, so an environment is
+  on one identity or the other and never both through a transition. Switching
+  is a re-provision (re-run `erun init`), not a merge — roll-forward design is
+  erun#2684's, and this shape is a constraint it has to work within.
+- The platform machine identity and the GitHub queue identity are two trust
+  domains. Name them coherently for attribution; never share the literal secret.
+
 ### Process, job, and deployment contracts
 
 - Paths passed to other processes must not contain the desktop executable's name:
@@ -48,6 +73,16 @@ this file for the conventions below.
   progress ticks and terminal outcomes. Never let a late progress write replace
   the final result. Lease renewal, expiry, supervisor reconciliation, and the
   maximum lifetime must remain bounded.
+- A supervisor that ends before it registers leaves no record, so the start
+  call is the only surface that can say why — and the only process that knows
+  is the supervisor itself. Its stdout and stderr are therefore captured to the
+  job's log rather than discarded to the null device
+  (`spawnEnvironmentJobSupervisor`), and the start failure quotes that capture
+  back (`jobSupervisorStartupFailureCause`). An empty capture is a real answer:
+  a supervisor killed outright never got to say anything, and the bare
+  "exited without registering" is then the whole truth — never invent a cause
+  for it. The post-registration flavour is the other half of this and is
+  `recordEnvironmentJobSupervisorFailure`'s, not this path's.
 - Agent reinvocation is bounded recovery, not a general retry loop:
   `decideEnvironmentJobReinvocation` accepts only an agent with a captured session
   ID whose started work was incomplete or failed. Reuse the same job, supervisor,
@@ -57,11 +92,13 @@ this file for the conventions below.
   Surface the count in status. A plain nonzero exit without started work is not
   eligible. Claude continuation was verified live; Codex context survival remains
   a disclosed live-verification gap, not a reason to remove its resume support.
-- Keep dtach for interactive sessions. The evaluated native background lifecycle
-  lacked reliable passive logs, non-interactive input, and cross-tool takeover
-  parity; revisit only when those guarantees are verified. This decision does not
-  prohibit non-interactive job resume. Build launch commands in
-  `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
+- Keep dtach for interactive **pod** sessions. The evaluated native background
+  lifecycle lacked reliable passive logs, non-interactive input, and cross-tool
+  takeover parity inside a runtime pod; revisit only when those guarantees are
+  verified there. This decision does not prohibit non-interactive job resume, and
+  it does not cover host orchestrators, which run as Claude background agents
+  attached from a PTY the desktop owns (`erun-ui/AGENTS.md`). Build launch
+  commands in `AISessionLaunchCommand`; do not add `--fork-session` on reattach.
 - Host bootstrap may seed missing pod config, never overwrite existing values.
   Environment-owned reconciliation belongs to `doctor --sync-config`.
 - An in-cluster cloud context names the cluster the current process itself runs
@@ -121,7 +158,9 @@ demonstrated:
   not each reserve the whole ceiling. Run its script tests when changing it.
 - Batch gate-merge takes ordered sources, fetches once, and composes them on one
   prospective tree. On a squash conflict, restore the batch's last committed
-  state, record skipped files/reason, and continue. Refuse an all-empty batch.
+  state, record skipped files/reason, and continue. A conflict confined to
+  atlas.sum is the exception: it is regenerated from the migration files on disk
+  and the source lands rather than being skipped. Refuse an all-empty batch.
   Do not loop single-source invocations that reset away earlier work.
 - Keep one gate_run per batch and preserve ordered landed/skipped composition
   in its log artifact. Mapping one batch build to multiple review acceptances
@@ -144,11 +183,20 @@ demonstrated:
   (`ForceGateTestStage`, set from `--gate`) makes its own `docker build`
   invalidate just that stage (`--no-cache-filter`, `dockerBuildGateStageArgs`), so
   declaring a gate costs the gate and not a cold rebuild of the shared cache. A
-  wholly replayed stage is otherwise **refused by every build, not only by
-  `--gate`** (`ensureGateTestStageExecuted`): both documented gate flows — the
-  merge queue's `gate-merge` → build → `record-build --gate`, and the erun-merge
-  skill's READY rung — run plain builds, so a guard the flag arms never covered
-  the run it was written for. Do not re-key that refusal on a flag.
+  wholly replayed stage is otherwise **refused by the run that declared itself
+  the merge queue's gate** (`ensureGateTestStageExecuted`): the merge queue
+  gates with `erun build --gate` (erun-merge-queue-drive § 2), and a gate's exit
+  status is the entirety of what `erun review record-build --gate` records, so a
+  memoized verdict cannot stand in for it. A plain `erun build` still **reports**
+  the replay — the `test stage (…): REPLAYED` outcome line is printed for every
+  build — but it does not fail on one: its rung (the erun-merge skill's READY
+  step, and every other plain build) claims only that the commit builds, which a
+  layer-cache hit on byte-identical inputs establishes as well as the run that
+  first executed the stage. Refusing those failed a promise no rung made, and
+  failed it wholesale — in a plan with two gate-bearing images, a diff that left
+  either one's inputs untouched replayed that one and failed the whole run
+  (#2718). Do not widen that refusal back to every build; keep it keyed on the
+  declaration.
   `gateTestStagePlanLines` announces the
   plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
   reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
@@ -162,6 +210,20 @@ demonstrated:
   ID), and a genuine failure. The orphan warning is not proof of completed work;
   callers must inspect the job's own record. A wrapper's bounded-wait timeout is
   also not the underlying gate verdict (`scripts/agent-gate.sh`).
+- A recorded pass is replayed only for the run that produced it: its tree, its
+  command, and the environment it executed under. The environment travels with
+  the record instead of in the job id -- the id is also what a re-invocation
+  after an expired bounded wait attaches to, so moving it with the environment
+  would find no job there and start a second gate beside the first. A recorded
+  pass from a differing environment is named loudly and run fresh, never
+  replayed: keyed on the whole environment minus the wrapper's own control
+  variables, so a knob nobody thought to enumerate still separates two runs --
+  and so does the pod, whose name the container puts in HOSTNAME, so a recorded
+  pass does not survive the pod that produced it being replaced. A run still
+  *live* under a differing environment is the one case the wrapper cannot run
+  fresh, since the exclusive claim refuses a second gate beside it: it names
+  the mismatch loudly and attaches, reporting that run's verdict as that
+  environment's and not the caller's.
 - A wait expiring is the wrapper's own deadline, never the gated job's outcome.
   On expiry the wrapper reads the job's own record, so a job that finished is
   reported by its actual result and 124 is reserved for one still genuinely
@@ -183,6 +245,84 @@ demonstrated:
   pruning and refusal on a measured shortage, but no invented refusal when the
   daemon's filesystem cannot be observed. The default/tuning live in
   `release_disk_headroom.go`.
+- A build cache is bounded per environment by one shape: this environment's share
+  of its own docker volume, tightened by its share of the node and never replaced
+  by it (`resolveBuildCacheBound`). A node share that resolves to a ceiling too
+  small to hold a working set is not a small bound — the ceiling is what
+  `docker buildx prune --max-used-space` reclaims the cache down to on every
+  build, so a cache held under what a build is served from drops the layers the
+  next build would have used every time it fires, exactly as it does at a ceiling
+  of no bytes — so an unusable node budget leaves the volume share in force and
+  is traced rather than acted on. What is unusable is read off the division the
+  allowance itself came from rather than asserted as a size: the node's room above
+  its reserve is divided among the caches that share it, and that reserve is
+  divided the same way, so a ceiling under this environment's share of the reserve
+  is a cache bounded smaller than the non-cache state beside it on the same disk
+  (`resolveBuildCacheNodeAllowance`). The threshold is a refusal, not a floor to
+  clamp up to: a CPU limit is shared fairly by the kernel, so
+  `RuntimeDindCPULimit` can floor one, while a disk ceiling is space the
+  environment then holds against every other tenant of that node, so inventing
+  room a node has said it does not have re-creates the aggregate defect the node
+  bound exists to remove. Refusing invents nothing; it leaves in force the bound
+  that was already there.
+- The node's co-tenant count is a declared chart value nothing cross-checks: the
+  pod's RBAC is namespace-scoped, so it cannot count its own co-tenants. The trace
+  reporting a node-derived ceiling names the count it divided by, which is the only
+  surface where a declaration that has drifted from the node is visible
+  (`build_cache_retention.go`, `build_cache_node_bound_test.go`).
+- That node bound has two inputs, both opt-in, and both environment variables
+  because neither is readable from inside the pod: `ERUN_BUILD_CACHE_NODE_BYTES`
+  is the node's disk in bytes, `ERUN_BUILD_CACHE_CO_TENANTS` is how many build
+  caches share it, and the chart renders the pair from its `buildCacheNodeGi` and
+  `buildCacheCoTenants`, both defaulting to zero so neither variable is emitted.
+  Unset is not a node budget of zero bytes: it is no node budget at all, and the
+  environment keeps byte-for-byte the docker-volume ceiling it had, untraced,
+  because that is the state every environment was in before this bound existed
+  (`errNoBuildCacheNodeBudget`). A node size without a count is an incomplete
+  declaration rather than a count of one — the chart emits the pair together, and
+  `declaredBuildCacheNodeAllowance` refuses the count-less form instead of handing
+  one environment the node.
+- The node's share is `(node − floor) / coTenants`, where the floor is
+  `resolveMinDiskHeadroomBytes` of the node itself — 20 GiB or 10% of it, whichever
+  is larger, overridable by `ERUN_RELEASE_MIN_DISK_HEADROOM_BYTES` — and its
+  ceiling is 80% of that (`resolveBuildCacheBounds`). It replaces the volume share
+  only where that ceiling is the lower of the two, so declaring both inputs at a
+  co-tenant count whose share still exceeds the environment's declared docker
+  volume installs a declaration that changes no ceiling and is never named as one:
+  the trace, and the co-tenant count in it, appear only once the node's share is
+  what is applied. That count is `(node − floor) / volume`, and it is a function of
+  the node, the floor and the volume in hand rather than a fixed number — work out
+  which side of it a node falls on before setting the pair, rather than reading the
+  declaration itself as a bound in force.
+- A share is also refused where no co-tenant count can make it usable. The floor is
+  divided by the same count the node's room is, so below `2.25 × floor` no count makes
+  the share usable: while the floor is the flat 20 GiB — every node under 200 GiB —
+  that is a node under 45 GiB, and a node at 21 GiB refuses the share at a count of 1
+  as surely as at a million. The refusal is the disposal argument above and not the
+  undeclared case: the volume share holds, and the run says the sum across the node
+  went unbounded by it rather than passing over the declaration in silence
+  (`errBuildCacheNodeBudgetUnusable`).
+- That gate bounds the node and not the ceiling, so it is a floor on the node rather
+  than on the bound — but the floor is not a clean node-only threshold. At exactly
+  `2.25 × floor` the two compared quantities are equal and the division on both sides
+  is integer division, so at the line the co-tenant count decides and not the node: a
+  45 GiB node installs the share at counts of 1, 2, 4, 8, 16, 32 and 64 and refuses it
+  at 3, 5, 6, 7 and 1000, each refusal 16–53 bytes short of the tie. The same rounding
+  refuses shares above the line where the sides are close, so a 46 GiB node with 5e7
+  co-tenants refuses a 400-byte ceiling against a 429-byte reserve share. Do not
+  restate the guard as `node < 2.25 × floor`. Above that noisy edge the guard does
+  stop bounding the ceiling: a 100 GiB node declaring 1000 co-tenants installs a
+  68,719,440-byte ceiling, larger than the 21,474,836 bytes it is weighed against.
+  Closing that would need a measured working-set floor, which the design deliberately
+  does not assert — so the guard's refusals are not a size band and none of the byte
+  counts in them is a floor; the sizes refused (up to 7,158,278,800 bytes on a 45 GiB
+  node at three co-tenants) and the size installed are not ordered by magnitude.
+  Refusing the share instead leaves every declared co-tenant unbounded by the node —
+  the aggregate defect this bound exists to remove. The operator's remedy is the
+  declaration: a count that shrinks the share that far is a count the node cannot be
+  holding, and nothing in the pod can check it
+  (`build_cache_node_bound_test.go`, whose refusals are exercised on 21 GiB and 32 GiB
+  nodes only — the 45 GiB and 46 GiB edges above are measured, not pinned).
 - Report already-published target artifacts before rebuilding with a single probe;
   reporting must not replace fingerprint-based promotion or imply a new resume engine.
 - A push the registry rejects for a blob it does not hold is the concurrent-publisher

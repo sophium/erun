@@ -9,6 +9,7 @@ import {
 } from 'erun-kit';
 import { Input } from 'erun-kit';
 import { Label } from 'erun-kit';
+import { SelectField } from 'erun-kit';
 import { AlertTriangle, LoaderCircle, RotateCcw, Trash2 } from 'lucide-react';
 import * as React from 'react';
 
@@ -21,12 +22,19 @@ import {
 } from '@/app/orchestratorThunks';
 import {
   closeOrchestratorDialog,
+  type OrchestratorAlias,
   type OrchestratorEnvRef,
   type OrchestratorEnvRole,
   type OrchestratorInfo,
 } from '@/app/slices/orchestratorsSlice';
 import { InlineAlert } from '@/components/app/InlineAlert';
-import { OrchestratorConversationsSection } from '@/components/app/OrchestratorDialog.Conversations';
+import {
+  ORCHESTRATOR_ALIAS_FIELD_ID,
+  ORCHESTRATOR_ALIAS_NONE,
+  orchestratorAliasHelper,
+  orchestratorAliasOptions,
+  orchestratorAliasValue,
+} from '@/components/app/OrchestratorDialog.Alias.helpers';
 import { DirectoriesField } from '@/components/app/OrchestratorDialog.Directories';
 import { EnvironmentsField } from '@/components/app/OrchestratorDialog.Environments';
 import {
@@ -34,8 +42,19 @@ import {
   envKey,
 } from '@/components/app/OrchestratorDialog.Environments.helpers';
 import { OrchestratorGuidanceSection } from '@/components/app/OrchestratorDialog.Guidance';
+import { OrchestratorLaunchFields } from '@/components/app/OrchestratorDialog.Launch';
+import { orchestratorLaunchSettingsToSave } from '@/components/app/OrchestratorDialog.Launch.helpers';
+import {
+  type OrchestratorLaunchForm,
+  useOrchestratorLaunchForm,
+} from '@/components/app/OrchestratorDialog.Launch.hooks';
+import { RestartRequiredNotice } from '@/components/app/OrchestratorDialog.RestartNotice';
+import { restartNoticeText } from '@/components/app/OrchestratorDialog.RestartNotice.helpers';
 
-import { ListOrchestratorEnvCandidates } from '../../../wailsjs/go/main/App';
+import {
+  ListOrchestratorAliasChoices,
+  ListOrchestratorEnvCandidates,
+} from '../../../wailsjs/go/main/App';
 
 // OrchestratorDialog creates or edits a persisted orchestrator: a name, the agent
 // environments it links — each with a directory on this machine, either a
@@ -51,6 +70,14 @@ interface OrchestratorForm {
   candidates: EnvCandidate[];
   name: string;
   setName: (name: string) => void;
+  // aliasChoices are the erun aliases configured on this machine, and alias is
+  // the form's own value (' none' represented as '' in the model, 'none' in the
+  // picker). Both are here because the picker offers the resolved list rather
+  // than free text: the writer refuses an alias this host cannot resolve.
+  aliasChoices: string[];
+  alias: OrchestratorAlias;
+  setAlias: (alias: OrchestratorAlias) => void;
+  launch: OrchestratorLaunchForm;
   selected: OrchestratorEnvRef[];
   toggle: (candidate: EnvCandidate, checked: boolean) => void;
   setDirectory: (ref: OrchestratorEnvRef, directory: string) => void;
@@ -65,14 +92,22 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   const dispatch = useAppDispatch();
   const [candidates, setCandidates] = React.useState<EnvCandidate[]>([]);
   const [name, setName] = React.useState('');
+  const [alias, setAlias] = React.useState<OrchestratorAlias>('');
+  const [aliasChoices, setAliasChoices] = React.useState<string[]>([]);
   const [selected, setSelected] = React.useState<OrchestratorEnvRef[]>([]);
   const [directories, setDirectories] = React.useState<string[]>([]);
+  const launch = useOrchestratorLaunchForm(open, editing);
 
   React.useEffect(() => {
     if (!open) {
       return;
     }
     setName(editing?.name ?? '');
+    // Seed the picker from the stored value, not from the resolved list: an
+    // alias this host can no longer resolve still has to be shown, or the
+    // operator would see "none" where a value is stored and the panel would
+    // quietly disagree with config.yaml.
+    setAlias(editing?.alias ?? '');
     setSelected(editing ? editing.environments.map((env) => ({ ...env })) : []);
     setDirectories(editing ? [...editing.directories] : []);
     void ListOrchestratorEnvCandidates().then((list) => {
@@ -80,6 +115,9 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
       // OrchestratorEnvRole erases to that on the wire); loadOrchestrators
       // takes the same widen-then-narrow approach for OrchestratorInfo below.
       setCandidates(list as EnvCandidate[]);
+    });
+    void ListOrchestratorAliasChoices().then((list) => {
+      setAliasChoices(list);
     });
   }, [open, editing]);
 
@@ -142,10 +180,11 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
   // exactly the form it collected, and keeping the two in one place is what stops
   // a new field from being rendered but never sent.
   const submit = (): void => {
+    const settings = orchestratorLaunchSettingsToSave(launch.settings);
     if (editing) {
-      void dispatch(updateOrchestrator(editing.id, name, selected, directories));
+      void dispatch(updateOrchestrator(editing.id, name, selected, directories, alias, settings));
     } else {
-      void dispatch(createOrchestrator(name, selected, directories));
+      void dispatch(createOrchestrator(name, selected, directories, alias, settings));
     }
   };
 
@@ -153,6 +192,10 @@ function useOrchestratorForm(open: boolean, editing: OrchestratorInfo | null): O
     candidates,
     name,
     setName,
+    aliasChoices,
+    alias,
+    setAlias,
+    launch,
     selected,
     toggle,
     setDirectory,
@@ -194,8 +237,8 @@ export function OrchestratorDialog(): React.ReactElement {
       <DialogContent
         // Bound the panel to the viewport and let the field region scroll, so the
         // footer — and with it Save — stays reachable on a short window. The form
-        // carries the linked environments, the orchestrator's own directories, its
-        // conversations and its guidance, which together outgrow a window; without
+        // carries the linked environments, the orchestrator's own directories and
+        // its guidance, which together outgrow a window; without
         // this the dialog simply grew past the bottom edge and the Save button sat
         // half off-screen, where it reads as a save that does nothing. Same
         // treatment, and the same reason, as EnvironmentDialogView.
@@ -262,17 +305,13 @@ function OrchestratorForm({
       </div>
 
       <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto px-6 pb-1">
-        <div className="space-y-1.5">
-          <Label htmlFor="orchestrator-name">Name</Label>
-          <Input
-            id="orchestrator-name"
-            value={name}
-            placeholder="Optional — defaults from the tenants"
-            onChange={(event) => {
-              form.setName(event.target.value);
-            }}
-          />
-        </div>
+        <OrchestratorNameField name={name} onChange={form.setName} />
+        <OrchestratorAliasField
+          choices={form.aliasChoices}
+          alias={form.alias}
+          onChange={form.setAlias}
+        />
+        <OrchestratorLaunchFields launch={form.launch} disabled={busy} />
         <RestartRequiredNotice editing={editing} />
         <EnvironmentsField
           candidates={candidates}
@@ -288,10 +327,7 @@ function OrchestratorForm({
           onRemove={form.removeDirectory}
         />
         {editing && !editing.transient ? (
-          <>
-            <OrchestratorConversationsSection orchestratorId={editing.id} />
-            <OrchestratorGuidanceSection orchestratorId={editing.id} />
-          </>
+          <OrchestratorGuidanceSection orchestratorId={editing.id} />
         ) : null}
         {error ? <InlineAlert>{error}</InlineAlert> : null}
       </div>
@@ -332,6 +368,66 @@ function OrchestratorForm({
   );
 }
 
+// OrchestratorNameField is the orchestrator's display name. Optional, and
+// derived from the linked tenants when left blank. Split out alongside the
+// alias field to keep OrchestratorForm inside its line budget.
+function OrchestratorNameField({
+  name,
+  onChange,
+}: {
+  name: string;
+  onChange: (name: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="orchestrator-name">Name</Label>
+      <Input
+        id="orchestrator-name"
+        value={name}
+        placeholder="Optional — defaults from the tenants"
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+    </div>
+  );
+}
+
+// OrchestratorAliasField renders the Platform alias picker: which erun platform
+// alias this orchestrator declares as its own. Split out of OrchestratorForm for
+// the same reason OrchestratorManageActions is -- the form sits at its
+// size/complexity budget -- and because the sentinel round trip belongs in one
+// place rather than inline among the other fields.
+//
+// The choices come from the backend rather than from free text: the writer
+// refuses an alias this host cannot resolve, so a picker over the resolved list
+// is what keeps the dialog from offering a value whose save is guaranteed to
+// fail. An empty list is a real state (no erun alias is configured on this
+// machine), and SelectField renders it as one.
+function OrchestratorAliasField({
+  choices,
+  alias,
+  onChange,
+}: {
+  choices: string[];
+  alias: OrchestratorAlias;
+  onChange: (alias: OrchestratorAlias) => void;
+}): React.ReactElement {
+  return (
+    <SelectField
+      id={ORCHESTRATOR_ALIAS_FIELD_ID}
+      label="Platform alias"
+      value={alias === '' ? ORCHESTRATOR_ALIAS_NONE : alias}
+      options={orchestratorAliasOptions(choices, alias)}
+      emptyLabel="No erun alias on this machine"
+      helper={orchestratorAliasHelper(alias)}
+      onChange={(value) => {
+        onChange(orchestratorAliasValue(value));
+      }}
+    />
+  );
+}
+
 // OrchestratorManageActions is the footer's left cluster for an existing
 // orchestrator: restart (only while its session is running) and delete. Split
 // out so the form stays within the lint size/complexity budgets and so
@@ -360,7 +456,7 @@ function OrchestratorManageActions({
           }}
         >
           <RotateCcw aria-hidden="true" />
-          {editing.restartRequired || editing.roleChanged ? 'Restart to apply' : 'Restart'}
+          {restartNoticeText(editing) ? 'Restart to apply' : 'Restart'}
         </Button>
       ) : null}
       <Button
@@ -373,75 +469,6 @@ function OrchestratorManageActions({
         <Trash2 aria-hidden="true" />
         Delete
       </Button>
-    </div>
-  );
-}
-
-// restartNoticeText picks the accurate reason for the amber notice below.
-// restartRequired (an environment link added or removed) always takes the
-// tools-specific wording, since it is the one guaranteed true; a role-only
-// edit (roleChanged) gets its own honest wording instead of being folded into
-// the same sentence — a role never changes which MCP tools the session holds,
-// so claiming "tools are missing" for it would be a false diagnosis (root
-// AGENTS.md § "Smooth, Seamless, No Dead Ends": distinguish causes before
-// writing copy).
-function restartNoticeText(editing: OrchestratorInfo): string | null {
-  if (editing.restartRequired) {
-    return 'Its environments changed while it was running. The session still holds tools for what it was linked to before and none for what was added since.';
-  }
-  if (editing.roleChanged) {
-    return "A linked environment's role changed while it was running. It's saved, but the session's current context may still reflect the old one — restart to be sure it picks up the change.";
-  }
-  return null;
-}
-
-// RestartRequiredNotice tells the operator, at the top of the form they just
-// opened, that their earlier edit did not take effect yet: a live Claude Code
-// session resolves its MCP toolset once at launch, so it still holds tools for
-// whatever it was linked to before and none for what was added since — only a
-// restart re-wires it (erun#1319). It carries the exact control that resolves
-// it (root AGENTS.md: "a message naming a remedy should carry the action that
-// resolves it") rather than pointing at the footer's Restart button below.
-// Takes the raw `editing` value and decides for itself whether there is
-// anything to say, so the caller stays a plain, unconditional render.
-function RestartRequiredNotice({
-  editing,
-}: {
-  editing: OrchestratorInfo | null;
-}): React.ReactElement | null {
-  const dispatch = useAppDispatch();
-  const busy = useAppSelector((state) => state.orchestrators.busy);
-  const text = editing?.status === 'running' ? restartNoticeText(editing) : null;
-  if (!editing || !text) {
-    return null;
-  }
-  const orchestratorId = editing.id;
-  return (
-    <div
-      role="status"
-      className="grid gap-1 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] leading-[1.4] text-foreground"
-    >
-      <span className="flex items-start gap-2">
-        <AlertTriangle aria-hidden="true" className="mt-[1px] size-3.5 shrink-0" />
-        <span className="grid gap-1">
-          <span>{text}</span>
-          <span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => {
-                dispatch(closeOrchestratorDialog());
-                void dispatch(restartOrchestrator(orchestratorId));
-              }}
-            >
-              <RotateCcw aria-hidden="true" />
-              Restart now
-            </Button>
-          </span>
-        </span>
-      </span>
     </div>
   );
 }

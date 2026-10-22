@@ -41,8 +41,31 @@ export class DebugPanel {
     return this.page.getByRole('tab', { name });
   }
 
+  // The pane a given tab reveals. The primary tab keeps its slot but renames
+  // itself with the diagnostics context (DebugPanel.tsx's primaryTabLabel), so
+  // the label names both the tab and the pane it shows.
+  paneFor(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Locator {
+    switch (name) {
+      case 'orchestrator':
+        return this.orchestratorPane();
+      case 'app log':
+        return this.appLogPane();
+      case 'UI trace':
+        return this.uiTracePane();
+      default:
+        return this.erunTracePane();
+    }
+  }
+
+  // Converge on the pane the tab reveals, not just on the click. The switch
+  // and the pane's render are two separate steps under React, so an assertion
+  // on anything inside it immediately after the click races that render
+  // against expect's fixed budget instead of the caller's — waitFor with no
+  // explicit timeout defers to the enclosing test's own budget, the same shape
+  // waitForOpen/waitForClosed above use.
   async selectTab(name: 'erun trace' | 'orchestrator' | 'app log' | 'UI trace'): Promise<void> {
     await this.tab(name).click();
+    await this.paneFor(name).waitFor({ state: 'visible' });
   }
 
   erunTracePane(): Locator {

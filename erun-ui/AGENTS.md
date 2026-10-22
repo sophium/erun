@@ -18,6 +18,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Automatic agent spawning is resource-bounded by `investigation_bounds.go`: input floor, one spawn per event, duplicate-signature exclusion, cooldown, population cap, and lifetime. Reserve the slot atomically with the cap check; derive liveness from the session registry.
 - Register spawned agents as attached environment jobs with activity leases (`AttachEnvironmentJob`) so status and busy indicators account for them.
 - Test report/state paths belong on the owning struct, defaulted at construction and overridden per test; never write shared host locations.
+- Every test that reaches orchestrator provisioning must stub `runOrchestratorLabelCommand`. Its production default shells out to `gh`, and on a missing label it creates it — so an unstubbed test mints a real `wip:<id>` label on a real repository. The shared orchestrator test helpers already stub it; a new App built directly under `NewApp` must too.
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.
 - Keep terminal session ownership in Go. The frontend should attach to sessions by ID, render buffered output, and send input, but it should not start shells on its own.
 - Prefer small transport-facing Go methods with JSON-safe structs over leaking backend internals into the frontend contract.
@@ -45,19 +46,67 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
   - **Host envs:** `erun init` had no pod and no cluster to stand up, so there is nothing to deploy and `erun deploy` refuses the env outright. The handler OPENS it directly — opening a host env is a shell in its own directory, with no deploy needed first. Falling through to the local-agent arm instead set `pendingOpenAfterDeploy`, so the env showed a failed deploy and never opened.
   - **Remote-worktree envs (remote-agent / runtime):** `erun init` deploys the runtime itself — carrying the desktop's `--mcp-auth-public-key` and the resolved cluster registry — and waits for it to be Available before emitting `==> Initialized`. So the handler OPENS the env directly; it composes no deploy. `open` stays a pure primitive (it does not deploy). Do **not** compose a second deploy here: `erun init` already deployed the runtime, and a re-render (adding mcp-auth + the cluster registry) rolls the pod init just created — the double-deploy defect.
   - **Local-agent (builds-here) envs:** `erun init` does not deploy (no in-pod build), so after `==> Initialized` the handler composes the single build→push→deploy (`startInitialDeploySelection` → `maybeStartDeployOrchestration`), records the env as pending-open, and opens its tabs only on the matching `environment-deployed` signal (emitted from `finishDeployByTenantEnv` on a succeeded/skipped deploy). Do **not** open a local-agent env's tabs before that signal — they would spawn against a runtime that does not exist and fail with an MCP port-forward timeout.
-- Resolve orchestrator conversations **attached → anchor** through `resolveOrchestratorConversation` (`orchestrator_live_conversation.go`), on restore, start, crash respawn, and restart. There are exactly two sources — `orchestratorConversationAttached` and `orchestratorConversationDerived` — and no third step: a conversation this orchestrator's own session reported being on is **not** adopted automatically, it is offered in the Manage dialog's Conversation section, classified `live`/`stranded`, for the operator to attach deliberately. The deterministic anchor is a first-launch fallback, not proof of the live conversation. Do not collapse the chain to an unconditional derivation: an explicit attachment that stops being honoured strands one conversation per restart, which is the regression the attached step prevents.
-- Falling through to the anchor while this orchestrator's tracked conversation differs from it is **reported, never adopted** (`orchestratorAnchorDivergenceNotice`): the anchor is fixed at the orchestrator's first-ever conversation, so an operator who has since cleared lands on weeks-old history whose resumed session looks entirely ordinary from the inside. The notice is gated exactly as the attachment path's usability check is — `orchestratorConversationUnusableReason`, reused rather than re-derived — and stays silent when there is nothing to say: no tracked record, a record naming the anchor itself, or a record that cannot be resumed anyway. Notice-on-every-launch is the failure mode this silence guards against.
-- `orchestrator_live_conversation_test.go` pins the order — `TestRestoreAlwaysResumesTheDerivedAnchorEvenWhenATrackedConversationDiverged` for the absent third step, `TestAttachingAConversationRestartsThereAndSurvivesTheNextLaunch` for the attached step, `TestAnUnconfirmedTrackedConversationIsReportedButNeverResumed` for a record that is reported but still not a source of truth, and `TestADivergedTrackedConversationIsReportedWhenTheOrchestratorStarts` for the notice reaching the operator on the spawn path; change the resolution and these change with this record.
-- Pair conversation tracking's writer and reader in the same change. The desktop creates a per-launch nonce and accepts a hook's observation only when its echoed nonce matches the durable launch entry; stale/replaced sessions must not control resumes.
-- Answer a restart hand-off for an orchestrator this desktop holds no session for from what is durable: the open-set entry's launch id and scope plus `orchestratorLiveConversationForLaunch`. Record nothing when the entry names no launch or the record does not confirm — the next launch then resumes the anchor idle, which is right when nothing here can vouch for what was running. Leaving the hand-off empty instead strands the live conversation and comes back on the wrong one, silently.
-- The pacing reconciler's coverage is the configured orchestrator population, not the sessions this desktop happens to hold. `reconcileOrchestratorPacing` runs `orchestratorPacingRows()` and then `orchestratorPacingUnmanagedRows()`, because a session started outside the desktop (a terminal, a previous desktop instance) writes the same activity and live-conversation records — so it is read and shown like any other — while having no row, no nudge count that moves, and no line at all in the log whose purpose is to tell a quiet pane from a suppressed one. Report those as `unreachable-from-transport`, never `not-alive`: the transport cannot reach the session, and the session is usually alive. Keep the card's wording scoped the same way ("not paced from this desktop").
-- Surface non-default conversation resolution and failed explicit attachments to the operator. Preserve the manage dialog's Conversation recovery control.
+- A persisted orchestrator runs as a Claude Code background agent **named exactly its orchestrator id**, and its PTY only ever runs `claude attach <agent id>` (`orchestrator_background_agent.go`). The agent owns the conversation; the desktop never names one, so a `/clear`, a desktop restart or a crash of the PTY cannot strand it. Do not reintroduce a desktop-side record of which conversation an orchestrator is on, or a `--resume`/`--session-id` on its launch — that is the class #2735 removed. Transient (Investigate) sessions stay foreground `claude` in the PTY.
+- Find the agent by an **exact** name match over `claude agents --json --all`, never `claude attach <name>`: that matches part of a name and cannot restart a stopped agent. Two agents with the name are refused with their ids and `claude rm <id>`, never guessed between.
+- A background agent never inherits the environment of the command that started it, and Claude's daemon replays its original launch arguments on every restart. So everything a restart can deliver — model, `effortLevel`/`ultracode`, and the session `env` including the gateway URL and credential — goes in the per-orchestrator settings file (`orchestrator-settings-<id>.json`, `0600`), rewritten on every open; the launch arguments stay fixed (`--settings`, the fixed-path `--mcp-config`, `--disallowedTools`, plus `--effort max`, which the `effortLevel` setting rejects). An agent whose recorded launch fingerprint differs, or that erun did not create, is recreated on its own conversation (`--resume <its sessionId>`) **with a notification**, never silently.
+- Test seams: `deps.claudeAgents` is the only path to the claude lifecycle commands, and the package's tests default it to an in-memory fake (`orchestrator_background_agent_fake_test.go`), so no Go test can start a real agent. The Playwright `claude` stub emulates the same service from a file in the isolated root (`claudeAgentsPath`); keep it and the win32 stub in lockstep with the commands the desktop runs.
+- `orchestrator_background_agent_test.go` pins the contract: `TestReopeningAfterAClearAttachesToTheAgentsCurrentConversation` for the #2735 reproduction, plus exact-name lookup, duplicate refusal, recreation on changed arguments, settings-only restarts, and the one-time continuation of a pre-agent orchestrator's conversation (`orchestrator_legacy_conversation.go`, read-only).
+- The pacing reconciler's coverage is the configured orchestrator population, not the sessions this desktop happens to hold. `reconcileOrchestratorPacing` runs `orchestratorPacingRows()` and then `orchestratorPacingUnmanagedRows()`, because a session started outside the desktop (a terminal, a previous desktop instance) writes the same activity records — so it is read and shown like any other — while having no row, no nudge count that moves, and no line at all in the log whose purpose is to tell a quiet pane from a suppressed one. Report those as `unreachable-from-transport`, never `not-alive`: the transport cannot reach the session, and the session is usually alive. Keep the card's wording scoped the same way ("not paced from this desktop").
 - Session liveness comes from the pod's dtach socket plus live program (`RemoteAppSessionHeartbeatScript`), not stream silence. `session_heartbeat.go` owns authoritative busy-latch release and rendered counts. Silence may latch busy on, but may decide off only without an authoritative observation. Keep the stale-PTY reconciler distinct.
 - Pod status reads that must work when the env is unhealthy go over `deps.execRuntimePod` (kubectl exec), not `deps.runPodRaw` (the MCP edge). The edge needs a port-forward and a healthy in-pod server, which is exactly what is missing when a session looks stale.
 - Mirror the pod's worktree, not its index: subtract `git ls-files -dz` entries from indexed listings. A fetch failure must not suppress deletion reconciliation.
 - A workspace-sync pass logs only what it did: one bounded counts-only line (inputs, counters, any fetch or delete error) when it transferred, deleted, signed, saw a stale index, or failed — never one line per file, and nothing at all for a pass that changed nothing. `workspaceSyncPasses` (`erun-common/workspace_sync_log.go`) folds quiet passes into one aggregate liveness line per window, which is what keeps a silent log readable as "nothing changed" rather than as "the sync loop died"; a mirror entering a standing quiet state (not a git repo, unreadable worktree listing) says so on entry. Keep both halves when touching `syncWorkspaceOnce` — a per-pass line without the aggregate is the flood, and an aggregate without the per-pass line is the event this log exists for, lost.
 - The shared runtime "ensure" (`ensureEnvRuntimeOnce`) is now a thin reconnect, not a deploy preflight: it rebinds the MCP/API forwarders against the already-deployed runtime. A failed ensure must be **surfaced**, not swallowed — set env-status failed + post an actionable notification — and must **not** stamp the dedup TTL on failure (so the next tab open retries). Discarding the error and TTL-stamping on failure (the pre-#644 behaviour) masks an undeployed env behind a downstream port-forward timeout.
 - **An orchestrator spawn opens the edge before it writes the MCP client config naming it.** `wireOrchestratorMCP` repairs every linked environment whose edge does not answer (`repairOrchestratorMCPEdges`) before `writeOrchestratorMCPConfig` runs, because the config is read once by a client that connects as it launches and does not ask again: a rebind kicked off afterwards lands too late, and the session comes back wired to a dead port with every tool for that environment unavailable — the operator told to run `erun open` by hand. Two properties must survive any refactor of that path. The repair is **scoped to an edge a probe found dead**, never armed unconditionally: reconnecting a healthy environment would put a real `erun open` on the launch path of every orchestrator and race the forward its own tabs use. And it **waits on the shared ensure** (`ensureEnvRuntimeWithin`, `envEnsureForBrokenForward`) rather than opening a second forward — it joins an in-flight rebind, bypasses the completed window because a probed-dead edge is evidence that outranks a recent success, and keeps the failed-ensure contract above. The wait is bounded (`orchestratorEdgeRepairBudget`, the same window an MCP client gives its own first connect) and exhausting it is not a failure verdict: the launch proceeds and anything still dead is reported by the existing `unreachable` notice. An environment that cannot be reached must never block the orchestrator from spawning.
+
+### Hosted definition transfer
+
+- The desktop uploads a hosted environment's portable settings when its config
+  changes, three ways to one transaction (`eruncommon.PushEnvironmentDefinition`,
+  reached through `uploadHostedDefinition`): the config watcher's reaction
+  (`reactToConfigWatchTargets`), the launch catch-up
+  (`catchUpHostedDefinitions`), and the marker panel's own control
+  (`UploadHostedDefinition`). Do not add a fourth path.
+- **The origin filter is consulted only by the watcher's reaction, never by the
+  upload decision.** `definitionWriteOrigin` (`hosted_definition_origin.go`)
+  records a config write this desktop is about to make, and
+  `reactToConfigWatchTargets` consumes it at most once per environment with an
+  explicit clear on a transfer that ends without writing. It is not a
+  comparison of file contents and must not become one: a writer converging on
+  the same bytes is indistinguishable from one writing twice, so a genuine
+  outside change would be swallowed by the guess. `autoUploadHostedDefinition`
+  stays reusable and unmarked — the catch-up and the panel's button ask whether
+  an environment needs an upload, which is a different question from whether the
+  watcher is looking at its own write.
+- **The origin filter gates the upload, never the state refresh.**
+  `reactToConfigWatchTargets` emits `environments-changed` for every event
+  unconditionally; a transfer rewrites an environment's config, and the surfaces
+  built from it still have to be told.
+- **The definition digest is the second guard and the dirty flag's substance.**
+  `HostedEnvironment.DefinitionDigest` fingerprints the portable subset, stamped
+  by `stampHostedMarker` on both a push and a pull. `HostedDefinitionLocalChangeFor`
+  answers "has this copy moved since the last transfer?" from the marker alone,
+  which is what makes a change made while the desktop was closed visible — and
+  the digest is also what stops a transfer's own stamp from being read as a
+  change, so the loop is closed twice over. A marker carrying no digest reads as
+  "cannot tell", never as "in step".
+- The digest covers the **portable subset only**, so an edit to a host-owned
+  setting must never read as divergence or spend an upload. Widening the
+  portable allowlist is not a UI decision — see `erun-common/env_definition.go`,
+  which is default-deny and whose `TestEveryEnvConfigFieldIsClassified` fails
+  until a new `EnvConfig` field is classified.
+- The watcher attributes an event to an environment by resolving the path back
+  through `eruncommon.EnvConfigPath`, never by pattern-matching a suffix: the
+  root `config.yaml` holds `CloudContextConfig.AdminToken` in plaintext, and
+  every live config sits beside its own dated backup.
+- `hosted_definition_upload_test.go` pins the behaviour. Change the filter and
+  these change with it: `TestADesktopDefinitionWriteDoesNotReFireTheUpload` (the
+  loop), `TestTheOriginMarkIsClearedWhenTheUploadWritesNothing` (a failed
+  transfer must not swallow the next outside change),
+  `TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded` (the dirty
+  flag), `TestAHostOwnedChangeIsNotUploaded` (the allowlist's edge),
+  `TestAnUnhostedEnvironmentIsNeverUploaded`, and
+  `TestTheWatcherUploadsAnOutsideChangeEndToEnd` (the real fsnotify plumbing).
 
 ## Runtime Usage Accuracy
 
@@ -145,6 +194,44 @@ review surface as having no key handlers.
 Keep dialog focus restoration, narrow live announcements, and consistent sidebar
 activity/status indicators. Expected blocks are status notices; attempted failures
 are alerts.
+
+**The diff panel's line-comment affordance belongs to the line the reader
+pointed at, not to the pixels under the pointer.** The panel re-reads `LoadDiff`
+on its own timer, and an answer that renders the change differently moves that
+row out from under a stationary reader. The reveal is therefore held as state in
+`DiffEnvSectionBody` (`DiffList.tsx`), keyed by the line's own environment, file
+and number, and released by `pointermove` — never by the row's `pointerout` /
+`pointerover`. Measured across that reflow: one `pointerout`/`pointerover` pair
+and its `mouseout`/`mouseover` counterpart on the row that moved, with **zero**
+`pointerleave`, `pointerenter` and **zero** `pointermove` — so a boundary-event
+release reproduces the strand exactly, and a `pointermove` is the only honest
+release signal. `review-diff-line-comment.spec.ts` pins it in the two shapes a
+reflow takes: an injected `meta` hunk line, which carries no affordance at all
+("the affordance the reader revealed survives a re-read of the diff"), and an
+ordinary commentable line of another file arriving under the pointer ("the
+affordance the reader revealed survives a reflow that brings another file under
+the pointer"). Both perform one pointer movement and must never re-hover to
+recover, since re-issuing the hover passes on the unfixed code. The second also
+pins that holding the reveal does not suppress the row the pointer is over now:
+that row reveals itself natively, so two lines are lit, each for its own reason.
+The row key (`${oldLine}:${newLine}:${index}`, `DiffList.tsx`) is what makes the
+held reveal safe — a node React reuses keeps its line's own number, so a reveal
+keyed by that number can never be carried onto a different logical line. The
+unfixed panel's red in the injected `meta` shape is *not* stable — measured
+15/15 serially but only 4/5 under the suite's parallel load — which is a reason
+to read a run of either case as evidence per attempt rather than as a single
+verdict; the fixed panel is deterministic in both.
+
+The hold is released by the reader's next `pointermove` and by nothing else, and
+a wheel scroll fires none. Recorded residual, measured: hovering a line, then
+scrolling so that line moves down still fully visible, leaves its affordance lit
+while the pointer rests on the line the scroll brought under it — which reveals
+itself normally, so two affordances are on screen and one is not under the
+pointer. Releasing when the revealed line leaves the panel does not reach that
+case (that one is the invisible half); the reachable half is the reader's pointer
+leaving the line, which is the same geometry a re-read produces. Cosmetic and
+self-clearing on the next movement, so it is left as recorded rather than
+released on scroll.
 
 ## Build And Packaging
 

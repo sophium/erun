@@ -81,14 +81,26 @@ func (s *unixTerminalSession) Pid() int {
 }
 
 // Alive probes the process with signal 0. POSIX has no EDR OpenProcess block,
-// so a signal-0 send is a reliable liveness check: nil means running, ESRCH
-// means gone. Any other error (e.g. EPERM) means the process exists.
+// so a signal-0 send is a reliable liveness check: nil means running and EPERM
+// means the process exists but belongs to another user, while ESRCH means it is
+// gone.
+//
+// A process this session already reaped is a third, separate case: once Wait has
+// run, Process.Signal answers os.ErrProcessDone rather than ESRCH for a process
+// that is demonstrably gone. Naming that error is what keeps a closed session
+// from reading as alive to every caller that gates cleanup on this probe.
 func (s *unixTerminalSession) Alive() bool {
 	if s == nil || s.cmd == nil || s.cmd.Process == nil {
 		return false
 	}
 	err := s.cmd.Process.Signal(syscall.Signal(0))
-	return !errors.Is(err, syscall.ESRCH)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, os.ErrProcessDone) {
+		return false
+	}
+	return errors.Is(err, syscall.EPERM)
 }
 
 func (s *unixTerminalSession) Close() error {

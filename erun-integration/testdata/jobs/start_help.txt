@@ -1,6 +1,8 @@
 Record a job starting, so the queue shows what is in flight before it finishes and a second actor can see it.
 
-With --scope set this is a claim: if another open job already holds that scope, this fails with 409 naming who holds it, what they are doing, and since when -- so you can pick up something else instead of duplicating the work.
+With --scope set this is a claim: if another open job already holds that scope, this fails with 409 naming who holds it, what they are doing, and since when -- so you can pick up something else instead of duplicating the work. A PLANNED job holds its scope too.
+
+--status PLANNED records work that has not started -- a triage or plan item parked against its issue, visible in the pipeline view before any code exists. It is not swept to ABANDONED: there is no actor yet to go quiet. `erun jobs finish <job-id> --status RUNNING` is how it begins.
 
 The summary is prose describing the work, never the command that performs it.
 
@@ -10,6 +12,8 @@ Usage:
 Examples:
   erun jobs start --type fix --issue sophium/erun#2109 --scope sophium/erun#2109 \
     --summary "fixing the jobs claim race" --actor erun/code4
+  erun jobs start --type triage --status PLANNED --issue sophium/erun#2109 --scope sophium/erun#2109 \
+    --summary "planning the jobs claim fix" --actor erun/ideas
 
 Flags:
       --actor string          Who is doing the work: the orchestrator id or agent identity
@@ -20,6 +24,7 @@ Flags:
       --issue string          The issue this work belongs to, e.g. owner/repo#2109
       --local-job-id string   The in-pod job id this mirrors, when there is one
       --scope string          What this job claims, so a second actor is told who holds it
+      --status string         PLANNED to record work that has not started, RUNNING (the default) to record work already underway
       --summary string        What the work is, in prose (not the command that performs it)
       --type string           Job type: fix, review, gate, release, deploy, investigate, plan, triage, or maintenance
 

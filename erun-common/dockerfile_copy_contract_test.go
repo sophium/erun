@@ -187,6 +187,67 @@ func dockerfileFromRefIsPinned(ref string, stages map[string]struct{}) bool {
 	return tag != "" && tag != "latest"
 }
 
+// The erun-backend-api component's opt-in suites -- every case gated on an
+// ERUN_E2E_* variable -- are inert without a venue that sets one: they report
+// SKIP under a package line that still reads `ok`, which is the fail-open shape
+// this whole file exists to catch, one layer up from the build fingerprints.
+// The venue is that component's own `test` stage, and the two halves below are
+// what make it one: the stage has to run the component's E2E gate script, and
+// the builder has to depend on it through the `COPY --from=test` marker
+// dockerfileHasGateTestStage reads, so no image is produced when the suite
+// failed. Drop either half and every one of those cases returns to SKIP with
+// `make check` still green.
+//
+// Naming the component rather than iterating every Dockerfile is deliberate.
+// A guard phrased "any Dockerfile that ships a test stage must consume it" goes
+// quiet in exactly the event it exists to catch, because deleting the stage
+// leaves nothing to iterate over.
+const optInE2EGateScript = "erun-devops/docker/erun-backend-api/e2e_gate_test.sh"
+
+// testStageInstructionLines returns the instructions of the stage declared
+// `FROM ... AS test`, or nothing when the file declares no such stage. The
+// stage is delimited by its own FROM rather than by the next one, so a rename
+// reads as "no such stage" instead of silently picking up a neighbour's body.
+func testStageInstructionLines(text string) []string {
+	var lines []string
+	inTestStage := false
+	for _, line := range strings.Split(text, "\n") {
+		if dockerfileFromRefPattern.MatchString(line) {
+			inTestStage = dockerfileTestStagePattern.MatchString(line)
+			continue
+		}
+		if inTestStage {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage locks the venue the
+// component's database-backed suites run in. The suites are opt-in on purpose
+// and skipping cleanly without a venue is correct; what must not be silent is
+// the venue's absence, because the loss is invisible in the only report the
+// gate makes -- a package line that reads `ok` either way.
+func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	// The components are literals, not a constant run through filepath.FromSlash:
+	// the repo-root read scan resolves a filepath.Join only from literal parts,
+	// and reports a computed one as a read it cannot see. The name the messages
+	// use is derived from this same Join so the two cannot drift.
+	path := filepath.Join(root, "erun-devops", "docker", "erun-backend-api", "Dockerfile")
+	venue := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator)))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, optInE2EGateScript) {
+		t.Errorf("%s declares no `test` stage running %s — the component's ERUN_E2E_* suites are gated on a database URL, and with no venue setting one every database-backed case in them reports SKIP under a package line that still reads `ok`", venue, optInE2EGateScript)
+	}
+	if !dockerfileHasGateTestStage(path) {
+		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and the `COPY --from=test` that depends on it the image builds and publishes with the E2E gate absent, and erun's incremental promotion is free to serve a cached fingerprint image instead of running it, so the same green build reports either way", venue)
+	}
+}
+
 var (
 	makefileRulePattern       = regexp.MustCompile(`^([A-Za-z0-9_.-]+)\s*::?\s*(.*)$`)
 	makefileShellScriptToken  = regexp.MustCompile(`(?:^|\s)(\S+\.sh)(?:\s|$)`)

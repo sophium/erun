@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -75,16 +74,47 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	return append(envVars, openHostOSOverride)
 }
 
-// portForwardStateFile mirrors production's os.UserConfigDir() layout, which
-// follows the real host OS and is not affected by ERUN_HOST_OS_OVERRIDE — so
-// the assertion must split per-OS or it only passes on Linux.
+// portForwardStateFile is where production keeps a forward's record: under the
+// config home the tenant config resolves through, on every host.
 func portForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
-	base := setup.ConfigHome
-	if runtime.GOOS == "darwin" {
-		base = filepath.Join(setup.Home, "Library", "Application Support")
-	}
-	return filepath.Join(base, "erun", "portforward", kind, tenant, environment+".json")
+	return filepath.Join(setup.ConfigHome, "erun", "portforward", kind, tenant, environment+".json")
 }
+
+// legacyPortForwardStateFile is where an earlier release kept that record on
+// macOS, beside os.UserConfigDir rather than the config home. Production keys
+// that layout on the detected host, so a scenario pins it on any host with
+// openHostOSOverride; the harness's XDG_CONFIG_HOME keeps it apart from the
+// canonical tree.
+func legacyPortForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
+	return filepath.Join(setup.Home, "Library", "Application Support", "erun", "portforward", kind, tenant, environment+".json")
+}
+
+// seedLegacyPortForwardRecord writes a record, its log and the log's rotated
+// generation at the legacy layout, each carrying a marker line a scenario can
+// look for after migration.
+func seedLegacyPortForwardRecord(t *testing.T, setup env.Setup, kind, tenant, environment string, localPort int) string {
+	t.Helper()
+	statePath := legacyPortForwardStateFile(setup, kind, tenant, environment)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatalf("mkdir legacy %s state dir: %v", kind, err)
+	}
+	body := fmt.Sprintf(
+		`{"tenant":%q,"environment":%q,"kubernetesContext":"test-context","namespace":"%s-%s","localPort":%d}`,
+		tenant, environment, tenant, environment, localPort)
+	logPath := strings.TrimSuffix(statePath, ".json") + ".log"
+	for path, content := range map[string]string{
+		statePath:      body,
+		logPath:        legacyPortForwardLogMarker + "\n",
+		logPath + ".1": legacyPortForwardLogMarker + "\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	return statePath
+}
+
+const legacyPortForwardLogMarker = "written before the upgrade"
 
 // writePortForwardState writes the per-env forward record erun itself would
 // have written, so a scenario can start from "erun already established this
@@ -2305,6 +2335,56 @@ exit 1
 			t.Fatalf("MCP port-forward must still be listening after open returns without a shell: %v", err)
 		}
 		_ = conn.Close()
+	})
+
+	t.Run("real_run_migrates_a_record_from_the_user_config_dir_layout", func(t *testing.T) {
+		// An earlier release kept forward records beside os.UserConfigDir,
+		// which on macOS is not the config home once XDG_CONFIG_HOME is set.
+		// The first real open after the upgrade must move that record, its log
+		// and the log's rotated generation into the config tree rather than
+		// leave them stranded where nothing reads them again.
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithPortRange(t, setup, "team", "dev", 26100)
+		legacyState := seedLegacyPortForwardRecord(t, setup, "mcp", "team", "dev", 26100)
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			MCPPort:        26100,
+			SSHPort:        26122,
+			ExecExitCodes:  []int{0},
+		})...)
+		envVars = append(envVars, openHostOSOverride)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/real_run_migrates_a_record_from_the_user_config_dir_layout", normalize.Apply(result.Combined))
+		// Filesystem state outside the captured streams: nothing is left at
+		// the legacy layout, and the canonical log still carries what was
+		// written before the upgrade, which a fresh log would not.
+		legacyLog := strings.TrimSuffix(legacyState, ".json") + ".log"
+		for _, path := range []string{legacyState, legacyLog, legacyLog + ".1"} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Errorf("expected %s to be moved away, stat err: %v", path, err)
+			}
+		}
+		statePath := portForwardStateFile(setup, "mcp", "team", "dev")
+		if _, err := os.Stat(statePath); err != nil {
+			t.Fatalf("expected the record at the config-home layout: %v", err)
+		}
+		newLog := strings.TrimSuffix(statePath, ".json") + ".log"
+		for _, path := range []string{newLog, newLog + ".1"} {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read migrated %s: %v", path, err)
+			}
+			if !strings.Contains(string(body), legacyPortForwardLogMarker) {
+				t.Errorf("expected %s to carry the pre-upgrade log, got:\n%s", path, body)
+			}
+		}
 	})
 
 	t.Run("real_run_port_forward_start_recovers_from_a_transient_failure", func(t *testing.T) {

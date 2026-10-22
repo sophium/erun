@@ -83,6 +83,34 @@ func (a *App) emitEnvironmentsChanged() {
 	a.emitEvent(environmentsChangedEvent, struct{}{})
 }
 
+type uiHostedDefinitionUploadedPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Revision    int    `json:"revision"`
+}
+
+// emitHostedDefinitionUploaded says that a definition upload wrote a new
+// revision for one environment.
+//
+// The upload's own config write already fires environments-changed, but that
+// tick reloads the sidebar and the tenant list — not the Manage dialog's
+// environment config, which is what renders the marker row and the local
+// divergence. Without this the panel would keep showing the revision the
+// environment had before the upload, in the one dialog whose subject is that
+// revision.
+func (a *App) emitHostedDefinitionUploaded(tenant, environment string, revision int) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	a.emitEvent(hostedDefinitionUploadedEvent, uiHostedDefinitionUploadedPayload{
+		Tenant:      tenant,
+		Environment: environment,
+		Revision:    revision,
+	})
+}
+
 type uiDoctorCompletedPayload struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`

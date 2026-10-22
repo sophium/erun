@@ -17,7 +17,7 @@ ARG ATLAS_VERSION=v1.2.0
 # install-deps call must stay pinned to the same version, so the installed
 # Chromium runtime library set is identical whether the suite runs inside the
 # build or inside a deployed runtime pod.
-ARG PLAYWRIGHT_VERSION=1.60.0
+ARG PLAYWRIGHT_VERSION=1.63.0
 
 # Declared once at the top for the same reason as HELM_VERSION above: the test
 # stage's own `terraform`, which runs the published modules' `terraform test`

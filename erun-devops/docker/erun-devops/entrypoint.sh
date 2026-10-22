@@ -847,14 +847,6 @@ function ensureObject(parent, name) {
   return parent[name];
 }
 
-function setEnv(settings, name, value) {
-  const normalized = (value || '').trim();
-  if (!normalized) {
-    return;
-  }
-  settings.env[name] = normalized;
-}
-
 // setBoolEnv writes name=1 only when the value is an enabled flag; otherwise it
 // removes any existing entry. Claude Code treats CLAUDE_CODE_USE_BEDROCK /
 // CLAUDE_CODE_USE_MANTLE as present-or-absent, not 1/0, so writing "0" would
@@ -884,43 +876,119 @@ function listValue(value) {
   return result;
 }
 
-if (configureRelay) {
+// The relay owns the settings entries it writes, and reconciles them on every
+// boot rather than only adding: settings.json lives on the persistent volume,
+// so a value relayed while the environment used a gateway (or Bedrock) would
+// otherwise outlive the deploy that turned it off — an environment that left
+// the gateway would keep launching the catalog's model against its own Claude
+// sign-in. Ownership is recorded beside the settings file so an entry the
+// operator wrote by hand is never removed. A pod with no record yet predates it:
+// if its earlier relay evidently ran (it always wrote both token defaults), every
+// entry that relay wrote was one of these names, so all of them count as owned
+// once; a settings file the relay never touched owns nothing.
+const relayedPassthroughNames = [
+  'AWS_PROFILE',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+  'ANTHROPIC_BEDROCK_SERVICE_TIER',
+  // A gateway serves model ids Claude Code cannot size on its own, so the
+  // window the chart declares for the catalog's default travels with it.
+  'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+  'CLAUDE_CODE_SKIP_MANTLE_AUTH',
+  'DISABLE_PROMPT_CACHING',
+  'ENABLE_PROMPT_CACHING_1H',
+];
+const relayedEnvNames = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_MANTLE',
+  'AWS_REGION',
+  'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  'MAX_THINKING_TOKENS',
+  ...relayedPassthroughNames,
+];
+const relayRecordPath = settingsPath ? `${settingsPath}.erun-relayed.json` : '';
+const relayRecord = relayRecordPath && fs.existsSync(relayRecordPath) ? readJSON(relayRecordPath) : null;
+let ownedEnv = new Set();
+let ownsAvailableModels = false;
+const relayedNow = { env: [], availableModels: false };
+
+function resolveRelayOwnership(settings) {
+  if (relayRecord) {
+    ownedEnv = new Set(Array.isArray(relayRecord.env) ? relayRecord.env : []);
+    ownsAvailableModels = relayRecord.availableModels === true;
+    return;
+  }
+  const env = settings.env && typeof settings.env === 'object' ? settings.env : {};
+  const relayRan = Boolean(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS && env.MAX_THINKING_TOKENS);
+  ownedEnv = relayRan ? new Set(relayedEnvNames) : new Set();
+  ownsAvailableModels = relayRan;
+}
+
+function syncEnv(settings, name, value) {
+  const normalized = (value || '').trim();
+  if (normalized) {
+    settings.env[name] = normalized;
+    relayedNow.env.push(name);
+  } else if (ownedEnv.has(name)) {
+    delete settings.env[name];
+  }
+}
+
+if (settingsPath) {
   const settings = readJSON(settingsPath);
-  settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
-  settings.env = ensureObject(settings, 'env');
+  const before = JSON.stringify(settings);
+  resolveRelayOwnership(settings);
+  if (configureRelay) {
+    settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
+    settings.env = ensureObject(settings, 'env');
 
-  setBoolEnv(settings, 'CLAUDE_CODE_USE_BEDROCK');
-  setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
-  setEnv(settings, 'AWS_REGION', region);
-  setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
-  setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '32000'));
-  setEnv(settings, 'MAX_THINKING_TOKENS', envValue('MAX_THINKING_TOKENS', '1024'));
+    setBoolEnv(settings, 'CLAUDE_CODE_USE_BEDROCK');
+    setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
+    syncEnv(settings, 'AWS_REGION', region);
+    syncEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
+    syncEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '32000'));
+    syncEnv(settings, 'MAX_THINKING_TOKENS', envValue('MAX_THINKING_TOKENS', '1024'));
+    for (const name of relayedPassthroughNames) {
+      syncEnv(settings, name, envValue(name));
+    }
+    for (const name of ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_MANTLE']) {
+      if (settings.env[name]) {
+        relayedNow.env.push(name);
+      }
+    }
 
-  for (const name of [
-    'AWS_PROFILE',
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_DEFAULT_OPUS_MODEL',
-    'ANTHROPIC_DEFAULT_SONNET_MODEL',
-    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-    'ANTHROPIC_BEDROCK_BASE_URL',
-    'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
-    'ANTHROPIC_BEDROCK_SERVICE_TIER',
-    // A gateway serves model ids Claude Code cannot size on its own, so the
-    // window the chart declares for the catalog's default travels with it.
-    'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
-    'CLAUDE_CODE_SKIP_MANTLE_AUTH',
-    'DISABLE_PROMPT_CACHING',
-    'ENABLE_PROMPT_CACHING_1H',
-  ]) {
-    setEnv(settings, name, envValue(name));
+    const availableModels = listValue(envValue('ERUN_CLAUDE_AVAILABLE_MODELS'));
+    if (availableModels.length > 0) {
+      settings.availableModels = availableModels;
+      relayedNow.availableModels = true;
+    } else if (ownsAvailableModels) {
+      delete settings.availableModels;
+    }
+  } else {
+    // Nothing routes through a relay now, so every entry it still owns is a
+    // leftover from a deploy that did.
+    if (settings.env && typeof settings.env === 'object' && !Array.isArray(settings.env)) {
+      for (const name of relayedEnvNames) {
+        syncEnv(settings, name, '');
+      }
+    }
+    if (ownsAvailableModels) {
+      delete settings.availableModels;
+    }
   }
-
-  const availableModels = listValue(envValue('ERUN_CLAUDE_AVAILABLE_MODELS'));
-  if (availableModels.length > 0) {
-    settings.availableModels = availableModels;
+  // Rewritten only when something changed, so an install that never relayed
+  // keeps exactly the settings file it had.
+  if (JSON.stringify(settings) !== before) {
+    writeJSON(settingsPath, settings);
   }
-
-  writeJSON(settingsPath, settings);
+  if (relayRecordPath) {
+    writeJSON(relayRecordPath, relayedNow);
+  }
 }
 
 const projectPath = envValue('ERUN_CLAUDE_PROJECT_PATH');

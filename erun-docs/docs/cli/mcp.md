@@ -102,7 +102,9 @@ An edge deployed without a trust anchor is the loopback-only case that predates 
 
 If the port-forward is down, the proxy answers each request with a JSON-RPC error telling you to run `erun open`, and keeps serving; the client shows the message and recovers on its own once the forward is back. stdout carries JSON-RPC and nothing else — every diagnostic goes to stderr, where the client's own log picks it up.
 
-An environment's edge can also forget the session mid-run — it restarts inside a still-running pod, or the session simply ages out. The proxy handles that itself: it re-runs the handshake and retries the request once, so the client sees its reply and nothing else, and the re-handshake is noted on stderr. Only an edge that will not accept a new session surfaces an error to the client.
+An environment's edge can also forget the session mid-run — it restarts inside a still-running pod, or the session simply ages out. The proxy handles that itself: it re-runs the handshake and retries the request once, so the client sees its reply and nothing else, and the re-handshake is noted on stderr.
+
+Only an edge that will not accept a new session surfaces an error to the client — and that error is about the session, not the environment. An edge that answers at all is running, so the environment stays dispatchable: the message names the tenant and environment, says the edge answered, and points at `erun exec job start`, which reaches the environment over the CLI without needing an MCP session of the client's own. Do not read it as the environment being down and leave it idle; retry the call to re-handshake, or dispatch over the CLI meanwhile.
 
 ## Error behaviour
 
@@ -114,6 +116,7 @@ An environment's edge can also forget the session mid-run — it restarts inside
 | `call` without `--tool`. | Errors with `--tool is required`; exit code 1. Run `erun mcp tools` to list them. |
 | `call --args` is not a JSON object. | Errors with `--args must be a JSON object` before resolving the target; exit code 1. |
 | Nothing listening on the env's MCP port. | Errors with `MCP endpoint is not reachable`, naming the endpoint, and tells you to run `erun open <tenant> <env>` to bring the port-forward up; exit code 1. |
+| The env's edge answers but will not hold this client's session. | Errors with `the MCP edge answered, but without a session it recognizes for this client`, naming the tenant and environment: the env is up and dispatchable, retrying the call re-handshakes, and `erun exec job start` reaches the env without depending on this client's session; exit code 1. |
 | The env rejects the bearer. | Errors with `MCP endpoint rejected the bearer token` and points at redeploying the env from the desktop app so it trusts this machine's identity; exit code 1. |
 | The tool itself reports an error. | Prints the tool's own message (`MCP tool <name> reported an error: …`); exit code 1. |
 | The tool does not exist. | Prints the edge's JSON-RPC error, including its code; exit code 1. |

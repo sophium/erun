@@ -58,6 +58,7 @@ export const tenantDashboardTabs: readonly TenantDashboardTabDescriptor[] = [
   { tab: 'reviews', label: 'Reviews' },
   { tab: 'queue', label: 'Merge queue' },
   { tab: 'gates', label: 'Gates' },
+  { tab: 'pipeline', label: 'Pipeline' },
   { tab: 'builds', label: 'Builds' },
   { tab: 'audit', label: 'Audit log' },
   { tab: 'registration', label: 'Registration' },

@@ -46,10 +46,39 @@
 # AGENT_GATE_RERUN=1 still skips the check and forces a new run regardless of
 # tree state.
 #
+# The environment a run executes under is the third input that decides what
+# its result means, and it is deliberately *not* one of the terms in the id
+# above. Moving the id with the environment would move it out from under the
+# bounded wait's own re-attach path -- a caller re-invoking after an expired
+# wait computes the id from its current environment, and if that moved it
+# would find no job to re-attach to and try to start a second gate beside the
+# first, which the exclusive claim below can only refuse. The id stays stable
+# and the *record* carries the environment instead: the name this leaves in
+# the job store ends with a marker derived from the environment of the
+# invocation that started it, and a recorded pass is replayed only when that
+# marker matches the environment asking for it. A recorded pass from a
+# differing environment is never replayed -- it is named loudly and run fresh,
+# because a pass recorded somewhere else answers a question the caller did not
+# ask. A run already *live* under a differing environment is the one case with
+# nothing to run fresh (the exclusive claim below refuses a second gate beside
+# it), so that invocation is named loudly and attached instead. A record with no
+# marker at all (one written before this existed, still readable for the
+# store's retention window) is treated the same way: unattributable, so not
+# replayed.
+#
 # A replayed result is never silently indistinguishable from a fresh one: it
-# is always announced on stderr, naming the job id it came from (queryable
-# again with `erun exec job status`) and the exact recorded outcome. And a
-# replay only ever stands in for another *passing* run -- a recorded failure,
+# is always announced on *both* the channels a caller reads -- stdout and
+# stderr -- naming the job id it came from (queryable again with `erun exec
+# job status`) and the exact recorded outcome, and saying in as many words
+# that nothing was executed. stderr alone was not enough. A lane reads a
+# gate's result from its captured output, and the replayed record goes to
+# stdout (`erun exec job output`), so a replay announced only on stderr left
+# stdout byte-identical to a real run -- every capture, pipe or `2>/dev/null`
+# dropped the one line that distinguished them, and the verdict is read at
+# the bottom of the log, not its head. Hence the banner before the record
+# *and* the trailer after it.
+#
+# A replay only ever stands in for another *passing* run -- a recorded failure,
 # an abandoned job, or anything else short of a clean exit is never replayed,
 # since a stale failure is cheap to re-check and a stale record of anything
 # other than success has no value. Only a stale pass could plausibly be
@@ -90,6 +119,21 @@
 # is reserved for a job still genuinely running, and an unreadable record
 # counts as the same non-verdict rather than as a failure.
 #
+# Which `erun` runs all of this is the environment's installed release, not the
+# checkout being gated, and the two are routinely a release or two apart: that
+# binary starts the job below, and it is what runs `erun exec gate-merge` for a
+# landing lane. The skew is invisible otherwise, and it makes a merged fix to
+# this layer look ineffective -- merging changes nothing until the environment
+# is upgraded, so a gate that passes over the old behaviour, or a landing whose
+# trailer still comes back the old way, reads as that fix having failed. So the
+# pod's own version is named before anything else runs -- on stdout, for the
+# same reason the replay banner above goes there: a lane reads a gate's result
+# from its captured output, and a fact announced only where the record does not
+# go is a fact that capture drops. It is stated as a fact about the run and not
+# a verdict about the tree: nothing here can decide whether a particular commit
+# is in that binary, and a line that appeared to would imply a comparison that
+# is not happening.
+#
 # This script's own exit code distinguishes four outcomes, not two: 0 for a
 # clean pass, 0 (with a named warning on stderr) for a pass that exited 0 but
 # left unsupervised background work running behind it, nonzero for a genuine
@@ -120,6 +164,46 @@ fi
 
 : "${ERUN_TENANT:?agent-gate.sh: ERUN_TENANT is not set (expected inside an agent pod)}"
 : "${ERUN_ENVIRONMENT:?agent-gate.sh: ERUN_ENVIRONMENT is not set (expected inside an agent pod)}"
+
+# announce_pod_erun names the `erun` that will actually run the gate below --
+# and, for a landing lane, `erun exec gate-merge`. That binary is the
+# environment's installed release rather than the checkout being gated, so a
+# merged fix to erun's own build/gate/landing layer is inert here until the
+# environment is upgraded, and a gate that passes over the old behaviour, or a
+# landing whose trailer still comes back the old way, reads as that fix having
+# failed when it has not run at all. Naming the version is what lets a reader
+# stop before drawing that conclusion.
+#
+# It is a fact, not a check: this script does not know which commits are in
+# that binary and must not imply it does. Nor does it fail the gate if the
+# version cannot be read -- the gate's job is to gate -- but an unreadable
+# version is reported as exactly that, because staying silent would restore the
+# invisibility this exists to remove. What it does cost is a wrong inference,
+# and that is the whole point.
+#
+# `--no-registry` keeps this off the network (measured ~1.8s -> ~0.1s on the
+# pod, and no dependence on the registry being reachable at all). An
+# environment whose erun predates that flag is precisely the case this line
+# exists for -- an old binary -- so its rejection falls back to the plain form
+# rather than being read as "no version to report".
+announce_pod_erun() {
+	pod_erun_raw=$(erun version --no-registry 2>/dev/null) || pod_erun_raw=""
+	if [ -z "$pod_erun_raw" ]; then
+		pod_erun_raw=$(erun version 2>/dev/null) || pod_erun_raw=""
+	fi
+	# The `erun <version>` line is always erun's own build identity and is the
+	# first line printed; a project VERSION resolved from the working directory
+	# rides a separate `project ...` line, which this anchored match skips.
+	pod_erun_version=$(printf '%s\n' "$pod_erun_raw" | sed -n 's/^erun //p' | head -n 1) || pod_erun_version=""
+
+	if [ -n "$pod_erun_version" ]; then
+		printf 'agent-gate: this gate runs on the pod'\''s erun %s -- that installed binary, not the checkout being gated, is also what runs `erun exec gate-merge`. Nothing here says whether a given commit is in it.\n' "$pod_erun_version"
+		printf 'agent-gate: a fix merged into erun-cli/erun-common is inert until this environment'\''s erun is upgraded, so a gate result after such a merge is not evidence about it -- read it as "not run yet", not as "the fix failed".\n'
+	else
+		printf 'agent-gate: could not read the pod'\''s erun version (`erun version` produced nothing readable) -- an unreadable binary is still what runs this gate and `erun exec gate-merge`, and it may predate the checkout being gated, so a gate result is not evidence about a fix to that layer.\n'
+	fi
+}
+announce_pod_erun
 
 # warn_if_wrapped_in_timeout looks a few hops up the process tree for an
 # ancestor named `timeout`. An outer `timeout` around this script can only
@@ -201,7 +285,63 @@ cmd_state_key() {
 	} | hash_stdin | cut -c1-16
 }
 
+# gate_control_env names the variables *this wrapper itself* consumes to decide
+# how it waits and whether it replays at all. They are held out of the
+# environment key below so that a caller turning one on for a retry (adding
+# AGENT_GATE_AWAIT_VERDICT=1 to its second invocation, say) does not read as a
+# different run and cost it the record it came back to collect. Being held out
+# of the key is not the same as being hidden from the work: `job start --env` is
+# additive and the supervisor inherits this process's own environment, so a
+# caller that exported one of these does hand it to the gated command. Nothing
+# the gate runs reads them; a variable the work *did* read would change the run
+# instead of describing it, and does not belong on this list.
+gate_control_env="AGENT_GATE_RERUN AGENT_GATE_AWAIT_VERDICT ERUN_AGENT_GATE_AWAIT_TIMEOUT"
+
+# env_state_key prints a key over the environment a gated run will execute
+# under: the *whole* environment, minus exactly the wrapper controls above --
+# not a list of variables known to matter. Which variables a gate reads is not
+# knowable from here (a starvation knob, a timeout, a feature flag, a database
+# URL -- whatever the suite being gated happens to consult), and a list of the
+# ones known today silently omits the next one, which is precisely the failure
+# this key exists to prevent, arriving as an omission instead of a mistake. So
+# a difference is the default and the exclusion is the narrow, reviewable
+# part. Like the scope key above, it reads the process environment rather than
+# the shell's own variables, so a value that never reached this process
+# cannot describe a run it is not in.
+#
+# The pod a run executed on is covered by that whole-environment rule rather
+# than by a term of its own: the container runtime puts the pod name in
+# HOSTNAME -- the same value a job record keeps as its Hostname -- so a pass
+# recorded before the pod was replaced keys differently afterwards and is not
+# replayed. Nothing here has to name the pod, and scrubbing HOSTNAME out of the
+# environment would take that protection with it.
+env_state_key() {
+	pattern=""
+	sep=""
+	for name in $gate_control_env; do
+		pattern="${pattern}${sep}^${name}="
+		sep="|"
+	done
+	env | grep -v -E "$pattern" | LC_ALL=C sort | hash_stdin | cut -c1-16
+}
+
+# recorded_env_key prints the environment marker a recorded job's own status
+# line carries, and nothing when it carries none -- a record written before
+# this existed, or a line this version cannot read. The last match wins: the
+# marker is appended after whatever name the caller supplied, so a name that
+# happened to contain one cannot displace the real one.
+recorded_env_key() {
+	printf '%s\n' "$1" | sed -n 's/.*\[env \([0-9a-f]\{16\}\)\].*/\1/p'
+}
+
 resolved_job_id="${job_id}-$(tree_state_key)-$(cmd_state_key "$@")"
+
+# The environment this invocation runs under, and the name the job store will
+# record for it. The marker rides in the name because the name is the one
+# field `erun exec job status` reports back on its own line; the id cannot
+# carry it without moving the re-attach path the header describes.
+env_key=$(env_state_key)
+record_name="$job_name [env $env_key]"
 
 await_timeout="${ERUN_AGENT_GATE_AWAIT_TIMEOUT:-8m}"
 
@@ -216,18 +356,54 @@ if [ "${AGENT_GATE_RERUN:-}" != "1" ]; then
 		running:*)
 			# Still running: the start/await/output flow below already attaches to
 			# it correctly (start reports "already running" and falls through), so
-			# no special-casing is needed here.
+			# no special-casing is needed here. There is also nothing else this
+			# invocation could usefully do -- starting a second gate beside this one
+			# is what the exclusive claim below refuses -- so a run started under a
+			# different environment is attached to and reported, but never silently:
+			# its verdict is that environment's, and a caller that takes it for this
+			# one's would be recording a result it never produced.
+			running_env=$(recorded_env_key "$status_line")
+			if [ -n "$running_env" ] && [ "$running_env" != "$env_key" ]; then
+				printf 'agent-gate: WARNING -- %s is already running as job %s, started under environment %s, not the environment this invocation is under (%s). The verdict reported below will be that run'\''s, for that environment -- not one this invocation asked for. Wait for it to finish, then run this command again to get a verdict for this environment.\n' "$job_name" "$resolved_job_id" "$running_env" "$env_key" >&2
+			fi
 			;;
 		"exited 0:"*)
-			printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree and command unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
-			replay_status=0
-			erun exec job await \
-				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$resolved_job_id" --timeout 1s >&2 || replay_status=$?
-			erun exec job output \
-				--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-				--id "$resolved_job_id" --max-bytes 16777216
-			exit "$replay_status"
+			replayed_env=$(recorded_env_key "$status_line")
+			if [ "$replayed_env" != "$env_key" ]; then
+				# A pass is only ever evidence for the run that produced it, and the
+				# environment is part of what that run was. Replaying it here would
+				# assert this configuration passed without ever executing it -- the
+				# caller is told a run happened that did not. So fall through and
+				# actually run it, which is also the only honest answer available:
+				# the recorded pass is real, it is simply not this run's.
+				if [ -z "$replayed_env" ]; then
+					env_mismatch="its record carries no environment marker (it predates this check), so it cannot be attributed to any environment"
+				else
+					env_mismatch="it ran under environment $replayed_env, and this invocation is under $env_key"
+				fi
+				printf 'agent-gate: refusing to replay the cached PASS for %s from job %s -- %s. A pass recorded under one environment is not a pass under another, so %s runs fresh instead.\n' "$job_name" "$resolved_job_id" "$env_mismatch" "$job_name" >&2
+			else
+				printf 'agent-gate: replaying a cached PASS for %s from job %s (%s) -- tree, command and environment unchanged since that run; set AGENT_GATE_RERUN=1 to force a fresh run\n' "$job_name" "$resolved_job_id" "$status_line" >&2
+				# The record below goes to stdout, and stdout is the channel a
+				# caller captures, pipes, or records -- so the fact that nothing
+				# ran has to be on that channel too, or the replay is
+				# byte-identical to a real run everywhere its result is actually
+				# read. Twice over: a banner before the record, and the same
+				# statement again after it, because the verdict is what a reader
+				# scrolls to at the bottom of a long log and a head line alone
+				# scrolls away. Neither line is printed by the fresh-run path
+				# below, so their presence is itself the tell.
+				printf 'agent-gate: REPLAYED a recorded PASS for %s from job %s -- NOTHING WAS EXECUTED by this invocation. The output below is the recorded result of an earlier run of this same command over this same tree in this same environment; the work itself did not run again. Set AGENT_GATE_RERUN=1 to force a real run.\n' "$job_name" "$resolved_job_id"
+				replay_status=0
+				erun exec job await \
+					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+					--id "$resolved_job_id" --timeout 1s >&2 || replay_status=$?
+				erun exec job output \
+					--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
+					--id "$resolved_job_id" --max-bytes 16777216
+				printf '\nagent-gate: END OF REPLAYED RECORD for %s from job %s -- NOTHING WAS EXECUTED by this invocation; everything above is a recorded result, not work this invocation did. Set AGENT_GATE_RERUN=1 to force a real run.\n' "$job_name" "$resolved_job_id"
+				exit "$replay_status"
+			fi
 			;;
 		*)
 			# A recorded outcome exists but is not a clean pass (a failure, an
@@ -268,7 +444,7 @@ fi
 start_status=0
 start_output=$(erun exec job start \
 	--tenant "$ERUN_TENANT" --environment "$ERUN_ENVIRONMENT" \
-	--id "$resolved_job_id" --name "$job_name" \
+	--id "$resolved_job_id" --name "$record_name" \
 	${exclusive_flag:+"$exclusive_flag"} \
 	--env AGENT_GATE_DETACHED=1 \
 	-- "$@" 2>&1) || start_status=$?

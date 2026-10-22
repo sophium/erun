@@ -35,7 +35,7 @@ Charts are build source too: `erun build` also packages every Helm chart under `
 | `--force` | Delete and recreate conflicting release tags when combined with `--release`. |
 | `--dry-run` | Resolve and print every `docker build` / `docker tag` / `docker push` command without executing. |
 | `--jobs`, `-j` | Build this many images at once. `0` (default) resolves a conservative degree from the machine; `1` builds strictly one at a time. |
-| `--gate` | Declare this the merge queue's gate build. Executes the Dockerfile's `test` stage (the one `make check` runs in) instead of accepting BuildKit's replay of it, and refuses to report success for a plan that would execute nothing. Rejected together with `--release`, `--deploy`, and `--e2e`: a gate is a verdict on a tree and publishes and deploys nothing. See [Merge queue § The gate build actually executes](/collaboration/merge-queue#the-gate-build-actually-executes). |
+| `--gate` | Declare this the merge queue's gate build. Executes the Dockerfile's `test` stage (the one `make check` runs in) instead of accepting BuildKit's replay of it, refuses to report success for a plan that would execute nothing, and refuses a run whose stage BuildKit replayed anyway. A plain `erun build` reports such a replay in its trace without failing. Rejected together with `--release`, `--deploy`, and `--e2e`: a gate is a verdict on a tree and publishes and deploys nothing. See [Merge queue § The gate build actually executes](/collaboration/merge-queue#the-gate-build-actually-executes). |
 | `--platform` | Build only these Docker platforms (e.g. `linux/amd64`), repeatable. Overrides the project's configured `docker.platforms` (project-wide or per-environment). Rejected together with `--release`, which always publishes every platform erun supports. See [Multi-architecture](#multi-architecture). |
 
 `--deploy` and `--release` are **convenience shortcuts for an Operator at the terminal** — they compose the pure primitives so you don't have to type three commands. Programmatic callers (the desktop app, scripts, an Agent driving MCP) don't use them; they run `build`, `push`, and `deploy` themselves and thread the version between the steps. See [Command primitives](/concepts/command-primitives).
@@ -52,15 +52,15 @@ A monorepo of independent deployables — each with its own `docker`/`k8s`/`VERS
 
 Independent images build **concurrently by default**. Most images in a multi-image project have no relationship to each other, so building them one after another spends most of its wall-clock waiting.
 
-What stays ordered is only what has to: an image whose Dockerfile `FROM`s a sibling does not start until that sibling has finished and written its tags. `erun build` resolves those edges into **waves** — one wave is a set of images that can build at the same time — and reports the plan before it starts:
+What stays ordered is only what has to: an image whose Dockerfile `FROM`s a sibling does not start until that sibling has finished and written its tags — and it starts the moment its *own* bases are done, not when every image beside it is done. An image built on a base that is a cache hit therefore starts almost immediately, however long the images discovered next to it take. `erun build` resolves those edges and reports them before it starts:
 
 ```
-build: 9 images in 2 waves — wave 1 (8): …; wave 2 (1): erun-mcp
+build: 9 images, 1 waiting on a sibling base — erun-mcp after erun-devops
 ```
 
 The plan is a pure function of the Dockerfiles, so it is the same on every machine. The number of workers is not printed, because it is derived from the machine.
 
-`--jobs 1` restores strictly sequential building, including keeping each image's decision lines next to its own build output. Above one, each image's output is buffered and flushed in wave order, so a run is readable and two runs of the same build produce the same stream.
+`--jobs 1` restores strictly sequential building, including keeping each image's decision lines next to its own build output. Above one, each image's output is published in build order — the image whose turn it is streams live, and one that ran ahead of it is held until its turn — so a run is readable and two runs of the same build produce the same stream, whatever order the images finished in.
 
 `ERUN_BUILD_JOBS` sets the same degree by environment.
 

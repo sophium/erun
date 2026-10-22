@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -92,11 +94,12 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	servers := newCapabilityServerCache(func(identity authIdentity) *mcp.Server {
 		return newServer(info, runtime, identity, recorder)
 	})
-	handler := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
+	streamable := mcp.NewStreamableHTTPHandler(servers.serverFor, &mcp.StreamableHTTPOptions{
 		JSONResponse:          true,
-		SessionTimeout:        5 * time.Minute,
+		SessionTimeout:        mcpSessionTimeout,
 		CrossOriginProtection: crossOriginProtectionForAuthenticatedEdge(cfg.Path),
 	})
+	handler := withSessionKeepAlive(streamable, cfg.Path, mcpSessionTimeout)
 
 	authCfg := mcpAuthConfigFromEnv()
 	mux := http.NewServeMux()
@@ -234,6 +237,26 @@ func endpointURL(cfg HTTPConfig) string {
 	return "http://" + listenAddress(cfg) + cfg.Path
 }
 
+// mcpSessionTimeout is how long the SDK keeps a session it has heard no POST
+// from. It is the edge's own idle-reap budget, and it has to stay in step with
+// the keepalive that renews a session a caller is still attached to
+// (session_keepalive.go), so the two read from one value rather than two.
+var mcpSessionTimeout = 5 * time.Minute
+
+// mcpServerLogger receives the MCP SDK's own server-side diagnostics. It is a
+// variable rather than a literal so a test can read what would otherwise go
+// straight to the pod's stderr.
+//
+// Leaving it nil is not "no logging configured"; it is
+// slog.New(slog.DiscardHandler) (mcp/ensureLogger), which silently drops every
+// diagnostic the SDK raises — including the "method %q is invalid during
+// session initialization" guard a client hits when it calls a tool on a
+// session the edge no longer knows. That is how a pod log containing zero
+// occurrences of the guard error was read as "those calls never arrived", when
+// the calls had arrived and been refused: the silence was this logger, not the
+// absence of the request.
+var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
 func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authIdentity, metrics *metricsRecorder) *mcp.Server {
 	info = eruncommon.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
@@ -241,7 +264,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig, identity authId
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "erun",
 		Version: info.Version,
-	}, nil)
+	}, &mcp.ServerOptions{Logger: mcpServerLogger})
 
 	reg := toolRegistrar{server: server, identity: identity, metrics: metrics}
 	registerReadModelTools(reg, info, runtime)
@@ -582,7 +605,7 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, reviewShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_create",
-		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Open a review on the erun platform. name is the eventual squash-merge message and must be unique per tenant; a colliding name fails with a conflict. sourceBranch must already exist on the remote (push it first with exec_push), since the review references it by name and the platform can only ever fetch what has actually landed there. issueRef records the issue the work belongs to, as owner/repo#number or as a bare number joined to the recorded repository; a recorded issue is declared, and outranks the number the source branch names. A real, immediate write, not a preview, unless preview is set.",
 	}, reviewCreateTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_comment",
@@ -638,7 +661,7 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, gateShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_list",
-		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
+		Description: "List jobs on the erun platform, the live queue first — what agents and orchestrators are working on right now, and what recently finished. Each entry names what is being done, by whom, and how long it has been going. A RUNNING job is work in flight, and so is PLANNED — work recorded before it starts, which the abandonment sweep deliberately leaves alone; ABANDONED means its actor stopped updating it and the platform swept it — read it as dropped, not as failed. Supports preview.",
 	}, jobsListTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_show",
@@ -646,11 +669,11 @@ func registerReviewTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, jobsShowTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_start",
-		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Record that this actor is starting a piece of work, so the queue shows what is in flight before it finishes and a second actor can see it. With scope set this is a claim: a 409 means another open job already holds that scope, and the refusal names who holds it, what they are doing in prose, and since when — pick up something else rather than duplicating the work. A PLANNED job holds its scope too. status PLANNED records work that has not started — a triage or plan item parked against its issue, visible in the pipeline view before any code exists, and deliberately never swept to ABANDONED. The summary is prose describing the work, never the command that performs it. A real, immediate write, not a preview, unless preview is set.",
 	}, jobsStartTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "jobs_finish",
-		Description: "Report how a job ended, or refresh what it is doing, on the erun platform. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
+		Description: "Report how a job ended, refresh what it is doing, or open a planned job, on the erun platform. status RUNNING on a PLANNED job is the one move that begins work; every other status closes the job. A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read. A real, immediate write, not a preview, unless preview is set.",
 	}, jobsFinishTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "review_queue_advance",
@@ -697,7 +720,7 @@ func registerDeliveryTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, observeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name: "usage",
-		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call. `disk[].totalBytes`/`usedBytes`/`percentUsed` describe the whole mount (`nodeShared: true`): every environment scheduled on the same node reports the identical figures, so cleaning up one environment may barely move them. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory) is the figure this environment can actually reduce.On a build-capable environment (local-agent, remote-agent), `excludesBuilds` is true because every image build actually runs in the erun-dind sidecar, a separate cgroup from the runtime container above -- so this call also reads the sidecar's own CPU and memory against its own limit and returns it as `dind`, with the same named warnings if the sidecar itself nears its memory limit or records an OOM kill; `dind` is absent only when the sidecar's own cgroup could not be read, and `observe` reports its resource limits either way. Also carries this environment's standing sizing recommendation (`sizing`), when retained usage history has accumulated one -- the same raise/lower/hold verdict and evidence window `resize` reasons from, so a caller does not need a separate resize call just to see it. That history is retained by this environment's own pod monitor and lives with the environment, so " +
+		Description: "Report the resolved environment's live CPU, memory, and disk usage, read straight from the runtime container's cgroup v2 accounting and a statfs of the workspace mount -- no metrics-server required, so it works on clusters where `kubectl top` reports \"Metrics API not available\". Memory is reported against the container's own limit (current, peak high-water mark, and a real OOM-kill count) and CPU utilisation against its quota over a sample window; a named warning fires when memory, memory's peak, or disk usage cross a fixed threshold. Every field reports its own unavailability (cgroup v1, an unlimited limit, an unreadable file) rather than failing the call. `disk[].totalBytes`/`usedBytes`/`percentUsed` describe the whole mount (`nodeShared: true`): every environment scheduled on the same node reports the identical figures, so cleaning up one environment may barely move them. `disk[].ownUsedBytes` (a `du` of the mount, scoped to this environment's own directory) is the figure this environment can actually reduce. `requests` reports what the scheduler admits this pod on: each container's declared `resources.requests` and the pod's effective total, read from the live pod spec because no cgroup file records a request. The limits above it are ceilings that reserve nothing, and the request is the figure that decides placement and how much of a node this environment actually holds; a pod spec that could not be read is reported as `requests.unavailable` rather than as a reservation of nothing. On a build-capable environment (local-agent, remote-agent), `excludesBuilds` is true because every image build actually runs in the erun-dind sidecar, a separate cgroup from the runtime container above -- so this call also reads the sidecar's own CPU and memory against its own limit and returns it as `dind`, with the same named warnings if the sidecar itself nears its memory limit or records an OOM kill; `dind` is absent only when the sidecar's own cgroup could not be read, and `observe` reports its resource limits either way. Also carries this environment's standing sizing recommendation (`sizing`), when retained usage history has accumulated one -- the same raise/lower/hold verdict and evidence window `resize` reasons from, so a caller does not need a separate resize call just to see it. That history is retained by this environment's own pod monitor and lives with the environment, so " +
 			UsageSizingClaim() + ". What varies is whether that history is there to read -- a reading taken from a host has the live counters to reason from and no observed window: the advice the counters prove (a raise, after a peak at the limit or a recorded OOM kill) fires there too, while the shrink direction, which needs a day of quiet evidence, reads as insufficient-evidence. ",
 	}, usageTool(runtime))
 	addTool(reg, &mcp.Tool{
@@ -760,11 +783,11 @@ func registerInspectionTools(reg toolRegistrar, runtime RuntimeConfig) {
 	}, execPushTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_merge",
-		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
+		Description: "Fetch targetBranch from a remote and merge it into the runtime repo's working tree's current branch with an explicit merge commit — never a rebase, since review comments anchor to a commit id and a rewrite would orphan every thread on an open review. A conflicted merge is reported as a distinct, named outcome; the worktree is left exactly as git left it, mid-merge, for the caller to resolve or abort — unless the conflict is confined to atlas.sum, the regenerable migration checksum, which is regenerated from the migration files already on disk and staged, completing the merge commit so the merge lands instead. A real, immediate mutation of the working tree. Set preview to trace the fetch and merge without running them.",
 	}, execMergeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_gate-merge",
-		Description: "Build the prospective merge a merge queue promotion (or batch) gates: fetch targetBranch and every source's branch, check out a fresh local branch named targetBranch at its own current remote tip, then squash-merge each source onto it in turn, each as its own commit carrying its own message — leaving a stack of one commit per landed source. Passing more than one source batches several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together*, not just individually; a single source is the ordinary one-branch gate. For the environment a review's merge queue promotes to MERGE: gate-merge, then build against the result, then review_record-build with gate set and, only on success, exec_push and review_report-merged. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A source whose squash conflicts is skipped, not fatal: the merge is backed out and recorded in the result's skipped list, and the rest of the batch still gates against the working tree as it stood before that attempt. A source that contributes nothing is skipped the same way: when its squash stages no changes because its content is already on the target, it is recorded as skipped with that reason rather than failing the batch, so an already-landed branch is a no-op instead of a dead gate. A batch where every source is skipped lands nothing and returns an error. A real, immediate mutation of the working tree. Set preview to trace the fetch, checkout, and each squash merge and commit without running them.",
+		Description: "Build the prospective merge a merge queue promotion (or batch) gates: fetch targetBranch and every source's branch, check out a fresh local branch named targetBranch at its own current remote tip, then squash-merge each source onto it in turn, each as its own commit carrying its own message plus that source branch's own load-bearing trailers (Closes #N, and the Reproduces: / Regression-Test: lines a defect fix declares), read from every line of its commit bodies rather than from a trailing trailer block so a declaration is not lost to whatever paragraph an author put after it — leaving a stack of one commit per landed source, with each landed source's carriedTrailers naming what it carried, including when it carried none. Passing more than one source batches several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together*, not just individually; a single source is the ordinary one-branch gate. For the environment a review's merge queue promotes to MERGE: gate-merge, then build against the result, then review_record-build with gate set and, only on success, exec_push and review_report-merged. The working tree must already be clean — this checks out a different local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge. A source whose squash conflicts is skipped, not fatal: the merge is backed out and recorded in the result's skipped list, and the rest of the batch still gates against the working tree as it stood before that attempt. A conflict confined to atlas.sum, the regenerable migration checksum, is not a skip: it is regenerated from the migration files already on disk and staged, and the source lands like a clean squash. A source that contributes nothing is skipped the same way: when its squash stages no changes because its content is already on the target, it is recorded as skipped with that reason rather than failing the batch, so an already-landed branch is a no-op instead of a dead gate. A batch where every source is skipped lands nothing and returns an error. A real, immediate mutation of the working tree. Set preview to trace the fetch, checkout, and each squash merge and commit without running them.",
 	}, execGateMergeTool(runtime))
 	addTool(reg, &mcp.Tool{
 		Name:        "exec_report-commit-status",

@@ -122,6 +122,56 @@ test.describe('manage dialog — components to deploy (#718)', () => {
     await expect(app.manageDialog.redeployBanner()).toContainText('no charts are checked');
   });
 
+  test('the version panel survives focus leaving it while a save settles', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // The panel is where the operator works, and it stays open across a save
+    // (see the "keeps the popover open after a pick" contract). Focus leaving it
+    // is not a dismissal, and the reported failure is the one input where that
+    // distinction was load-dependent: the save disables the very button it was
+    // invoked from, the browser hands focus back to the document body, and the
+    // dialog's focus scope re-focuses the dialog container — a focusin outside
+    // this subtree — on the re-render that follows. Radix turns that into a
+    // dismiss, and the only thing swallowing it was the `busy` guard on
+    // setManageVersionChoicesOpen. Whether the re-focus beats the save clearing
+    // `busy` therefore decided the outcome, which is what made it show up only
+    // in contended runs.
+    //
+    // Driving the move after the save has settled exercises that losing branch
+    // on every run instead of once in a contended one: the save is complete
+    // (the panel is open, the banner is up), focus is inside the panel, and it
+    // then leaves — with no pointer anywhere, which is the only input that ever
+    // reached the dismissal. Asserting the panel is still there — and that its
+    // own control is still rendered — is the whole contract.
+    await stubVersionSuggestions(page);
+    const runtimeName = `${seededEnv.tenant}-devops`;
+    await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
+    await app.manageDialog.waitForOpen();
+    await app.manageDialog.selectTab('Runtime');
+    await app.manageDialog.openVersionPicker();
+    await app.manageDialog.pickVersion('1.0.0');
+
+    const runtime = app.manageDialog.deployComponentCheckbox(runtimeName);
+    const saveDefault = app.manageDialog.saveDeployComponentsButton();
+    await expect(runtime).toBeChecked();
+    await runtime.click();
+    await expect(saveDefault).toBeEnabled();
+    await saveDefault.click();
+    await app.manageDialog.waitForRedeployBanner();
+    await expect(saveDefault).toBeDisabled();
+
+    // Focus inside the panel, then out of it, with no pointer in between.
+    await app.manageDialog.versionPickerSearchInput().focus();
+    await app.manageDialog.locator().focus();
+
+    // The reported failure lands here: the control the save was pressed on is
+    // no longer in the DOM, so there is nothing left to be disabled.
+    await expect(saveDefault).toBeDisabled();
+    await expect(app.manageDialog.deployComponentsHeading()).toBeVisible();
+  });
+
   test('a sourceless (runtime) env offers the publishable platform components by reference', async ({
     app,
     page,

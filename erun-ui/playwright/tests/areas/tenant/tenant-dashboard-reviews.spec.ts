@@ -759,6 +759,7 @@ test.describe('tenant dashboard — review build profile (#2274)', () => {
       removeEnvironment(SEED_TENANT, environment);
     }
   });
+
   // The denial a caller refused a review actually sees. It has to carry the
   // grant, filled in with the caller's own user id: an assertion that it
   // merely names the missing read passes on the version that stopped short.

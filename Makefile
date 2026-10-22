@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-backend-api-e2e test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -45,27 +45,53 @@
 # replacement for it.
 #
 # 15m was calibrated against an uncapped build container, which took 22 of a
-# 24-core node before the build-container CPU cap (#2255/#2257) started
-# holding it to its declared cpu= (commonly 4). Once every module actually
-# got only that many cores, the fixed 15m stopped fitting: every module
-# reported "0 issues" and then hit the timeout anyway, turning an
-# environmental CPU shortage into a false-red gate (erun#2266). Scale the
-# timeout inversely with the same resolved CPU quota LINT_PARALLELISM already
-# reads below (scripts/parallel-gate.sh's cpu-quota mode, which honors the
-# erun-devops Dockerfile's PARALLEL_GATE_CPU_LIMIT=$DIND_CPU_LIMIT override
-# the same way LINT_PARALLELISM's width calculation does), floored at the
-# original 15m so an environment at or above the 22-core reference never gets
-# less time than before. At the reference DIND_CPU_LIMIT default of 4 this
-# resolves to 82m, comfortably past the ~24.5m (1468s) a starved run was
-# observed to take in erun#2266 before failing. LINT_TIMEOUT's `?=` keeps the
-# existing manual override: an explicit `LINT_TIMEOUT=<duration> make check`
-# (or an env var of the same name) still wins over this computed default.
+# 24-core node before the build-container CPU cap started holding it to its
+# declared cpu= (commonly 4). Once every module actually got only that many
+# cores, the fixed 15m stopped fitting: every module reported "0 issues" and
+# then hit the timeout anyway, turning an environmental CPU shortage into a
+# false-red gate. Scale that reference budget -- 15m at 22 cores -- by the
+# smallest CPU erun sizes a build environment at (MinimumRuntimeDindCPU in
+# erun-common/runtime_resources.go, "the floor RuntimeDindCPULimit refuses to
+# size a build below") rather than by this pod's own quota, so the same
+# commit's lint is handed the same deadline wherever it runs: 15m * 22 / 4 =
+# 82m, past the ~24.5m (1468s) a starved run was observed to take before the
+# old formula replaced it, and past the longest lint measured on the fleet
+# since. LINT_TIMEOUT's `?=` keeps the existing manual override: an explicit
+# `LINT_TIMEOUT=<duration> make check` (or an env var of the same name) still
+# wins over this computed default.
+#
+# The budget reads no cgroup and no PARALLEL_GATE_CPU_LIMIT on purpose. It
+# used to be scaled inversely with this pod's own resolved quota, which made
+# the lint's deadline -- and so the meaning of a lint red -- a property of the
+# machine that ran it: the 22-core environment resolved the 15m floor, the
+# 8-core ones 41m, and `erun review record-build --gate --failed` cannot tell
+# a lint that found something from one killed by a deadline its environment
+# never had a chance to meet. The scaling's premise was that wall-clock scales
+# as 1/cores; the measured runs do not, because a lint's fixed phases --
+# package loading, the warm cache, the twelve other targets check-gate fans
+# out beside it -- do not parallelize: the same commit's lint took 912s, 1296s
+# and up to 2569s on the *most*-resourced environment in the fleet, which the
+# old formula handed the *least* time. A budget that is the same everywhere is
+# what makes a red attributable wherever it was produced.
+#
+# The trade is deliberate and stated rather than hidden: a lint that never
+# finishes -- or never loads its packages, and so has no report to read -- is
+# now diagnosed in up to 82m on every environment, where a 22-core pod used to
+# give up at 15m. Since the verdict is read from golangci-lint's own report
+# rather than from its deadline (see the `lint` target's comment), a deadline
+# expiring around an analysis that did report is not a failure: the only red
+# this budget can still produce is a starved run killed before it could report
+# at all, which is the false red this formula's lineage exists to remove, and
+# it costs a review ejected from the merge queue plus a full cold gate
+# rebuild. A wedged run needs a human either way; a healthy one must not be
+# failed for being slow.
 LINT_TIMEOUT_REFERENCE_CPU := 22
 LINT_TIMEOUT_BASE_MINUTES := 15
-LINT_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
-	m=$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / cpu )); \
-	[ "$$m" -ge $(LINT_TIMEOUT_BASE_MINUTES) ] || m=$(LINT_TIMEOUT_BASE_MINUTES); \
-	echo "$${m}m")
+# The smallest CPU erun sizes a build environment at, named rather than inlined
+# so the resolved budget below stays auditable against that floor -- and fixed
+# rather than read from this pod, so the budget is identical everywhere.
+LINT_TIMEOUT_FLEET_MIN_CPU := 4
+LINT_TIMEOUT ?= $(shell echo "$$(( $(LINT_TIMEOUT_BASE_MINUTES) * $(LINT_TIMEOUT_REFERENCE_CPU) / $(LINT_TIMEOUT_FLEET_MIN_CPU) ))m")
 
 LINT_MODULES := erun-common erun-cli erun-mcp erun-integration erun-backend/erun-backend-api erun-ui
 
@@ -175,8 +201,10 @@ GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # still making progress. A gate that fails a correct tree for being slow is
 # worse than a slow gate, because it teaches its operators to re-run it.
 #
-# Scale the budget inversely with the resolved CPU quota, the same shape
-# LINT_TIMEOUT above uses for the identical defect in the sibling linter run.
+# Scale the budget inversely with the resolved CPU quota -- the shape
+# LINT_TIMEOUT above used for the identical defect in the sibling linter run
+# until its budget was made uniform across environments instead (see its
+# comment); this one still has to fit the work to the machine.
 # The quota is what GO_TEST_GOMAXPROCS already divides into this suite's
 # `-parallel` share, so at or above GO_TEST_TARGET_COUNT CPUs the suite has its
 # reference share and takes the base, and below it the suite is at its serial
@@ -227,6 +255,55 @@ INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota)
 # golangci-lint is running"); the flag opts into golangci-lint's own supported
 # concurrent-runner mode, which is safe against the shared cache because cache
 # entries are keyed by file content hash, not writer identity.
+#
+# Each module's fan-out job is scripts/lint-module.sh, not `golangci-lint`
+# directly, so the verdict is read from golangci-lint's own report instead of
+# its exit status. The two disagree in exactly the case that reds this target
+# for no finding: golangci-lint prints its whole report -- the findings, or
+# "0 issues." -- and then overrides the code it decided from that report with
+# the run's own deadline, so a clean analysis that outlived --timeout exits as
+# a timeout and reads as a lint failure to anything watching the status,
+# including `erun review record-build --gate --failed`.
+#
+# The lineage, because the deadline has moved twice and each move has a
+# reason. The timeout used to be a flat 15m, calibrated on a build container
+# that took 22 of a 24-core node; once the container's declared cpu= was
+# actually enforced every module reported "0 issues" and then hit the deadline
+# anyway, so the timeout was scaled inversely with the resolved quota and
+# floored at that original 15m. That corrected the starved-environment end of
+# the range and left the floor calibrated for a lint that owns the whole
+# quota -- which is not what this target hands it. check-gate fans 13 targets
+# out at -j13 and this target runs all six LINT_MODULES at LINT_PARALLELISM=6,
+# so at PARALLEL_GATE_CPU_LIMIT=22 each lint gets LINT_GOMAXPROCS = 22/6 = 3
+# cores while twelve other targets run beside it; erun-backend-api's analysis
+# completed with "0 issues." and was reported as a lint failure at 912s and at
+# 1296s against that 900s floor.
+#
+# Raising the floor was not the fix on its own: while the verdict still came
+# from the deadline, moving the threshold only traded a short false red for a
+# long one. The invariant is narrower than the timeout -- a lint that reported
+# its whole result and found nothing must not red the gate -- so it is read
+# off the report, and the deadline keeps its role as a bound on a lint that
+# never finishes, or never loads its packages, which has no report to read and
+# still fails. Reading the verdict off the report is also what makes raising
+# the budget safe now: with no verdict riding on it, a longer deadline cannot
+# turn a finding green -- it can only let a starved run finish far enough to
+# say what it found -- and the run it waits for instead is one that never
+# reported at all. LINT_TIMEOUT above is therefore both uniform and generous,
+# for the same reason the verdict is read from the report and not from the
+# clock: a red has to mean one thing, the same thing, wherever this gate runs.
+#
+# What this target does not leave implicit: the budget it ran under. The
+# timeout above is the same on every environment now, but the fan-out width and
+# the per-lint CPU share are not, and both decide how long a module's lint can
+# take -- so a red still needs the numbers it ran under beside it to be read.
+# The recipe therefore prints the numbers it passes (the timeout, the fan-out
+# width, the per-lint GOMAXPROCS) beside the cpu quota the widths were derived
+# from, once before the fan-out and again beside the aggregated failure line.
+# It prints its own expanded variables rather than recomputing them, so an
+# operator's LINT_TIMEOUT/LINT_PARALLELISM/LINT_GOMAXPROCS override is what
+# shows up here: the numbers worth printing are the ones the modules got, not a
+# second resolution of the formula that produced them.
 lint:
 	@pin=$$(tr -d '\n' < GOLANGCI_LINT_VERSION); \
 	pin_num=$${pin#v}; \
@@ -237,9 +314,15 @@ lint:
 		   echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$$pin" >&2; \
 		   exit 1 ;; \
 	esac
-	@for m in $(LINT_MODULES); do \
-		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "cd $$m && GOMAXPROCS=$(LINT_GOMAXPROCS) golangci-lint run --allow-parallel-runners --timeout $(LINT_TIMEOUT) ./..."; \
-	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint
+	@cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
+	budget="LINT_TIMEOUT=$(LINT_TIMEOUT) LINT_PARALLELISM=$(LINT_PARALLELISM) LINT_GOMAXPROCS=$(LINT_GOMAXPROCS), the widths from a cpu quota of $$cpu (the timeout is the same on every environment)"; \
+	echo ">> lint budget: $$budget"; \
+	for m in $(LINT_MODULES); do \
+		printf '%s\t%s\t%s\n' "$$m" "golangci-lint $$m" "$(CURDIR)/scripts/lint-module.sh $(LINT_GOMAXPROCS) $(LINT_TIMEOUT) $$m"; \
+	done | ./scripts/parallel-gate.sh $(LINT_PARALLELISM) lint; \
+	status=$$?; \
+	[ "$$status" -eq 1 ] && echo ">> lint budget: $$budget (the failure above ran under this)" >&2; \
+	exit $$status
 
 # erun-ui's own Go tests. See the LINT_MODULES comment above for why this is
 # a separate step rather than folded into integration-test or a contributor's
@@ -467,6 +550,20 @@ FRONTEND_VITEST_WORKERS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota);
 	[ "$$n" -ge 1 ] || n=1; \
 	echo $$n)
 
+# The bound above says how many workers each vitest job may start, not that
+# each one can. Under the oversubscription the whole of `make check` is built
+# on -- this fan-out inside a check-gate target, inside check-gate's own `-j`
+# fan-out -- a forked worker can be starved past vitest's own start timeout,
+# and the pool then exits 1 with a message that reads exactly like a failing
+# assertion while naming a different file each time. The bound is not the
+# lever for that: vitest 4 exposes no knob for the timeout, and no worker
+# count makes a starved start impossible. scripts/vitest-gate.sh runs both
+# vitest jobs instead, keeps the bound reaching vitest unchanged, and
+# separates the two outcomes so only the pool-start class is retried or
+# reported as an environment fault. Its self-test runs below, so a classifier
+# that stops distinguishing correctly fails the gate rather than quietly
+# absorbing reds.
+
 # ERUN_PLAYWRIGHT_WORKERS is the desktop suite's worker count, and it is
 # resolved here -- beside every other quota-derived gate width -- rather than
 # in the erun-devops Dockerfile, which used to compute it as DIND_CPU_LIMIT/2
@@ -537,6 +634,8 @@ test-frontend:
 		sh -c 'node --test scripts/check-issue-references.test.mjs && node scripts/check-issue-references.mjs erun-kit/src erun-ui/frontend/src erun-console/src'
 	@./scripts/timed-step.sh "regression-coverage gate self-test" \
 		node --test scripts/check-regression-coverage.test.mjs
+	@./scripts/timed-step.sh "vitest worker-start classifier self-test" \
+		sh scripts/vitest-gate_test.sh
 	@./scripts/timed-step.sh "generating erun-ui/frontend wailsjs bindings" \
 		./erun-ui/generate-wailsjs.sh
 	@( \
@@ -549,12 +648,12 @@ test-frontend:
 		printf 'erun-ui-frontend-lint\terun-ui/frontend lint\tcd erun-ui/frontend && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-ui-frontend/\n'; \
 		printf 'erun-ui-frontend-format\terun-ui/frontend format:check\tcd erun-ui/frontend && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-ui-frontend.json\n'; \
 		printf 'erun-ui-frontend-build\terun-ui/frontend build\tcd erun-ui/frontend && yarn build\n'; \
-		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
+		printf 'erun-ui-frontend-test\terun-ui/frontend test\tcd erun-ui/frontend && $(CURDIR)/scripts/vitest-gate.sh --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n'; \
 		printf 'erun-console-typecheck\terun-console typecheck\tcd erun-console && yarn typecheck\n'; \
 		printf 'erun-console-lint\terun-console lint\tcd erun-console && yarn lint -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/eslint/erun-console/\n'; \
 		printf 'erun-console-format\terun-console format:check\tcd erun-console && yarn format:check -- --cache --cache-strategy content --cache-location $(FRONTEND_LINT_CACHE_DIR)/prettier/erun-console.json\n'; \
 		printf 'erun-console-build\terun-console build\tcd erun-console && yarn build\n'; \
-		printf 'erun-console-test\terun-console test\tcd erun-console && yarn test -- --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
+		printf 'erun-console-test\terun-console test\tcd erun-console && $(CURDIR)/scripts/vitest-gate.sh --maxWorkers=$(FRONTEND_VITEST_WORKERS)\n' \
 	) | ./scripts/parallel-gate.sh $(FRONTEND_GATE_PARALLELISM) test-frontend
 
 # Builds a headless erun-app (desktop tags) and runs the mandatory
@@ -736,6 +835,13 @@ helm-chart-tests:
 # cannot run inside any image build. `terraform` itself is installed there too;
 # no binary the gate needs is visible to that guard, so the Dockerfile's own
 # install is what has to stay in step.
+#
+# Each module's `terraform init` is retried a bounded number of times on a
+# transient registry failure, because that one network step has reddened
+# branches that changed no terraform file; see the header of
+# scripts/terraform-module-tests.sh, and its self-test in fast-check. The
+# suites themselves are not retried -- they run against mocked providers, so a
+# retry there could only hide a real assertion failure.
 terraform-module-tests:
 	sh scripts/terraform-module-tests.sh
 
@@ -814,6 +920,23 @@ test-atlas-validate:
 # agent env, before merging a change to erun-devops/docker/erun-console/.
 test-console-nginx:
 	sh erun-devops/docker/erun-console/nginx_test.sh
+
+# The opt-in ERUN_E2E_* database suites of erun-backend-api, against a real
+# postgres and the real migrations -- the venue that decides whether the
+# `Regression-Test:` cases those suites carry are actually run. The gate proper
+# is the erun-backend-api image's own `test` stage, which runs this same script
+# inside `erun build`/`erun build --gate` and fails the build when it fails;
+# that is the venue a pull request is graded by, and it is why this target is
+# not in `make check`.
+#
+# Same "needs a real docker daemon and the atlas CLI" exclusion from make check
+# as test-postgres-restart/test-retention above -- and, unlike those, the
+# erun-backend-api image's own test stage carries both, which is what lets it
+# run this script in-build. Kept as a target as well so an agent or human can
+# reproduce a gate failure without a full image build. Run it before merging a
+# change to erun-backend-api's database-backed behavior.
+test-erun-backend-api-e2e:
+	sh erun-devops/docker/erun-backend-api/e2e_gate_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
@@ -956,7 +1079,8 @@ check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-e
 # don't need a full check-gate cycle to find: golangci-lint findings, the
 # tracker-reference gate (root AGENTS.md § "Code Comments"), the
 # regression-coverage gate (root AGENTS.md § "A Defect Fix Names Its
-# Reproduction"), the pre-commit hook's own regression test, and prettier
+# Reproduction"), the pre-commit hook's own regression test, the
+# terraform-module-tests init-retry self-test, and prettier
 # formatting. This is NOT a substitute for
 # check/check-gate -- it runs no
 # tests, no build, and no integration suite, so a green fast-check says
@@ -1020,6 +1144,8 @@ fast-check: lint
 	@node scripts/check-regression-coverage.mjs
 	@echo ">> pre-commit hook (bindings regenerated before the frontend lint)"
 	@sh scripts/pre-commit_test.sh
+	@echo ">> terraform-module-tests init retry (transient retried, bounded, permanent fails fast)"
+	@sh scripts/terraform-module-tests_test.sh
 	@echo ">> prettier --check (erun-kit, erun-ui/frontend, erun-console)"
 	@for d in erun-kit erun-ui/frontend erun-console; do \
 		printf '%s\t%s\t%s\n' "$$d" "prettier $$d" "cd $$d && yarn format:check"; \

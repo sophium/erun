@@ -2,8 +2,8 @@ import { test, expect } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtures/seedRoot.js';
 
 // #1260: the desktop re-states the orchestrator pacing contract into a live
-// session every 10 minutes, and relaunches a session that died from a crash
-// (never one the operator cleanly quit or Stopped) into the same conversation.
+// session every 10 minutes, and reattaches a terminal that died from a crash
+// (never one the operator cleanly quit or Stopped) to the same background agent.
 //
 // Neither half of that has a reachable surface in this harness. Both text-into-
 // the-pty and the crash-relaunch require a real orchestrator PTY: the pacing
@@ -21,15 +21,14 @@ import { SEED_ENV_ALPHA, SEED_TENANT, removeOrchestrator } from '../../../fixtur
 // never starts a session — CreateOrchestrator "creates stopped") and asserting
 // it renders as stopped with none of the reconciler's side effects, which is
 // the negative invariant that IS reachable. The nudge decision, the cap/rearm
-// bookkeeping, the crash-vs-clean-exit distinction, and the same-conversation
-// respawn are covered by the Go suite instead:
+// bookkeeping, the crash-vs-clean-exit distinction, and the same-agent
+// reattach are covered by the Go suite instead:
 // erun-ui/orchestrator_pacing_test.go (TestDecideOrchestratorPacing,
 // TestReconcileOrchestratorPacingNudgesAQuietSession,
 // TestOrchestratorPacingCapsAfterRepeatedSilenceAndRearmsOnFreshBusy,
 // TestSendSessionInputRearmsOrchestratorPacing) and erun-ui/orchestrator_test.go
-// (TestOrchestratorRespawnsAfterCrashIntoTheSameConversation,
-// TestOrchestratorCleanExitDoesNotRespawn, TestStopOrchestratorRefusesItsOwnRespawn,
-// TestBuildOrchestratorLaunchFallbackKeepsThePin).
+// (TestOrchestratorRespawnsAfterCrashOntoTheSameAgent,
+// TestOrchestratorCleanExitDoesNotRespawn, TestStopOrchestratorRefusesItsOwnRespawn).
 //
 // #1699's env-aware suppression (a linked environment busy on this
 // orchestrator's own dispatched work must not accrue staleness or take a

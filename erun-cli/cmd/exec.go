@@ -454,7 +454,10 @@ func newExecMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 			"would orphan every thread on an open review.\n\n" +
 			"A conflicted merge is reported as a distinct, named outcome rather than a generic failure. The " +
 			"worktree is left exactly as git left it, mid-merge — resolve the conflicted files and commit, or " +
-			"run `git merge --abort` to back out, before doing anything else.\n\n" +
+			"run `git merge --abort` to back out, before doing anything else. A conflict confined to atlas.sum, " +
+			"the regenerable migration checksum, is the exception: each is regenerated from the migration " +
+			"files already on disk and staged, the merge commit is completed, and the merge is reported as " +
+			"landed rather than as a conflict.\n\n" +
 			"--dry-run traces the fetch and merge without running them.",
 		Example:      "  erun exec merge main\n  erun exec merge release/2026.9 --remote upstream",
 		Args:         cobra.ExactArgs(1),
@@ -516,16 +519,22 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"`Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
 			"what the branch declared about itself survives a squash that replaces the rest of its history. " +
 			"The message stays the commit's subject and the whole of its own body, and a trailer the message " +
-			"already carries is not repeated.\n\n" +
+			"already carries is not repeated. They are read from every line of the branch's own commit bodies " +
+			"rather than from a trailing trailer block, so a declaration is not lost to whatever paragraph an " +
+			"author put after it, and each landed source reports the trailers it carried — including when it " +
+			"carried none, which is otherwise invisible in the squash message.\n\n" +
 			"The working tree must already be clean: this checks out a different local branch than whatever the " +
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
 			"A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean " +
 			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
-			"tree as it stood before that attempt. A source that contributes nothing is skipped the same way: " +
-			"when its squash stages no changes because its content is already on the target, it is recorded as " +
-			"skipped with that reason rather than failing the batch, so an already-landed branch is a no-op " +
-			"instead of a dead gate. A batch where every source is skipped lands nothing and exits non-zero.\n\n" +
+			"tree as it stood before that attempt. A conflict confined to atlas.sum, the regenerable migration " +
+			"checksum, is the exception: it is regenerated from the migration files already on disk and staged, " +
+			"and the source lands like a clean squash rather than being skipped. A source that contributes " +
+			"nothing is skipped the same way: when its squash stages no changes because its content is already " +
+			"on the target, it is recorded as skipped with that reason rather than failing the batch, so an " +
+			"already-landed branch is a no-op instead of a dead gate. A batch where every source is skipped " +
+			"lands nothing and exits non-zero.\n\n" +
 			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
 			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
 			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +
@@ -601,12 +610,25 @@ func readGateMergeSources(ctx common.Context, sourceBranches []string) ([]common
 	return sources, nil
 }
 
+// gateMergeCarriedTrailerSummary names what one landed source's squash
+// carried. The empty case is spelled out rather than left blank: a carriage
+// that found nothing is the state a caller cannot otherwise see, since the
+// landed commit and a successful exit look the same either way.
+func gateMergeCarriedTrailerSummary(trailers []string) string {
+	if len(trailers) == 0 {
+		return "no trailers of its own"
+	}
+	return "its own trailers: " + strings.Join(trailers, "; ")
+}
+
 // reportGateMergeResult prints each landed and skipped source, then refuses
 // if the batch landed nothing at all — there is nothing to gate against an
 // unchanged target.
 func reportGateMergeResult(ctx common.Context, result common.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
-		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s).", result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit))
+		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",
+			result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit,
+			gateMergeCarriedTrailerSummary(landed.CarriedTrailers)))
 	}
 	for _, skipped := range result.Skipped {
 		ctx.Info(fmt.Sprintf("Skipped %s/%s: %s.", result.Remote, skipped.SourceBranch, skipped.Reason))

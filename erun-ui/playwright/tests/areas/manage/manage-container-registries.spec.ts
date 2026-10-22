@@ -1,4 +1,4 @@
-import { test, expect } from '../../../fixtures/erunApp.js';
+import { test, expect, withTestBudget } from '../../../fixtures/erunApp.js';
 import { SEED_ENV_ALPHA, SEED_TENANT } from '../../../fixtures/seedRoot.js';
 
 test.describe('manage dialog container registries', () => {
@@ -112,7 +112,14 @@ test.describe('manage dialog container registries', () => {
 
     await app.sidebar.openManageDialogViaKeyboard(seededEnv.tenant, seededEnv.environment);
     await app.manageDialog.waitForOpen();
-    await expect(app.manageDialog.registryInput(0)).toHaveValue('registry.example/test');
+    // Every read below is the reopened dialog's own config load -- a value the
+    // environment's config file owns, and one `expect(...)` bounds by expect's
+    // 10s default rather than by the budget this test declared. The first is the
+    // one that proves the reload landed; the rest are then already satisfied.
+    await expect(app.manageDialog.registryInput(0)).toHaveValue(
+      'registry.example/test',
+      withTestBudget(),
+    );
     await expect(app.manageDialog.registryRoleCheckbox(0, 'build')).toBeChecked();
     await expect(app.manageDialog.registryRoleCheckbox(0, 'from')).toBeChecked();
     await expect(app.manageDialog.registryRoleCheckbox(0, 'deploy')).not.toBeChecked();

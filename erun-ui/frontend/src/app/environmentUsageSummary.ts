@@ -58,14 +58,19 @@ export type EnvironmentUsageMetrics =
       kind: 'reading';
       cpu: UsageMetricSummary;
       memory: UsageMetricSummary;
-      // builds is the erun-dind sidecar's own reading, present only when the
-      // environment carries that sidecar AND its cgroup could be read. Its
-      // absence is a real distinction — an older runtime image, a sidecar
-      // mid-restart — and must render as "not read", never as a zero: on a
-      // build-capable environment the runtime container's CPU is near zero by
-      // construction (a release lane spends its time waiting on bounded
-      // `erun exec job await` calls), so a fabricated 0 here would be
-      // indistinguishable from a build that is genuinely not running.
+      // builds is the erun-dind sidecar's own reading, present whenever the
+      // environment carries that sidecar. It is the row that makes a build
+      // legible at all: on a build-capable environment the runtime container's
+      // CPU is near zero by construction (a release lane spends its time
+      // waiting on bounded `erun exec job await` calls), so a fabricated 0 here
+      // would be indistinguishable from a build that is genuinely not running.
+      //
+      // A sidecar whose cgroup could not be read — an older runtime image, a
+      // sidecar mid-restart — is still present here, as the not-read state
+      // ('—' carrying its own reason), never as a zero and never as an absent
+      // row. An environment that carries no sidecar at all is the only one
+      // that renders no Builds row, and `excludesBuilds` is what separates
+      // that case from this one.
       builds?: UsageBuildsSummary;
       ageLabel: string;
       stale: boolean;
@@ -124,18 +129,25 @@ export function summarizeEnvironmentUsageMetrics(
   const ageLabel = formatElapsed(new Date(observedAtUnix * 1000).toISOString(), nowMs).trim();
   return {
     kind: 'reading',
-    cpu: cpuMetric(usage.cpu),
-    memory: memoryMetric(usage.memory),
-    builds: buildsMetric(usage.dind),
+    cpu: cpuMetric(usage.cpu, usage.requests),
+    memory: memoryMetric(usage.memory, usage.requests),
+    builds: buildsMetric(usage),
     ageLabel,
     stale,
   };
 }
 
-// buildsMetric reduces the erun-dind sidecar's reading to one row, or returns
-// undefined when there is no sidecar reading to show — which the card renders
-// as nothing at all, leaving the age caption's "excludes builds" caveat to do
-// its original job.
+// DIND_SIDECAR_NAME is the domain every Builds line names — in the reading and
+// in the not-read state alike. The card's other rows are the runtime container,
+// so which of the two containers a figure belongs to is the whole question this
+// row exists to answer, and a not-read row answers it by naming the container it
+// could not reach rather than leaving the age caption's caveat to imply it.
+const DIND_SIDECAR_NAME = 'erun-dind sidecar';
+
+// buildsMetric reduces the erun-dind sidecar's reading to one row, and returns
+// undefined only for an environment that carries no sidecar to read — the card
+// renders that as nothing at all, leaving the age caption's "excludes builds"
+// caveat to do its original job.
 //
 // The cumulative-CPU-seconds arm is not a fallback for a failure: cpu.max has
 // no quota on most sidecars (it declares no limit so a build can use the node),
@@ -143,11 +155,28 @@ export function summarizeEnvironmentUsageMetrics(
 // "Unavailable" on exactly the environments this row is for. `usageUsec` is a
 // real measurement, and stating it as CPU-seconds rather than as a percentage
 // keeps a cumulative counter from reading as a rate.
-function buildsMetric(
-  dind: UIEnvironmentUsageSnapshot['usage']['dind'],
-): UsageBuildsSummary | undefined {
+function buildsMetric(usage: UIEnvironmentUsageSnapshot['usage']): UsageBuildsSummary | undefined {
+  const dind = usage.dind;
   if (!dind) {
-    return undefined;
+    // An absent reading is two states and only one of them is a row. An
+    // environment that carries no sidecar has nothing to report here; an
+    // environment that carries one and whose exec into it failed does — the
+    // not-read state, in the place the reading would have been. Rendering the
+    // second as the first is what leaves the operator with the runtime
+    // container's near-idle CPU qualified only by the age caption's caveat, a
+    // number that reads as idle beside an Activity line saying a build is
+    // running, which is the opposite of what it means. `excludesBuilds` is the
+    // field that separates them, and the reader sets it from the environment's
+    // own type rather than from whether the sidecar answered.
+    if (!usage.excludesBuilds) {
+      return undefined;
+    }
+    return {
+      value: '—',
+      suffix: '',
+      caption: DIND_SIDECAR_NAME,
+      note: 'the sidecar could not be read',
+    };
   }
   const caption = dindCaption(dind.memory);
   if (dind.cpu.available) {
@@ -184,29 +213,39 @@ function buildsMetric(
 // the card's other rows are the runtime container, and "which of these two
 // numbers is my build" is the whole question this row exists to answer.
 function dindCaption(memory: UIEnvironmentUsageSnapshot['usage']['memory']): string {
-  const sidecar = 'erun-dind sidecar';
   if (!memory.available) {
-    return sidecar;
+    return DIND_SIDECAR_NAME;
   }
   const figure = memory.unlimited
     ? `${memory.current ?? '—'} (no limit)`
     : `${memory.current ?? '—'} of ${memory.limit ?? '—'}`;
-  return `${sidecar} · ${figure}`;
+  return `${DIND_SIDECAR_NAME} · ${figure}`;
 }
 
-function cpuMetric(usage: UIEnvironmentUsageSnapshot['usage']['cpu']): UsageMetricSummary {
+function cpuMetric(
+  usage: UIEnvironmentUsageSnapshot['usage']['cpu'],
+  requests: UIEnvironmentUsageSnapshot['usage']['requests'],
+): UsageMetricSummary {
   if (!usage.available) {
     return { label: 'CPU', value: '—', suffix: '' };
   }
   return {
     label: 'CPU',
     value: usage.utilization ?? percentLabel(usage.utilizationPercent),
-    suffix: '',
+    suffix: requestSuffix(requests?.runtime.cpu),
     percent: measuredPercent(usage.utilizationPercent),
   };
 }
 
-function memoryMetric(usage: UIEnvironmentUsageSnapshot['usage']['memory']): UsageMetricSummary {
+// memoryMetric names its denominator a *limit* and states the reservation
+// beside it. Unqualified, `82% of 23.0 GiB` reads as an environment holding
+// 23.0 GiB: a cgroup ceiling is what the container may grow to under pressure
+// and reserves nothing, so an operator sizing a node against it is reading a
+// ceiling as provisioning. The request is the figure that reserves.
+function memoryMetric(
+  usage: UIEnvironmentUsageSnapshot['usage']['memory'],
+  requests: UIEnvironmentUsageSnapshot['usage']['requests'],
+): UsageMetricSummary {
   if (!usage.available) {
     return { label: 'Memory', value: '—', suffix: '' };
   }
@@ -216,12 +255,22 @@ function memoryMetric(usage: UIEnvironmentUsageSnapshot['usage']['memory']): Usa
     return { label: 'Memory', value: usage.current ?? '—', suffix: 'no limit' };
   }
   const percent = measuredPercent(usage.percentOfLimit);
+  const limit = usage.limit ? `of ${usage.limit} limit` : '';
+  const requested = requestSuffix(requests?.runtime.memory);
   return {
     label: 'Memory',
     value: percentLabel(percent),
-    suffix: usage.limit ? `of ${usage.limit}` : '',
+    suffix: [limit, requested].filter(Boolean).join(' · '),
     percent,
   };
+}
+
+// requestSuffix states one resource's reservation, in the Kubernetes
+// vocabulary ("1024Mi requested"). A resource the container declares nothing
+// for contributes nothing rather than "0 requested": an undeclared request is
+// the absence of a reservation, not a reservation of zero.
+function requestSuffix(requested: string | undefined): string {
+  return requested ? `${requested} requested` : '';
 }
 
 // measuredPercent resolves a metric's share of its ceiling to a number whenever
@@ -289,7 +338,7 @@ function usageFigureParts(usage: UIEnvironmentUsageSnapshot['usage']): string[] 
     parts.push(
       usage.memory.unlimited
         ? `Mem ${usage.memory.current ?? '—'} (no limit)`
-        : `Mem ${percentLabel(usage.memory.percentOfLimit)} of ${usage.memory.limit ?? '—'}`,
+        : `Mem ${percentLabel(usage.memory.percentOfLimit)} of ${usage.memory.limit ?? '—'} limit`,
     );
   }
   return parts;

@@ -1,4 +1,9 @@
-import type { UIRuntimePodConfig, UIRuntimeResourceStatus } from '@/types';
+import type {
+  UIRuntimePodConfig,
+  UIRuntimeResourceMetric,
+  UIRuntimeResourceReading,
+  UIRuntimeResourceStatus,
+} from '@/types';
 
 export const MIN_RUNTIME_CPU_CORES = 0.25;
 export const MIN_RUNTIME_MEMORY_GIB = 1;
@@ -11,10 +16,25 @@ export interface RuntimeResourceBounds {
   loading: boolean;
   available: boolean;
   message: string;
-  // notice explains what the maximum alone cannot: that it is capped by the
-  // node being full rather than by a limit on this environment, and/or that
-  // part of the node's real usage is invisible to the reading.
+  // notice explains what the maximum alone cannot: that the scheduler has
+  // nothing left to admit a pod with, and what returns it.
   notice: string;
+  // worstCase is the other capacity question's answer, carried separately so
+  // the panel can label it and keep it apart from the scheduling figure. It is
+  // never the source of the maximum: a limit reserves nothing, so capping the
+  // configuration at the node's bursting headroom makes a node that schedules
+  // fine look full.
+  worstCase: { message: string; notice: string };
+}
+
+function emptyMetric(unit: string): UIRuntimeResourceMetric {
+  return { total: 0, used: 0, free: 0, unit, formatted: '', floored: false };
+}
+
+// unavailableReading is the shape a reading takes when the capacity read itself
+// failed, so the two readings a status always carries are always present.
+function unavailableReading(): UIRuntimeResourceReading {
+  return { cpu: emptyMetric('cores'), memory: emptyMetric('GiB') };
 }
 
 // unavailableRuntimeResourceStatus is the shape a dialog shows when the
@@ -30,8 +50,9 @@ export function unavailableRuntimeResourceStatus(
     message,
     floored: false,
     measuredUsage: false,
-    cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '', floored: false },
-    memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '', floored: false },
+    schedulable: unavailableReading(),
+    schedulableComplete: false,
+    worstCase: unavailableReading(),
   };
 }
 
@@ -49,6 +70,12 @@ export function runtimePodConfigToKubernetes(config: UIRuntimePodConfig): UIRunt
   };
 }
 
+// runtimeResourceBounds derives the control's range from the *scheduling*
+// reading, because the scheduler is what decides whether a request places. The
+// worst-case reading travels beside it, labelled, and never caps the control:
+// capping the configuration at the node's bursting headroom is what made a
+// node with ample room to place a pod read as full, and led an operator to
+// shrink a limit that is sized for the work an agent runs in the container.
 export function runtimeResourceBounds(
   status: UIRuntimeResourceStatus | null,
   loading: boolean,
@@ -61,6 +88,7 @@ export function runtimeResourceBounds(
       available: false,
       message: 'Checking capacity...',
       notice: '',
+      worstCase: { message: '', notice: '' },
     };
   }
   if (!status) {
@@ -71,6 +99,7 @@ export function runtimeResourceBounds(
       available: false,
       message: '',
       notice: '',
+      worstCase: { message: '', notice: '' },
     };
   }
   if (!status.available) {
@@ -81,17 +110,20 @@ export function runtimeResourceBounds(
       available: false,
       message: status.message ?? 'Capacity is unavailable.',
       notice: '',
+      worstCase: { message: '', notice: '' },
     };
   }
   return {
-    cpuMax: roundToStep(status.cpu.free, RUNTIME_CPU_STEP),
-    memoryMax: roundToStep(status.memory.free, RUNTIME_MEMORY_STEP),
+    cpuMax: roundToStep(status.schedulable.cpu.free, RUNTIME_CPU_STEP),
+    memoryMax: roundToStep(status.schedulable.memory.free, RUNTIME_MEMORY_STEP),
     loading: false,
     available: true,
-    message:
-      status.message ??
-      `Right now: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory free.`,
-    notice: status.notice ?? '',
+    message: status.schedulable.message ?? '',
+    notice: status.schedulable.notice ?? '',
+    worstCase: {
+      message: status.worstCase.message ?? '',
+      notice: status.worstCase.notice ?? '',
+    },
   };
 }
 
@@ -99,14 +131,14 @@ function parsedRuntimeErrorMessage(error: string, status: UIRuntimeResourceStatu
   if (
     status?.available &&
     error.startsWith('CPU') &&
-    roundToStep(status.cpu.free, RUNTIME_CPU_STEP) < MIN_RUNTIME_CPU_CORES
+    roundToStep(status.schedulable.cpu.free, RUNTIME_CPU_STEP) < MIN_RUNTIME_CPU_CORES
   ) {
     return 'No CPU capacity is available for this runtime.';
   }
   if (
     status?.available &&
     error.startsWith('Memory') &&
-    roundToStep(status.memory.free, RUNTIME_MEMORY_STEP) < MIN_RUNTIME_MEMORY_GIB
+    roundToStep(status.schedulable.memory.free, RUNTIME_MEMORY_STEP) < MIN_RUNTIME_MEMORY_GIB
   ) {
     return 'No memory capacity is available for this runtime.';
   }
@@ -123,6 +155,17 @@ export interface RuntimeResourceValidation {
   capacityWarning: string;
 }
 
+// schedulerExhaustedWarning is the one scheduling statement this panel can make
+// honestly. It is about the node, never about the entered values: the values
+// size the container's *limits*, which reserve nothing, so no entered figure can
+// be compared against what the scheduler admits a pod on. The warning this
+// replaced ("No node currently has 4 CPU and 8.7 GiB free ... or you lower the
+// request") said the opposite and offered the one remedy that is harmful --
+// shrinking a limit sized for the cold `make check-gate` an agent runs in that
+// container re-creates the OOM kills that destroy its run and its unpushed work.
+export const SCHEDULER_EXHAUSTED_WARNING =
+  'No node has request capacity left to admit another runtime pod — a new pod stays Pending until a node frees it. Stopping an environment nobody is using on one of these nodes is what returns it.';
+
 export function runtimeResourceValidation(
   config: UIRuntimePodConfig,
   status: UIRuntimeResourceStatus | null,
@@ -134,14 +177,18 @@ export function runtimeResourceValidation(
   if (!status?.available) {
     return { blockingError: '', capacityWarning: '' };
   }
-  const matchingNode = (status.nodes ?? []).find(
-    (node) => parsed.cpuCores <= node.cpu.free && parsed.memoryGiB <= node.memory.free,
+  // A node whose declared requests could not be read cannot be said to admit or
+  // refuse anything: its free figure is an upper bound, and an unreadable
+  // reading is not a shortfall.
+  const nodes = (status.nodes ?? []).filter((node) => node.schedulableComplete);
+  if (nodes.length === 0) {
+    return { blockingError: '', capacityWarning: '' };
+  }
+  const admitting = nodes.some(
+    (node) => node.schedulable.cpu.free > 0 && node.schedulable.memory.free > 0,
   );
-  if (status.nodes && status.nodes.length > 0 && !matchingNode) {
-    return {
-      blockingError: '',
-      capacityWarning: `No node currently has ${formatNumber(parsed.cpuCores)} CPU and ${formatNumber(parsed.memoryGiB)} GiB free — the configuration saves, but a deploy stays pending until capacity frees up or you lower the request.`,
-    };
+  if (!admitting) {
+    return { blockingError: '', capacityWarning: SCHEDULER_EXHAUSTED_WARNING };
   }
   return { blockingError: '', capacityWarning: '' };
 }

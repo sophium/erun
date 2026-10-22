@@ -174,6 +174,14 @@ var cliOnlyAgentFacingFlags = map[string]bool{
 	"doctor --sync-config":           true,
 	"doctor --remote-repository-url": true,
 	"doctor --codecommit-ssh-key-id": true,
+	// Pulling a definition into an environment this machine does not have yet
+	// must choose that environment's local port range, and the range is this
+	// machine's own allocation -- the same decision `erun init` makes at the
+	// terminal and nothing else offers a control for. The desktop's hosted
+	// panel uploads the environment it is showing; it never pulls, and never
+	// creates an environment, so there is no affordance that could host this
+	// flag and no defaulted value it would need.
+	"platform env pull --port-range-start": true,
 }
 
 // knownUnsurfacedFlags baselines the flag-granularity gaps that existed the

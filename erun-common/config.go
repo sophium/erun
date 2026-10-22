@@ -57,6 +57,37 @@ type OrchestratorConfig struct {
 	Name         string                        `yaml:"name" json:"name"`
 	Environments []OrchestratorEnvConfig       `yaml:"environments,omitempty" json:"environments,omitempty"`
 	Directories  []OrchestratorDirectoryConfig `yaml:"directories,omitempty" json:"directories,omitempty"`
+	// Alias names the erun platform alias this orchestrator declares as its
+	// own: which configured erun-type cloud alias it acts as. Empty -- the
+	// default -- declares none of its own and leaves it following this
+	// machine's own alias.
+	//
+	// It is the orchestrator-scoped counterpart of
+	// TenantConfig.PrimaryCloudProviderAlias, and a *selection* among aliases
+	// this host already has, never a credential: an orchestrator session has no
+	// pod and inherits the host's own config and secret store through its PTY,
+	// so naming an alias here changes whose identity that is not at all.
+	//
+	// Nothing resolves through it yet. An orchestrator's platform calls still
+	// resolve this machine's alias the way they always have; this field is the
+	// mapping that work needs in place first, and giving an orchestrator a
+	// credential of its own remains a separate decision.
+	Alias string `yaml:"alias,omitempty" json:"alias,omitempty"`
+	// UseGateway routes this orchestrator's Claude session through the
+	// erun-level gateway catalog (ERunConfig.OpenRouter). False -- the default
+	// -- leaves it on this machine's own Claude Code configuration, which is
+	// what every orchestrator ran on before the field existed. It is an opt-in
+	// rather than the environment-style tri-state on purpose: an orchestrator
+	// runs on the operator's own machine under their own sign-in, so a catalog
+	// configured for environments must not silently move it.
+	UseGateway bool `yaml:"usegateway,omitempty" json:"useGateway,omitempty"`
+	// Model is the model the session and its subagents launch on. Empty
+	// resolves to the gateway catalog's default under the gateway, and to
+	// DefaultOrchestratorModel otherwise (ResolveOrchestratorLaunch).
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// Effort is one of ClaudeEffortLevels. Empty resolves to the same default
+	// an environment's AI tab launches with.
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 // OrchestratorDirectoryConfig is one directory the orchestrator operates in,
@@ -319,8 +350,13 @@ type EnvConfig struct {
 	// working; an env carries at most one alias per provider type.
 	CloudProviderAliases map[string]string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
 	ManagedCloud         bool              `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion       string            `yaml:"runtimeversion,omitempty"`
-	RuntimeRegistry      string            `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	// Hosted records which platform row this environment corresponds to, so a
+	// definition can be uploaded to and pulled from the right one. It is a
+	// local assertion, not server state, and it is deliberately separate from
+	// ManagedCloud above — see HostedEnvironment's own comment.
+	Hosted          HostedEnvironment `yaml:"hosted,omitempty" json:"hosted,omitempty"`
+	RuntimeVersion  string            `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry string            `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
 	// ContainerRegistries carries the marked registry list for environments
 	// whose project config is not on the local machine (remote-agent and
 	// runtime envs). Local-agent envs resolve their list from the project's
@@ -1440,6 +1476,19 @@ const configFilePerm os.FileMode = 0o600
 // never a 0-byte or partially written file. The rename is atomic because the temp
 // file shares the destination's directory, and thus its filesystem.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeFileViaRename(path, data, perm, true)
+}
+
+// replaceFileAtomically gives a concurrent reader WriteFileAtomic's guarantee --
+// the whole previous file or the whole new one, never a truncated one -- without
+// its fsync. Activity snapshots and lease records are rewritten on hot paths
+// (the MCP server records one per request) and are read concurrently by idle
+// polls; what they need is visibility atomicity, not crash durability.
+func replaceFileAtomically(path string, data []byte, perm os.FileMode) error {
+	return writeFileViaRename(path, data, perm, false)
+}
+
+func writeFileViaRename(path string, data []byte, perm os.FileMode, durable bool) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -1456,9 +1505,11 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
+	if durable {
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return err
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		return err

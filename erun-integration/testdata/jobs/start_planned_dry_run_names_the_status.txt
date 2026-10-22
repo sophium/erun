@@ -1,0 +1,3 @@
+Dry run: erun jobs start planned.
+audit: erun jobs start --actor erun/ideas --dry-run --issue sophium/erun#1 --scope sophium/erun#1 --status planned --summary planning the jobs status ladder --type triage
+platform: POST https://api.example.test/v1/jobs (jobType=triage, actorId=erun/ideas, status=PLANNED, issueRef=sophium/erun#1, scope=sophium/erun#1)

@@ -82,6 +82,11 @@ export interface UITenantDashboard {
   // and what recent gates decided, independent of whether the change gated
   // is an erun review at all.
   gateRuns?: UIGateRun[];
+  // pipeline is the Pipeline tab's own view: every job and review the platform
+  // holds for this tenant, unioned on the issue each belongs to. It spans the
+  // reviews and gate runs above rather than repeating them — a piece of
+  // planned work has no branch at all, so only this list can show it.
+  pipeline?: UIPipelineIssue[];
   auditEvents?: UITenantDashboardAudit[];
   panels?: UITenantDashboardPanel[];
   // canCreateReview and canAdvanceMergeQueue report whether the signed-in user
@@ -160,11 +165,25 @@ export const TENANT_ENROLLMENT_ENROLLED = 'enrolled';
 // "never requested" — it must render as its own state rather than collapse
 // into local-only's confident answer.
 export const TENANT_ENROLLMENT_UNKNOWN = 'unknown';
+// TENANT_ENROLLMENT_TENANT_MISMATCH is the platform answering this row's own
+// credential with a tenant that is not the row's. It is the same verdict — and
+// deliberately the same value — as TENANT_PLATFORM_STATE_TENANT_MISMATCH: the
+// sidebar row and the dashboard it opens describe one situation, and two
+// spellings of it would be two things to keep in step.
+export const TENANT_ENROLLMENT_TENANT_MISMATCH = TENANT_PLATFORM_STATE_TENANT_MISMATCH;
 
 export interface UITenantPlatformEnrollmentStatus {
   tenant: string;
   state: string;
   declineReason?: string;
+  // platformHost is the platform this row's credential actually reached,
+  // absent when it reached none — the icon's copy names whichever platform
+  // answered rather than a fixed hostname, which is only ever right for the
+  // one platform it names.
+  platformHost?: string;
+  // platformTenant is the tenant the platform resolved this row's credential
+  // to, set only on TENANT_ENROLLMENT_TENANT_MISMATCH.
+  platformTenant?: string;
 }
 
 export interface UIListTenantPlatformEnrollmentStatusesInput {
@@ -519,6 +538,64 @@ export interface UIGateRun {
   logRef?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+// UIPipelineItem is one piece of work on one rung, with the record it came
+// from. Exactly one of job or review is set: a row that could not say which it
+// was would send an operator looking for a branch that does not exist (a job)
+// or a job that does (a review).
+//
+// rung is the platform's own label — PLANNED, IN_PROGRESS, REVIEW_OPEN,
+// READY, MERGING, MERGED, or an outcome such as FAILED — never re-derived
+// here. Its name and tone come from erun-kit's shared pipelineRungs, so this
+// tab and the console's Pipeline section label one rung the same way.
+export interface UIPipelineItem {
+  issueKey: string;
+  // issueRef/issueRefSource are the item's own link and where it came from.
+  // An INFERRED source means the number was parsed out of a branch name —
+  // a guess about the branch, and it renders as one.
+  issueRef?: string;
+  issueRefSource?: string;
+  rung: string;
+  job?: UIPipelineJob;
+  review?: UIPipelineReview;
+}
+
+// UIPipelineJob is the job half: work that exists as a record, with its own
+// issue reference and owning actor. It has no branch, and nothing derives one
+// for it.
+export interface UIPipelineJob {
+  jobId: string;
+  jobType: string;
+  issueRef?: string;
+  summary: string;
+  status: string;
+  actorKind: string;
+  actorId: string;
+  startedAt?: string;
+  // endedAt is set exactly when the job is no longer open. A planned job
+  // carries none, and its absence must not read as a job that failed to
+  // record one.
+  endedAt?: string;
+}
+
+// UIPipelineReview is the review half: work proposed for merge, with the
+// branches it moves between.
+export interface UIPipelineReview {
+  reviewId: string;
+  repository?: string;
+  name: string;
+  targetBranch: string;
+  sourceBranch: string;
+  status: string;
+}
+
+// UIPipelineIssue is one issue's own group of pipeline work. issueKey is
+// empty for the single group that names no issue, which the platform orders
+// last — the view shows work without an issue rather than guessing one for it.
+export interface UIPipelineIssue {
+  issueKey: string;
+  items: UIPipelineItem[];
 }
 
 export interface UITenantDashboardAudit {

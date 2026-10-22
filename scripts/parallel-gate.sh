@@ -95,10 +95,10 @@
 #   Usage: parallel-gate.sh cpu-quota
 #
 # Prints cpu_quota()'s result on its own, so a caller that needs the raw
-# number (the Makefile's LINT_TIMEOUT scaling, see erun#2266) can reuse the
-# exact same override chain -- PARALLEL_GATE_CPU_LIMIT, then cgroup v2, then
-# cgroup v1, then `nproc`, then the constant fallback -- instead of
-# re-implementing cgroup reads a second time.
+# number (the Makefile's per-job CPU shares and its integration-suite budget)
+# can reuse the exact same override chain -- PARALLEL_GATE_CPU_LIMIT, then
+# cgroup v2, then cgroup v1, then `nproc`, then the constant fallback --
+# instead of re-implementing cgroup reads a second time.
 cgroup_root="${PARALLEL_GATE_CGROUP_ROOT:-/sys/fs/cgroup}"
 # JS's Number.MAX_SAFE_INTEGER (2^53 - 1). cgroup v1's unlimited sentinel
 # for memory.limit_in_bytes is ~2^63, far above this, and cannot itself be

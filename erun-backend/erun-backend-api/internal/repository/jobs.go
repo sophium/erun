@@ -86,8 +86,8 @@ func (r *JobRepository) Get(ctx context.Context, tenantID, jobID string) (model.
 }
 
 // List returns the caller's tenant's jobs narrowed by filter, the live queue
-// first: every RUNNING job ahead of the finished ones, then most recently
-// started first. Scoped explicitly by tenant_id from the security context
+// first: every open job -- PLANNED or RUNNING -- ahead of the finished ones,
+// then most recently started first. Scoped explicitly by tenant_id from the security context
 // rather than left to RLS: erun_operations' policy is unconditional, so an
 // OPERATIONS caller's empty filter would otherwise read every tenant's jobs.
 func (r *JobRepository) List(ctx context.Context, filter JobFilter) ([]model.Job, error) {
@@ -141,7 +141,7 @@ func (r *JobRepository) list(ctx context.Context, filter JobFilter, environmentI
 			query += ` AND actor_id = ?`
 			args = append(args, filter.ActorID)
 		}
-		query += ` ORDER BY (status = 'RUNNING') DESC, started_at DESC, job_id DESC`
+		query += ` ORDER BY (status IN ('PLANNED', 'RUNNING')) DESC, started_at DESC, job_id DESC`
 		return tx.NewRaw(query, args...).Scan(ctx, &jobs)
 	})
 	return jobs, err
@@ -151,6 +151,10 @@ func (r *JobRepository) list(ctx context.Context, filter JobFilter, environmentI
 // lookup is the claim primitive's read half: a caller about to start work
 // asks this first so a second claim can be refused with the holder named,
 // instead of two actors silently duplicating each other.
+//
+// PLANNED counts as holding: a parked plan is a claim on the same scope a
+// running job is, and leaving it out would let a second actor claim as
+// RUNNING the very work somebody had already recorded an intent to do.
 //
 // A scope no open job holds is reported as ErrNotFound, the same sentinel a
 // missing row resolves to, so a caller cannot confuse "nobody holds this"
@@ -167,7 +171,7 @@ func (r *JobRepository) FindOpenByScope(ctx context.Context, scope string) (mode
 			  FROM jobs
 			 WHERE tenant_id = ?
 			   AND scope = ?
-			   AND status = 'RUNNING'
+			   AND status IN ('PLANNED', 'RUNNING')
 			 ORDER BY started_at DESC, job_id DESC
 			 LIMIT 1
 		`, securityContext.TenantID, scope).Scan(ctx, &job)
@@ -190,6 +194,14 @@ func (r *JobRepository) FindOpenByScope(ctx context.Context, scope string) (mode
 // One statement, not a read followed by a write: a row that a later update
 // refreshes between the two would otherwise be abandoned on the strength of
 // the state it had when it was read.
+//
+// PLANNED is deliberately outside the predicate rather than merely absent
+// from it. ABANDONED means an actor started work and stopped updating it; a
+// parked plan has no actor to stop, so sweeping one would destroy exactly the
+// prospective backlog entry the status exists to hold -- within the TTL,
+// silently, on a schedule. The sweep closes RUNNING jobs and nothing else,
+// and that is a contract, not an accident of the current predicate: widening
+// it to every open job would put a planned item back on the clock.
 func (r *JobRepository) AbandonStale(ctx context.Context, staleBefore time.Time) ([]model.Job, error) {
 	// A sweep that closed nothing is still a definite answer, so the slice is
 	// built non-nil and marshals as [] rather than null -- the same contract

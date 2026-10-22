@@ -144,3 +144,8 @@ CREATE TRIGGER environment_events_set_timestamps
   BEFORE INSERT OR UPDATE ON environment_events
   FOR EACH ROW
   EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER environment_definitions_set_timestamps
+  BEFORE INSERT OR UPDATE ON environment_definitions
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

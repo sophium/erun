@@ -1,0 +1,18 @@
+Set which effort level this host-side orchestrator's Claude session launches at: one of low, medium, high, xhigh, max, ultracode. Pass "default" to clear it back to the default, ultracode, the same level an environment's agent launches at by default. Stored on the orchestrator's entry in config.yaml and read back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted.
+
+Usage:
+  erun orchestrator set-effort ORCHESTRATOR_ID [flags]
+
+Examples:
+  erun orchestrator set-effort my-orchestrator --effort high
+  erun orchestrator set-effort my-orchestrator --effort default
+
+Flags:
+      --dry-run         Resolve and trace mutating actions without executing them.
+      --effort string   Effort level (low, medium, high, xhigh, max, ultracode), or "default" to clear it
+  -h, --help            help for set-effort
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

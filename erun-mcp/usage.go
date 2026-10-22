@@ -78,7 +78,7 @@ func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		req := eruncommon.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		params := eruncommon.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
-		result, err := eruncommon.RunRuntimeUsage(runCtx, nil, req, params)
+		result, err := eruncommon.RunRuntimeUsage(runCtx, nil, nil, req, params)
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}

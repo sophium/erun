@@ -104,6 +104,118 @@ export class OrchestratorDialog {
     return this.page.locator(`#orchestrator-env-role-${tenant}-${environment}`);
   }
 
+  // The orchestrator's own platform alias, which is one field of the dialog
+  // rather than one per linked environment. The trigger is behind the
+  // menu button inside the Shadcn field markup, so clicking it is what opens
+  // the list -- the same interaction envRoleTrigger's callers use.
+  aliasTrigger(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).locator('#orchestrator-alias');
+  }
+
+  async setAlias(
+    alias: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<void> {
+    await this.aliasTrigger(mode).click();
+    await this.page.getByRole('option', { name: alias, exact: true }).click();
+  }
+
+  // The aliases the trigger offers, by their visible words, in render order.
+  // Opened and dismissed in one call, read as a list rather than probed one at
+  // a time, for the same reason envRoleOptionNames is: the property under test
+  // is which aliases are absent (a stored alias this machine no longer
+  // resolves, or another provider's) alongside which are present.
+  async aliasOptionNames(
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<string[]> {
+    await this.aliasTrigger(mode).click();
+    const options = this.page.getByRole('option');
+    await options.first().waitFor({ state: 'visible' });
+    const names = await options.allInnerTexts();
+    await this.page.keyboard.press('Escape');
+    return names.map((name) => name.trim());
+  }
+
+  // The launch settings: the gateway switch, the model and the effort. Ids
+  // match OrchestratorDialog.Launch.helpers.ts. The model is a SelectField
+  // trigger through the gateway and a free-entry textbox off it, both under
+  // the same id, so each mode has its own locator.
+  gatewayCheckbox(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('checkbox', { name: 'Use gateway', exact: true });
+  }
+
+  gatewayHelp(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).locator('#orchestrator-gateway-help');
+  }
+
+  // The recovery control offered when the gateway catalog could not be read.
+  gatewayRetryButton(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('button', { name: 'Retry', exact: true });
+  }
+
+  // Every place the dialog renders a piece of text, so a spec can assert a
+  // message is reported once rather than echoed.
+  textOccurrences(
+    text: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Locator {
+    return this.locator(mode).getByText(text);
+  }
+
+  modelInput(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('textbox', { name: 'Model', exact: true });
+  }
+
+  modelHelp(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).locator('#orchestrator-model-help');
+  }
+
+  modelResetButton(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('button', { name: 'Reset to default', exact: true });
+  }
+
+  modelTrigger(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('combobox', { name: 'Model', exact: true });
+  }
+
+  async setGatewayModel(
+    label: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<void> {
+    await this.modelTrigger(mode).click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  // Read as one list for the same reason aliasOptionNames is: what the picker
+  // leaves out matters as much as what it offers.
+  async gatewayModelOptionNames(
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<string[]> {
+    await this.modelTrigger(mode).click();
+    const options = this.page.getByRole('option');
+    await options.first().waitFor({ state: 'visible' });
+    const names = await options.allInnerTexts();
+    await this.page.keyboard.press('Escape');
+    return names.map((name) => name.trim());
+  }
+
+  effortTrigger(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('combobox', { name: 'Effort', exact: true });
+  }
+
+  async setEffort(
+    label: string,
+    mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator',
+  ): Promise<void> {
+    await this.effortTrigger(mode).click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  // The dialog's own error line: a save the backend refused renders here.
+  errorAlert(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByRole('alert');
+  }
+
   async setEnvRole(
     tenant: string,
     environment: string,
@@ -174,8 +286,8 @@ export class OrchestratorDialog {
     await this.locator(mode).getByRole('button', { name: 'Cancel' }).click();
   }
 
-  nameInput(): Locator {
-    return this.locator().getByLabel('Name');
+  nameInput(mode: 'New orchestrator' | 'Edit orchestrator' = 'New orchestrator'): Locator {
+    return this.locator(mode).getByLabel('Name');
   }
 
   createButton(): Locator {
@@ -228,36 +340,6 @@ export class OrchestratorDialog {
     });
   }
 
-  // The conversation picker: which conversation this orchestrator resumes, every
-  // one it could be pointed at instead, and the attach that corrects it. Rows
-  // carry their conversation id and role as data attributes so a spec addresses
-  // one without matching on rendered prose.
-  conversationSummary(): Locator {
-    return this.locator('Edit orchestrator').getByText('Resuming the conversation', {
-      exact: false,
-    });
-  }
-
-  conversationRow(conversationId: string): Locator {
-    return this.locator('Edit orchestrator').locator(`[data-conversation-id="${conversationId}"]`);
-  }
-
-  conversationRows(): Locator {
-    return this.locator('Edit orchestrator').locator('[data-conversation-id]');
-  }
-
-  conversationAttachButton(conversationId: string): Locator {
-    return this.conversationRow(conversationId).getByRole('button', {
-      name: `Attach ${conversationId} to this orchestrator`,
-    });
-  }
-
-  conversationDetachButton(conversationId: string): Locator {
-    return this.conversationRow(conversationId).getByRole('button', {
-      name: `Stop using ${conversationId} for this orchestrator`,
-    });
-  }
-
   // The restart-required banner (erun#1319): shown at the top of the form when
   // this orchestrator's live session was spawned with a scope that no longer
   // matches what it is linked to now, naming why and carrying its own action
@@ -270,6 +352,19 @@ export class OrchestratorDialog {
 
   restartNowButton(): Locator {
     return this.restartRequiredNotice().getByRole('button', { name: 'Restart now' });
+  }
+
+  // The same banner when only the launch settings changed: a session fixes its
+  // gateway, model and effort at launch, so it names that cause instead of
+  // claiming tools are missing.
+  launchSettingsRestartNotice(): Locator {
+    return this.locator('Edit orchestrator').getByRole('status').filter({
+      hasText: 'Its gateway, model or effort changed while it was running',
+    });
+  }
+
+  launchSettingsRestartNowButton(): Locator {
+    return this.launchSettingsRestartNotice().getByRole('button', { name: 'Restart now' });
   }
 
   // The footer's own restart action, present whenever the session is running;

@@ -1,7 +1,6 @@
 import type { StartSessionResult, UISelection } from '@/types';
 
 import {
-  CloseSession,
   StartCreateVersionSession,
   StartDeploySession,
   StartInitialDeploySession,
@@ -38,8 +37,8 @@ import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { TerminalTab, TerminalTabKind } from './state';
 import type { AppThunk } from './store';
-import { maybeRespawnDeadDefaultTab } from './tabRespawnThunks';
-import { recordTab, rememberSelectedTab, removeTab } from './tabsThunks';
+import { recordTab } from './tabsThunks';
+import { closeTerminalTab, selectTerminalTab } from './terminalTabThunks';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
@@ -410,6 +409,10 @@ const finishOpenSession =
     }
     dispatch(registerOpenSessionResult(key, result, runSelection));
     dispatch(showOpenSelectionStatus(result.sessionId, selection));
+    // The session this open claimed the pane for. registerOpenSessionResult
+    // sets it unconditionally; everything between here and the restore below
+    // may hand it on.
+    const claimedSessionId = result.sessionId;
 
     await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
     // Fire-and-forget: rebuilding tabs for pod sessions another window
@@ -419,7 +422,17 @@ const finishOpenSession =
     if (!isCurrentSelection()) {
       return;
     }
-    dispatch(restoreSelectedTabForEnv(key));
+    // isCurrentSelection tracks the environment, and stays true while the user
+    // picks a different tab of the same one -- which is exactly the move this
+    // restore would undo. ensureDefaultEnvTabs awaits a spawn per default tab,
+    // so that pick has had the whole of it to land, and a pane that has moved
+    // on is no longer this open's to re-point. Taking it back anyway strands
+    // the tab the user is on: the renderer writes only the session the store
+    // names, so everything that tab emits from then on is dropped, and with
+    // nothing left to dispatch the pane stays blank rather than recovering.
+    if (getState().terminal.sessionId === claimedSessionId) {
+      dispatch(restoreSelectedTabForEnv(key));
+    }
 
     if (getState().layout.reviewOpen) {
       await dispatch(loadReviewDiff());
@@ -564,70 +577,9 @@ export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, ge
   }
 };
 
-export const selectTerminalTab =
-  (sessionId: number): AppThunk =>
-  (dispatch, getState, extra) => {
-    const controller = requireController(extra);
-    if (sessionId <= 0) {
-      return;
-    }
-    if (dispatch(maybeRespawnDeadDefaultTab(sessionId))) {
-      return;
-    }
-    if (sessionId === getState().terminal.sessionId) {
-      return;
-    }
-    dispatch(setSessionId(sessionId));
-    dispatch(rememberSelectedTab(sessionId));
-    const state = getState();
-    const exitReason = state.sessions.exitReasons[sessionId] ?? '';
-    if (exitReason) {
-      dispatch(setTerminalCopyOutput(state.sessions.exitOutputs[sessionId] ?? ''));
-      dispatch(setTerminalCopyStatus(''));
-      dispatch(showTerminalMessage(exitReason));
-    } else {
-      dispatch(hideTerminalMessage());
-    }
-    controller.focusTerminalSoon();
-    controller.queueTerminalResize();
-  };
-
-export const closeTerminalTab =
-  (sessionId: number): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    if (sessionId <= 0) {
-      return;
-    }
-    const state = getState();
-    const selection = state.selection.selected;
-    if (!selection) {
-      return;
-    }
-    const runSelection = { ...selection };
-    const key = selectionKey(runSelection);
-    const tabs = state.terminal.tabsByEnv[key] ?? [];
-    const target = tabs.find((tab) => tab.sessionId === sessionId);
-    if (target && target.kind !== 'extra') {
-      return;
-    }
-    try {
-      await CloseSession(sessionId);
-    } catch (error: unknown) {
-      dispatch(showTerminalError(readError(error)));
-      return;
-    }
-    const remaining = dispatch(removeTab(key, sessionId));
-    if (getState().terminal.sessionId === sessionId) {
-      const next = remaining[remaining.length - 1];
-      if (next) {
-        dispatch(selectTerminalTab(next.sessionId));
-      } else {
-        dispatch(setSessionId(0));
-      }
-    }
-  };
-
-// Re-exported here so existing session-thunks imports still resolve;
-// closeEnvironment itself lives in ./closeEnvironmentThunks to keep this
-// file under the max-lines cap.
+// Re-exported here so existing session-thunks imports still resolve. The
+// environment-scoped teardown and single-tab selection live in their own
+// modules to keep this file under the max-lines cap; this flow owns the
+// multi-step selections only.
 export { closeEnvironment } from './closeEnvironmentThunks';
+export { closeTerminalTab, selectTerminalTab };

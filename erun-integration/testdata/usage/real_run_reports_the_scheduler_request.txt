@@ -1,0 +1,14 @@
+CPU: 0.7% of a 14.00-core quota (sampled over 1.0s)
+Memory: 394.4MiB / 27.0GiB limit (1.4%), peak 979.7MiB, OOM kills 0
+Requests: 0.5 CPU / 2.0GiB for the pod
+  erun-devops: 0.25 CPU / 1.0GiB
+  erun-dind: 0.25 CPU / 1.0GiB
+erun-dind sidecar (where builds run):
+  CPU: 0.7% of a 14.00-core quota (sampled over 1.0s)
+  Memory: 394.4MiB / 27.0GiB limit (1.4%), peak 979.7MiB, OOM kills 0
+Disk (node, shared): <HOME> 84.9GiB / 189.1GiB (44.9%)
+  this environment's own usage: 42.0GiB
+Sizing recommendation:
+  sizing: memory insufficient-evidence from 27648Mi (peak 980Mi of 27648Mi (4%), but only 0m observed of the 24h0m a shrink needs); cpu insufficient-evidence from 14 (0.11% of scheduling periods throttled (425 of 376556), but only 0m observed of the 24h0m a shrink needs)
+  sizing-evidence: 0m observed, 1 samples, 0 restarts, knob=runtimepod, from cgroup memory.peak, cgroup memory.events oom_kill, cgroup cpu.stat usage_usec/nr_throttled (not loadavg)
+audit: erun usage

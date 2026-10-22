@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 
-import { expect, test } from '../../../fixtures/erunApp.js';
+import { expect, test, withTestBudget } from '../../../fixtures/erunApp.js';
 
 // The terminal host had no aria-label/role and xterm's screenReaderMode
 // was never turned on, so the AccessibilityManager live region that carries
@@ -12,6 +12,9 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 test.describe('terminal accessibility', () => {
   test('the terminal host is a named, reachable group', async ({ app }) => {
     const host = app.terminalPane.host();
+    // waitFor (not expect) converges the pane's render against the enclosing
+    // test's own budget rather than expect's fixed one.
+    await host.waitFor({ state: 'visible' });
     await expect(host).toBeVisible();
     await expect(host).toHaveAttribute('role', 'group');
     await expect(host).toHaveAccessibleName('Terminal');
@@ -36,14 +39,21 @@ test.describe('terminal accessibility', () => {
     // Only present when `screenReaderMode: true` reached `new Terminal(...)`
     // -- xterm's AccessibilityManager is not instantiated otherwise, so this
     // element's mere existence is the regression guard for the option.
-    await expect(app.terminalPane.accessibilityTree()).toHaveCount(1);
-    await expect(app.terminalPane.accessibilityTree().locator('[role="list"]')).toHaveCount(1);
+    //
+    // The tree is built after the reload's own boot, so both counts converge
+    // on the budget this test declared rather than expect's 10s default.
+    await expect(app.terminalPane.accessibilityTree()).toHaveCount(1, withTestBudget());
+    await expect(app.terminalPane.accessibilityTree().locator('[role="list"]')).toHaveCount(
+      1,
+      withTestBudget(),
+    );
   });
 
   // Scoped to the host div itself, not a whole-page scan: axe can't observe
   // xterm's screen-reader wiring (checked directly above), but it can catch a
   // structurally broken landmark/name on the surface we changed.
   test('axe reports no violations for the terminal host', async ({ app, page }) => {
+    await app.terminalPane.host().waitFor({ state: 'visible' });
     await expect(app.terminalPane.host()).toBeVisible();
     const results = await new AxeBuilder({ page }).include('#erun-terminal-pane').analyze();
     expect(results.violations).toEqual([]);

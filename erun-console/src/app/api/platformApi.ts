@@ -33,6 +33,7 @@ export const platformApi = createApi({
     'TenantIssuers',
     'GateRuns',
     'Jobs',
+    'Pipeline',
   ],
   endpoints: () => ({}),
 });

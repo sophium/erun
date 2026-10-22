@@ -19,7 +19,7 @@ func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
 	}
 }
 
-// A concurrent wave can have several images in flight, and the heartbeat must
+// A concurrent build can have several images in flight, and the heartbeat must
 // still say which one is the long one rather than only how many there are.
 func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
 	got := formatBuildHeartbeat([]buildHeartbeatSnapshot{
@@ -60,7 +60,7 @@ func TestBuildHeartbeatBeatsOnlyWhileABuildIsStillRunning(t *testing.T) {
 	done() // idempotent: a second clear must not drop another image's registration
 }
 
-// Two images in one wave are tracked independently, so the one that finishes
+// Two images building at once are tracked independently, so the one that finishes
 // first stops being named while the other keeps its own elapsed time.
 func TestBuildHeartbeatTracksConcurrentBuildsIndependently(t *testing.T) {
 	clock := time.Unix(0, 0)

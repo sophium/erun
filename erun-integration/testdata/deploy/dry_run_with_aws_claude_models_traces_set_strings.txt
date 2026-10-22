@@ -11,3 +11,5 @@ cd <TMP> && helm upgrade --install --wait --wait-for-jobs --server-side true --f
 deploy: would watch pods in managed-prod on context edge for early container failure (release managed-devops)
 kubectl --context edge --namespace managed-prod get pods -o json
 dedup: ready (release=edge-managed-prod-managed-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context edge -n managed-prod delete secret erun-claude-gateway --ignore-not-found

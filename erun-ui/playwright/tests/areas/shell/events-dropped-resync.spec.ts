@@ -52,9 +52,14 @@ test.describe('erun:events-dropped gap marker', () => {
     await emitEventsDropped(page, 7);
 
     const icon = app.titlebar.messageCenterIcon('warning');
+    // waitFor (not expect) converges the marker's own render against the
+    // enclosing test's budget rather than expect's fixed one.
+    await icon.waitFor({ state: 'visible' });
     await expect(icon).toBeVisible();
     await icon.click();
-    await expect(app.titlebar.messageCenterRow(/Lost 7 updates from the app/)).toBeVisible();
+    const row = app.titlebar.messageCenterRow(/Lost 7 updates from the app/);
+    await row.waitFor({ state: 'visible' });
+    await expect(row).toBeVisible();
 
     const response = await resync;
     expect(response.ok()).toBe(true);

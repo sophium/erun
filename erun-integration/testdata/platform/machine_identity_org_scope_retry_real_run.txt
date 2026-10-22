@@ -1,0 +1,6 @@
+machine-env-1 (tenant tenant-1 named "acme", user user-1)
+audit: erun platform whoami
+platform: GET <IDENTITY_API>/v1/whoami
+GET <IDENTITY_API>/.well-known/openid-configuration
+POST <IDENTITY_API>/oauth/token (client_credentials grant)
+cloud machine identity: issuer rejected scope urn:zitadel:iam:user:resourceowner; retrying without it

@@ -72,6 +72,31 @@ export interface UIRuntimeUsage {
   // environment's CPU legible — see UIRuntimeDindUsage. Absent on every other
   // environment, and absent (not zeroed) when the exec into the sidecar failed.
   dind?: UIRuntimeDindUsage;
+  // requests is what the scheduler admits this pod on, read from the pod spec.
+  // cpu and memory above are measured against the container's cgroup *limit* --
+  // a ceiling that reserves nothing -- so a renderer states the reservation
+  // beside it rather than letting the ceiling read as provisioned. Absent when
+  // nothing was read; `unavailable` (never a zero) when the pod spec could not
+  // be.
+  requests?: UIRuntimeUsageRequests;
+}
+
+// UIRuntimeUsageRequests mirrors eruncommon.RuntimeUsageRequests' runtime
+// container half: the reservation the cpu and memory rows above are measured
+// against.
+export interface UIRuntimeUsageRequests {
+  runtime: UIRuntimeContainerRequests;
+  unavailable?: string;
+}
+
+// UIRuntimeContainerRequests is one container's declared request. A zero/empty
+// field is a container that declares nothing for that resource — which reserves
+// nothing — and must render as absent rather than as a measured zero.
+export interface UIRuntimeContainerRequests {
+  cpuMilli?: number;
+  memoryBytes?: number;
+  cpu?: string;
+  memory?: string;
 }
 
 // UIRuntimeDindUsage is the erun-dind sidecar's own CPU/memory reading. It

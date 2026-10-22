@@ -1162,6 +1162,15 @@ type orchestratorSeed struct {
 	// A seed may carry these and no environment at all, which is a complete
 	// definition.
 	directories []string
+	// alias is the erun platform alias the orchestrator declares as its own.
+	// Empty is the default and the common case, and writes no key at all, so
+	// goldens seeded before this field existed are unchanged by it.
+	alias string
+	// useGateway, model and effort are the launch settings. Their zero values
+	// are the defaults and write no key, for the same reason as alias.
+	useGateway bool
+	model      string
+	effort     string
 }
 
 // seedOrchestratorsWithEnvRoles appends a persisted orchestrators list,
@@ -1186,6 +1195,18 @@ func seedOrchestratorsWithEnvRoles(t testing.TB, setup env.Setup, orchestrators 
 	for _, orchestrator := range orchestrators {
 		sb.WriteString("  - id: " + orchestrator.id + "\n")
 		sb.WriteString("    name: " + orchestrator.name + "\n")
+		if orchestrator.alias != "" {
+			sb.WriteString("    alias: " + orchestrator.alias + "\n")
+		}
+		if orchestrator.useGateway {
+			sb.WriteString("    usegateway: true\n")
+		}
+		if orchestrator.model != "" {
+			sb.WriteString("    model: " + orchestrator.model + "\n")
+		}
+		if orchestrator.effort != "" {
+			sb.WriteString("    effort: " + orchestrator.effort + "\n")
+		}
 		if len(orchestrator.environments) > 0 {
 			sb.WriteString("    environments:\n")
 			for _, e := range orchestrator.environments {

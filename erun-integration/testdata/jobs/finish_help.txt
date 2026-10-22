@@ -1,17 +1,20 @@
 Report how a job ended (or refresh what it is doing). A job that has already finished cannot be updated: its outcome is the record coordination and reporting both read.
 
+--status RUNNING on a PLANNED job is the one move that reopens any work: it says the plan has begun. Every other status closes the job, and none of them reopens a job that already finished.
+
 Usage:
   erun jobs finish <job-id> [flags]
 
 Examples:
   erun jobs finish job_01H... --status SUCCEEDED
+  erun jobs finish job_01H... --status RUNNING   # the planned work has begun
   erun jobs finish job_01H... --summary "waiting on the gate build"
 
 Flags:
       --dry-run               Resolve and trace mutating actions without executing them.
   -h, --help                  help for finish
       --local-job-id string   Record the in-pod job id this mirrors
-      --status string         Close the job as SUCCEEDED, FAILED, ABANDONED, or SUPERSEDED
+      --status string         Move the job forward: RUNNING opens a PLANNED job; SUCCEEDED, FAILED, ABANDONED and SUPERSEDED close it
       --summary string        Refresh what the job is doing, in prose
 
 Global Flags:

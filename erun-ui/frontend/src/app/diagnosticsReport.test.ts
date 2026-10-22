@@ -25,6 +25,7 @@ function orchestrator(overrides: Partial<OrchestratorInfo> = {}): OrchestratorIn
     nudgeCapped: false,
     restartRequired: false,
     roleChanged: false,
+    launchSettingsChanged: false,
     ...overrides,
   };
 }

@@ -36,6 +36,7 @@ Tenants:
           runtime-version: none
           runtime-pod: none
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none
@@ -53,6 +54,7 @@ Tenants:
           runtime-version: none
           runtime-pod: none
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none
@@ -73,6 +75,7 @@ Tenants:
           runtime-version: none
           runtime-pod: none
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none

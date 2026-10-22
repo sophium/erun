@@ -1,6 +1,6 @@
 import type { Request, Route } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
   seedEnvironment,
@@ -288,16 +288,20 @@ test.describe('tenant dashboard — Registration tab', () => {
 
       await app.tenantDashboard.envNameInput().fill('new-env');
       await app.tenantDashboard.previewEnvironmentButton().click();
-      await expect.poll(() => previewCalled).toBe(true);
+      // Each poll here waits on a value this spec's own route handler owns, so
+      // it is the read's arrival that decides the step -- and `expect.poll`
+      // carries no timeout of its own, resolving to expect's 10s default
+      // rather than the 30s this test declares. Pointed at that budget.
+      await expect.poll(() => previewCalled, withTestBudget()).toBe(true);
       await expect(app.tenantDashboard.activePanel()).toContainText('namespace frs-new-env');
       await expect(app.tenantDashboard.activePanel()).toContainText('Quota ok');
 
       await app.tenantDashboard.registerEnvironmentButton().click();
-      await expect.poll(() => registerCalled).toBe(true);
+      await expect.poll(() => registerCalled, withTestBudget()).toBe(true);
 
       // The register success re-fetches the dashboard, so the new
       // environment appears without a manual refresh.
-      await expect.poll(() => dashboardLoads).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => dashboardLoads, withTestBudget()).toBeGreaterThanOrEqual(2);
       await expect(app.tenantDashboard.environmentRow('new-env')).toContainText('registered');
     } finally {
       removeEnvironment(SEED_TENANT, environment);
@@ -362,12 +366,14 @@ test.describe('tenant dashboard — Registration tab', () => {
     await expect(app.tenantDashboard.envAdoptToggle()).toBeChecked();
     await expect(app.tenantDashboard.envKubernetesContextInput()).not.toHaveValue('');
 
+    // Same poll, same route-handler-owned value, same 10s default (see the
+    // registration case above).
     await app.tenantDashboard.previewEnvironmentButton().click();
-    await expect.poll(() => previewCalled.adopt).toBe(true);
+    await expect.poll(() => previewCalled.adopt, withTestBudget()).toBe(true);
     await expect(app.tenantDashboard.activePanel()).toContainText('deploy: skipped');
 
     await app.tenantDashboard.recordEnvironmentButton().click();
-    await expect.poll(() => registerCalled.adopt).toBe(true);
+    await expect.poll(() => registerCalled.adopt, withTestBudget()).toBe(true);
     expect(registerCalled.runtimeVersion).toBeFalsy();
   });
 
@@ -465,7 +471,7 @@ test.describe('tenant dashboard — Registration tab', () => {
       await app.tenantDashboard.deleteConfirmInputFor('prod-env').fill('prod-env');
       await app.tenantDashboard.deleteButtonFor('prod-env').click();
 
-      await expect.poll(() => deleteCalled).toBe(true);
+      await expect.poll(() => deleteCalled, withTestBudget()).toBe(true);
       await expect(app.tenantDashboard.environmentRow('prod-env')).toContainText('deleting');
     } finally {
       removeEnvironment(SEED_TENANT, environment);

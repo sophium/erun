@@ -19,9 +19,9 @@ import { expect, test } from '../../../fixtures/erunApp.js';
 //
 // The backend's own sweep runs on a timer against these inert envs and reports
 // them unreachable, which legitimately clears a simulated state. Every
-// assertion is therefore re-driven until it converges, bounded by a real
-// timeout rather than a guessed delay — a genuinely broken row never converges
-// and the step still fails.
+// assertion is therefore re-driven until it converges, bounded by the calling
+// test's own deadline rather than a second cap the step picked for itself —
+// a genuinely broken row never converges and the step still fails.
 
 test.describe('sidebar env activity', () => {
   test('a reachable env shows a status light even though the desktop never opened it', async ({
@@ -196,7 +196,7 @@ async function driveEnvActivity(
   await expect(async () => {
     await emitEnvActivity(page, event);
     await assertions();
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 }
 
 // Mirrors the env-activity event erun-ui/environment_activity.go emits per tick.

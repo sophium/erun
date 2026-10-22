@@ -14,11 +14,6 @@ const (
 	// transient (Investigate) session, which has no id and no linked envs.
 	OrchestratorIDEnvVar = "ERUN_ORCHESTRATOR_ID"
 
-	// OrchestratorLaunchEnvVar names this launch's nonce, which the session's
-	// own hooks stamp onto the conversation id they report, so a restart
-	// attaches to the launch that asked for it.
-	OrchestratorLaunchEnvVar = "ERUN_ORCHESTRATOR_LAUNCH"
-
 	// DesktopSessionEnvVar marks a process as one the desktop app started rather
 	// than a shell the Operator opened by hand. Internal; not a contract.
 	DesktopSessionEnvVar = "ERUN_UI_SESSION"
@@ -38,7 +33,6 @@ const (
 func OrchestratorSessionEnvVars() []string {
 	return []string{
 		OrchestratorIDEnvVar,
-		OrchestratorLaunchEnvVar,
 		DesktopSessionEnvVar,
 		RuntimeOutputsDirEnvVar,
 	}

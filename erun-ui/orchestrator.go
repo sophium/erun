@@ -10,12 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
@@ -46,19 +46,25 @@ import (
 type orchestratorSession struct {
 	id     string
 	serial int
-	// conversationID is the AI-harness conversation this PTY is attached to. It
-	// is what a restart records, so the resume continues this conversation rather
-	// than whichever one the (mutable, reusable) orchestrator id resolves to
-	// later.
-	conversationID string
-	// launchID is the nonce this launch minted and handed to the session, so a
-	// live-conversation record the session writes can be recognised as belonging
-	// to this launch rather than to a run it replaced. See
-	// orchestrator_live_conversation.go.
-	launchID  string
+	// agentID is the Claude background agent this PTY is attached to. Empty for
+	// a transient (Investigate) session, which runs in the PTY itself.
+	agentID   string
 	transient bool
 	name      string
-	envs      []eruncommon.OrchestratorEnvConfig
+	// alias is the erun platform alias this orchestrator acts as, held on the
+	// session for the same reason name and dirs are: the Edit dialog reads a
+	// running orchestrator's own snapshot, and a session that did not carry the
+	// alias would report none and erase it on the next save.
+	alias string
+	// launched is what this session actually runs on, resolved at spawn. It is
+	// only ever compared against the definition resolved now to flag a restart;
+	// rows report the configured values, never these.
+	launched orchestratorResolvedLaunch
+	envs     []eruncommon.OrchestratorEnvConfig
+	// wiredScope is the environment scope the agent's MCP config held when the
+	// agent last started. An agent that was already running when this PTY
+	// attached keeps the tools it started with, whatever envs says now.
+	wiredScope []string
 	// dirs are the orchestrator's own directories: paths it operates in that
 	// belong to no environment. Held on the session so a running orchestrator
 	// still reports them (the Edit dialog reads its scope from this snapshot),
@@ -145,6 +151,33 @@ type orchestratorEnvInput struct {
 	Environment string                         `json:"environment"`
 	Directory   string                         `json:"directory"`
 	Role        eruncommon.OrchestratorEnvRole `json:"role"`
+}
+
+// orchestratorLaunchInput is the dialog's gateway, model and effort for
+// create/update (eruncommon.OrchestratorConfig.UseGateway/Model/Effort). An
+// empty Model or Effort is the default, never a value of its own.
+type orchestratorLaunchInput struct {
+	UseGateway bool   `json:"useGateway"`
+	Model      string `json:"model"`
+	Effort     string `json:"effort"`
+}
+
+// orchestratorLaunchChoices is what the dialog's gateway, model and effort
+// controls offer. GatewayModels is the catalog's driveable set, empty when no
+// catalog is configured; GatewayUndriveableModels the catalog entries the
+// gateway cannot drive, so a recorded one can be labelled as such rather than
+// as an uncurated id; DefaultModel and DefaultEffort are what an empty
+// setting launches on off the gateway, GatewayDefaultModel what an empty model
+// launches on through it ("" when the catalog names none, which falls back to
+// DefaultModel).
+type orchestratorLaunchChoices struct {
+	GatewayConfigured        bool     `json:"gatewayConfigured"`
+	GatewayModels            []string `json:"gatewayModels"`
+	GatewayUndriveableModels []string `json:"gatewayUndriveableModels"`
+	GatewayDefaultModel      string   `json:"gatewayDefaultModel"`
+	DefaultModel             string   `json:"defaultModel"`
+	EffortLevels             []string `json:"effortLevels"`
+	DefaultEffort            string   `json:"defaultEffort"`
 }
 
 // orchestratorEnvCandidate is an env the operator considered linking, eligible
@@ -282,6 +315,26 @@ type orchestratorInfo struct {
 	// the same Restart affordance without claiming the specific "tools
 	// missing" reason that does not apply here. See orchestratorRolesChanged.
 	RoleChanged bool `json:"roleChanged"`
+	// Alias is the erun platform alias this orchestrator acts as, empty when it
+	// declares none of its own (eruncommon.OrchestratorConfig.Alias). It is the
+	// dialog's own field, seeded from here and sent back on save, so a value
+	// written by `erun orchestrator set-alias` survives an unrelated edit made
+	// in the desktop.
+	Alias string `json:"alias,omitempty"`
+	// UseGateway, Model and Effort are the launch settings as configured, never
+	// as the live session launched them: the dialog seeds from here and sends
+	// them back on save, so a row carrying launched values would re-persist them
+	// over a later `erun orchestrator set-*`. Empty Model or Effort is the
+	// default.
+	UseGateway bool   `json:"useGateway,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Effort     string `json:"effort,omitempty"`
+	// LaunchSettingsChanged is true when the definition, resolved now, would
+	// launch on a different model, effort or gateway than the live session runs
+	// on -- or no longer resolves at all. Like RoleChanged it asks
+	// for a Restart without claiming tools are missing: a session's model,
+	// effort and gateway are fixed when it launches.
+	LaunchSettingsChanged bool `json:"launchSettingsChanged"`
 }
 
 func orchestratorSessionKey(id string) string {
@@ -310,21 +363,6 @@ func orchestratorsRoot() string {
 		home = os.TempDir()
 	}
 	return filepath.Join(home, "orchestrators")
-}
-
-// orchestratorReturnNoteName is the note an orchestrator leaves its unfinished
-// task in before triggering a rebuild+restart, in the shared working directory.
-// The id is in the name because that directory is shared: it is what lets a
-// woken session read its own agenda rather than whichever note happened to be
-// written last, and the session can address it without being told which one it
-// is, from the id it already carries. An unnamed session (transient) stages no
-// hand-off, so it only ever falls back to the bare name.
-func orchestratorReturnNoteName(orchestratorID string) string {
-	id := strings.TrimSpace(orchestratorID)
-	if id == "" {
-		return "RESUME-NOTE.md"
-	}
-	return "RESUME-NOTE." + id + ".md"
 }
 
 // defaultOrchestratorDirectory is the host mirror an env defaults to:
@@ -473,10 +511,9 @@ here happen to have files — read the config every time.
   desktop's Outputs) first. You may build locally to help, but never edit a pod-backed
   environment's review directory.
 - **This directory is shared with every other orchestrator**, so anything here that is
-  yours alone carries your id in its name. The return note you leave before a
-  rebuild+restart is the one that matters most: erun reads it back as
-  ` + "`RESUME-NOTE.$ERUN_ORCHESTRATOR_ID.md`" + `, and a note addressed to the directory
-  alone is one any orchestrator can read as its own or overwrite.
+  yours alone carries your id (` + "`$ERUN_ORCHESTRATOR_ID`" + `) in its name: a file
+  addressed to the directory alone is one any orchestrator can read as its own or
+  overwrite.
 - File erun **platform** bugs with the ` + "`erun-file-issue`" + ` skill.
 
 ## Operating mode
@@ -567,23 +604,28 @@ func (a *App) ensureOrchestratorWorkspace() (string, error) {
 	return dir, nil
 }
 
-// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus this
-// orchestrator's own role file. Separate from it rather than an extra parameter
-// on it: the workspace itself is id-independent, and the shared root is ensured
-// from a dozen places that have no id to give.
+// ensureOrchestratorWorkspaceFor is ensureOrchestratorWorkspace plus the two
+// things that belong to a particular orchestrator rather than to the shared
+// root: its own role file, and the claim label its claim protocol addresses
+// issues by. Separate from ensureOrchestratorWorkspace rather than an extra
+// parameter on it: the workspace itself is id-independent, and the shared root
+// is ensured from a dozen places that have no id to give.
 //
 // Seeding here rather than at creation means an orchestrator that already
-// existed gets a role file on its next launch too, not only newly created ones.
+// existed gets both on its next launch too, not only newly created ones.
 func (a *App) ensureOrchestratorWorkspaceFor(id string) (string, error) {
 	dir, err := a.ensureOrchestratorWorkspace()
 	if err != nil {
 		return "", err
 	}
-	// Best-effort, like the skills install and the SessionStart hook: a role
-	// file that could not be seeded must not stop the orchestrator launching,
-	// but it is reported rather than passed over in silence.
+	// Best-effort, like the skills install and the SessionStart hook: neither
+	// of these must stop the orchestrator launching, but they are reported
+	// rather than passed over in silence.
 	if roleErr := ensureOrchestratorRoleFile(dir, id); roleErr != nil {
 		fmt.Fprintf(os.Stderr, "erun: could not seed orchestrator role file for %s: %v\n", id, roleErr)
+	}
+	if labelErr := a.ensureOrchestratorClaimLabel(a.ctx, dir, id); labelErr != nil {
+		fmt.Fprintf(os.Stderr, "erun: could not provision the claim label for %s: %v\n", id, labelErr)
 	}
 	return dir, nil
 }
@@ -1059,8 +1101,8 @@ immediately AFTER the shared contract, so anything here can add to that
 contract or override a line of it.
 
 Put this orchestrator's standing role here: what it owns, what it must not do,
-how it should report. A role is standing, so it belongs here rather than in
-RESUME-NOTE.<id>.md, which is a task hand-off that is read once and superseded.
+how it should report. A role is standing, so it belongs here rather than in a
+task note, which is read once and superseded.
 
 Do NOT list this orchestrator's environments here. The shared contract requires
 knowing scope from erun's config and never from disk; a list baked in here would
@@ -1114,15 +1156,6 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	}
 	hooks["SessionStart"] = mergeOrchestratorHookBlocks(
 		hooks["SessionStart"], orchestratorSessionStartHook(dir), isOrchestratorSessionStartHookBlock)
-	// Which conversation the session is actually writing to is something only
-	// the session knows, and it can change while the session runs — so the
-	// recorder goes on the session boundaries AND on every turn boundary, and the
-	// reader that resolves a resume is installed in the same breath as this
-	// writer. See orchestrator_live_conversation.go.
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"} {
-		hooks[event] = mergeOrchestratorHookBlocks(
-			hooks[event], orchestratorLiveConversationHookBlock(), isOrchestratorLiveConversationHookBlock)
-	}
 	// The agent reports its own turn boundaries. Whether it is working cannot be
 	// read off its terminal: an agent TUI repaints continuously, so an
 	// output-driven latch never clears.
@@ -1145,9 +1178,10 @@ func ensureOrchestratorSessionStartHook(dir string) error {
 	// See orchestrator_shell_activity.go.
 	hooks["PostToolUse"] = mergeOrchestratorHookBlocks(
 		hooks["PostToolUse"], orchestratorShellActivityHookBlocks(), isOrchestratorShellActivityHookBlock)
-	// Not installing the retired session recorder is not enough: every machine
-	// that ever ran an older build still carries it, and it would go on writing
-	// a file nothing reads on every turn boundary. Strip it wherever it is found.
+	// Not installing the retired conversation recorders is not enough: every
+	// machine that ever ran an older build still carries them, and they would go
+	// on writing files nothing reads on every turn boundary. Strip them wherever
+	// they are found.
 	for event := range hooks {
 		hooks[event] = pruneRetiredSessionRecorderHooks(hooks[event])
 	}
@@ -1487,10 +1521,11 @@ func orchestratorPacingSnapshotFromHistory(entry orchestratorNudgeHistoryEntry, 
 	}
 }
 
-func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
+func orchestratorInfoFor(id, name, alias string, envs []eruncommon.OrchestratorEnvConfig, dirs []eruncommon.OrchestratorDirectoryConfig, status string, sessionID int, busy orchestratorBusySnapshot, transient bool, shell orchestratorShellSnapshot, pacing orchestratorPacingSnapshot, envActivity map[string]environmentActivityState, envUsage map[string]environmentUsageReading, restartRequired, roleChanged bool) orchestratorInfo {
 	return orchestratorInfo{
 		ID:                     id,
 		Name:                   name,
+		Alias:                  alias,
 		Environments:           envInfos(envs, envActivity, envUsage),
 		Tenants:                tenantsFromEnvs(envs),
 		Directories:            directoryPaths(dirs),
@@ -1517,14 +1552,23 @@ func orchestratorInfoFor(id, name string, envs []eruncommon.OrchestratorEnvConfi
 	}
 }
 
-// orchestratorScopeMismatch reports whether a running session's wired
-// environment scope (wiredEnvs, i.e. what wireOrchestratorMCP last built its
-// MCP config from) has drifted from the environments it is configured with
-// right now. True means the live session still holds tools for an
-// environment it was unlinked from, is missing tools for one it was newly
-// linked to, or both — and only a fresh spawn (RestartOrchestrator) fixes it.
-func orchestratorScopeMismatch(wiredEnvs, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
-	return !equalOrchestratorScope(orchestratorScopeOf(wiredEnvs), orchestratorScopeOf(configuredEnvs))
+// orchestratorScopeMismatch reports whether a running agent's wired
+// environment scope (wiredScope, i.e. what its MCP config held when the agent
+// last started) has drifted from the environments it is configured with right
+// now. True means the live agent still holds tools for an environment it was
+// unlinked from, is missing tools for one it was newly linked to, or both —
+// and only restarting it (RestartOrchestrator) fixes it.
+func orchestratorScopeMismatch(wiredScope []string, configuredEnvs []eruncommon.OrchestratorEnvConfig) bool {
+	return !equalOrchestratorScope(normalizedOrchestratorScope(wiredScope), orchestratorScopeOf(configuredEnvs))
+}
+
+// normalizedOrchestratorScope reads a recorded scope the way orchestratorScopeOf
+// renders one, so a record that held no environments compares equal to none.
+func normalizedOrchestratorScope(scope []string) []string {
+	out := make([]string, 0, len(scope))
+	out = append(out, scope...)
+	sort.Strings(out)
+	return out
 }
 
 // orchestratorRolesChanged reports whether any environment linked in both
@@ -1548,17 +1592,6 @@ func orchestratorRolesChanged(wiredEnvs, configuredEnvs []eruncommon.Orchestrato
 	return false
 }
 
-// orchestratorModel is the model an orchestrator's Claude session launches on,
-// and the model its subagents inherit (via CLAUDE_CODE_SUBAGENT_MODEL). Matches
-// the erun-env default so an orchestrator behaves like the in-pod agent.
-const orchestratorModel = "opus"
-
-// orchestratorUltracodeFlag turns on ultracode effort — xhigh thinking plus
-// standing multi-agent workflow orchestration — the erun-env default. The
-// single-quoted JSON is literal in both PowerShell and POSIX shells. Kept in
-// lockstep with erun-common's claudeEffortFlags(ultracode).
-const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
-
 // orchestratorNoAskFlag removes the harness's ability to stop and ask. An
 // orchestrator's contract is to resolve ambiguity from the code, tests and
 // sensible defaults and carry the task to a verified end — so a question is a
@@ -1571,132 +1604,53 @@ const orchestratorUltracodeFlag = ` --settings '{"ultracode":true}'`
 // orchestratorNoAskStopGuardCommand catches. The two are halves of one guard.
 const orchestratorNoAskFlag = " --disallowedTools AskUserQuestion"
 
-// orchestratorLaunchCommand resolves how to launch the host AI harness. It runs
-// through the host shell so an npm claude.cmd / .ps1 shim resolves (ConPTY can't
-// exec a .cmd directly). A non-empty initialPrompt seeds a fresh session (the
-// Investigate flow); otherwise the launch resumes THIS orchestrator's own
-// conversation (pinned by sessionID) — creating it on first open — so
-// orchestrators no longer collide on `--continue`'s single most-recent
-// conversation in the shared workspace. A non-empty resumePrompt is handed to
-// the resumed (or freshly created) session so a rebuild+restart continues its
-// task itself.
-func orchestratorLaunchCommand(sessionID, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string, error) {
+// orchestratorLaunchCommand resolves what the orchestrator's PTY runs, through
+// the host shell so an npm claude.cmd / .ps1 shim resolves (ConPTY can't exec a
+// .cmd directly). A persisted orchestrator attaches to its background agent
+// (agentID); the agent, not the PTY, owns the conversation. A transient
+// (Investigate) session has no agent and runs a fresh session in the PTY,
+// seeded with initialPrompt. launch supplies its model and effort.
+func orchestratorLaunchCommand(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
 	if _, err := exec.LookPath(defaultAITool); err != nil {
 		return "", nil, fmt.Errorf("the %q CLI was not found on PATH; install it to run an orchestrator", defaultAITool)
 	}
-	shell, args := buildOrchestratorLaunch(runtime.GOOS, sessionID, orchestratorSessionExists(sessionID), initialPrompt, resumePrompt, mcpConfigPath)
+	if strings.TrimSpace(agentID) != "" {
+		if !claudeAgentIDPattern.MatchString(agentID) {
+			return "", nil, fmt.Errorf("cannot attach to Claude background agent %q: not an agent id", agentID)
+		}
+		shell, args := orchestratorAttachCommand(runtime.GOOS, agentID)
+		return shell, args, nil
+	}
+	shell, args := buildOrchestratorLaunch(runtime.GOOS, launch, initialPrompt, mcpConfigPath)
 	return shell, args, nil
 }
 
-// orchestratorSessionNamespace seeds the deterministic per-orchestrator Claude
-// session id. Any fixed UUID works; it only has to be stable.
-var orchestratorSessionNamespace = uuid.MustParse("6f7e9c2a-1b3d-4e5f-8a9b-0c1d2e3f4a5b")
+// claudeAgentIDPattern is the shape of a background agent id. It is spliced
+// into a shell line, so nothing else is accepted.
+var claudeAgentIDPattern = regexp.MustCompile(`^[0-9a-f]{6,64}$`)
 
-// orchestratorSessionID derives a stable Claude session id for an orchestrator
-// from its own id, so each orchestrator resumes ITS OWN conversation rather than
-// whatever `--continue` finds as the most-recent one in the shared
-// $HOME/orchestrators workspace (which collapses every orchestrator onto one
-// shared session). Deterministic, so it needs no persistence, and unique per
-// orchestrator id. Empty for a transient/Investigate orchestrator (no id), which
-// keeps starting a fresh unpinned session.
-func orchestratorSessionID(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return ""
-	}
-	return uuid.NewSHA1(orchestratorSessionNamespace, []byte(id)).String()
-}
-
-// orchestratorSessionExists reports whether a Claude conversation for this
-// session id already exists on disk, so the launch can `--resume` it instead of
-// trying to create it (Claude rejects `--session-id` for an id already in use).
-// It globs across all project dirs — the session id is globally unique — so it
-// need not replicate Claude's cwd->project-dir encoding.
-func orchestratorSessionExists(sessionID string) bool {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return false
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return false
-	}
-	matches, err := filepath.Glob(filepath.Join(home, ".claude", "projects", "*", sessionID+".jsonl"))
-	return err == nil && len(matches) > 0
-}
-
-// buildOrchestratorLaunch composes the host-shell invocation. Every launch runs
-// ultracode effort on opus. With a pinned sessionID the launch resumes THIS
-// orchestrator's own conversation (`--resume <id>` when it already exists, else
-// `--session-id <id>` to create it under that id) so orchestrators stay
-// isolated; without one (transient/Investigate, or a legacy caller) it keeps the
-// old "continue, else fresh". The resume is expressed per shell so it survives a
-// first run: PowerShell tests $LASTEXITCODE, POSIX chains with ||. A resumePrompt
-// is appended to both the resume and the fallback branch so an auto-resume
-// runs the task even on the first launch.
-//
-// The fallback never drops a pinned sessionID down to plain `fresh`: an
-// unpinned session is what the live-session hook then records as this
-// orchestrator's conversation (orchestrator_live_session.go), so a crash the
-// shell recovers from would silently swap this orchestrator onto an amnesiac
-// conversation instead of surfacing the failure. A pinned launch falls back to
-// retrying the same resume instead — still nothing to fall back to but the
-// conversation it already has. Only a transient/Investigate launch (no
-// sessionID) has nothing to pin and keeps falling back to fresh.
-func buildOrchestratorLaunch(goos, sessionID string, sessionExists bool, initialPrompt, resumePrompt, mcpConfigPath string) (string, []string) {
+// buildOrchestratorLaunch composes a transient session's host-shell invocation
+// at launch's effort on launch's model. Both are spliced unquoted, which is safe
+// only because eruncommon.ResolveOrchestratorLaunch admits nothing but a plain
+// model token and a known effort level.
+func buildOrchestratorLaunch(goos string, launch eruncommon.OrchestratorLaunch, initialPrompt, mcpConfigPath string) (string, []string) {
 	quote := shellQuote
 	if goos == "windows" {
 		quote = powerShellQuote
 	}
-	flags := orchestratorUltracodeFlag + orchestratorNoAskFlag + " --model " + orchestratorModel
+	command := defaultAITool + launch.EffortFlags + orchestratorNoAskFlag + " --model " + launch.Model
 	if strings.TrimSpace(mcpConfigPath) != "" {
-		flags += " --mcp-config " + quote(mcpConfigPath)
+		command += " --mcp-config " + quote(mcpConfigPath)
 	}
-	fresh := defaultAITool + flags
+	if strings.TrimSpace(initialPrompt) != "" {
+		command += " " + orchestratorPromptArg(goos, initialPrompt)
+	}
 	shell, shellArgs := resolveLocalShellCommand(goos)
-
-	resume, fallback := orchestratorResumeAndFallback(sessionID, sessionExists, fresh, flags)
-
-	chain := func(primary, secondary string) string {
-		if goos == "windows" {
-			return primary + "; if ($LASTEXITCODE -ne 0) { " + secondary + " }"
-		}
-		return primary + " || " + secondary
-	}
-
-	var command string
-	switch {
-	case strings.TrimSpace(initialPrompt) != "":
-		command = fresh + " " + orchestratorPromptArg(goos, initialPrompt)
-	case strings.TrimSpace(resumePrompt) != "":
-		arg := orchestratorPromptArg(goos, resumePrompt)
-		command = chain(resume+" "+arg, fallback+" "+arg)
-	default:
-		command = chain(resume, fallback)
-	}
-
 	flag := "-lc"
 	if goos == "windows" {
 		flag = "-Command"
 	}
 	return shell, append(shellArgs, flag, command)
-}
-
-// orchestratorResumeAndFallback resolves the primary resume/create invocation
-// for a pinned sessionID and what a failed primary should fall back to. The
-// fallback for a pinned sessionID is the exact same invocation, never unpinned
-// fresh — see buildOrchestratorLaunch's comment for why. A transient/legacy
-// launch (no sessionID) has nothing to pin and keeps falling back to fresh.
-func orchestratorResumeAndFallback(sessionID string, sessionExists bool, fresh, flags string) (resume, fallback string) {
-	if strings.TrimSpace(sessionID) == "" {
-		return defaultAITool + " --continue" + flags, fresh
-	}
-	if sessionExists {
-		resume = defaultAITool + " --resume " + sessionID + flags
-	} else {
-		resume = defaultAITool + " --session-id " + sessionID + flags
-	}
-	return resume, resume
 }
 
 // orchestratorPromptArg renders a prompt as the one argument the harness reads
@@ -1716,14 +1670,21 @@ func orchestratorPromptArg(goos, prompt string) string {
 }
 
 func (a *App) loadOrchestratorConfigs() ([]eruncommon.OrchestratorConfig, error) {
+	configs, _, err := a.loadOrchestratorConfigsWithCatalog()
+	return configs, err
+}
+
+// loadOrchestratorConfigsWithCatalog is loadOrchestratorConfigs plus the
+// gateway catalog from the same read, for a poll that needs both.
+func (a *App) loadOrchestratorConfigsWithCatalog() ([]eruncommon.OrchestratorConfig, *eruncommon.OpenRouterConfig, error) {
 	config, _, err := a.deps.store.LoadERunConfig()
 	if errors.Is(err, eruncommon.ErrNotInitialized) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return config.Orchestrators, nil
+	return config.Orchestrators, config.OpenRouter, nil
 }
 
 func (a *App) saveOrchestratorConfigs(orchestrators []eruncommon.OrchestratorConfig) error {
@@ -1748,6 +1709,48 @@ func (a *App) findOrchestratorConfig(id string) (eruncommon.OrchestratorConfig, 
 		}
 	}
 	return eruncommon.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", id)
+}
+
+// ListOrchestratorAliasChoices returns the erun platform aliases configured on
+// this host, for the Edit orchestrator dialog's Platform alias picker.
+//
+// A picker rather than a text field, for the reason the environment candidate
+// list is one: the writer refuses an alias this host cannot resolve
+// (eruncommon.ValidateOrchestratorAlias), so offering the resolved list is what
+// keeps the dialog from letting an operator choose something the save will
+// reject. An empty list is a real answer — no erun alias is configured on this
+// machine — and the control renders it as such rather than as an empty choice.
+func (a *App) ListOrchestratorAliasChoices() ([]string, error) {
+	return a.configuredERunAliases()
+}
+
+// ListOrchestratorLaunchChoices returns what the Edit orchestrator dialog's
+// gateway, model and effort controls offer, read from the same catalog the
+// save validates against and the launch resolves through, so the dialog cannot
+// offer a model the save refuses. An uninitialized root config is no catalog.
+func (a *App) ListOrchestratorLaunchChoices() (orchestratorLaunchChoices, error) {
+	catalog, err := eruncommon.ResolveOpenRouterConfig(a.deps.store)
+	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+		return orchestratorLaunchChoices{}, fmt.Errorf("cannot read the gateway catalog from the ERun settings: %w", err)
+	}
+	return orchestratorLaunchChoicesFor(catalog), nil
+}
+
+// configuredERunAliases is the one filter for "which configured cloud aliases
+// are erun platform aliases", shared by this picker and the tenant platform
+// resolution, so the two cannot come to disagree about what the host has.
+func (a *App) configuredERunAliases() ([]string, error) {
+	providers, err := eruncommon.ListCloudProviders(a.deps.store)
+	if err != nil {
+		return nil, err
+	}
+	aliases := []string{}
+	for _, provider := range providers {
+		if provider.Provider == eruncommon.CloudProviderERun {
+			aliases = append(aliases, provider.Alias)
+		}
+	}
+	return aliases, nil
 }
 
 // ListOrchestratorEnvCandidates returns every environment the operator could
@@ -1995,8 +1998,12 @@ func orchestratorDisplayName(name string, envs []eruncommon.OrchestratorEnvConfi
 // host review directory (creating the mirror and wiring its sync where the env
 // needs one), then stores the definition. Created stopped — StartOrchestrator
 // spawns the session.
-func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
+func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs []string, alias string, launch orchestratorLaunchInput) (orchestratorInfo, error) {
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
+	if err != nil {
+		return orchestratorInfo{}, err
+	}
+	alias, launch, _, err = a.validateOrchestratorSettings(alias, launch)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -2009,19 +2016,31 @@ func (a *App) CreateOrchestrator(name string, envs []orchestratorEnvInput, dirs 
 	}
 	id := uniqueOrchestratorID(orchestratorDisplayName(name, refs), configs)
 	displayName := orchestratorDisplayName(name, refs)
-	def := eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
+	def := withOrchestratorLaunchSettings(eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
 	if err := a.saveOrchestratorConfigs(append(configs, def)); err != nil {
 		return orchestratorInfo{}, err
 	}
-	return orchestratorInfoFor(id, displayName, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, "stopped", 0, orchestratorBusySnapshot{}, false, orchestratorShellSnapshot{}, orchestratorPacingSnapshot{}, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false)
+	return orchestratorInfoWithLaunchSettings(info, launch, false), nil
 }
 
 // UpdateOrchestrator edits an existing orchestrator's linked environments, the
-// directories it names for itself, and its name, re-wiring sync for the current
-// set.
-func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string) (orchestratorInfo, error) {
+// directories it names for itself, its name, the platform alias it acts as, and
+// its gateway, model and effort, re-wiring sync for the current set.
+//
+// Every field comes from the caller rather than being read back off the stored
+// definition, because the save below replaces the whole entry: a field this
+// literal omits is not left alone, it is erased. alias and the launch settings
+// in particular are settable from the terminal (`erun orchestrator set-*`) as
+// well as from this dialog, so the dialog must send back what it was shown even
+// when the operator edited something else entirely.
+func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, dirs []string, alias string, launch orchestratorLaunchInput) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	refs, dirRefs, err := a.resolveOrchestratorScope(envs, dirs)
+	if err != nil {
+		return orchestratorInfo{}, err
+	}
+	alias, launch, catalog, err := a.validateOrchestratorSettings(alias, launch)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -2043,12 +2062,13 @@ func (a *App) UpdateOrchestrator(id, name string, envs []orchestratorEnvInput, d
 		return orchestratorInfo{}, err
 	}
 	displayName := orchestratorDisplayName(name, refs)
-	configs[index] = eruncommon.OrchestratorConfig{ID: id, Name: displayName, Environments: refs, Directories: dirRefs}
+	configs[index] = withOrchestratorLaunchSettings(eruncommon.OrchestratorConfig{ID: id, Name: displayName, Alias: alias, Environments: refs, Directories: dirRefs}, launch)
 	if err := a.saveOrchestratorConfigs(configs); err != nil {
 		return orchestratorInfo{}, err
 	}
 	status, sessionID, busy, shell, pacing, restartRequired, roleChanged := a.updatedOrchestratorRunningSnapshot(id, refs)
-	return orchestratorInfoFor(id, displayName, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged), nil
+	info := orchestratorInfoFor(id, displayName, alias, refs, dirRefs, status, sessionID, busy, false, shell, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), restartRequired, roleChanged)
+	return orchestratorInfoWithLaunchSettings(info, launch, a.orchestratorLaunchSettingsChanged(configs[index], catalog)), nil
 }
 
 // updatedOrchestratorRunningSnapshot is UpdateOrchestrator's own read of live
@@ -2085,47 +2105,38 @@ func (a *App) updatedOrchestratorRunningSnapshot(id string, configuredEnvs []eru
 	// effect immediately. A role-only edit doesn't affect wiring the same way
 	// (see orchestratorRolesChanged), but is still reported so the dialog can
 	// tell the operator their edit is not guaranteed live yet.
-	if wired, ok := a.orchestratorWiredEnvs(id); ok {
-		restartRequired = orchestratorScopeMismatch(wired, configuredEnvs)
+	if wired, wiredScope, ok := a.orchestratorWiredEnvs(id); ok {
+		restartRequired = orchestratorScopeMismatch(wiredScope, configuredEnvs)
 		roleChanged = orchestratorRolesChanged(wired, configuredEnvs)
 	}
 	return "running", info.SessionID, busy, shell, pacing, restartRequired, roleChanged
 }
 
-// StartOrchestrator spawns the session for a persisted orchestrator definition,
-// reusing an already-running one.
+// StartOrchestrator opens a persisted orchestrator: it attaches to the
+// orchestrator's Claude background agent, creating the agent when there is
+// none, and reuses a PTY that is already attached.
 func (a *App) StartOrchestrator(id string, cols, rows int) (orchestratorInfo, error) {
-	return a.startPersistedOrchestrator(id, "", "", cols, rows)
-}
-
-// StartOrchestratorWithResume is StartOrchestrator plus the conversation to
-// continue and the prompt handed to it, so the boot restore path can make a
-// rebuilt+restarted orchestrator carry on with its task instead of idling at the
-// prompt. The conversation is named explicitly because a restart hand-off is the
-// one path that must reach the session that asked for it, not merely the
-// orchestrator it belongs to.
-func (a *App) StartOrchestratorWithResume(id, conversationID, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
-	return a.startPersistedOrchestrator(id, conversationID, resumePrompt, cols, rows)
-}
-
-func (a *App) startPersistedOrchestrator(id, conversationID, resumePrompt string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	if info, ok := a.runningOrchestratorInfo(id); ok {
-		return info, nil
+		return a.withConfiguredLaunchSettings(info), nil
 	}
 	def, err := a.findOrchestratorConfig(id)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
+	launch, err := a.resolvePersistedOrchestratorLaunch(def)
+	if err != nil {
+		return orchestratorInfo{}, err
+	}
 	return a.spawnOrchestratorSession(orchestratorSpawn{
-		id:             def.ID,
-		name:           def.Name,
-		envs:           a.refreshLinkedEnvDirectories(def.Environments),
-		dirs:           def.Directories,
-		conversationID: conversationID,
-		resumePrompt:   resumePrompt,
-		cols:           cols,
-		rows:           rows,
+		id:     def.ID,
+		name:   def.Name,
+		alias:  def.Alias,
+		launch: launch,
+		envs:   a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:   def.Directories,
+		cols:   cols,
+		rows:   rows,
 	})
 }
 
@@ -2147,27 +2158,37 @@ func (a *App) refreshLinkedEnvDirectories(envs []eruncommon.OrchestratorEnvConfi
 	return out
 }
 
-// RestartOrchestrator stops a persisted orchestrator's running session and spawns
-// a fresh one, so the operator can recycle a stuck agent without losing context:
-// spawnOrchestratorSession relaunches this orchestrator's own pinned session,
-// which resumes its own conversation. The definition is resolved before teardown because
-// stopOrchestratorSession forgets the live session, and a transient (Investigate)
-// orchestrator has no persisted definition to respawn — findOrchestratorConfig
-// then returns an error, so transients are intentionally not restartable.
+// RestartOrchestrator stops a persisted orchestrator's background agent and
+// starts it again, so the operator can recycle a stuck agent, or apply changed
+// settings, without losing context: the agent comes back on its own current
+// conversation and re-reads the settings and MCP config written for it. The
+// definition is resolved before teardown because stopOrchestratorSession
+// forgets the live session, and a transient (Investigate) orchestrator has no
+// persisted definition to respawn — findOrchestratorConfig then returns an
+// error, so transients are intentionally not restartable. The launch is
+// resolved before teardown too, so settings that cannot launch leave the
+// running session in place rather than stopping it for nothing.
 func (a *App) RestartOrchestrator(id string, cols, rows int) (orchestratorInfo, error) {
 	id = strings.TrimSpace(id)
 	def, err := a.findOrchestratorConfig(id)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
+	launch, err := a.resolvePersistedOrchestratorLaunch(def)
+	if err != nil {
+		return orchestratorInfo{}, err
+	}
 	a.stopOrchestratorSession(id)
 	return a.spawnOrchestratorSession(orchestratorSpawn{
-		id:   def.ID,
-		name: def.Name,
-		envs: a.refreshLinkedEnvDirectories(def.Environments),
-		dirs: def.Directories,
-		cols: cols,
-		rows: rows,
+		id:      def.ID,
+		name:    def.Name,
+		alias:   def.Alias,
+		launch:  launch,
+		envs:    a.refreshLinkedEnvDirectories(def.Environments),
+		dirs:    def.Directories,
+		restart: true,
+		cols:    cols,
+		rows:    rows,
 	})
 }
 
@@ -2181,50 +2202,22 @@ func (a *App) runningOrchestratorInfo(id string) (orchestratorInfo, bool) {
 	}
 	shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 	pacing := orchestratorPacingSnapshotFromSession(session)
-	return orchestratorInfoFor(session.id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
+	return orchestratorInfoFor(session.id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, session.transient, shell, pacing, a.envActivity, a.envUsage, false, false), true
 }
 
-// orchestratorWiredEnvs returns the environment scope id's live session was
-// actually spawned with — what wireOrchestratorMCP last built its MCP config
-// from, not necessarily what the orchestrator is configured with right now —
-// or ok=false when nothing is running for it.
-func (a *App) orchestratorWiredEnvs(id string) (envs []eruncommon.OrchestratorEnvConfig, ok bool) {
+// orchestratorWiredEnvs returns the environments id's live session was opened
+// with and the scope its agent's MCP config actually holds — what the agent
+// last started with, not necessarily what the orchestrator is configured with
+// right now — or ok=false when nothing is running for it.
+func (a *App) orchestratorWiredEnvs(id string) ([]eruncommon.OrchestratorEnvConfig, []string, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	session := a.orchestrators[id]
 	managed := a.sessions[orchestratorSessionKey(id)]
 	if session == nil || managed == nil || managed.closed {
-		return nil, false
+		return nil, nil, false
 	}
-	return session.envs, true
-}
-
-// runningOrchestratorConversation returns the conversation a live session was
-// spawned with, the launch that spawned it, and the scope it is wired to, so a
-// restart records the exact session that asked for it. The launch is returned
-// alongside because the spawn conversation is only where the session started:
-// what it is on now is whatever it reported under that launch. Empty when
-// nothing is running for that id: there is then no conversation a resume could
-// name.
-func (a *App) runningOrchestratorConversation(id string) (string, string, []string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	session := a.orchestrators[id]
-	managed := a.sessions[orchestratorSessionKey(id)]
-	if session == nil || managed == nil || managed.closed {
-		return "", "", nil
-	}
-	return session.conversationID, session.launchID, orchestratorScopeOf(session.envs)
-}
-
-// orchestratorScope is the environment set an orchestrator is defined with right
-// now, in the same shape a restart records, so the two can be compared on resume.
-func (a *App) orchestratorScope(id string) ([]string, error) {
-	def, err := a.findOrchestratorConfig(id)
-	if err != nil {
-		return nil, err
-	}
-	return orchestratorScopeOf(def.Environments), nil
+	return session.envs, session.wiredScope, true
 }
 
 // orchestratorScopeOf renders linked environments as sorted tenant/environment
@@ -2243,20 +2236,22 @@ func orchestratorScopeOf(envs []eruncommon.OrchestratorEnvConfig) []string {
 	return out
 }
 
-// orchestratorSpawn is one session launch: which orchestrator, which
-// conversation it attaches to, and what that conversation is handed on arrival.
-// An empty conversationID means the orchestrator's own pinned conversation.
+// orchestratorSpawn is one session launch: which orchestrator, what it runs
+// on, and -- for a transient session -- what it is seeded with.
 type orchestratorSpawn struct {
-	id             string
-	name           string
-	envs           []eruncommon.OrchestratorEnvConfig
-	dirs           []eruncommon.OrchestratorDirectoryConfig
-	initialPrompt  string
-	conversationID string
-	resumePrompt   string
-	transient      bool
-	cols           int
-	rows           int
+	id            string
+	name          string
+	alias         string
+	launch        orchestratorLaunchPlan
+	envs          []eruncommon.OrchestratorEnvConfig
+	dirs          []eruncommon.OrchestratorDirectoryConfig
+	initialPrompt string
+	transient     bool
+	// restart stops a running background agent before attaching, so it starts
+	// again on what this spawn writes for it.
+	restart bool
+	cols    int
+	rows    int
 }
 
 // wireOrchestratorMCP writes the per-orchestrator MCP config and tells the
@@ -2335,32 +2330,11 @@ func (a *App) reportUnreachableOrchestratorEdges(name string, unreachable []orch
 	}
 }
 
-// conversationToLaunch answers which conversation a spawn attaches to. A named
-// one (a restart hand-off, an operator attaching one deliberately) is taken as
-// given: it names the conversation that asked for this launch. Otherwise the
-// launch resolves what this orchestrator is on -- attached, or the derived
-// anchor -- and reports anything surprising about that answer: an attachment
-// that could not be honoured, or an anchor that diverged from the conversation
-// this orchestrator's own session last reported. A resume that lands somewhere
-// unexpected in silence is the whole defect, and both are that.
-func (a *App) conversationToLaunch(id, named string) string {
-	if conversationID := strings.TrimSpace(named); conversationID != "" {
-		return conversationID
-	}
-	choice := a.resolveOrchestratorConversation(orchestratorEntryOrEmpty(
-		readOpenOrchestrators(a.deps.orchestratorOpenPath), id))
-	if choice.Notice != "" {
-		a.emitAppNotification("warning", choice.Notice)
-	}
-	return choice.ConversationID
-}
-
-// spawnOrchestratorSession launches the host AI harness in the shared
-// orchestrators root and tracks the live session.
+// spawnOrchestratorSession opens an orchestrator in a desktop PTY and tracks the
+// live session. A persisted orchestrator attaches to its background agent; a
+// transient (Investigate) one runs its session in the PTY itself.
 func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInfo, error) {
 	id, name, envs := spawn.id, spawn.name, spawn.envs
-	dirs := spawn.dirs
-	transient := spawn.transient
 	cols, rows := clampTerminalSize(spawn.cols, spawn.rows)
 	// Wire each linked env's erun MCP into the orchestrator session so it drives
 	// its envs through the MCP (raw/build/deploy/…) rather than raw kubectl.
@@ -2368,57 +2342,23 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	// agent with linked envs and none of their tools looks working and is not,
 	// so the operator is told why instead of discovering it tool by tool.
 	mcpConfigPath := a.wireOrchestratorMCP(id, name, envs)
-	// A restart hand-off names the conversation that asked for it; every other
-	// launch resolves which conversation this orchestrator is on -- the one the
-	// operator attached, the one its last session reported, or the anchor derived
-	// from its id -- and says so when that is not the plain answer. Clicking an
-	// orchestrator has to land where a restart lands, or the fork this resolution
-	// exists to follow would be followed on one path and stranded on the other.
-	conversationID := a.conversationToLaunch(id, spawn.conversationID)
-	// The nonce for this launch, handed to the session in its environment and
-	// written into the durable record below. Minted here, once, so both halves
-	// of the live-conversation record name the same launch.
-	launchID := uuid.NewString()
-	executable, args, err := a.deps.resolveOrchestratorLaunch(conversationID, spawn.initialPrompt, spawn.resumePrompt, mcpConfigPath)
-	if err != nil {
-		return orchestratorInfo{}, err
-	}
 	// Every orchestrator launches in the shared $HOME/orchestrators root, which
 	// carries the one CLAUDE.md and the `<tenant>-<env>` mirror subdirectories.
 	dir, err := a.ensureOrchestratorWorkspaceFor(id)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
-	sessionEnv := []string{
-		appSessionEnvVar + "=1",
-		// The orchestrator's own id, so an agent driving from its shell can
-		// record itself as the return target for a rebuild+restart (see the
-		// erun-orchestrate skill). Empty for transient/Investigate sessions.
-		eruncommon.OrchestratorIDEnvVar + "=" + id,
-		// This launch's nonce, which the session's own hooks stamp onto the
-		// conversation id they report. It is what makes that record this launch's
-		// rather than any session that happens to carry the orchestrator id.
-		orchestratorLaunchEnvVar + "=" + launchID,
-		"CLAUDE_CODE_SUBAGENT_MODEL=" + orchestratorModel,
+	sessionEnv := orchestratorSessionEnv(id, spawn.launch.env)
+	launch := orchestratorPTYLaunch{dir: dir, env: sessionEnv, launch: spawn.launch.launch, mcpConfigPath: mcpConfigPath, cols: cols, rows: rows}
+	wired := orchestratorAgentLaunch{scope: orchestratorScopeOf(envs), launched: resolvedLaunchOf(spawn.launch.launch)}
+	if !spawn.transient {
+		launch.agent, err = a.prepareOrchestratorAgent(spawn, launch)
+		if err != nil {
+			return orchestratorInfo{}, err
+		}
+		wired = launch.agent
 	}
-	// An orchestrator has no pod, so the outputs convention an in-pod agent
-	// follows needs a host directory to point at. Without it a host-side agent
-	// has nowhere its deliverables are expected, and the operator has no way to
-	// see them. A transient session has no id and so no directory of its own.
-	if outputsDir, outputsErr := ensureOrchestratorOutputsDir(id); outputsErr == nil {
-		sessionEnv = append(sessionEnv, eruncommon.RuntimeOutputsDirEnvVar+"="+outputsDir)
-	} else if strings.TrimSpace(id) != "" {
-		log.Printf("erun-app: orchestrator outputs dir for %s: %v", id, outputsErr)
-	}
-	params := startTerminalSessionParams{
-		Dir:        resolveTerminalStartDir(dir),
-		Executable: executable,
-		Args:       args,
-		Env:        sessionEnv,
-		Cols:       cols,
-		Rows:       rows,
-	}
-	session, err := a.deps.startTerminal(params)
+	session, err := a.startOrchestratorPTY(launch, spawn.initialPrompt)
 	if err != nil {
 		return orchestratorInfo{}, err
 	}
@@ -2434,32 +2374,25 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 		kind:      sessionKindOrchestrator,
 		startedAt: time.Now(),
 	}
-	if !transient {
+	if !spawn.transient {
 		// A transient (Investigate) session is not restartable at all
 		// (RestartOrchestrator's comment above), and its bounded lifecycle is
 		// investigation_bounds.go's to manage, not tryReconnect's — so it gets
 		// no respawn closure and a crash simply ends it.
-		managed.respawn = a.orchestratorRespawnFunc(orchestratorRespawn{
-			id:             id,
-			conversationID: conversationID,
-			launchID:       launchID,
-			mcpConfigPath:  mcpConfigPath,
-			dir:            dir,
-			env:            sessionEnv,
-			cols:           cols,
-			rows:           rows,
-		})
+		managed.respawn = a.orchestratorRespawnFunc(spawn, launch)
 	}
 	newSession := &orchestratorSession{
-		id:             id,
-		serial:         serial,
-		conversationID: conversationID,
-		launchID:       launchID,
-		transient:      transient,
-		name:           name,
-		envs:           envs,
-		dirs:           dirs,
-		startedAt:      time.Now(),
+		id:         id,
+		serial:     serial,
+		agentID:    launch.agent.agentID,
+		transient:  spawn.transient,
+		name:       name,
+		alias:      spawn.alias,
+		launched:   wired.launched,
+		envs:       envs,
+		wiredScope: wired.scope,
+		dirs:       spawn.dirs,
+		startedAt:  time.Now(),
 	}
 	a.restoreOrchestratorNudgeHistory(newSession)
 	a.sessions[key] = managed
@@ -2472,69 +2405,124 @@ func (a *App) spawnOrchestratorSession(spawn orchestratorSpawn) (orchestratorInf
 	// likely to be killed or to crash as to be quit cleanly, and only a record
 	// written here survives that. A transient (Investigate) session has no
 	// persisted definition to reopen, so it is deliberately not recorded.
-	if !transient {
-		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id, launchID, orchestratorScopeOf(envs)); err != nil {
+	if !spawn.transient {
+		if err := recordOpenOrchestrator(a.deps.orchestratorOpenPath, id); err != nil {
 			log.Printf("erun-app: record open orchestrator %s: %v", id, err)
 		}
 	}
-	return orchestratorInfoFor(id, name, envs, dirs, "running", serial, orchestratorBusySnapshot{}, transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false), nil
+	info := orchestratorInfoFor(id, name, spawn.alias, envs, spawn.dirs, "running", serial, orchestratorBusySnapshot{}, spawn.transient, orchestratorShellSnapshot{}, pacing, a.envActivitySnapshot(), a.envUsageSnapshot(), false, false)
+	info.RestartRequired = orchestratorScopeMismatch(wired.scope, envs)
+	return orchestratorInfoWithLaunchSettings(info, spawn.launch.settings, wired.launched != resolvedLaunchOf(spawn.launch.launch)), nil
 }
 
-// orchestratorRespawnFunc builds the closure tryReconnect calls when this
-// orchestrator's session exits: the same launch path a fresh start uses,
-// resuming whichever conversation this orchestrator's own session last reported
-// under this launch rather than only the id it was spawned with. It carries the
-// crash-resume prompt so the relaunched session carries its task forward
-// without waiting to be asked, matching the goal of this recovery: an
-// orchestrator that died comes back on its own.
+// orchestratorSessionEnv is the environment an orchestrator session runs with:
+// the desktop's own markers plus the resolved launch's (the subagent model, and
+// through a gateway its routing and credential).
+func orchestratorSessionEnv(id string, launchEnv []string) []string {
+	env := []string{
+		appSessionEnvVar + "=1",
+		// The orchestrator's own id, so an agent driving from its shell can
+		// record itself as the return target for a rebuild+restart (see the
+		// erun-orchestrate skill), and its hooks can name whose report they
+		// write. Empty for transient/Investigate sessions.
+		eruncommon.OrchestratorIDEnvVar + "=" + id,
+	}
+	env = append(env, launchEnv...)
+	// An orchestrator has no pod, so the outputs convention an in-pod agent
+	// follows needs a host directory to point at. Without it a host-side agent
+	// has nowhere its deliverables are expected, and the operator has no way to
+	// see them. A transient session has no id and so no directory of its own.
+	if outputsDir, err := ensureOrchestratorOutputsDir(id); err == nil {
+		env = append(env, eruncommon.RuntimeOutputsDirEnvVar+"="+outputsDir)
+	} else if strings.TrimSpace(id) != "" {
+		log.Printf("erun-app: orchestrator outputs dir for %s: %v", id, err)
+	}
+	return env
+}
+
+// orchestratorPTYLaunch is what the desktop's PTY for one orchestrator is
+// started with, kept so a crash recovery reattaches the same way.
+type orchestratorPTYLaunch struct {
+	dir           string
+	env           []string
+	launch        eruncommon.OrchestratorLaunch
+	mcpConfigPath string
+	agent         orchestratorAgentLaunch
+	cols          int
+	rows          int
+}
+
+// prepareOrchestratorAgent writes what a persisted orchestrator's agent reads
+// when it starts -- its settings file and an MCP config at its fixed path --
+// and resolves the agent to attach to. The agent, not the PTY, receives the
+// session environment: a background agent never inherits the environment of
+// the command that started it.
+func (a *App) prepareOrchestratorAgent(spawn orchestratorSpawn, launch orchestratorPTYLaunch) (orchestratorAgentLaunch, error) {
+	mcpConfigPath := orchestratorMCPConfigPath(spawn.id)
+	if launch.mcpConfigPath == "" {
+		if err := writeEmptyOrchestratorMCPConfig(mcpConfigPath); err != nil {
+			return orchestratorAgentLaunch{}, err
+		}
+	}
+	settingsPath := orchestratorAgentSettingsPath(spawn.id)
+	if err := writeOrchestratorAgentSettings(settingsPath, spawn.launch.launch, launch.env); err != nil {
+		return orchestratorAgentLaunch{}, fmt.Errorf("write the settings for %s's background agent: %w", spawn.id, err)
+	}
+	_, effortFlags := eruncommon.ClaudeBackgroundEffort(spawn.launch.launch.Effort)
+	return a.ensureOrchestratorAgent(orchestratorAgentRequest{
+		spec: orchestratorAgentSpec{
+			id:            spawn.id,
+			dir:           launch.dir,
+			settingsPath:  settingsPath,
+			mcpConfigPath: mcpConfigPath,
+			effortFlags:   effortFlags,
+		},
+		scope:    orchestratorScopeOf(spawn.envs),
+		launched: resolvedLaunchOf(spawn.launch.launch),
+		restart:  spawn.restart,
+	})
+}
+
+// startOrchestratorPTY starts the desktop's terminal for one orchestrator:
+// `claude attach` for a background agent, the session itself for a transient.
+func (a *App) startOrchestratorPTY(launch orchestratorPTYLaunch, initialPrompt string) (terminalSession, error) {
+	executable, args, err := a.deps.resolveOrchestratorLaunch(launch.launch, launch.agent.agentID, initialPrompt, launch.mcpConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return a.deps.startTerminal(startTerminalSessionParams{
+		Dir:        resolveTerminalStartDir(launch.dir),
+		Executable: executable,
+		Args:       args,
+		Env:        launch.env,
+		Cols:       launch.cols,
+		Rows:       launch.rows,
+	})
+}
+
+// orchestratorRespawnFunc builds the closure tryReconnect calls when an
+// orchestrator's terminal exits unexpectedly: it resolves the agent again and
+// reattaches, which restarts an agent that stopped. The agent kept its own
+// conversation throughout, so nothing has to be told to resume.
 //
 // tryReconnect only ever calls this after orchestratorReconnectRefused has
 // already refused a clean exit and an operator Stop, so every call here is a
 // real crash being recovered from.
-func (a *App) orchestratorRespawnFunc(respawn orchestratorRespawn) func() (terminalSession, error) {
+func (a *App) orchestratorRespawnFunc(spawn orchestratorSpawn, launch orchestratorPTYLaunch) func() (terminalSession, error) {
+	spawn.restart = false
 	return func() (terminalSession, error) {
-		// The crashed session may have moved to a conversation of its own after
-		// the launch that spawned it, so what it last reported under THIS
-		// launch's nonce is preferred over the id it was started with. The
-		// respawn keeps that nonce: it is the same launch continuing, so the
-		// record stays confirmable across the recovery.
-		resumeID := orchestratorLiveConversationForLaunch(respawn.id, respawn.launchID, respawn.conversationID)
-		executable, args, err := a.deps.resolveOrchestratorLaunch(resumeID, "", orchestratorCrashResumePrompt(), respawn.mcpConfigPath)
+		agent, err := a.prepareOrchestratorAgent(spawn, launch)
 		if err != nil {
 			return nil, err
 		}
-		return a.deps.startTerminal(startTerminalSessionParams{
-			Dir:        resolveTerminalStartDir(respawn.dir),
-			Executable: executable,
-			Args:       args,
-			Env:        respawn.env,
-			Cols:       respawn.cols,
-			Rows:       respawn.rows,
-		})
+		launch.agent = agent
+		a.mu.Lock()
+		if session := a.orchestrators[spawn.id]; session != nil {
+			session.agentID = agent.agentID
+		}
+		a.mu.Unlock()
+		return a.startOrchestratorPTY(launch, "")
 	}
-}
-
-// orchestratorRespawn is what a crash recovery needs to relaunch one
-// orchestrator's session: grouped into a value so the closure's inputs stay
-// named rather than becoming another run of positional strings and ints.
-type orchestratorRespawn struct {
-	id             string
-	conversationID string
-	launchID       string
-	mcpConfigPath  string
-	dir            string
-	env            []string
-	cols           int
-	rows           int
-}
-
-// orchestratorCrashResumePrompt is handed to a session tryReconnect just
-// relaunched after its process exited non-zero. Unlike
-// orchestratorRestartResumePrompt it names no return note: nothing wrote one
-// for this event, since the orchestrator did not choose to end its turn.
-func orchestratorCrashResumePrompt() string {
-	return "This session's process just exited unexpectedly and was relaunched automatically. " +
-		"Resume the conversation exactly where it left off and carry any in-progress task through to its verified end without waiting to be asked."
 }
 
 // unreachableOrchestratorIDs names every configured orchestrator this desktop
@@ -2556,9 +2544,11 @@ func unreachableOrchestratorIDs(configs []eruncommon.OrchestratorConfig, now tim
 // ListOrchestrators merges the persisted definitions (each tagged running or
 // stopped) with any transient running sessions (Investigate), id-ordered.
 func (a *App) ListOrchestrators() []orchestratorInfo {
-	configs, err := a.loadOrchestratorConfigs()
+	// The catalog comes from the same read: each running row resolves its
+	// definition against it to tell whether a restart would change anything.
+	configs, catalog, err := a.loadOrchestratorConfigsWithCatalog()
 	if err != nil {
-		configs = nil
+		configs, catalog = nil, nil
 	}
 	// Read once for the whole list rather than once per orchestrator: the
 	// "stopped" branch below has no live session to read cumulative pacing
@@ -2586,6 +2576,8 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		pacing.Unreachable = unreachable[config.ID]
 		restartRequired := false
 		roleChanged := false
+		launchSettings := orchestratorLaunchSettingsOf(config)
+		launchSettingsChanged := false
 		if session := a.orchestrators[config.ID]; session != nil {
 			if managed := a.sessions[orchestratorSessionKey(config.ID)]; managed != nil && !managed.closed {
 				status = "running"
@@ -2597,11 +2589,13 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 				// still runs on whatever it was spawned with. A poll that
 				// shows the new set as if it were live is exactly the defect
 				// this flag exists to stop (see orchestratorScopeMismatch).
-				restartRequired = orchestratorScopeMismatch(session.envs, config.Environments)
+				restartRequired = orchestratorScopeMismatch(session.wiredScope, config.Environments)
 				roleChanged = orchestratorRolesChanged(session.envs, config.Environments)
+				launchSettingsChanged = orchestratorLaunchDiffers(config, catalog, session.launched)
 			}
 		}
-		out = append(out, orchestratorInfoFor(config.ID, config.Name, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged))
+		info := orchestratorInfoFor(config.ID, config.Name, config.Alias, config.Environments, config.Directories, status, sessionID, busy, false, shell, pacing, a.envActivity, a.envUsage, restartRequired, roleChanged)
+		out = append(out, orchestratorInfoWithLaunchSettings(info, launchSettings, launchSettingsChanged))
 		seen[config.ID] = struct{}{}
 	}
 	for id, session := range a.orchestrators {
@@ -2614,23 +2608,30 @@ func (a *App) ListOrchestrators() []orchestratorInfo {
 		}
 		shell := orchestratorShellSnapshot{Running: session.shellRunning, Command: session.shellCommand, StartedAtUnix: session.shellStartedAtUnix}
 		pacing := orchestratorPacingSnapshotFromSession(session)
-		out = append(out, orchestratorInfoFor(id, session.name, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
+		out = append(out, orchestratorInfoFor(id, session.name, session.alias, session.envs, session.dirs, "running", session.serial, orchestratorBusySnapshot{Busy: session.aiBusy, AtUnix: session.aiBusyAtUnix}, true, shell, pacing, a.envActivity, a.envUsage, false, false))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
-// StopOrchestrator ends a running session while keeping a persisted definition;
-// a transient session is forgotten entirely.
+// StopOrchestrator ends a running session while keeping a persisted definition:
+// it detaches the desktop's terminal and stops the orchestrator's background
+// agent, whose conversation is kept for the next start. A transient session is
+// forgotten entirely.
 func (a *App) StopOrchestrator(id string) error {
 	id = strings.TrimSpace(id)
-	if a.stopOrchestratorSession(id) {
-		return nil
+	stopped := a.stopOrchestratorSession(id)
+	_, err := a.findOrchestratorConfig(id)
+	if err != nil {
+		if stopped {
+			return nil
+		}
+		return fmt.Errorf("orchestrator %q not found", id)
 	}
-	if _, err := a.findOrchestratorConfig(id); err == nil {
-		return nil
+	if err := a.stopOrchestratorAgent(id); err != nil {
+		return fmt.Errorf("stop the Claude background agent for %s: %w", id, err)
 	}
-	return fmt.Errorf("orchestrator %q not found", id)
+	return nil
 }
 
 func (a *App) stopOrchestratorSession(id string) bool {
@@ -2657,8 +2658,10 @@ func (a *App) stopOrchestratorSession(id string) bool {
 	return session != nil || managed != nil
 }
 
-// DeleteOrchestrator stops the session if running and removes the persisted
-// definition. The linked environments' sync config is left intact.
+// DeleteOrchestrator stops the session if running, removes the orchestrator's
+// background agent, and removes the persisted definition. The linked
+// environments' sync config is left intact, and so is the agent's conversation
+// transcript, which is Claude's.
 //
 // It also clears this id's persisted nudge history: the id is a
 // name-derived slug (uniqueOrchestratorID), not a uuid, so creating a new
@@ -2668,6 +2671,9 @@ func (a *App) stopOrchestratorSession(id string) bool {
 func (a *App) DeleteOrchestrator(id string) error {
 	id = strings.TrimSpace(id)
 	a.stopOrchestratorSession(id)
+	if err := a.deleteOrchestratorAgent(id); err != nil {
+		return fmt.Errorf("remove the Claude background agent for %s: %w", id, err)
+	}
 	if err := clearOrchestratorNudgeHistoryEntry(a.deps.orchestratorNudgeHistoryPath, id); err != nil {
 		log.Printf("erun-app: clear orchestrator nudge history %s: %v", id, err)
 	}

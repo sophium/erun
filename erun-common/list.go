@@ -36,6 +36,18 @@ type ListOrchestratorResult struct {
 	ID           string                      `json:"id"`
 	Name         string                      `json:"name"`
 	Environments []ListOrchestratorEnvResult `json:"environments,omitempty"`
+	// Alias is the erun platform alias this orchestrator declares as its own,
+	// empty when it declares none. Reported so the value is readable from the
+	// terminal, and not only from the dialog that writes it: a field an
+	// operator can set and cannot read back is the gap the operator-settable
+	// registry exists to catch.
+	Alias string `json:"alias,omitempty"`
+	// UseGateway, Model and Effort are the launch settings as recorded, not as
+	// resolved: an empty Model or Effort reads as the default, which is what the
+	// operator declared.
+	UseGateway bool   `json:"useGateway,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Effort     string `json:"effort,omitempty"`
 	// Directories are the orchestrator's own: paths it works in that belong to
 	// no environment at all. Reported so an orchestrator pointed only at
 	// directories does not read as having no scope.
@@ -116,20 +128,24 @@ type ListEnvironmentResult struct {
 	// environment — which is every environment seen from a host other than its
 	// own runtime container, since the history is written by the container that
 	// produced it.
-	Sizing             *RuntimeSizingRecommendation `json:"sizing,omitempty"`
-	ManagedCloud       bool                         `json:"managedCloud,omitempty"`
-	DisableBuildScript bool                         `json:"disableBuildScript,omitempty"`
-	PlatformAccount    bool                         `json:"platformAccount,omitempty"`
-	AITool             string                       `json:"aiTool,omitempty"`
-	Claude             EnvironmentClaudeConfig      `json:"claude,omitempty"`
-	Idle               EnvironmentIdleConfig        `json:"idle,omitempty"`
-	Deploy             EnvironmentDeployConfig      `json:"deploy,omitempty"`
-	IsActive           bool                         `json:"isActive,omitempty"`
-	LocalPorts         EnvironmentLocalPorts        `json:"localPorts,omitempty"`
-	IsDefault          bool                         `json:"isDefault,omitempty"`
-	IsEffective        bool                         `json:"isEffective,omitempty"`
-	SSH                ListSSHResult                `json:"ssh,omitempty"`
-	AutoStart          *bool                        `json:"autoStart,omitempty"`
+	Sizing       *RuntimeSizingRecommendation `json:"sizing,omitempty"`
+	ManagedCloud bool                         `json:"managedCloud,omitempty"`
+	// Hosted is the platform row this environment corresponds to, when it has
+	// one. Nil means the environment is not marked as hosted, which is the
+	// normal state: most environments never reach the platform.
+	Hosted             *HostedEnvironment      `json:"hosted,omitempty"`
+	DisableBuildScript bool                    `json:"disableBuildScript,omitempty"`
+	PlatformAccount    bool                    `json:"platformAccount,omitempty"`
+	AITool             string                  `json:"aiTool,omitempty"`
+	Claude             EnvironmentClaudeConfig `json:"claude,omitempty"`
+	Idle               EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Deploy             EnvironmentDeployConfig `json:"deploy,omitempty"`
+	IsActive           bool                    `json:"isActive,omitempty"`
+	LocalPorts         EnvironmentLocalPorts   `json:"localPorts,omitempty"`
+	IsDefault          bool                    `json:"isDefault,omitempty"`
+	IsEffective        bool                    `json:"isEffective,omitempty"`
+	SSH                ListSSHResult           `json:"ssh,omitempty"`
+	AutoStart          *bool                   `json:"autoStart,omitempty"`
 }
 
 // RuntimeImageLineMismatchResult is the list read-model view of
@@ -306,6 +322,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		RuntimePod:               env.RuntimePod,
 		Sizing:                   EnvironmentRuntimeSizing(tenant.Name, env),
 		ManagedCloud:             env.ManagedCloud,
+		Hosted:                   listHostedEnvironment(env),
 		DisableBuildScript:       env.DisableBuildScript,
 		PlatformAccount:          env.PlatformAccount,
 		AITool:                   strings.TrimSpace(env.AITool),
@@ -319,6 +336,17 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		SSH:                      listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
 		AutoStart:                copyAutoStartPtr(env.AutoStart),
 	}
+}
+
+// listHostedEnvironment returns the env's hosted marker as a pointer, so an
+// environment that carries none reports absent rather than as an all-zero
+// marker a reader would have to know to ignore.
+func listHostedEnvironment(env EnvConfig) *HostedEnvironment {
+	marker, ok := HostedEnvironmentFromConfig(env)
+	if !ok {
+		return nil
+	}
+	return &marker
 }
 
 // listRuntimeVersionLine wraps ResolveRuntimeVersionLine, but only when there
@@ -496,6 +524,10 @@ func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 			Name:         orchestrator.Name,
 			Environments: envs,
 			Directories:  directories,
+			Alias:        strings.TrimSpace(orchestrator.Alias),
+			UseGateway:   orchestrator.UseGateway,
+			Model:        strings.TrimSpace(orchestrator.Model),
+			Effort:       strings.TrimSpace(orchestrator.Effort),
 		})
 	}
 	return results, nil

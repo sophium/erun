@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,9 +24,26 @@ type mockOIDCProvider struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
 	keyID  string
+	// tokenEndpoint is the path -- registered by newMockOIDCProviderWithRoutes'
+	// extraRoutes hook -- the discovery document advertises as this issuer's
+	// token endpoint. Empty means this provider serves no token endpoint, and
+	// the document says so by omission rather than by naming one it would not
+	// answer at.
+	tokenEndpoint string
 }
 
 func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
+	t.Helper()
+	return newMockOIDCProviderWithRoutes(t, nil)
+}
+
+// newMockOIDCProviderWithRoutes is newMockOIDCProvider plus a hook to register
+// routes on the provider's own mux before it starts serving, so a test that
+// needs the issuer to do more than discovery-and-keys -- a token endpoint, say
+// -- extends this provider instead of standing up a second one beside it. The
+// provider is passed rather than only its mux because an added route usually
+// also has to be advertised in the discovery document.
+func newMockOIDCProviderWithRoutes(t *testing.T, extraRoutes func(*mockOIDCProvider, *http.ServeMux)) *mockOIDCProvider {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -34,11 +52,15 @@ func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
 	p := &mockOIDCProvider{key: key, keyID: "test-key-1"}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
-		writeOIDCJSON(w, map[string]any{
+		document := map[string]any{
 			"issuer":                                p.issuer(),
 			"jwks_uri":                              p.issuer() + "/keys",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
-		})
+		}
+		if p.tokenEndpoint != "" {
+			document["token_endpoint"] = p.issuer() + p.tokenEndpoint
+		}
+		writeOIDCJSON(w, document)
 	})
 	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
 		writeOIDCJSON(w, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
@@ -48,6 +70,9 @@ func newMockOIDCProvider(t *testing.T) *mockOIDCProvider {
 			Use:       "sig",
 		}}})
 	})
+	if extraRoutes != nil {
+		extraRoutes(p, mux)
+	}
 	p.server = httptest.NewServer(mux)
 	t.Cleanup(p.server.Close)
 	return p
@@ -57,18 +82,29 @@ func (p *mockOIDCProvider) issuer() string { return p.server.URL }
 
 func (p *mockOIDCProvider) sign(t *testing.T, claims map[string]any) string {
 	t.Helper()
+	token, err := p.signClaims(claims)
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return token
+}
+
+// signClaims is sign for a caller that is not the test goroutine. An
+// http.Handler minting a token per request cannot call t.Fatalf, so it needs
+// the error rather than the failure.
+func (p *mockOIDCProvider) signClaims(claims map[string]any) (string, error) {
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: p.key},
 		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", p.keyID),
 	)
 	if err != nil {
-		t.Fatalf("new signer: %v", err)
+		return "", fmt.Errorf("new signer: %w", err)
 	}
 	token, err := jwt.Signed(signer).Claims(claims).Serialize()
 	if err != nil {
-		t.Fatalf("serialize token: %v", err)
+		return "", fmt.Errorf("serialize token: %w", err)
 	}
-	return token
+	return token, nil
 }
 
 // signWithUntrustedKey signs claims with a fresh key while keeping the provider's

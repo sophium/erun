@@ -101,15 +101,21 @@ func renderPlatformAliasEntry(provider CloudProviderConfig) (string, error) {
 //
 // ok is false whenever this host has nothing to give -- no erun alias, several,
 // one with no stored session, or no readable secret store -- and each of those
-// is a no-op rather than an error, matching provisionRegistryCredentialSecret.
+// is a no-op rather than a failure, matching provisionRegistryCredentialSecret.
 //
-// An explicit selection that cannot be honoured is the one case that is not a
-// no-op. The operator named it, so declining silently would leave them with a
-// deploy that reported success and an environment that still cannot call the
-// platform, with nothing anywhere saying why; the error names the alias and the
-// next step instead.
+// err is non-nil with ok false in exactly two cases, and the caller's own
+// selection is what tells them apart, which is why both are returned rather
+// than one being dropped here. An operator who named an alias gets a failure
+// carrying the selection, the offending alias, and the cause: declining
+// silently would leave them with a deploy that reported success and an
+// environment that still cannot call the platform, with nothing saying why. An
+// operator who named none gets the several-aliases ambiguity and nothing else:
+// it is a decline rather than a failure, and it is reported because it is the
+// one silent-looking no-op the operator can actually lift. Every other unnamed
+// decline -- no alias, no session, no readable store -- is nil, so a caller
+// that names no alias keeps the silence it has always had.
 func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alias string) (CloudProviderConfig, string, bool, error) {
-	explicit := strings.TrimSpace(alias) != ""
+	explicit := hostAliasSelected(alias)
 	if store == nil || deps.CloudSecretStore == nil {
 		return CloudProviderConfig{}, "", false, hostAliasUnusable(
 			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
@@ -128,16 +134,60 @@ func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alia
 	return provider, token, true, nil
 }
 
+// hostAliasSelected reports whether the operator named the alias themselves.
+// Both answers a resolve can give turn on it -- a named alias that cannot be
+// honoured is a failure, an unnamed one that cannot be is a no-op -- so the
+// callers that have to tell those apart read it here instead of repeating the
+// test and drifting from it.
+func hostAliasSelected(alias string) bool {
+	return strings.TrimSpace(alias) != ""
+}
+
 // hostAliasUnusable is the pair of answers an alias this host cannot deliver
 // has. An operator who named it gets a failure carrying the selection, the
 // offending alias, and the cause; one who named none gets the silent "this host
 // has nothing to give" that every caller of resolveHostPlatformAlias has always
 // treated as a no-op, since nothing they said is being ignored.
+//
+// The named-none half has one exception, and it is the reason this takes the
+// cause rather than only the explicitness. A host with several erun aliases and
+// no selection is not a host with nothing to give -- it has two things to give
+// and no unambiguous answer, which is a decline the operator can lift -- so
+// reporting it as the same silence an absent alias gets leaves the retrofit
+// declining on precisely the hosts it was built for, with no record anywhere.
+// The ambiguity is therefore returned rather than dropped, and a caller decides
+// whether to report it; an absent alias, an absent session and an unreadable
+// store are all genuinely nothing to say and stay nil.
 func hostAliasUnusable(explicit bool, alias string, cause error) error {
-	if !explicit {
-		return nil
+	if explicit {
+		return fmt.Errorf("--erun-alias %q: %w", alias, cause)
 	}
-	return fmt.Errorf("--erun-alias %q: %w", alias, cause)
+	if isPlatformAliasAmbiguity(cause) {
+		return cause
+	}
+	return nil
+}
+
+// platformAliasDeclineLine renders the one line a caller that provisioned
+// nothing owes its operator, in either of the two shapes that decline has.
+//
+// The nil shape is the line init has always emitted and a routine deploy has
+// always suppressed -- a host with no alias to give changes no input, and a
+// decision that changes no input needs no line in a trace every runtime deploy
+// carries -- so a caller that must stay silent does so by not calling this at
+// all, never by asking it to render nothing.
+//
+// The ambiguity shape is the exception, and the reason this exists: the
+// operator has a real choice to make, the environment is left unable to call
+// the platform until they make it, and the only other place that says so is a
+// pod-side refusal naming a different cause and a remedy unreachable from
+// inside a pod. Naming the cause and the remedy here is what connects the two.
+func platformAliasDeclineLine(cause error) string {
+	if cause == nil {
+		return "platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched"
+	}
+	return "platform alias: " + cause.Error() +
+		"; no alias was provisioned for this environment, so its pod cannot call the platform until a deploy names one"
 }
 
 // noStoredSessionError names the alias and the command that would sign this host
@@ -180,12 +230,15 @@ stringData:
 // plus the secret store), so it still runs under dry-run: the decision it makes
 // belongs in the trace either way.
 func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, namespace, kubernetesContext string, deps CloudDependencies) (string, error) {
-	provider, token, ok, err := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
-	if err != nil {
-		return "", err
-	}
+	provider, token, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if !ok {
-		ctx.Trace("platform alias: no signed-in erun cloud provider alias on this host; leaving the pod's own alias state untouched")
+		if hostAliasSelected(ctx.PlatformAlias) {
+			// The one decline that is a failure: the operator named the alias, so
+			// ignoring it would leave them with an environment that cannot call
+			// the platform and nothing saying why.
+			return "", cause
+		}
+		ctx.Trace(platformAliasDeclineLine(cause))
 		return "", nil
 	}
 	entry, err := renderPlatformAliasEntry(provider)
@@ -242,6 +295,15 @@ func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, nam
 // refreshImagePullSecrets, recordMCPAuthKeyOnEnv): a deploy that has nothing to
 // deliver for this leaves the release byte-for-byte as it was, and a decision
 // that changes no input needs no line in a trace every runtime deploy carries.
+//
+// The several-alias host above is not that host, and the difference is the one
+// this function has to keep: it has something to give and no unambiguous answer,
+// which is a decline the operator lifts by naming one, not an absence. Left
+// silent it is indistinguishable from the no-op, so the deploy provisions
+// nothing on exactly the hosts that triggered the retrofit and records nothing
+// anywhere -- the pod's own refusal names a different cause and a remedy that
+// cannot work from inside a pod. So the decline is traced, and only it: the
+// absence above still adds nothing.
 func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) error {
 	if deployInput == nil || deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
 		return nil
@@ -259,15 +321,23 @@ func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) erro
 	}
 	store, deps := ConfigStore{}, DefaultCloudDependencies()
 	// Resolved before provisioning so "this host has nothing to give" is
-	// distinguishable from "there was nothing to do" without either case
-	// leaving a trace. The provisioning below re-resolves the same local,
-	// read-only state through the one implementation that already owns it. An
-	// alias the operator named explicitly is the exception at both steps: it is
-	// reported rather than swallowed, because a decline they did not ask for is
-	// indistinguishable from the retrofit never having run.
-	if _, _, ok, err := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias); err != nil {
-		return err
-	} else if !ok {
+	// distinguishable from "there was nothing to do", and so the reason is in
+	// hand before the provisioning below re-resolves the same local, read-only
+	// state through the one implementation that already owns it. An alias the
+	// operator named explicitly is reported rather than swallowed, because a
+	// decline they did not ask for is indistinguishable from the retrofit never
+	// having run. The ambiguity is the one decline they named nothing for that
+	// is still theirs to lift, so it gets the one line a deploy may add here;
+	// every other unnamed decline adds nothing, which is the rule this gate
+	// exists to keep.
+	_, _, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	if !ok {
+		if hostAliasSelected(ctx.PlatformAlias) {
+			return cause
+		}
+		if cause != nil {
+			ctx.Trace(platformAliasDeclineLine(cause))
+		}
 		return nil
 	}
 	name, err := provisionPlatformAliasSecret(ctx, store, deployInput.Tenant, deployInput.Namespace, deployInput.KubernetesContext, deps)

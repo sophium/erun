@@ -36,6 +36,7 @@ Tenants:
           runtime-version: <VERSION> (erun line, ghcr.io/sophium/erun-devops — release name team-devops disagrees with the image)
           runtime-pod: none
           managed-cloud: off
+          hosted: no
           ai-tool: none
           claude: none
           idle: none

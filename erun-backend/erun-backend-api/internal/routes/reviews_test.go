@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type stubReviewRepository struct {
@@ -686,21 +687,24 @@ func TestCreateReviewRefusesAnUnusableRepository(t *testing.T) {
 
 // TestCreateReviewRefusesACallerSuppliedIssueProvenance is the reproduction of
 // the forgery POST /v1/reviews allowed. The route decoded its body straight
-// into model.Review -- the same struct it returns -- so the two derived issue
-// fields were reachable from request input, and because nothing persists them
-// the `Returning("*")` that overwrites every stored column with the database's
-// own value could not overwrite these. A body asserting a declared reference
-// came back in the 201 as though the platform had established it, which is
-// exactly the claim the INFERRED marking exists to refuse.
+// into model.Review -- the same struct it returns -- so a derived issue field
+// was reachable from request input, and because nothing persists it the
+// `Returning("*")` that overwrites every stored column with the database's own
+// value could not overwrite this one. A body asserting a provenance came back
+// in the 201 as though the platform had established it.
 //
-// The source branch here deliberately follows no convention: that is the state
-// where the resolver has nothing of its own to replace a forged value with, so
-// the caller's value would have been the whole answer.
+// `issueRef` itself is a real request field now -- declaring the issue is what
+// makes the link authoritative, and that is the whole point of the column -- so
+// the claim that stays unforgeable is the one the platform derives: the source.
+// A caller states *which* issue, never *that they stated it*. The source branch
+// here deliberately follows no convention, which is the state where the
+// resolver has nothing of its own to replace a forged value with, so the
+// caller's value would have been the whole answer.
 func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
 	reviews := &stubReviewRepository{}
 	routes := ReviewRoutes{reviews: reviews, service: &stubReviewService{}}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
-		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"my-branch","issueRef":"9999","issueRefSource":"DECLARED"}`))
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"my-branch","issueRefSource":"DECLARED"}`))
 	rec := httptest.NewRecorder()
 
 	routes.createReview(rec, req)
@@ -714,16 +718,165 @@ func TestCreateReviewRefusesACallerSuppliedIssueProvenance(t *testing.T) {
 	}
 	for _, field := range []string{"issueRef", "issueRefSource"} {
 		if value, ok := created[field]; ok {
-			t.Fatalf("%s = %v in the response, want it absent: a review's issue link and its provenance are the platform's to resolve, and a caller must not be able to assert either", field, value)
+			t.Fatalf("%s = %v in the response, want it absent: a review's issue provenance is the platform's to resolve, and a caller must not be able to assert one", field, value)
 		}
 	}
 	// The forgery has to be stopped at the boundary rather than scrubbed off
 	// the response afterwards: what the repository is handed is what the route
-	// built, and that value carries no issue link either. The resolver is the
-	// only writer of these two fields on the way out.
-	if reviews.gotCreated.IssueRef != "" || reviews.gotCreated.IssueRefSource != "" {
-		t.Fatalf("the repository was handed issueRef=%q issueRefSource=%q, want neither",
-			reviews.gotCreated.IssueRef, reviews.gotCreated.IssueRefSource)
+	// built, and that value carries no declared issue either. The resolver is
+	// the only writer of these two fields on the way out.
+	if reviews.gotCreated.DeclaredIssueRef != "" || reviews.gotCreated.IssueRefSource != "" {
+		t.Fatalf("the repository was handed declaredIssueRef=%q issueRefSource=%q, want neither",
+			reviews.gotCreated.DeclaredIssueRef, reviews.gotCreated.IssueRefSource)
+	}
+}
+
+// TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch is the required
+// pair for the stored link: a review that states its issue records it, and
+// that statement beats whatever its source branch looks like. It runs the real
+// ReviewService.PrepareCreate rather than the stub, because "which spelling
+// lands in reviews.issue_ref" is the service's contract and a stub that only
+// echoes would pin nothing about it.
+//
+// The bare-number case is the branch convention's own spelling, kept working:
+// a caller who already writes `feature/2683-...` branches should not have to
+// look up the owner/repo prefix to record the link explicitly.
+func TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch(t *testing.T) {
+	cases := []struct {
+		name       string
+		repository string
+		source     string
+		issueRef   string
+		want       string
+	}{
+		{
+			name:       "a canonical declaration wins over the branch's number",
+			repository: "https://github.com/sophium/erun",
+			source:     "bug/2212-issue-ref-from-branch",
+			issueRef:   "sophium/erun#2683",
+			want:       "sophium/erun#2683",
+		},
+		{
+			name:       "a bare number is joined to the review's repository",
+			repository: "https://github.com/sophium/erun",
+			source:     "feature/widget",
+			issueRef:   "2683",
+			want:       "sophium/erun#2683",
+		},
+		{
+			name:       "a declaration naming another repository is left alone",
+			repository: "https://github.com/sophium/erun",
+			source:     "bug/2212-issue-ref-from-branch",
+			issueRef:   "other/repo#7",
+			want:       "other/repo#7",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reviews := &stubReviewRepository{}
+			routes := ReviewRoutes{reviews: reviews, service: service.NewReviewService(nil, nil, nil, nil, nil, nil)}
+			body, err := json.Marshal(createReviewRequest{
+				Repository: tc.repository, Name: "Add widget",
+				TargetBranch: "main", SourceBranch: tc.source, IssueRef: tc.issueRef,
+			})
+			if err != nil {
+				t.Fatalf("encoding the create body: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+
+			routes.createReview(rec, req)
+
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+			}
+			if reviews.gotCreated.DeclaredIssueRef != tc.want {
+				t.Fatalf("the repository was handed issue_ref %q, want %q",
+					reviews.gotCreated.DeclaredIssueRef, tc.want)
+			}
+			var created map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+				t.Fatalf("body %q is not a review object: %v", rec.Body.String(), err)
+			}
+			if created["issueRef"] != tc.want {
+				t.Fatalf("issueRef = %v in the response, want %q", created["issueRef"], tc.want)
+			}
+			if created["issueRefSource"] != string(eruncommon.IssueReferenceDeclared) {
+				t.Fatalf("issueRefSource = %v, want %q: an issue the author stated is declared, not inferred",
+					created["issueRefSource"], eruncommon.IssueReferenceDeclared)
+			}
+		})
+	}
+}
+
+// TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared is the
+// other half of the provenance rule, and the state the pipeline view must not
+// mislabel: with no declaration recorded, the link is the branch's own guess
+// and has to arrive marked as one.
+func TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared(t *testing.T) {
+	reviews := &stubReviewRepository{}
+	routes := ReviewRoutes{reviews: reviews, service: service.NewReviewService(nil, nil, nil, nil, nil, nil)}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewBufferString(
+		`{"name":"Add widget","repository":"https://github.com/sophium/erun","targetBranch":"main","sourceBranch":"bug/2212-issue-ref-from-branch"}`))
+	rec := httptest.NewRecorder()
+
+	routes.createReview(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	if reviews.gotCreated.DeclaredIssueRef != "" {
+		t.Fatalf("the repository was handed issue_ref %q, want none recorded", reviews.gotCreated.DeclaredIssueRef)
+	}
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("body %q is not a review object: %v", rec.Body.String(), err)
+	}
+	if created["issueRef"] != "2212" {
+		t.Fatalf("issueRef = %v, want the branch's own number", created["issueRef"])
+	}
+	if created["issueRefSource"] != string(eruncommon.IssueReferenceInferred) {
+		t.Fatalf("issueRefSource = %v, want %q: a number parsed out of a branch name is a guess",
+			created["issueRefSource"], eruncommon.IssueReferenceInferred)
+	}
+}
+
+// TestCreateReviewRefusesAnIssueReferenceItCannotSpell is the trust boundary on
+// the new field: a value that is neither owner/repo#number nor a bare number is
+// refused up front, naming the field, rather than stored as a reference no
+// other pipeline could ever match it against.
+func TestCreateReviewRefusesAnIssueReferenceItCannotSpell(t *testing.T) {
+	cases := []struct{ name, repository, issueRef string }{
+		{name: "prose", repository: "https://github.com/sophium/erun", issueRef: "the jobs issue"},
+		{name: "a branch slug", repository: "https://github.com/sophium/erun", issueRef: "2683-add-planned-jobs"},
+		{name: "a bare number with no repository to join it to", repository: "file:///tmp/erun", issueRef: "2683"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reviews := &stubReviewRepository{}
+			routes := ReviewRoutes{reviews: reviews, service: service.NewReviewService(nil, nil, nil, nil, nil, nil)}
+			body, err := json.Marshal(createReviewRequest{
+				Repository: tc.repository, Name: "Add widget",
+				TargetBranch: "main", SourceBranch: "feature/widget", IssueRef: tc.issueRef,
+			})
+			if err != nil {
+				t.Fatalf("encoding the create body: %v", err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/reviews", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+
+			routes.createReview(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"code":"INVALID_ISSUE_REF"`) {
+				t.Fatalf("body = %q, want the INVALID_ISSUE_REF code", rec.Body.String())
+			}
+			if reviews.gotCreated.Name != "" {
+				t.Fatal("the repository was handed a review the platform had already refused")
+			}
+		})
 	}
 }
 
@@ -916,5 +1069,184 @@ func TestListMergeQueueCarriesTheDerivedIssueRef(t *testing.T) {
 	}
 	if listed[0]["issueRef"] != "2212" || listed[0]["issueRefSource"] != "INFERRED" {
 		t.Fatalf("listing = %v, want the branch's issue marked inferred", listed)
+	}
+}
+
+// repositoryFilteringReviewRepository answers a listing the way the SQL does:
+// a row is in the answer only when the filter names it, so a test can tell a
+// filter that reached the query from one that was answered for.
+type repositoryFilteringReviewRepository struct {
+	rows      []model.Review
+	gotFilter apirepository.ReviewFilter
+	calls     int
+}
+
+func (s *repositoryFilteringReviewRepository) Create(context.Context, model.Review) (model.Review, error) {
+	return model.Review{}, nil
+}
+
+func (s *repositoryFilteringReviewRepository) Get(_ context.Context, reviewID string) (model.Review, error) {
+	for _, review := range s.rows {
+		if review.ReviewID == reviewID {
+			return review, nil
+		}
+	}
+	return model.Review{}, nil
+}
+
+func (s *repositoryFilteringReviewRepository) List(_ context.Context, filter apirepository.ReviewFilter) ([]model.Review, error) {
+	s.gotFilter = filter
+	s.calls++
+	var matched []model.Review
+	for _, review := range s.rows {
+		if filter.Repository != "" && review.Repository != filter.Repository {
+			continue
+		}
+		if filter.Status != "" && review.Status != filter.Status {
+			continue
+		}
+		matched = append(matched, review)
+	}
+	return matched, nil
+}
+
+func (s *repositoryFilteringReviewRepository) ListMergeQueue(_ context.Context, repository, targetBranch string) ([]model.Review, error) {
+	var matched []model.Review
+	for _, review := range s.rows {
+		if repository != "" && review.Repository != repository {
+			continue
+		}
+		if targetBranch != "" && review.TargetBranch != targetBranch {
+			continue
+		}
+		matched = append(matched, review)
+	}
+	return matched, nil
+}
+
+// The reported failure: `erun review list --repository <spelling>` answered a
+// silent subset of one repository's reviews, because the filter was compared
+// verbatim against a repository column whose rows were canonicalized when they
+// were written. Every row of one repository belongs to the answer whichever
+// remote spelling the caller holds, and a repository that genuinely has none
+// still answers none.
+func TestListReviewsFindsEverySpellingOfOneRepository(t *testing.T) {
+	reviews := &repositoryFilteringReviewRepository{rows: []model.Review{
+		// As an SSH checkout records them: the review stores the canonical
+		// identity, never the spelling the caller happened to hold.
+		{ReviewID: "review-1", Repository: "https://github.com/sophium/erun", Status: model.ReviewStatusOpen},
+		{ReviewID: "review-2", Repository: "https://github.com/sophium/erun", Status: model.ReviewStatusMerged},
+		{ReviewID: "review-3", Repository: "https://github.com/sophium/other", Status: model.ReviewStatusOpen},
+	}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews?repository=git%40github.com%3Asophium%2Ferun.git&status=OPEN", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	listed := reviewIssueFields(t, rec)
+	if len(listed) != 1 || listed[0]["reviewId"] != "review-1" {
+		t.Fatalf("listing = %v, want this repository's OPEN review and only it", listed)
+	}
+	// The other branch of the same pair: a repository with nothing in the
+	// asked-for state answers nothing rather than being widened.
+	req = httptest.NewRequest(http.MethodGet, "/v1/reviews?repository=git%40github.com%3Asophium%2Ferun.git&status=READY", nil)
+	rec = httptest.NewRecorder()
+	routes.listReviews(rec, req)
+	if listed := reviewIssueFields(t, rec); len(listed) != 0 {
+		t.Fatalf("listing = %v, want none: this repository has no READY review", listed)
+	}
+}
+
+// The other half of the reported failure: `--repository owner/repo` names no
+// repository at all, and answering it with the one row a caller had once
+// recorded under that same shorthand is a silent subset of the repository they
+// meant. It is refused before the query, like a mistyped `--status`.
+func TestListReviewsRefusesARepositoryThatNamesNoRepository(t *testing.T) {
+	reviews := &repositoryFilteringReviewRepository{rows: []model.Review{
+		{ReviewID: "review-1", Repository: "https://github.com/sophium/erun", Status: model.ReviewStatusOpen},
+	}}
+	routes := ReviewRoutes{reviews: reviews}
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews?repository=sophium%2Ferun", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listReviews(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	var body errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response body is not JSON: %v", err)
+	}
+	if body.Code != "INVALID_REPOSITORY" {
+		t.Fatalf("code = %q, want %q", body.Code, "INVALID_REPOSITORY")
+	}
+	if !strings.Contains(body.Message, "git remote get-url origin") {
+		t.Fatalf("message %q does not name the form the caller should pass", body.Message)
+	}
+	if reviews.calls != 0 {
+		t.Fatalf("the refused filter reached the repository anyway (%d queries)", reviews.calls)
+	}
+}
+
+// A queue is addressed the same way a listing is, and for the same reason: an
+// environment holding the SSH remote must reach the queue its HTTPS remote
+// recorded, and a value that names no repository must not address a subset of
+// one.
+func TestListMergeQueueResolvesTheRepositorySpelling(t *testing.T) {
+	reviews := &repositoryFilteringReviewRepository{rows: []model.Review{
+		{ReviewID: "review-1", Repository: "https://github.com/sophium/erun", TargetBranch: "main"},
+	}}
+	routes := ReviewRoutes{reviews: reviews}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/merge-queue?repository=git%40github.com%3Asophium%2Ferun.git&targetBranch=main", nil)
+	rec := httptest.NewRecorder()
+	routes.listMergeQueue(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if listed := reviewIssueFields(t, rec); len(listed) != 1 {
+		t.Fatalf("listing = %v, want this repository's queued review", listed)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v1/reviews/merge-queue?repository=sophium%2Ferun&targetBranch=main", nil)
+	rec = httptest.NewRecorder()
+	routes.listMergeQueue(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a repository that names none: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The advance takes the repository in its body, so it carries the same
+// canonicalization: advancing `git@github.com:o/r.git` must address the queue
+// that remote's HTTPS form recorded rather than answering EMPTY_QUEUE for it.
+func TestAdvanceMergeQueueResolvesTheRepositorySpelling(t *testing.T) {
+	svc := &stubReviewService{review: model.Review{ReviewID: "review-1", Status: model.ReviewStatusMerge}}
+	routes := ReviewRoutes{service: svc}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance",
+		bytes.NewBufferString(`{"repository":"git@github.com:sophium/erun.git","targetBranch":"main"}`))
+	rec := httptest.NewRecorder()
+	routes.advanceMergeQueue(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if svc.advanceRepository != "https://github.com/sophium/erun" {
+		t.Fatalf("AdvanceMergeQueue got repository=%q, want the canonical identity", svc.advanceRepository)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/reviews/merge-queue/advance",
+		bytes.NewBufferString(`{"repository":"sophium/erun","targetBranch":"main"}`))
+	rec = httptest.NewRecorder()
+	routes.advanceMergeQueue(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a repository that names none: %s", rec.Code, rec.Body.String())
+	}
+	if svc.advanceRepository != "https://github.com/sophium/erun" {
+		t.Fatalf("the refused body reached the service as %q", svc.advanceRepository)
 	}
 }

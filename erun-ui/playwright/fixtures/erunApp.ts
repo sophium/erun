@@ -1,5 +1,6 @@
-import { expect, type Locator } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { AppShell } from '../pages/index.js';
+import { injectTestStylesheet } from '../pages/testStylesheet.js';
 import { test as base } from './workerBackend.js';
 import { reapStubProcesses } from './stubProcesses.js';
 import {
@@ -208,6 +209,45 @@ export async function captureHoverCard(card: Locator, filePath: string): Promise
 // the deadline the test chose rather than at a default it never chose.
 export function withTestBudget(): { timeout: number } {
   return { timeout: test.info().timeout };
+}
+
+// disablePopoverEntranceAnimation freezes the Radix popover's entrance
+// animation before any geometry read, so the card is measured at rest.
+//
+// PopoverContent (erun-kit/src/components/ui/popover.tsx) carries
+// `data-[state=open]:animate-in ... zoom-in-95`, so every open runs a ~150ms
+// transform. `toBeVisible()` resolves the instant the element is visible, not
+// once that transform settles, so a bounding-box or colour read taken right
+// after can land mid-transition and report a smaller-than-rest size --
+// indistinguishable from a real difference between two cards. The animation
+// has to be off before the first measurement, not waited out.
+//
+// Injected through the shared pages/testStylesheet.ts, whose own comment
+// records why that is an evaluate rather than page.addStyleTag. Its contract
+// -- the popover really is at rest afterwards -- is pinned by
+// tests/areas/sidebar/sidebar-hovercard-animation-off.spec.ts.
+const POPOVER_ENTRANCE_ANIMATION_OFF = [
+  '[role="dialog"][data-state] {',
+  '  animation: none !important;',
+  '  transform: none !important;',
+  '}',
+].join('\n');
+
+const POPOVER_ANIMATION_OFF_ATTR = 'data-erun-test-popover-animation-off';
+
+export async function disablePopoverEntranceAnimation(page: Page): Promise<void> {
+  await injectTestStylesheet(page, POPOVER_ANIMATION_OFF_ATTR, POPOVER_ENTRANCE_ANIMATION_OFF);
+}
+
+// constrainPopoverWidth narrows the popover below its own fixed w-90, for the
+// clipping cases that need a long value to overflow whatever the card is
+// later sized to.
+export async function constrainPopoverWidth(page: Page, width: string): Promise<void> {
+  await injectTestStylesheet(
+    page,
+    'data-erun-test-popover-width',
+    `[role="dialog"] { width: ${width} !important; }`,
+  );
 }
 
 export { expect };

@@ -246,3 +246,17 @@ func TestListenHeadlessKeepsNonAddressInUseFailuresFatal(t *testing.T) {
 		t.Fatal("listenHeadless accepted an unusable address")
 	}
 }
+
+// A headless backend kept importing the login shell's environment, which on
+// macOS replaced the PATH its caller supplied: the Playwright harness's inert
+// opener stubs fell off it, and a spec clicking a host path opened /etc/hosts
+// on the operator's desktop. Only a windowed launch -- launchd's minimal
+// Finder/Dock environment -- needs the import.
+func TestOnlyAWindowedLaunchImportsTheLoginShellEnvironment(t *testing.T) {
+	if !desktopDeps(true).skipLoginShellEnv {
+		t.Fatal("a headless backend must keep the environment its caller supplied")
+	}
+	if desktopDeps(false).skipLoginShellEnv {
+		t.Fatal("a windowed launch must still import the login shell's environment")
+	}
+}

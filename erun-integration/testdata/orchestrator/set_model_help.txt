@@ -1,0 +1,18 @@
+Set which model this host-side orchestrator's Claude session and its subagents launch on. Pass "default" to clear it: the default is opus on this machine's own Claude Code configuration, and the gateway catalog's default model when the orchestrator routes through the gateway (opus if the catalog names none). A model id is letters, digits and . _ : / - and cannot start with -. With the gateway turned on, a model the gateway cannot drive is refused. Stored on the orchestrator's entry in config.yaml and read back by `erun list`. A running orchestrator keeps the launch it started with until it is restarted.
+
+Usage:
+  erun orchestrator set-model ORCHESTRATOR_ID [flags]
+
+Examples:
+  erun orchestrator set-model my-orchestrator --model sonnet
+  erun orchestrator set-model my-orchestrator --model default
+
+Flags:
+      --dry-run        Resolve and trace mutating actions without executing them.
+  -h, --help           help for set-model
+      --model string   Model id to launch on, or "default" to clear it
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

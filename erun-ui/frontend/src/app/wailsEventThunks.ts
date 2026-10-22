@@ -50,7 +50,7 @@ import {
   setPendingOpenAfterDeploy,
   setSelected,
 } from './slices/selectionSlice';
-import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
+import { envClosing, recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
 import { removeTab } from './tabsThunks';
@@ -498,7 +498,7 @@ const dropExitedSessionFromTabs =
     if (getState().terminal.sessionId !== sessionId) {
       return;
     }
-    if (getState().sessions.closingEnvs[key]) {
+    if (envClosing(getState().sessions, key)) {
       // closeEnvironment is tearing this env's tabs down; its own default
       // tabs exit asynchronously and race clearTabsForEnv, so a sibling tab
       // (e.g. the AI tab) can still look "exiting" here. Auto-selecting it
@@ -533,7 +533,14 @@ export const handleTerminalExit =
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
 
-    if (payload.sessionId !== getState().terminal.sessionId) {
+    // Nothing to report either way: this exit is not the pane's, or the
+    // desktop caused it. A deliberate teardown — an env close, a tab close, an
+    // AI-session end — kills the PTY on purpose, so the reader parked in Read
+    // wakes with a reason ("signal: killed") for the kill the operator asked
+    // for. The exit says which it is itself (@see
+    // TerminalExitPayload.deliberate); neither the env's close hold nor the tab
+    // strip can, a close being able to kill and still come back an error.
+    if (payload.deliberate === true || payload.sessionId !== getState().terminal.sessionId) {
       return;
     }
     dispatchTerminalExitFeedback(dispatch, payload, selections, reason, failedOutput);

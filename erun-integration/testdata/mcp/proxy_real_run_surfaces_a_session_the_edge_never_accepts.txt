@@ -1,5 +1,5 @@
 {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}}}}
-{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"re-establish the MCP session with http://<LOOPBACK>:26100/mcp: MCP endpoint no longer knows this session: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found"}}
+{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"re-establish the MCP session with http://<LOOPBACK>:26100/mcp: the MCP edge answered, but without a session it recognizes for this client: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found; team/dev is up and dispatchable — what is broken is this MCP client's session with its edge, not the environment. Calling again re-handshakes; to dispatch work now, use the CLI, which needs no MCP session of its own: `erun exec job start --tenant team --environment dev --id \u003cjob id\u003e --name \u003cname\u003e -- \u003ccommand\u003e`"}}
 audit: erun mcp proxy --environment dev --tenant team
 mcp: team/dev edge resolved to http://<LOOPBACK>:26100/mcp
-mcp proxy: re-establish the MCP session with http://<LOOPBACK>:26100/mcp: MCP endpoint no longer knows this session: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found
+mcp proxy: re-establish the MCP session with http://<LOOPBACK>:26100/mcp: the MCP edge answered, but without a session it recognizes for this client: http://<LOOPBACK>:26100/mcp (HTTP 404): session not found

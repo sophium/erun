@@ -144,12 +144,21 @@ This keeps the audit story clean: every change is its own row with its own actor
 
 ## 9. Service-account identity
 
-Agents running unattended use a service-account OIDC identity (see [Sign-in](/agent-reference/api-protocol#sign-in-oidc)). The Agent's `sub` claim resolves to a stable `creator_user_id` in every audit record — there is no anonymous Agent action.
+Agents running unattended use a service-account OIDC identity (see [Sign-in](/agent-reference/api-protocol#sign-in-oidc)). erun's verification is issuer-generic, so a service account in the tenant's **own** identity provider — an Okta service app, an AWS IAM Identity Center machine identity — authenticates today, given a registered issuer and a token carrying the org claim. The token's `sub` claim resolves to the ERun user that service account is enrolled as, and every audit row records it: `audit_events` carries `erun_user_id`, `external_user_id`, and `external_issuer_id`. There is no anonymous Agent action.
 
 Practical implications:
 
 - Use a *different* service account per Agent. Distinct identities in the audit trail are how the Operator distinguishes Agent A's actions from Agent B's.
 - Rotate credentials on a regular cadence; the service-account refresh flow re-issues short-lived tokens without code changes.
+
+**An environment erun provisions gets its own identity.** An environment registered on the platform whose tenant resolves by an org-scoped issuer the platform administers is minted a client-credentials identity of its own, scoped to the predefined `TenantAgent` role rather than the broad `TenantUser`. `erun init` asks the platform for it and delivers it through the same Kubernetes `Secret` channel as the registry credential, so the environment's platform calls are attributed to the environment rather than to whoever ran `init`. Provisioning is idempotent — asking again for the same environment returns the identity that already exists, never a second one — and a second environment of the same tenant gets its own distinct identity, which is what makes Agent A's actions distinguishable from Agent B's.
+
+Two situations still fall back to the delegating Operator alias, and `erun init` says so in its own output rather than leaving it to be inferred:
+
+- **The tenant's own identity provider.** erun mints only in the issuer it administers. A tenant on Okta, AWS IAM Identity Center, or any other provider erun does not administer creates the service account itself and enrols it as a user — `POST /v1/users` with the account's issuer and subject — then grants it `TenantAgent` with `POST /v1/users/{user_id}/roles`. See [Agent reference · Roles and role assignment](/agent-reference/api-protocol#roles-endpoints).
+- **A host or environment that cannot be provisioned for.** A host with no signed-in erun alias has nothing to ask with; an environment not yet registered on the platform has no identity to mint one for. Both keep the delegated alias, which is what they had before.
+
+Until an environment is given one, the split in [Merge queue · What runs where](/collaboration/merge-queue#capability-split) still decides which calls it can make at all.
 
 ## 10. Be loud in `--dry-run`, terse in real runs
 

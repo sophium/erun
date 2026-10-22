@@ -56,11 +56,17 @@ var (
 	// ErrMCPUnauthorized means the edge refused the bearer.
 	ErrMCPUnauthorized = errors.New("MCP endpoint rejected the bearer token")
 
-	// errMCPSessionLost means the edge no longer knows the session the client
-	// pinned — an edge that restarted inside a still-running pod, or a session
-	// that aged out. It is recoverable by handshaking again, so it never leaves
-	// this package.
-	errMCPSessionLost = errors.New("MCP endpoint no longer knows this session")
+	// ErrMCPSessionLost means the edge answered, but without a session it
+	// recognizes for this client — an edge that restarted inside a still-running
+	// pod, a session that aged out, or a caller carrying no session id at all.
+	//
+	// It is exported because it is the one transport failure that is evidence
+	// about the *environment*: the edge being up enough to answer is what
+	// separates "the environment is unreachable" from "this client cannot hold a
+	// session with a live edge". The two have opposite remedies, and a caller
+	// that can only see ErrMCPEndpointUnreachable collapses them — which is how
+	// a dispatchable environment gets read as one that is down.
+	ErrMCPSessionLost = errors.New("the MCP edge answered, but without a session it recognizes for this client")
 )
 
 // MCPLocalEndpoint is the loopback URL a port-forwarded environment edge answers
@@ -376,7 +382,11 @@ func (s *mcpSession) post(ctx context.Context, payload mcpJSONRPCRequest) (*mcpJ
 // A session the edge has forgotten is re-handshaked: a long-lived relay pins
 // one session id for its whole lifetime, so treating the edge's 404 as
 // terminal would kill every request for the environment until the relay
-// itself was restarted.
+// itself was restarted. The edge says the same thing a second way -- HTTP 200
+// with a JSON-RPC error that the method is invalid during session
+// initialization, which is what a request on a session the edge no longer
+// holds initialized gets -- and postOnce reports that as the same loss, so
+// neither shape is the final word.
 //
 // A local port-forward that drops mid-request — kubectl logs "lost connection
 // to pod" and reconnects on its own — is retried on the same session, with no
@@ -391,7 +401,7 @@ func (s *mcpSession) postRaw(ctx context.Context, body []byte) ([]byte, error) {
 	if err == nil || s.recovering {
 		return raw, err
 	}
-	if errors.Is(err, errMCPSessionLost) {
+	if errors.Is(err, ErrMCPSessionLost) {
 		return s.recoverLostSession(ctx, body)
 	}
 	if errors.Is(err, ErrMCPEndpointUnreachable) && s.localPort > 0 && CanReachLocalMCPEndpoint(s.localPort) {
@@ -466,7 +476,58 @@ func (s *mcpSession) postOnce(ctx context.Context, body []byte) ([]byte, error) 
 	if err := mcpStatusError(s.endpoint, resp, pinned); err != nil {
 		return nil, err
 	}
-	return decodeMCPReply(resp)
+	return s.decodePostReply(resp)
+}
+
+// decodePostReply reads the reply's own framing and then asks what it says
+// about the session: a 200 whose JSON-RPC error is the edge's
+// session-initialization guard is a lost session wearing the status code of a
+// successful request.
+func (s *mcpSession) decodePostReply(resp *http.Response) ([]byte, error) {
+	reply, err := decodeMCPReply(resp)
+	if err != nil {
+		return nil, err
+	}
+	if err := mcpUninitializedSessionError(s.endpoint, resp.StatusCode, reply); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+
+// mcpSessionInitializationGuard is the tail of the server-side error an MCP
+// edge answers with when a request reaches it on a session that is not
+// initialized -- because the caller's session id is not the edge's any more,
+// or because the request carried none. It is matched on the message rather
+// than on the JSON-RPC code: the SDK raises it as an ordinary internal error,
+// so the code alone cannot tell it apart from an unrelated failure.
+const mcpSessionInitializationGuard = "is invalid during session initialization"
+
+// mcpUninitializedSessionError recognises a call the edge refused because it
+// had no initialized session for this caller, and reports it as the same
+// recoverable loss an HTTP 404 is.
+//
+// This is the second shape of a lost session, and the one a client that only
+// checked for the first missed: the edge answers HTTP 200 with a JSON-RPC
+// error object, so nothing at the status-code layer says the session is gone,
+// and a caller that treats the error as the final word reports a tool failure
+// that a re-handshake would have fixed. Both the typed callers and the stdio
+// relay go through here, so both recover from either shape alike.
+//
+// Answering at all is the fact worth keeping: the edge that raises this guard
+// is up and serving, so the failure is this client's session rather than the
+// environment being out of reach (see ErrMCPSessionLost).
+func mcpUninitializedSessionError(endpoint string, status int, reply []byte) error {
+	if len(reply) == 0 {
+		return nil
+	}
+	var decoded mcpJSONRPCResponse
+	if err := json.Unmarshal(reply, &decoded); err != nil {
+		return nil
+	}
+	if decoded.Error == nil || !strings.Contains(decoded.Error.Message, mcpSessionInitializationGuard) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s (HTTP %d) answered %s", ErrMCPSessionLost, endpoint, status, decoded.Error.detail())
 }
 
 // startupReachabilityWait is the bound postOnce's first-attempt wait uses:
@@ -551,7 +612,7 @@ func mcpStatusError(endpoint string, resp *http.Response, sessionPinned bool) er
 		return fmt.Errorf("%w: %s (HTTP %d)%s", ErrMCPUnauthorized, endpoint, resp.StatusCode, detail)
 	}
 	if resp.StatusCode == http.StatusNotFound && sessionPinned {
-		return fmt.Errorf("%w: %s (HTTP %d)%s", errMCPSessionLost, endpoint, resp.StatusCode, detail)
+		return fmt.Errorf("%w: %s (HTTP %d)%s", ErrMCPSessionLost, endpoint, resp.StatusCode, detail)
 	}
 	return fmt.Errorf("MCP endpoint %s returned HTTP %d%s", endpoint, resp.StatusCode, detail)
 }

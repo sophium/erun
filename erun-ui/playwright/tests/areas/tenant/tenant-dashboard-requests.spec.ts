@@ -1,7 +1,7 @@
 import type { Request, Route } from '@playwright/test';
 
 import { artifactPath } from '../../../fixtures/artifacts.js';
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   removeEnvironment,
   seedEnvironment,
@@ -274,7 +274,11 @@ test.describe('tenant dashboard — Requests tab', () => {
       await expect(confirm).toBeEnabled();
       await confirm.click();
 
-      await expect.poll(() => declineBody?.reason).toBe('no room right now');
+      // The body the decline sent is this spec's own route handler's to
+      // record, so this step waits on that read arriving -- and `expect.poll`
+      // carries no timeout of its own, resolving to expect's 10s default
+      // rather than the 30s this test declares. Pointed at that budget.
+      await expect.poll(() => declineBody?.reason, withTestBudget()).toBe('no room right now');
       await expect(app.tenantDashboard.requestsEmptyState()).toBeVisible();
     } finally {
       removeEnvironment(SEED_TENANT, environment);

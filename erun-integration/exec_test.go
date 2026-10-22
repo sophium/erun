@@ -1668,6 +1668,125 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("gate_merge_real_run_carries_trailers_past_a_trailing_issue_reference", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's commit
+		// declares "Closes #N" and the reproduction trailers a defect fix
+		// declares, and closes with a bare "Refs #N" — the same "Token #N"
+		// spelling "Closes #N" uses, so it carries no colon to read as a
+		// trailer token. The block walk stopped at that paragraph, read an
+		// empty block, and squash-merged the branch under the review name
+		// alone: every declaration was gone, the issue stayed open with its fix
+		// on the target, and nothing said so. The "Refs #N" is the whole point
+		// of the scenario — without it the branch lands its trailers and the
+		// failure this exists for is never reached.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "Fix the widget\n\nCloses #2662\nReproduces: a caller reading the widget got its parts in the wrong order.\nRegression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder\n\nRefs #2662")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Assemble the widget in declared order"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		if subject := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%s")); subject != "Assemble the widget in declared order" {
+			t.Fatalf("the squash commit must still lead with the review name, got %q", subject)
+		}
+		// The observable behaviour the report is about: a reader grepping the
+		// target for the issue reference finds the commit that closed it.
+		grepped := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "main", "--grep=Closes #2662", "--format=%s"))
+		if grepped != "Assemble the widget in declared order" {
+			t.Fatalf("expected the landed squash commit to be findable by its issue reference, got %q", grepped)
+		}
+		body := captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B")
+		for _, want := range []string{
+			"Reproduces: a caller reading the widget got its parts in the wrong order.",
+			"Regression-Test: erun-common/widget_test.go::TestWidgetPartsKeepTheirDeclaredOrder",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected the landed commit to carry %q, got:\n%s", want, body)
+			}
+		}
+		// The other half of the guarantee: the run says what it carried, so a
+		// carriage that found nothing is never left to be counted out of the
+		// squash message afterwards.
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 {
+			t.Fatalf("expected one landed source, got %+v", parsed.Landed)
+		}
+		carried := parsed.Landed[0].CarriedTrailers
+		if len(carried) != 3 || carried[0] != "Closes #2662" {
+			t.Fatalf("expected the result to name the three trailers it carried, got %q", carried)
+		}
+	})
+
+	t.Run("gate_merge_real_run_carries_a_hard_wrapped_trailer_whole", func(t *testing.T) {
+		// The reported failure, on a real repository: the branch's own commit
+		// declares a "Reproduces:" whose value is hard-wrapped across four
+		// physical lines, each continuation starting at column 0 — how a long
+		// hand-written value is wrapped, and how the value on the landing this was
+		// observed on was written. The carriage read a trailer entry as ending at the
+		// first line that looked like a "Token value", which nearly every
+		// continuation line does, so the branch landed with only the first
+		// physical line: the commit on the target asserted a reproduction that
+		// ended mid-clause, and the truncation was invisible because the shortened
+		// line still matched the trailer pattern.
+		//
+		// The wrap is the whole point of the scenario — without it the branch
+		// lands its trailer intact and the failure this exists for is never
+		// reached. The assertions read the tail of the value, which is the part
+		// the truncation dropped.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		seedBareOrigin(t, setup)
+
+		const wrapped = "Reproduces: a hover card closed under a stationary pointer by the boot's own\n" +
+			"default-landing open, read again as if it were still there -- expect's 10s\n" +
+			"default expires with \"element(s) not found\" for the card that answered the\n" +
+			"read before it."
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "feature.txt"), "feature\n")
+		fixture.RunGit(t, setup.Cwd, "add", "feature.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m",
+			"Re-hover the orchestrator card\n\n"+wrapped+"\n"+
+				"Regression-Test: erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts::a hover card dropped while the boot lands is re-hovered, not read as absent\n")
+		fixture.RunGit(t, setup.Cwd, "push", "-u", "-q", "origin", "feature")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "main")
+
+		result := erun.Run(t, []string{"exec", "gate-merge", "--source", "feature", "--target", "main", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env(), Stdin: "Re-hover the orchestrator card"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+
+		// The observable behaviour the report is about: the landed commit's
+		// "Reproduces:" is the value its author wrote, whole.
+		body := strings.TrimSpace(captureGit(t, setup.Cwd, "log", "-1", "--pretty=%B"))
+		if !strings.Contains(body, wrapped) {
+			t.Fatalf("expected the landed commit to carry the branch's wrapped trailer whole, got:\n%s", body)
+		}
+
+		var parsed common.GateMergeWorkingTreeResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
+		}
+		if len(parsed.Landed) != 1 {
+			t.Fatalf("expected one landed source, got %+v", parsed.Landed)
+		}
+		carried := parsed.Landed[0].CarriedTrailers
+		if len(carried) != 2 || carried[0] != wrapped {
+			t.Fatalf("expected the run to report the wrapped trailer whole, got %q", carried)
+		}
+	})
+
 	t.Run("gate_merge_real_run_accepts_a_url_remote", func(t *testing.T) {
 		// The reported failure: --remote takes a URL, not only a configured
 		// remote name. A URL creates no remote-tracking refs, so the ref the
@@ -2795,10 +2914,66 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 	mux.HandleFunc("GET /repos/sophium/erun/collaborators/{login}/permission", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"permission":"` + opts.QueuePermission + `"}`))
 	})
-	server := httptest.NewServer(mux)
+	// Assign the URL before Start: httptest.NewServer begins serving before it
+	// returns, so writing server.URL afterwards has no happens-before edge with
+	// the handler goroutines that read it. The listener address is fixed when it
+	// is allocated, so this is the same URL NewServer would report.
+	server := httptest.NewUnstartedServer(mux)
+	serverURL = "http://" + server.Listener.Addr().String()
+	server.Start()
 	t.Cleanup(server.Close)
-	serverURL = server.URL
 	return server
+}
+
+// TestGithubRulesetStubServerAssignsItsURLBeforeItServes pins the ordering
+// githubRulesetStubServer's page-1 handler depends on: it builds the Link header
+// out of the captured serverURL, and httptest.NewServer returns only after its
+// serving goroutine exists, so assigning serverURL from server.URL afterwards
+// has no happens-before edge to that handler's read.
+//
+// The ordering that fixes is not observable without -race, and no gated venue
+// runs -race for this module: scripts/integration-test.sh's own `go test` --
+// the integration suite both `make integration-test` and `make check-gate`
+// run -- passes -count=1, -parallel and -timeout and nothing else, and -race
+// is wired in the Makefile for erun-common and erun-ui alone. So this test is
+// green in the gate on the pre-fix tree as well as the post-fix one, and a
+// green gate is evidence for its behavioral half only. Run the ordering half
+// explicitly with:
+//
+//	cd erun-integration && go test -race -count=1 -run \
+//	  '^TestGithubRulesetStubServerAssignsItsURLBeforeItServes$' .
+//
+// which reports the pair as a data race -- read at the Link header line,
+// previous write at the assignment -- on the pre-fix tree, and is silent after.
+//
+// The probe's client is deliberately a process of its own. An in-process client
+// is ordered by the netpoll round trip that carries the request -- the test
+// goroutine writes serverURL and then blocks in the same poller that wakes the
+// server's accept -- and every in-process shape of this probe is silent, which
+// is why the scenarios that use this stub never surfaced the race either. A
+// foreign process shares no such edge.
+//
+// The pair of requests is deliberate too: as the first stub a process builds
+// the probe is silent even with an out-of-process client, and from the second
+// on it reports the pair deterministically. Both requests are asserted, so the
+// probe cannot pass by never reaching the read, and pinning the Link header to
+// the server's own URL is also what establishes that the address the fix
+// assigns from is the URL NewServer would have reported.
+func TestGithubRulesetStubServerAssignsItsURLBeforeItServes(t *testing.T) {
+	curl, err := osexec.LookPath("curl")
+	if err != nil {
+		t.Fatalf("this probe needs curl as an out-of-process HTTP client: %v", err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		server := githubRulesetStubServer(t, githubRulesetStubOptions{})
+		out, err := harnessexec.Command(curl, "-sS", "-i", server.URL+"/repos/sophium/erun/rulesets/rule-suites").CombinedOutput()
+		if err != nil {
+			t.Fatalf("request %d: %v\n%s", attempt, err, out)
+		}
+		if want := "Link: <" + server.URL + "/repos/sophium/erun/rulesets/rule-suites?page=2>"; !strings.Contains(string(out), want) {
+			t.Fatalf("request %d: response does not carry %q:\n%s", attempt, want, out)
+		}
+	}
 }
 
 // gateRunsStubServer answers the one platform call reconcile-bypass makes:

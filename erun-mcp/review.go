@@ -84,6 +84,7 @@ type ReviewCreateInput struct {
 	Repository   string `json:"repository" jsonschema:"repository the branches belong to, in any form git accepts; defaults to this agent's own checkout origin"`
 	TargetBranch string `json:"targetBranch" jsonschema:"branch this review proposes merging into"`
 	SourceBranch string `json:"sourceBranch" jsonschema:"branch this review proposes merging; must already be pushed to the remote (use exec_push)"`
+	IssueRef     string `json:"issueRef" jsonschema:"issue this work belongs to, as owner/repo#number or as a bare number the platform joins to the recorded repository; recorded as a declared link, which outranks the number the source branch names. Omit to leave the branch as the whole link"`
 }
 
 type ReviewResult struct {
@@ -102,6 +103,7 @@ func reviewCreateTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		ctx.MCPTool = "review_create"
 		review, err := eruncommon.RunReviewCreate(ctx, runtime.Store, input.Alias, eruncommon.PlatformCreateReviewParams{
 			Repository: input.Repository, Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
+			IssueRef: input.IssueRef,
 		}, cloudDependencies())
 		if err != nil {
 			return nil, ReviewResult{}, err

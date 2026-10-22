@@ -112,6 +112,17 @@ composition and release invariants belong to root/shared logic, not chart policy
 - Declare dind requests/limits explicitly, not through ambient LimitRange defaults.
   Under embedded BuildKit, build steps can escape the sidecar's memory cgroup:
   its configured memory remains capacity guidance, not a proven aggregate ceiling.
+- A bound on the node's build cache travels only when the deployment declares the
+  node. `buildCacheNodeGi` and `buildCacheCoTenants` both default to `0` and render
+  only as a pair, and only for an environment that has the dind sidecar, so a
+  deployment that says nothing about its node emits neither variable and keeps the
+  docker-volume ceiling unchanged. Neither is discoverable from inside the pod —
+  the environment's RBAC is namespace-scoped, so it cannot count its co-tenants,
+  and a node-local, quota-less claim reports the node's capacity rather than its
+  own size — and nothing in erun's own deploy plan sets them, so they are an
+  operator's declaration alone. What they resolve to, and the co-tenant count at
+  which they stop changing any ceiling, is `erun-common/AGENTS.md` § "Release
+  recovery".
 - Size the runtime container's own default for the gate it runs, not for a serving
   app: agents run `make check-gate` in it — the same ten-target gate the sidecar
   runs during an image build. `DefaultRuntimePodMemory` and the chart's
@@ -120,6 +131,24 @@ composition and release invariants belong to root/shared logic, not chart policy
   A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
   ceiling hits throughout lint) against 78% of 16384Mi with no ceiling hits, and
   a warm one at about a quarter of it.
+- **The sizing warning above runs one way only, and a bigger limit is not the safe
+  direction.** A limit is containment for the container holding it, not a claim the
+  node can back it. Every environment pod is Burstable at priority 0: requests are
+  a small fixed value (the chart's 0.25 CPU / 1 GiB per container) and a limit is
+  never set equal to one, so no container satisfies the `requests == limits` rule
+  `Guaranteed` requires, and no environment pod carries a `PriorityClass` (the
+  repo's only one is the cluster-edge local-path helper). Node-pressure eviction
+  sheds pods whose usage exceeds their requests first, ranked by priority — every
+  environment is 0 — so raising a limit buys burst headroom and widens what the
+  environment can be holding when a node-level killer looks; it buys no safety.
+  Container OOM scores do not come from the limit: kubelet derives a Burstable
+  container's `oom_score_adj` from its *request* and the node's own capacity
+  (`1000 - 1000 × request / nodeCapacity`), so it is identical for every
+  environment on a node however each is sized. A container that reaches its own
+  `memory.max` is killed on an otherwise idle node regardless. What bounds the sum
+  is the namespace `ResourceQuota` (`MinimumRuntimeNamespaceQuota`), not any
+  container's limit, and `erun init` sets none. The operator-facing prose is
+  `erun-docs/docs/desktop/resources-and-usage.md`; keep the two in step.
 - Do not write limits to a node-shared `docker/buildkit` cgroup. Standalone
   buildkitd configuration is not read by dockerd's embedded builder; daemon-wide
   cgroup-parent changes broke exec/readiness. Per-leaf caps do not prove aggregate
@@ -127,8 +156,12 @@ composition and release invariants belong to root/shared logic, not chart policy
 - BuildKit attributes its cache records and cache mounts to the daemon's own
   engine id (moby's builder passes `ID: opt.EngineID`), which dockerd persists
   at `<data-root>/engine-id` on the docker-state volume and reuses on every
-  later start — so a rolled pod keeps serving the cache that volume already
-  holds, `<engine-id>::<ref>` keys and all. Do not anchor a worker id in
+  later start, so the *namespace* those keys live in is a property of the
+  volume and survives a roll, `<engine-id>::<ref>` keys and all. What the
+  volume holds is not thereby servable: a build's RUN steps are keyed under a
+  `--cgroup-parent` derived from the pod's own hostname
+  (erun-common/build_cpu_cap.go), so a roll re-executes them while only the
+  steps before the first one still replay. Do not anchor a worker id in
   `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
   buildkitd's runc/containerd workers, so writing one changes no key.
   `dind-entrypoint.sh` carries the measured detail beside the wrapper.
@@ -315,6 +348,13 @@ composition and release invariants belong to root/shared logic, not chart policy
   `--host=tcp://0.0.0.0:2375` listener bound to *all* interfaces, with no
   authentication, reachable by anything sharing the pod's network namespace. That is
   a real pre-existing exposure this repo has not hardened to loopback-only.
+- **`erun build` provides that endpoint where nothing listens on it.** A build
+  with a `test` stage first checks `127.0.0.1:2375`; inside a pod the dind listener
+  answers and is used. Anywhere else (a host environment, a laptop) it starts a
+  loopback-only forwarder from that address to the build's own daemon socket on the
+  daemon host's network — the network a `RUN --network=host` step joins — and
+  removes it when the build ends (`ensureBuildDaemonEndpoint`). A test stage can
+  therefore start container fixtures the same way on every venue.
 - **Under that entitlement a test may start its own container-runtime fixture; two
   classes never belong in a `test` stage.** In scope: a Testcontainers-style
   ephemeral dependency (a postgres, a compose-style sidecar) via
@@ -323,19 +363,34 @@ composition and release invariants belong to root/shared logic, not chart policy
   needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
   this stage cannot depend on the `builder` stage it gates without inverting the
   marker order), and a test asserting a deployed version (that runs after `deploy`,
-  per the `/pipeline` convention, never during build). The concrete in-scope
-  instances are `erun-backend-db/migrate_test.sh`, `retention*_test.sh`,
-  `schema_drift_test.sh`, and `erun-console/nginx_test.sh` — each needs only a real
-  docker daemon (`migrate_test.sh` additionally needs the atlas CLI, a toolchain
-  `COPY` away) — and none is migrated into a component `test` stage yet: they remain
-  the root Makefile's `test-postgres-restart`/`test-retention`/
+  per the `/pipeline` convention, never during build).
+- **`erun-backend-api` is the first component migrated into that venue, and it is
+  the template for the rest.** Its Dockerfile declares `AS test`, consumes the
+  entitlement with `RUN --network=host` against `DOCKER_HOST=tcp://127.0.0.1:2375`
+  through a client it copies from its own pinned `test-toolchain` stage, and its
+  `builder` stage depends on the result via `COPY --from=test /test-ok` — so the
+  image cannot be built when the gate fails, and `erun build --gate` invalidates and
+  executes that stage by name. The stage runs
+  `erun-devops/docker/erun-backend-api/e2e_gate_test.sh`: a real `postgres:18.3`
+  fixture plus `erun-backend-db`'s real Atlas migrations, one database per package
+  (the platform-bootstrap suites assert whole-database state and are not mutually
+  isolated), and every `ERUN_E2E_*_DATABASE_URL` the module's tests read derived from
+  those sources rather than listed, so a suite added later is covered when it lands.
+  The run fails when a database-gated case skips with the database configured,
+  because that is the shape this venue exists to remove: without it the module was
+  reached only by `make check`'s bare `go test -count=1 ./...` with no `ERUN_E2E_*`
+  variable set, so every database-backed case reported `SKIP` under a package line
+  that still read `ok`. The same script runs by hand via `make
+  test-erun-backend-api-e2e`.
+- The remaining in-scope instances are still unmigrated:
+  `erun-backend-db/migrate_test.sh`, `retention*_test.sh`, `schema_drift_test.sh`,
+  and `erun-console/nginx_test.sh` each need only a real docker daemon
+  (`migrate_test.sh` additionally needs the atlas CLI, a toolchain `COPY` away) and
+  remain the root Makefile's `test-postgres-restart`/`test-retention`/
   `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
   hand or via `erun exec job` before merging a change to the behavior they cover.
-  Retiring them is now blocked only by the migration itself: the entitlement above
-  has landed, so nothing but the per-component `test` stage work remains. Until that
-  lands they stay runnable only by hand or via `erun exec job`, never in `make check`
-  — see the venue note in the root Makefile, which is a real constraint rather than
-  an oversight.
+  They stay runnable only that way, never in `make check` — see the venue note in
+  the root Makefile, which is a real constraint rather than an oversight.
 
 ## Release Workflow
 
@@ -359,8 +414,11 @@ composition and release invariants belong to root/shared logic, not chart policy
   behavior. Keep release-sensitive common, CLI, and MCP suites aligned.
 - `helm-chart-tests` uses render-only tests without a cluster; new tests under
   `k8s` are discovered automatically. Keep real-daemon tests separate and explicit:
-  `test-postgres-restart` for reset/migration/recovery and `test-console-nginx`
-  for shipped nginx behavior. Run affected entrypoint/helper script tests too.
+  `test-postgres-restart` for reset/migration/recovery, `test-console-nginx`
+  for shipped nginx behavior, and `test-erun-backend-api-e2e` for the
+  `erun-backend-api` opt-in `ERUN_E2E_*` database suites (the same script that
+  module's own image `test` stage runs in every build). Run affected
+  entrypoint/helper script tests too.
 - Live RBAC, resource isolation, and restart guarantees need corresponding real
   probes when changed; render tests alone cannot establish them.
 - Guidance-only edits use root's consistency/reference validation exemption.

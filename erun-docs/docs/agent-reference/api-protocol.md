@@ -143,6 +143,8 @@ When no trust anchor is configured the edge stays loopback-only (legacy, unauthe
 
 **Minting a scoped token is real; per-caller entitlement to a tier is not (issue #1877).** [`POST /v1/environments/{id}/mcp-token`](#mcp-token-endpoint) lets a caller request any of the four tiers, validated only against the fixed vocabulary above — not against whether *this* caller should be trusted with it. Any tenant member (the mint route's `TenantUserClass`, not just `TenantAdmin`) can today request `erun:admin` for any environment their tenant owns. Treat this as the same trust boundary a hosted console operator already sits inside (they can already reach the environment through other admin-tier routes), not as a control that narrows what an already-authenticated tenant member can do — a caller building an unattended or autonomous consumer of a minted token (rather than a human clicking "mint" once per session) should not assume a request for a narrower tier is enforced against who is asking.
 
+**A session lives for as long as the caller is attached to it.** MCP here is the streamable HTTP transport, so the session id handed back by `initialize` is pinned on every later request, and the edge renews a session for exactly as long as the caller's standalone `GET` SSE stream is held open. A session with nothing attached is still closed five minutes after its last `POST` — that is what keeps a caller which abandons a session without terminating it (every one-shot CLI call does) from accumulating for the lifetime of the pod — and a call on a session the edge has closed is answered `404` when it names the session, or `method "<name>" is invalid during session initialization` when it carries no session id at all (issue #2693). Both mean the same thing and both are recoverable by handshaking again; `erun`'s own client does that automatically, on either response.
+
 ### Endpoints
 
 :::note Shipped vs planned
@@ -161,8 +163,9 @@ The `(iss, org) → tenant` resolution model and first-identity bootstrap above 
 | `GET` | `/v1/environments/{environment_id}` | Fetch one environment by id. | Tenant member |
 | `POST` | `/v1/environments/{environment_id}/deploy` | Deploy an already-registered runtime env at a published version — the retry and version-change path (`202`). Body below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/stop` | Scale a runtime env's Deployment to zero — the server-side equivalent of `erun stop`. Does not change the env's provisioning `status`. Body-less. | Tenant member (write) |
-| `DELETE` | `/v1/environments/{environment_id}` | Start tearing down a runtime env's namespace (skipped if it never deployed) and removing its row — the server-side equivalent of `erun delete`. Asynchronous: `202 Accepted` with the row at `status: deleting`; poll to see it converge. Not recoverable. | Tenant member (write) |
+| `DELETE` | `/v1/environments/{environment_id}` | Start tearing down a runtime env's namespace (skipped if it never deployed), revoking the environment's own platform identity, and removing its row — the server-side equivalent of `erun delete`. Asynchronous: `202 Accepted` with the row at `status: deleting`; poll to see it converge. Not recoverable. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/mcp-token` | Mint a per-env MCP bearer token (`{token, audience, scope}`) for the caller to present to the env's `erun-mcp` edge. Optional body `{scope}` requests a capability tier; minting `erun:admin` additionally requires the entitlement below. `erun:read`/`erun:attach`/`erun:operate` need no additional entitlement. Response below. | Tenant member (write); `erun:admin` additionally requires the delete-environment entitlement |
+| `POST` | `/v1/environments/{environment_id}/machine-identity` | Provision — or return — this environment's own platform identity: a client-credentials pair in the tenant's own organization, enrolled as an erun user holding the predefined `TenantAgent` role. Idempotent per environment; `201` when the identity is new, `200` when it already existed. Body-less. Response below. | Tenant member (write) |
 | `POST` | `/v1/environments/{environment_id}/dns01-token` | Mint a per-env DNS-01 broker token (`{token, audience}`), the credential the cluster's cert-manager DNS-01 webhook presents to the [DNS-01 broker](#dns01-broker). Body-less. Response below. | Tenant member (write) |
 | `PUT` | `/v1/environments/{environment_id}/hostname` | Point the caller's own environment's wildcard hostname at an IP by performing the platform's own PowerDNS write — for a caller with no direct PowerDNS access to the platform cluster (a developer's local cluster, most concretely). Body `{targetIp}`. Response below. | Tenant member (write) |
 | `DELETE` | `/v1/environments/{environment_id}/hostname` | Remove the caller's own environment's wildcard hostname record, symmetric with the `PUT` above. Body-less; `204` on success. | Tenant member (write) |
@@ -497,6 +500,10 @@ Poll `GET /v1/environments/{id}` (or the `GET /v1/config` read model) to follow 
 
 **Cleanup that outlives the row.** A successful teardown chains a best-effort `erun unexpose` to remove the per-env DNS record — see [Env teardown](/agent-reference/networking-spec#unexposing). Its failure is logged on the control plane, not recorded on the environment, since the row is removed in the same workflow step.
 
+**The environment's own platform identity is revoked with it.** Once the namespace is gone and before the row is removed, the teardown revokes the [machine identity](#service-account-flow-for-agents) the environment was provisioned with: the erun user it resolves to — together with its external-identity mapping and its `TenantAgent` grant — and the identity-provider application that mints its tokens. Deleting an environment therefore leaves nothing usable behind, rather than a client secret that keeps minting tokens for an environment that no longer exists. An environment that holds the delegated Operator alias instead has no machine identity to revoke, and the step is a no-op for it.
+
+This is deliberately part of the delete attempt rather than a best-effort side effect: a revocation that cannot be completed moves the environment to `deletion-blocked` naming why, and the reconciler retries it like any other blocked teardown. Removing the row anyway would orphan the identity with nothing left naming it. Revoking an identity for an environment that still *exists* is a separate capability and is **not** offered by this endpoint.
+
 | Status | Condition | Recovery |
 |---|---|---|
 | `401` / `403` | Standard auth failures (see [Errors](#errors)). | Send a valid token whose roles permit the write. |
@@ -593,6 +600,38 @@ The operator lands this token as the Secret the per-tenant Issuer's webhook solv
 | `404` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Mint for an environment id the caller's tenant owns. |
 | `501` | No backend signing key is configured (`ERUN_API_MCP_SIGNING_KEY_PATH` unset). | Configure the signing key on the backend. |
 | `500` | The tenant read or signing failed (internal wiring error). | Retry; if it persists, it is a server bug. |
+
+### `POST /v1/environments/{environment_id}/machine-identity` {#machine-identity-endpoint}
+
+Provisions — or returns — this environment's **own platform identity**, so its API calls are attributed to the environment rather than to whichever Operator's session provisioned it. The environment is resolved from `{environment_id}` under row-level security, so an identity can only be minted for the caller's own tenant.
+
+The identity is created in the tenant's own organization in the platform's identity provider, enrolled as an erun user mapped to `(issuer, subject)`, and granted the predefined [`TenantAgent`](#roles-endpoints) role — the reads, the nested and unattached build report, gate-run create/update, and the `MERGED` status report, without the rest of `TenantUser`. **The enrolment and the grant are performed by the API itself**, behind this route's own authorization; they are not the caller's `POST /v1/users` and `POST /v1/users/{user_id}/roles` calls, which are tenant-admin only and which an ordinary Operator's session cannot make. Body-less; `201` when the identity is new and `200` when this environment already had one:
+
+```jsonc
+// 200/201 response
+{
+  "environmentId": "0192…",
+  "environmentName": "prod",
+  "issuer": "https://auth.example",       // the registered issuer a token from this identity carries
+  "subject": "client-env-0192",           // what such a token resolves by
+  "clientId": "client-env-0192",
+  "clientSecret": "…",                    // returned once per call; place it in the environment's own Secret
+  "userId": "0192…",                      // the erun user row the identity is enrolled as
+  "alreadyEnrolled": false
+}
+```
+
+The subject is derived from the environment's own id, which is what makes the call idempotent: repeating it finds the identity the first call created. A second environment of the same tenant gets its own distinct identity. `erun init` is the caller in practice — it delivers the credential through the same Kubernetes `Secret` channel as the registry credential (see [Service-account flow for Agents](#service-account-flow-for-agents)).
+
+**Error behaviour.** Bare HTTP status with the `{code, message}` envelope (see [Errors](#errors)):
+
+| Status | `code` | Condition | Recovery |
+|---|---|---|---|
+| `401` / `403` | standard | Standard auth failures (see [Errors](#errors)). `WriteAll`, or `TenantUser`/`TenantAdmin`, covers this write. | Send a valid token whose roles permit the write. |
+| `404` | `NOT_FOUND` | No environment with `{environment_id}` in the caller's tenant (RLS returns not-found for another tenant's env). | Provision for an environment id the caller's tenant owns. |
+| `409` | `MACHINE_IDENTITY_UNAVAILABLE` | The tenant cannot be given an identity: it resolves by no org-scoped issuer, or by several — the message names which. | Give the tenant one org-scoped issuer mapping, or reconcile it down to one. |
+| `501` | `MACHINE_IDENTITY_UNCONFIGURED` | This control plane administers no identity provider. | Configure the platform's identity provider — the same dependency `/v1/identity/*` needs. |
+| `500` | `INTERNAL_SERVER_ERROR` | The identity provider call failed, or the enrolment did. Nothing is left half-written: an identity created but not enrolled is returned again with its credential on the next call. | Retry; if it persists, it is a server bug. |
 
 ### `PUT` / `DELETE` `/v1/environments/{environment_id}/hostname` {#environment-hostname-endpoint}
 
@@ -1164,6 +1203,16 @@ This endpoint requires the caller to already know the enrollee's `issuer`/`subje
 
 A **role** is a named, tenant-owned bundle of permissions; a **permission** is one API method + path grant, either an exact pair (`apiMethod`/`apiPath`) or a regex pattern pair (`apiMethodPattern`/`apiPathPattern`) — the same shape `role_permissions` stores and [the capability set](#capability-set) resolves against. `ReadAll` and `WriteAll` are two such predefined roles, created per tenant on first use and granted automatically only to a tenant's bootstrap first user (see [`POST /v1/users`](#post-v1users-and-get-v1users) above) — every later enrollment holds nothing until someone grants it a role, predefined or custom. All five endpoints below act on the caller's own resolved tenant — RLS scopes every read and write, and there is no operations-tenant cross-tenant override (unlike `/v1/users`).
 
+**The narrower predefined roles.** `TenantUser`, `TenantAdmin`, and `TenantAgent` are predefined too, created per tenant on the same lazy, idempotent schedule. Unlike `ReadAll`/`WriteAll`, their permissions are **exact route grants derived from the API's own route table**, never hand-authored patterns or an enumerated path list — so each one names only routes that really exist, and a route reclassified out of a role stops being granted to it the next time the tenant's roles are read (the reconciliation is in both directions, so the narrowing applies to tenants seeded before the change).
+
+| Role | Grants | Assigned automatically |
+|---|---|---|
+| `TenantUser` | Reads the tenant and drives reviews, comments, builds, the merge queue, gate runs, and environments that already exist. | Every enrollment that names no `roleIds`, and is not the tenant's first user. |
+| `TenantAdmin` | Everything `TenantUser` grants, plus tenant administration: creating and deleting environments, registering contexts, enrolling users and invites, creating roles and granting or revoking them. No operations-tenant surface. | The tenant's first user, whichever path enrolled them. |
+| `TenantAgent` | The narrowest: reading `GET /v1/whoami` and the reviews it is gated against, reporting the review-nested `GATE` build, creating and updating its own gate run, reporting `MERGED`, and the unattached `POST /v1/builds` self-report `erun build` makes. | Nothing, yet. |
+
+`TenantAgent` is deliberately a **strict subset of `TenantUser`**, not a peer of it: it exists for an environment's own machine identity, so it carries exactly what such an identity performs while it drives the merge-queue gate and nothing more. In particular it does **not** carry the tenant-wide build history (`GET /v1/builds` — the self-report needs only the `POST` half), opening a review, advancing or overriding the merge queue, writing a comment or assigning a reviewer, triggering a release, or any tenant administration. Extend it only when a real additional caller is identified; a machine identity that holds more than its flow needs is the attribution and blast-radius problem this role exists to avoid. An operator can grant it today with [`POST /v1/users/{user_id}/roles`](#roles-endpoints); the per-environment identity meant to hold it by default is still [planned](#service-account-flow-for-agents).
+
 **`GET /v1/roles`** lists the tenant's roles with their permissions. **`POST /v1/roles`** creates one:
 
 ```jsonc
@@ -1427,12 +1476,18 @@ Lists the caller's tenant's metering events, most recent first — the usage-met
 
 Long-running Agents don't sign in interactively. The typical pattern:
 
-1. The administrator creates a service account in the tenant's identity provider (e.g., an Okta service app, an AWS IAM Identity Center machine identity).
+1. The administrator creates a service account **in the tenant's own identity provider** (e.g., an Okta service app, an AWS IAM Identity Center machine identity), and registers that provider as an issuer. erun verifies service accounts through the same issuer-generic path every other token takes; it does not create the account for you.
 2. The Agent obtains tokens using the standard machine-to-machine OAuth 2.0 client-credentials flow (`grant_type=client_credentials`), with the client secret stored as a Kubernetes Secret in the Agent's environment.
 3. Every API call carries the resulting JWT as `Authorization: Bearer <jwt>`.
-4. The Agent's `sub` claim resolves to its `creatorUserId` in every audit record — there is no anonymous Agent action.
+4. The Agent's `sub` claim resolves to the ERun user that account is enrolled as, and every audit row records it — `audit_events` carries `erun_user_id`, `external_user_id`, and `external_issuer_id`. There is no anonymous Agent action.
 
 When the token expires (typical lifetime 1 hour), the Agent's client refreshes it transparently using the cached client credentials.
+
+**Two properties a machine token must have for an org-scoped issuer.** A service account is a user of the IdP like any other, so where the issuer is org-scoped the tenant is resolved from the org claim named in its mapping — and on the erun-shipped Zitadel that claim (`urn:zitadel:iam:user:resourceowner:id`) is asserted only when the client **requests the `urn:zitadel:iam:user:resourceowner` scope** and the service account's token type is **JWT** rather than the opaque default. A `client_credentials` request omitting either still authenticates at the IdP but resolves to no tenant, and every call answers [`401 TENANT_UNRESOLVED`](#errors). Both are properties of the service account and its token request, not of erun.
+
+**What erun provisions, and what an Operator still does.** For an environment registered on the platform whose tenant resolves by an org-scoped issuer the platform administers, erun mints the identity itself: `POST /v1/environments/{environment_id}/machine-identity` provisions it in the tenant's own organization, enrols it as an erun user, grants it the predefined [`TenantAgent`](#roles-endpoints) role, and returns the client-credentials pair. `erun init` calls that route and delivers what it returns through the same Kubernetes `Secret` channel as the registry credential, so the environment authenticates as itself. The call is idempotent: repeating it for one environment returns the identity that already exists.
+
+Two cases are not provisioned and keep the delegated Operator alias instead, which `erun init` reports rather than leaving to be inferred: a tenant whose identity provider erun does not administer (the Operator creates the service account there and enrols it as a user, then grants it `TenantAgent`), and a host with no signed-in erun alias, which has nothing to ask with. An environment's identity is revoked when the environment is deleted — see [`DELETE /v1/environments/{environment_id}`](#delete-endpoint) — but revoking one for an environment that still exists, and the migration of an environment already carrying the Operator's credential, remain separate, still-open work tracked in [erun#2684](https://github.com/sophium/erun/issues/2684). Until an environment holds an identity of its own, [Merge queue · What runs where](/collaboration/merge-queue#capability-split) remains the operative split: an environment with no usable alias still builds, and a credentialed host records.
 
 ### Errors
 

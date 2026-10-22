@@ -43,6 +43,7 @@ function buildStore(orchestratorId: string, tenant: string, environment: string)
         nudgeCapped: false,
         restartRequired: false,
         roleChanged: false,
+        launchSettingsChanged: false,
       },
     ]),
   );
@@ -172,6 +173,7 @@ test('a clean boot seeds the card from the fetch alone, before any event arrives
         nudgeCapped: false,
         restartRequired: false,
         roleChanged: false,
+        launchSettingsChanged: false,
       },
     ]),
   );

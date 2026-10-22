@@ -211,6 +211,66 @@ func exchangeERunDeviceCode(tokenEndpoint, clientID, deviceCode string) (ERunTok
 	return postFormForTokens(tokenEndpoint, form)
 }
 
+// defaultClientCredentialsERunTokens runs the client_credentials grant a
+// provisioned machine identity authenticates with. It is the machine half of
+// the same token endpoint the refresh-token path uses, and the difference is
+// the whole point: nothing here is a session, so nothing here expires into a
+// signed-out state a human has to clear.
+//
+// Credentials travel in the request's Authorization header rather than the
+// form body, because the application erun provisions is created with Zitadel's
+// API_AUTH_METHOD_TYPE_BASIC — the two have to agree, and only one of the two
+// supported client-authentication methods puts a long-lived secret somewhere a
+// proxy or an access log is likely to retain.
+//
+// The org-claim scope is requested for exactly the reason login requests it:
+// where the issuer is org-scoped, erun resolves the tenant from the claim it
+// names, and a token that omits the scope authenticates at the IdP and then
+// resolves to no tenant at the API. An issuer that has never heard of the
+// scope — a tenant's own BYO IdP — is retried once without it, so an identity
+// minted somewhere erun's own IdP is not still authenticates as it would have
+// before this grant existed.
+func defaultClientCredentialsERunTokens(ctx Context, discovery OIDCDiscovery, clientID string, clientSecret string) (ERunTokens, error) {
+	if strings.TrimSpace(discovery.TokenEndpoint) == "" {
+		return ERunTokens{}, fmt.Errorf("issuer %s does not advertise a token endpoint", discovery.Issuer)
+	}
+	ctx.Trace("POST " + discovery.TokenEndpoint + " (client_credentials grant)")
+	if ctx.DryRun {
+		return ERunTokens{}, nil
+	}
+	tokens, err := postClientCredentialsForm(discovery.TokenEndpoint, clientID, clientSecret, erunOrgClaimScope)
+	if err == nil || !isERunInvalidScopeError(err) {
+		return tokens, err
+	}
+	ctx.Trace("cloud machine identity: issuer rejected scope " + erunOrgClaimScope + "; retrying without it")
+	return postClientCredentialsForm(discovery.TokenEndpoint, clientID, clientSecret, "")
+}
+
+func postClientCredentialsForm(tokenEndpoint, clientID, clientSecret, scope string) (ERunTokens, error) {
+	form := url.Values{"grant_type": {"client_credentials"}}
+	if scope != "" {
+		form.Set("scope", scope)
+	}
+	req, err := http.NewRequest(http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return ERunTokens{}, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.SetBasicAuth(clientID, clientSecret)
+	var payload struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+	}
+	if err := doERunRequest(req, &payload); err != nil {
+		return ERunTokens{}, fmt.Errorf("client credentials: %w", err)
+	}
+	return ERunTokens{
+		AccessToken: payload.AccessToken,
+		ExpiresIn:   time.Duration(payload.ExpiresIn) * time.Second,
+	}, nil
+}
+
 func defaultRefreshERunTokens(ctx Context, discovery OIDCDiscovery, clientID string, refreshToken string) (ERunTokens, error) {
 	ctx.Trace("POST " + discovery.TokenEndpoint + " (refresh_token grant)")
 	if ctx.DryRun {

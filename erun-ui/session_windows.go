@@ -139,17 +139,25 @@ func (s *windowsTerminalSession) Close() error {
 	// Kill the whole child tree, not just the shell: an `erun open`'s kubectl
 	// exec child otherwise survives as an orphan that holds the exec stream open,
 	// leaving a stale dtach client attached in the pod after every close.
-	if s.pid > 0 {
+	//
+	// The liveness probe runs while the handle is still open — Alive reads it,
+	// and closing it first would turn "did I kill it" into "I no longer know".
+	killErr := killProcessTree(s.pid, func() error {
 		killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.pid))
 		eruncommon.HideConsoleWindow(killCmd)
-		_ = killCmd.Run()
-	}
+		return killCmd.Run()
+	}, s.Alive)
 	if s.handle != 0 {
 		_ = syscall.CloseHandle(s.handle)
 		s.handle = 0
 	}
 	if s.pty != nil {
-		return ignoreAlreadyClosed(s.pty.Close())
+		ptyErr := ignoreAlreadyClosed(s.pty.Close())
+		// A survivor is the report the caller has to act on; a pty that could
+		// not be released only says the desktop still holds its own end.
+		if killErr == nil {
+			return ptyErr
+		}
 	}
-	return nil
+	return killErr
 }

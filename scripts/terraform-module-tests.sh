@@ -29,8 +29,107 @@ set -eu
 CHECKPOINT_DISABLE=1
 export CHECKPOINT_DISABLE
 
+# `terraform init` is this gate's one and only network step, and it is the one
+# step here that can fail for a reason that has nothing to do with the change
+# under test. On a loaded build host its discovery request to
+# registry.terraform.io has timed out while the same pod reached the same host
+# with a plain `curl` in 0.28s, and while the other modules' init in the same
+# run succeeded -- reddening branches that changed no terraform file at all and
+# pulling them out of the merge queue. Worse, the abort lands before the rest of
+# the gate runs, so the branch's own changed specs are never exercised and a
+# whole gate's worth of evidence is lost to an unrelated timeout.
+#
+# So `init` alone is retried, a bounded number of times with a short linear
+# backoff. The retry is honest because the request it re-runs is an idempotent,
+# side-effect-free GET -- nothing is being asserted away, only a network blip
+# ridden out -- which is a different thing from widening a test timeout, and
+# `init` is the only place here with a reason to be retried at all. The suites
+# themselves run against mocked providers with no registry in reach, so
+# retrying them would buy nothing and could only hide a real assertion failure:
+# the one thing this gate exists to catch.
+#
+# The worst case this can add is (1 + 2) * the base step per module, which is
+# less than a single attempt's own cost -- so a genuine registry outage still
+# reds the gate promptly rather than turning it into a hang. The Go half of this
+# same decision is erun-common/published_artifact_verify.go's
+# readBackPublishedArtifact, which retries a subprocess read-back on a transient
+# failure classified from its captured output; this mirrors that shape.
+TF_INIT_MAX_ATTEMPTS=3
+TF_INIT_RETRY_BASE_SECONDS=2
+
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 modules_root="$(cd "${script_dir}/../erun-devops/terraform-erun/modules" && pwd)"
+
+# terraform_init_failure_is_transient reports whether a failed `terraform init`
+# capture ($1) failed for a transport reason rather than a verdict about the
+# module. It is deliberately a marker list of transport signatures only.
+#
+# Two things it must never match, both of which the report that produced this
+# fix demonstrates. "Could not retrieve the list of available versions for
+# provider X" is the outer wrapper around BOTH kinds: a timed-out discovery
+# request and a constraint no release satisfies ("no available releases match
+# the given constraints") carry it word for word. And a bare "not found" or a
+# bare status code would catch a genuinely broken module. Matching the outer
+# message would retry a provider that does not exist; matching nothing would
+# leave the blip. So the markers below are the inner transport failures, and a
+# definitive answer from the registry -- a version constraint, an unknown
+# provider, a bad source address, a malformed config, a checksum mismatch --
+# stays terminal and fails on its first attempt.
+terraform_init_failure_is_transient() {
+    # Terraform hard-wraps diagnostics at 80 columns, so a marker can be split
+    # across two lines in the capture: the reported failure itself prints
+    # "failed to request\ndiscovery document". Fold the capture onto one line
+    # before matching, or the very failure this exists for goes unrecognized.
+    tf_folded="$(tr '\n' ' ' <"$1" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
+    for tf_marker in \
+        'failed to request discovery document' \
+        'context deadline exceeded' \
+        'i/o timeout' \
+        'connection reset by peer' \
+        'connection refused' \
+        'tls handshake timeout' \
+        'no such host' \
+        'temporary failure in name resolution' \
+        'network is unreachable' \
+        '502 bad gateway' \
+        '503 service unavailable' \
+        '429 too many requests'
+    do
+        case "${tf_folded}" in
+        *"${tf_marker}"*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# terraform_init_with_retry runs `terraform init` for the module in $1, leaving
+# its output in the log file $2. It returns 0 on success and 1 on failure, with
+# the log from the final attempt intact so the caller's existing failure report
+# is unchanged. A transient failure is retried up to TF_INIT_MAX_ATTEMPTS
+# times; a failure that is not transient returns after the first attempt, with
+# no backoff paid.
+terraform_init_with_retry() {
+    tf_init_dir="$1"
+    tf_init_log="$2"
+    tf_init_attempt=1
+
+    while :; do
+        if (cd "${tf_init_dir}" && terraform init -backend=false -input=false -no-color) \
+            >"${tf_init_log}" 2>&1; then
+            return 0
+        fi
+        if [ "${tf_init_attempt}" -ge "${TF_INIT_MAX_ATTEMPTS}" ] ||
+            ! terraform_init_failure_is_transient "${tf_init_log}"; then
+            return 1
+        fi
+        tf_init_delay=$((TF_INIT_RETRY_BASE_SECONDS * tf_init_attempt))
+        echo "-- terraform init in $(basename "${tf_init_dir}") hit a transient" \
+            "registry failure; retrying in ${tf_init_delay}s" \
+            "(attempt $((tf_init_attempt + 1)) of ${TF_INIT_MAX_ATTEMPTS})" >&2
+        sleep "${tf_init_delay}"
+        tf_init_attempt=$((tf_init_attempt + 1))
+    done
+}
 
 command -v terraform >/dev/null 2>&1 || {
     echo "FAIL: the terraform CLI is required to run the terraform module tests" >&2
@@ -64,8 +163,7 @@ for module_dir in "${modules_root}"/*/; do
     echo ">> terraform test ${module}"
 
     init_log="${work_dir}/${module}.init.log"
-    if ! (cd "${module_dir}" && terraform init -backend=false -input=false -no-color) \
-        >"${init_log}" 2>&1; then
+    if ! terraform_init_with_retry "${module_dir}" "${init_log}"; then
         echo "FAIL: terraform init failed in ${module}:" >&2
         cat "${init_log}" >&2
         failed="${failed} ${module}"

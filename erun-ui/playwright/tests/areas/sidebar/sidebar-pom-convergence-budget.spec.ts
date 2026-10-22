@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-import { expect, test, waitForSeededRow } from '../../../fixtures/erunApp.js';
+import { expect, test, waitForSeededRow, withTestBudget } from '../../../fixtures/erunApp.js';
 import {
   SEED_ORCHESTRATOR,
   SEED_TENANT,
@@ -117,10 +117,16 @@ test.describe('sidebar POM convergence steps (#2459)', () => {
     test.setTimeout(60_000);
     await holdInvoke(page, 'ListOrchestrators', 26_000);
     await app.reboot();
+    // The read is the whole observation, and it is its own re-drivable unit:
+    // it returns only once the card is up, and a card this step has already
+    // seen can still be dropped by the poll's own re-render while the pointer
+    // rests on the row (erun-ui/playwright/AGENTS.md's hover-card bullet).
+    // A bare `expect(...).toBeVisible()` after it re-races exactly that drop on
+    // `expect`'s separate 10s clock -- getByRole('dialog', ...) "not found" --
+    // with no way back, since nothing re-hovers.
     await app.sidebar.readOrchestratorHoverCard(SEED_ORCHESTRATOR, async (card) => {
       await expect(card).toBeVisible({ timeout: 2_000 });
     });
-    await expect(app.sidebar.orchestratorHoverCard(SEED_ORCHESTRATOR)).toBeVisible();
   });
 
   // closeEnvironment carried `toPass({ timeout: 30_000 })` around a 2s inner
@@ -137,9 +143,15 @@ test.describe('sidebar POM convergence steps (#2459)', () => {
     test.setTimeout(60_000);
     const { tenant, environment } = seededEnv;
     await app.sidebar.openEnvironment(tenant, environment);
-    await expect(app.sidebar.envOpenDot(tenant, environment)).toHaveCount(1);
+    // openEnvironment is a bare click with no convergence of its own, and the
+    // row's isOpen follows StartSession asynchronously -- so this count is a
+    // step, not a read, and it carries the budget this test declared rather
+    // than `expect`'s separate 10s clock (fixtures/erunApp.ts withTestBudget).
+    await expect(app.sidebar.envOpenDot(tenant, environment)).toHaveCount(1, withTestBudget());
     await holdInvoke(page, 'CloseEnvironmentSessions', 31_000);
     await app.sidebar.closeEnvironment(tenant, environment);
-    await expect(app.sidebar.envOpenDot(tenant, environment)).toHaveCount(0);
+    // No re-assertion after the close: closeEnvironment is the whole close
+    // contract for a spec (pages/Sidebar.ts), and a bare re-check of the
+    // indicator is a race with any tab spawn the open left in flight.
   });
 });

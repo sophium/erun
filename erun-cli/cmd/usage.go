@@ -28,6 +28,15 @@ func newUsageCmd(resolveOpen OpenResolver) *cobra.Command {
 			"OOM-killed would otherwise read as memory-healthy. Every field reports its own unavailability\n" +
 			"(cgroup v1, an unlimited limit, a file that could not be read) rather than\n" +
 			"failing the call, since those are normal on some clusters, not errors.\n\n" +
+			"Those figures are limits, and a limit is a ceiling: it reserves nothing at\n" +
+			"scheduling time, so `394.4MiB / 27.0GiB limit` is a reading against a\n" +
+			"ceiling, not a claim that this environment holds 27.0GiB. What the\n" +
+			"scheduler actually admits the pod on is its resources.requests, so this\n" +
+			"command reports those too, read from the live pod spec -- no cgroup file\n" +
+			"records a request. Each container's own request is listed under the pod's\n" +
+			"effective total, which is the rule Kubernetes itself admits on: the larger\n" +
+			"of the init containers' peak and the sum of the containers'. A pod spec\n" +
+			"that cannot be read reports that, rather than a reservation of nothing.\n\n" +
 			"Disk is reported for the whole mount (node, shared): every environment\n" +
 			"scheduled on the same node sees the identical total/used/percent, so cleaning\n" +
 			"up one environment may barely move it. The own-usage line beneath it (a `du`\n" +
@@ -74,7 +83,7 @@ func runUsageCommand(ctx common.Context, resolveOpen OpenResolver, params common
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	usage, err := common.RunRuntimeUsage(ctx, nil, req, common.RuntimeUsageParams{
+	usage, err := common.RunRuntimeUsage(ctx, nil, nil, req, common.RuntimeUsageParams{
 		Interval: time.Duration(intervalSeconds * float64(time.Second)),
 	})
 	if err != nil {

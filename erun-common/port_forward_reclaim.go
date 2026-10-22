@@ -33,11 +33,7 @@ import (
 // through the same config root so a sweep and a write cannot disagree about
 // where the tree is.
 func portForwardRoot() (string, error) {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(configDir, configRoot, "portforward"), nil
+	return resolveConfigFilePath(filepath.Join(configRoot, "portforward"))
 }
 
 // ReclaimOrphanedPortForwardRecords removes every forward record under the
@@ -59,16 +55,28 @@ func ReclaimOrphanedPortForwardRecords(ctx Context) error {
 	if err != nil {
 		return err
 	}
-	for _, kind := range portForwardStateKinds {
-		kindDir := filepath.Join(root, kind)
-		if err := reclaimOrphanedRecordsInKind(ctx, kindDir, kind, configured); err != nil {
-			return err
+	// The tree os.UserConfigDir named is walked too: records an earlier release
+	// left there for environments since deleted are never opened again, so
+	// migration never reaches them either.
+	roots := []string{root}
+	if legacyRoot, ok := legacyPortForwardRoot(); ok {
+		roots = append(roots, legacyRoot)
+	}
+	// RemovePortForwardRecord clears every location of a record, so one found
+	// in both trees is removed, and traced, once.
+	reclaimed := map[string]bool{}
+	for _, root := range roots {
+		for _, kind := range portForwardStateKinds {
+			kindDir := filepath.Join(root, kind)
+			if err := reclaimOrphanedRecordsInKind(ctx, kindDir, kind, configured, reclaimed); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func reclaimOrphanedRecordsInKind(ctx Context, kindDir, kind string, configured map[string]map[string]bool) error {
+func reclaimOrphanedRecordsInKind(ctx Context, kindDir, kind string, configured map[string]map[string]bool, reclaimed map[string]bool) error {
 	tenantEntries, err := os.ReadDir(kindDir)
 	if err != nil {
 		// Nothing recorded for this kind yet, which is the ordinary state of a
@@ -90,6 +98,11 @@ func reclaimOrphanedRecordsInKind(ctx Context, kindDir, kind string, configured 
 			if tenantKnown && environments[environment] {
 				continue
 			}
+			key := filepath.Join(kind, tenant, environment)
+			if reclaimed[key] {
+				continue
+			}
+			reclaimed[key] = true
 			if err := RemovePortForwardRecord(ctx, kind, tenant, environment); err != nil {
 				return err
 			}

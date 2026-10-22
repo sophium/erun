@@ -28,6 +28,22 @@
     "erun-dind: memory is at 89% of its 14336Mi limit (warns at 85%)"
   ],
   "excludesBuilds": true,
+  "requests": {
+    "containers": {
+      "erun-devops": {
+        "cpuMilli": 250,
+        "memoryBytes": 1073741824
+      },
+      "erun-dind": {
+        "cpuMilli": 250,
+        "memoryBytes": 1073741824
+      }
+    },
+    "pod": {
+      "cpuMilli": 500,
+      "memoryBytes": 2147483648
+    }
+  },
   "dind": {
     "cpu": {
       "quotaCores": 4,

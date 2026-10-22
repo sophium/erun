@@ -24,6 +24,8 @@ helm upgrade --install --wait --wait-for-jobs --server-side true --force-conflic
 deploy: would watch pods in team-dev on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-dev get pods -o json
 dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)
+remove gateway credentials secret erun-claude-gateway (environment does not use the gateway)
+kubectl --context test-context -n team-dev delete secret erun-claude-gateway --ignore-not-found
 kubectl --context test-context --namespace team-dev get deployment team-devops -o 'jsonpath={.spec.replicas}/{.status.readyReplicas}'
 runtime run state: deployment team-devops is absent from namespace team-dev
 open: team-devops is not deployed, so there is nothing to wake

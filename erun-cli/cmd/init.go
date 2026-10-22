@@ -234,11 +234,15 @@ func confirmPrompt(run PromptRunner, label string) (bool, error) {
 
 // confirmPromptTo renders the confirm to out instead of promptui's default
 // (os.Stdout) when out is non-nil. The open --no-shell alias flow routes it to
-// stderr: promptui repaints the confirm from a readline goroutine, and it prints
-// the eval-able setup script to stdout immediately afterward, so leaving the
-// prompt on stdout lets the two writers interleave non-deterministically (on
-// Windows the repaint frames fused into the first script line ~1 run in 20).
-// Keeping the UI on stderr leaves stdout carrying only the script.
+// stderr: the confirm writes while the eval-able setup script is printed to
+// stdout immediately afterward, so leaving the prompt on stdout lets the two
+// writers interleave non-deterministically (on Windows the prompt frames fused
+// into the first script line ~1 run in 20). Keeping the UI on stderr leaves
+// stdout carrying only the script.
+//
+// The answer comes from runConfirmPrompt, which drops promptui's repaint prompt
+// for this confirmation (see its comment); the label, the accepted inputs, and
+// the empty-answer default below are unchanged.
 func confirmPromptTo(run PromptRunner, label string, out io.WriteCloser) (bool, error) {
 	label = strings.TrimRight(strings.TrimSpace(label), "?")
 	prompt := promptui.Prompt{
@@ -260,7 +264,7 @@ func confirmPromptTo(run PromptRunner, label string, out io.WriteCloser) (bool, 
 		},
 	}
 
-	result, err := run(prompt)
+	result, err := runConfirmPrompt(run, prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
 			return false, fmt.Errorf("initialization interrupted")

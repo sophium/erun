@@ -21,9 +21,9 @@ func imagePullSecretKubectlStub(t *testing.T, getResponses map[string]string, ap
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\nset -e\ncase \"$*\" in\n")
 	for name, body := range getResponses {
-		b.WriteString(fmt.Sprintf("  *\"get secret %s -o json\"*)\n", name))
+		fmt.Fprintf(&b, "  *\"get secret %s -o json\"*)\n", name)
 		if body == "" {
-			b.WriteString(fmt.Sprintf("    echo 'Error from server (NotFound): secrets \"%s\" not found' >&2\n    exit 1\n", name))
+			fmt.Fprintf(&b, "    echo 'Error from server (NotFound): secrets \"%s\" not found' >&2\n    exit 1\n", name)
 		} else {
 			b.WriteString("    cat <<'STUBEOF'\n" + body + "\nSTUBEOF\n    exit 0\n")
 		}

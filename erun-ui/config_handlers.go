@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -39,6 +40,9 @@ func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
 	// not edit it cannot silently drop the operator's gateway configuration.
 	if config.OpenRouter != nil {
 		updated.OpenRouter = openRouterConfigFromUI(config.OpenRouter)
+		if err := validateGatewayCatalogModelIDs(updated.OpenRouter); err != nil {
+			return uiERunConfig{}, err
+		}
 	}
 	if err := a.deps.store.SaveERunConfig(updated); err != nil {
 		return uiERunConfig{}, err
@@ -363,6 +367,23 @@ func openRouterConfigFromUI(config *uiOpenRouterConfig) *eruncommon.OpenRouterCo
 		out.Models = append(out.Models, eruncommon.OpenRouterModel{ID: id, Context: m.Context, RequiresReasoningEcho: m.RequiresReasoningEcho})
 	}
 	return out
+}
+
+func validateGatewayCatalogModelIDs(catalog *eruncommon.OpenRouterConfig) error {
+	if catalog == nil {
+		return nil
+	}
+	for _, m := range catalog.Models {
+		if err := eruncommon.ValidateClaudeModelID(m.ID); err != nil {
+			return fmt.Errorf("cannot save the gateway catalog: %w", err)
+		}
+	}
+	if def := catalog.DefaultModel; def != "" {
+		if err := eruncommon.ValidateClaudeModelID(def); err != nil {
+			return fmt.Errorf("cannot save the gateway catalog: default %w", err)
+		}
+	}
+	return nil
 }
 
 func (a *App) tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTenantConfig {

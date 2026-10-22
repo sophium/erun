@@ -30,6 +30,7 @@ function orchestrator(
     nudgeCapped: false,
     restartRequired: false,
     roleChanged: false,
+    launchSettingsChanged: false,
   };
 }
 

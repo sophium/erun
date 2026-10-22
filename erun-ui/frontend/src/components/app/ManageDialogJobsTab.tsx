@@ -46,7 +46,11 @@ export function JobsTab({
   open: boolean;
 }): React.ReactElement {
   const [jobs, setJobs] = React.useState<JobView[]>([]);
-  const [loading, setLoading] = React.useState(false);
+  // False from this tab's first render until the read it opened with has been
+  // answered. Starting false is what keeps the placeholder over the whole read
+  // rather than only the part of it after the effect fired, so the settled
+  // empty state below is never rendered before the read it describes.
+  const [settled, setSettled] = React.useState(false);
   const [error, setError] = React.useState('');
   const [unreachable, setUnreachable] = React.useState<UnreachableJobsState | null>(null);
   const [nowUnix, setNowUnix] = React.useState(() => Math.floor(Date.now() / 1000));
@@ -55,7 +59,7 @@ export function JobsTab({
     if (!selection) {
       return;
     }
-    setLoading(true);
+    setSettled(false);
     setError('');
     setUnreachable(null);
     LoadEnvironmentJobs(selection.tenant, selection.environment)
@@ -73,7 +77,7 @@ export function JobsTab({
         }
       })
       .finally(() => {
-        setLoading(false);
+        setSettled(true);
       });
   }, [selection]);
 
@@ -103,8 +107,11 @@ export function JobsTab({
   if (!selection) {
     return <JobsEmptyState message="Select an environment to see its jobs." />;
   }
-  if (loading && jobs.length === 0) {
-    return <JobsEmptyState message="Loading jobs…" />;
+  // Its own test id: the reading placeholder and the settled empty state are
+  // different states, and a caller waiting on the empty state has to be able
+  // to settle on the read's answer rather than on this.
+  if (!settled && jobs.length === 0) {
+    return <JobsEmptyState message="Loading jobs…" testId="manage-jobs-loading" />;
   }
   // Distinct from "no jobs yet": the pod that would answer is not reachable
   // right now, so an empty list here would read as "nothing is running" when
@@ -252,11 +259,17 @@ function JobsUnreachableAlert({
   );
 }
 
-function JobsEmptyState({ message }: { message: string }): React.ReactElement {
+function JobsEmptyState({
+  message,
+  testId = 'manage-jobs-empty',
+}: {
+  message: string;
+  testId?: string;
+}): React.ReactElement {
   return (
     <div
       className="flex items-center gap-3 rounded-[var(--radius)] border border-border bg-muted/40 px-3 py-3 text-[13px] text-muted-foreground"
-      data-testid="manage-jobs-empty"
+      data-testid={testId}
     >
       <ListChecks className="size-4 shrink-0" aria-hidden="true" />
       <span>{message}</span>

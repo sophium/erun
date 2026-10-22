@@ -13,6 +13,10 @@ test.describe('auto-start gate', () => {
     await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
 
+    // The field this predicate reads, asserted before the predicate is asked:
+    // "not remote" has to mean the type was read and says local agent, not
+    // that the control had not rendered yet.
+    await expect(app.manageDialog.environmentTypeSelect()).toContainText(/local agent/i);
     expect(await app.manageDialog.hasRemoteWorktree()).toBe(false);
 
     await app.manageDialog.selectTab('Runtime');
@@ -21,6 +25,35 @@ test.describe('auto-start gate', () => {
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
+  });
+
+  test('the env-type read refuses to answer while the manage body is still loading', async ({
+    app,
+    page,
+  }) => {
+    // `hasRemoteWorktree()` answers `false` for a local-agent env, and the
+    // assertions above lean on that to mean "there is no Remote field to show".
+    // While the dialog's config is still loading the body is a "Loading
+    // config..." placeholder, so the Environment type control does not exist --
+    // and folding that absence into `false` let the negative assertions be
+    // reported without the field ever having been read. The read is held open
+    // here rather than delayed, so the placeholder state is the only state the
+    // test can observe.
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const parsed = JSON.parse(request.postData() ?? '{}') as { method?: string };
+      if (parsed.method === 'LoadEnvironmentConfig') {
+        return; // never fulfils: the dialog stays in its loading body
+      }
+      await route.continue();
+    });
+
+    // The edit button's own onClick opens the dialog; openManageDialogFor
+    // additionally waits for the loaded body, which is the state being ruled out.
+    await app.sidebar.environmentRow(SEED_TENANT, SEED_ENV_ALPHA).dispatchEvent('click');
+    await app.manageDialog.waitForOpen();
+
+    await expect(app.manageDialog.environmentTypeSelect()).toHaveCount(0);
+    await expect(app.manageDialog.hasRemoteWorktree()).rejects.toThrow(/not readable/);
   });
 
   test('first-time prompt stays closed when gate decides nothing would start', async ({ app }) => {

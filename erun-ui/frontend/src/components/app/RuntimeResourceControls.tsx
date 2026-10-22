@@ -91,6 +91,7 @@ export function RuntimeResourceControls({
           </div>
         )}
       </div>
+      <RuntimeResourceWorstCase worstCase={bounds.worstCase} />
       <ResourceControl
         id={`${idPrefix}-cpu`}
         label="CPU"
@@ -122,6 +123,33 @@ export function RuntimeResourceControls({
         capacityWarning={capacityWarning}
         capacityBlocks={capacityBlocks}
       />
+    </div>
+  );
+}
+
+// RuntimeResourceWorstCase renders the second capacity question: how much of
+// the node is committed if every container on it bursts to its declared limit
+// at once. It is kept visually apart from the scheduling figure above, and
+// unboxed rather than styled like the controls, because it does not bound them
+// -- a limit reserves nothing, so a node whose limits are oversubscribed can
+// still place a pod, and reading this figure as a ceiling is what led an
+// operator to shrink a limit sized for the work.
+function RuntimeResourceWorstCase({
+  worstCase,
+}: {
+  worstCase: { message: string; notice: string };
+}): React.ReactElement | null {
+  if (!worstCase.message && !worstCase.notice) {
+    return null;
+  }
+  return (
+    <div className="grid gap-1 border-t border-border pt-2" role="status">
+      {worstCase.message && (
+        <div className="text-xs leading-[1.35] text-muted-foreground">{worstCase.message}</div>
+      )}
+      {worstCase.notice && (
+        <div className="text-xs leading-[1.35] text-muted-foreground">{worstCase.notice}</div>
+      )}
     </div>
   );
 }

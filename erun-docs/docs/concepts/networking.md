@@ -13,7 +13,7 @@ ERun never invents a custom protocol for connecting to an env. Every connection 
 | Path | Used by | Mechanism |
 |---|---|---|
 | **SSH** to the runtime pod | Operator (terminal, IDE) | The desktop app port-forwards the in-pod SSH server (`EnvConfig.sshd.localport`) to localhost. Any SSH-speaking editor attaches. |
-| **MCP** to the runtime pod | Agent (Claude Code, Codex, custom) | Same desktop port-forward, different port — published in `<UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json`. |
+| **MCP** to the runtime pod | Agent (Claude Code, Codex, custom) | Same desktop port-forward, different port — published in `<config-root>/portforward/mcp/<tenant>/<env>.json`. |
 | **HTTP / TCP** to an application service | Browsers, curl, other services | A normal Kubernetes `Service` inside the env's namespace. Exposed via one of the patterns below. |
 
 The first two are stable — every env has them, the desktop manages them. The third is where you make choices.

@@ -8,6 +8,7 @@ import type {
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
+import { loadManageGatewayRouting } from './gatewayRedeployThunks';
 import {
   clearManageDeployComponentsRefresh,
   refreshManageDeployComponents,
@@ -15,6 +16,7 @@ import {
 } from './manageDeployComponentsThunks';
 import {
   aiSessionLaunchSignature,
+  claudeRoutingChanged,
   cloneEnvironmentConfig,
   compactClaudeDraft,
   nextPendingRedeploy,
@@ -296,6 +298,7 @@ export const loadManageConfig = (): AppThunk<Promise<void>> => async (dispatch, 
       }),
     );
     void dispatch(loadManageResourceStatus(result.kubernetesContext, selection));
+    void dispatch(loadManageGatewayRouting(selection));
   } catch (error) {
     dispatch(
       patchManageDialog({
@@ -438,10 +441,12 @@ const applyManageSaveConsequences =
     // A changed Claude launch flag only applies when the AI session's
     // create-time program runs, so reopen the env's open AI tabs now rather
     // than leaving a live claude on the stale flags. A save that did not
-    // change the launch signature must not churn tabs.
+    // change the launch signature must not churn tabs, and one that moved the
+    // Claude routing waits for the redeploy that applies it.
     if (
       priorConfig &&
-      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(savedConfig)
+      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(savedConfig) &&
+      !claudeRoutingChanged(priorConfig, savedConfig)
     ) {
       void dispatch(relaunchAISessionsForLaunchChange(selection));
     }

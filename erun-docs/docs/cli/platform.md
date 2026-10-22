@@ -99,6 +99,39 @@ Registers a hosted environment. For a `runtime` environment with `--runtime-vers
 | `--type` | `runtime`, `remote-agent`, or `local-agent`. |
 | `--context-id` / `--kubernetes-context` | For a `runtime` environment, `--context-id` places the deploy on that registered [cloud context](/concepts/hosted-platform#single-cluster-placement) (validated to belong to your tenant, with room); omit both to auto-select one of your own registered contexts, falling back to the platform's own cluster if you have none. `--kubernetes-context` (a raw name, not a registered context) is **not supported for a `runtime` environment** — it names no known credential to authenticate with. |
 | `--runtime-version` | Published erun runtime version to deploy (runtime environments only). |
+| `--adopt` | Record a row for an environment that already exists on this machine instead of asking the platform to provision one. Requires `--kubernetes-context`; the platform refuses `--runtime-version` and `--context-id` alongside it. |
+| `--tenant-id` | Target tenant id (operations-tenant callers only; defaults to the caller's own tenant). The response's `tenantId` is the tenant that actually resolved. |
+| `--definition` | Upload this local environment's portable settings with the registration, as `TENANT/ENVIRONMENT`, as definition revision 1. Requires `--adopt`. Only the portable subset travels — see [Managing hosted environments · Which settings never leave the machine](/collaboration/hosted-environments#which-settings-never-leave-the-machine). |
+
+### `platform env push`
+
+Uploads a registered local environment's portable settings to the platform row its hosted marker names, advancing the row's definition revision.
+
+```bash
+erun platform env push acme dev
+```
+
+The environment must already be marked as hosted; `platform env register --adopt --definition` is what records that marker. A marker that names a different tenant, platform or environment than this call resolves is refused rather than re-pointed. Nothing an operator clicks triggers this upload — the desktop's hosted panel is read-only.
+
+Supports `--dry-run`, which resolves the marker and traces which settings would travel without contacting the platform.
+
+### `platform env pull`
+
+Reads the platform's stored definition and writes its portable subset into `erun/<tenant>/<env>/config.yaml`, preserving every field the platform has no opinion about.
+
+```bash
+erun platform env pull acme dev
+erun platform env pull acme dev --yes
+```
+
+| Flag | Description |
+|---|---|
+| `--environment-id` | The platform row to pull from. Required when the local environment does not exist yet — nothing local can say which row you mean. |
+| `--repo-path` | Host repo path to record for a new environment of a type that needs one (`local-agent`). Checked before the write: an unusable path refuses rather than creating an environment that cannot build. |
+| `--port-range-start` | Local port range start for a new environment. Defaults to the lowest free range on this machine; a start another environment already claims is refused before the write. |
+| `--yes` / `-y` | Accept a two-sided edit without prompting. |
+
+A **platform-owned** field that disagrees (the name, type or Kubernetes context) refuses rather than merging. When the local copy and the platform have both moved since the last sync, the diff is shown and you are asked. Supports `--dry-run`, which traces the reads it would make and states the boundary it holds without contacting the platform or writing anything.
 
 ### `platform env deploy`
 

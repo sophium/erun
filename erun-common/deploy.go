@@ -1108,7 +1108,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	defer handle.Release()
 
 	if ctx.DryRun {
-		return nil
+		return pruneGatewayCredentialsSecret(ctx, deployInput)
 	}
 	stepCtx, finish := ctx.startTimingStep(target)
 	err = runHelmDeployExecute(stepCtx, deployInput, valuesPull, depBuild, deploy, target)
@@ -1129,7 +1129,13 @@ func runHelmDeployExecute(ctx Context, deployInput HelmDeploySpec, valuesPull *p
 	if err := runChartDependencyBuild(ctx, deployInput, depBuild, target); err != nil {
 		return err
 	}
-	return runHelmDeployRollout(ctx, deployInput, deploy, target)
+	if err := runHelmDeployRollout(ctx, deployInput, deploy, target); err != nil {
+		return err
+	}
+	if err := pruneGatewayCredentialsSecret(ctx, deployInput); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
+	}
+	return nil
 }
 
 // helmDeployTargetLabel builds the label used in deploy feedback. It names the
@@ -3125,8 +3131,15 @@ func helmPlatformAliasSecretSetArgs(name string) []string {
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig, gateway *OpenRouterConfig) []string {
 	args := make([]string, 0, 12)
-	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
-	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
+	// A gateway replaces the model provider, so it renders the provider flags
+	// off: Claude Code reads CLAUDE_CODE_USE_BEDROCK / _MANTLE ahead of
+	// ANTHROPIC_BASE_URL, and leaving either on would route the session past the
+	// gateway the environment selected.
+	gatewayOn := EffectiveGateway(config, gateway).Configured()
+	useMantle := !gatewayOn && resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)
+	useBedrock := !gatewayOn && resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)
+	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(useMantle))
+	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(useBedrock))
 	if models := formatClaudeModels(config.Models); models != "" {
 		args = append(args, "--set-string", "claude.availableModels="+escapeHelmSetValue(models))
 	}

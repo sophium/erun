@@ -33,6 +33,10 @@ interface UsageEvent {
       percentOfLimit?: number;
       oomKills: number;
     };
+    requests?: {
+      runtime: { cpuMilli?: number; memoryBytes?: number; cpu?: string; memory?: string };
+      unavailable?: string;
+    };
   };
   observedAtUnix: number;
   staleAfterSeconds: number;
@@ -53,6 +57,12 @@ function freshUsagePayload(overrides: Partial<UsageEvent> = {}): UsageEvent {
         limit: '2048Mi',
         percentOfLimit: 25,
         oomKills: 0,
+      },
+      // The scheduler's own input, read from the pod spec: the runtime
+      // container reserves 0.25 CPU / 1024Mi while the 2048Mi above is only the
+      // ceiling it may grow to.
+      requests: {
+        runtime: { cpuMilli: 250, memoryBytes: 1073741824, cpu: '0.25 CPU', memory: '1024Mi' },
       },
     },
     observedAtUnix: Math.floor(Date.now() / 1000),
@@ -75,8 +85,9 @@ async function emitEnvUsage(page: Page, payload: UsageEvent): Promise<void> {
 // The backend's own usage sweep also runs on a timer against the seeded
 // (never-deployed, unreachable) alpha env and can overwrite the injected
 // reading with its own "not running" observation, so every assertion driven
-// by this helper re-drives the event until it converges, bounded by a real
-// timeout rather than a guessed delay — mirrors driveEnvActivity in
+// by this helper re-drives the event until it converges, bounded by the
+// calling test's own deadline rather than a second cap the step picked for
+// itself — mirrors driveEnvActivity in
 // sidebar-orchestrator-hover-card-activity.spec.ts.
 async function driveEnvUsage(
   page: Page,
@@ -86,16 +97,17 @@ async function driveEnvUsage(
   await expect(async () => {
     await emitEnvUsage(page, event);
     await assertions();
-  }).toPass({ timeout: 20_000 });
+  }).toPass();
 }
 
 test.describe('environment usage on the hover cards', () => {
   test('the environment hover card renders a fresh reading with its age', async ({ app, page }) => {
-    // driveEnvUsage's own retry (20s) nests hoverEnvironmentRow's own retry
-    // (20s) inside it, so a single slow hover attempt under contention can
-    // consume most of the default 30s test budget before driveEnvUsage gets
-    // a chance to retry the whole thing. Widen the test's own budget rather
-    // than shrinking either nested retry's bound.
+    // driveEnvUsage's retry nests hoverEnvironmentRow's own retry inside it,
+    // so a single slow hover attempt under contention can consume most of the
+    // default 30s test budget before driveEnvUsage gets a chance to retry the
+    // whole thing. driveEnvUsage is bare precisely so that this declared
+    // budget is the one it spends: a cap of its own would take
+    // `min(this deadline, now + cap)` and make the widening below inert.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -113,7 +125,12 @@ test.describe('environment usage on the hover cards', () => {
       await expect(dialog.getByText('CPU', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(dialog.getByText('Memory', { exact: true })).toBeVisible({ timeout: 1_000 });
       await expect(dialog).toContainText('12.0%', { timeout: 1_000 });
-      await expect(dialog).toContainText('of 2048Mi', { timeout: 1_000 });
+      // The ceiling is named as one and the reservation is stated beside it:
+      // `of 2048Mi` alone reads as an environment holding 2GiB, which is the
+      // misreading this row exists to end.
+      await expect(dialog).toContainText('of 2048Mi limit', { timeout: 1_000 });
+      await expect(dialog).toContainText('1024Mi requested', { timeout: 1_000 });
+      await expect(dialog).toContainText('0.25 CPU requested', { timeout: 1_000 });
       // Each metric carries its own decile strip: 12% -> 2 filled segments,
       // 25% -> 3, and neither is near its ceiling so neither reads amber.
       const strips = dialog.locator('[data-decile-fill]');
@@ -142,7 +159,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the preceding test's comment: driveEnvUsage's retry nests
     // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and driveEnvUsage is bare so that this is the
+    // budget it actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -262,7 +280,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the first driveEnvUsage test's comment: its retry nests
     // hoverEnvironmentRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and it is bare so that this is the budget it
+    // actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -313,7 +332,8 @@ test.describe('environment usage on the hover cards', () => {
   }) => {
     // See the first driveEnvUsage test's comment: its retry nests
     // hoverOrchestratorRow's own retry, so this needs more than the 30s
-    // default under contention.
+    // default under contention, and it is bare so that this is the budget it
+    // actually spends.
     test.setTimeout(60_000);
     await app.reboot();
 
@@ -374,5 +394,52 @@ test.describe('environment usage on the hover cards', () => {
     // (erun-ui/playwright/AGENTS.md, "assert nothing happened").
     await app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA).waitFor({ state: 'hidden' });
     expect(calls).toBe(0);
+  });
+
+  // The reservation is a separate read from the cgroup reading, and the two can
+  // disagree: the pod spec is read over kubectl and can be refused (RBAC, a
+  // pod mid-replacement) while the cgroup figures beside it arrive intact. Both
+  // sides matter -- an attempted-and-failed read must not render as a
+  // reservation of nothing, and it must not take the rest of the reading down
+  // with it.
+  test('an unread reservation states no request rather than a zero one', async ({ app, page }) => {
+    test.setTimeout(60_000);
+    await app.reboot();
+
+    const dialog = app.sidebar.envHoverCard(SEED_TENANT, SEED_ENV_ALPHA);
+    await driveEnvUsage(
+      page,
+      freshUsagePayload({
+        usage: {
+          tenant: SEED_TENANT,
+          environment: SEED_ENV_ALPHA,
+          available: true,
+          cpu: {
+            available: true,
+            utilization: '12.0%',
+            utilizationPercent: 12,
+            quota: '2.00 cores',
+          },
+          memory: {
+            available: true,
+            current: '512Mi',
+            limit: '2048Mi',
+            percentOfLimit: 25,
+            oomKills: 0,
+          },
+          requests: { runtime: {}, unavailable: 'kubectl get pods: connection refused' },
+        },
+      }),
+      async () => {
+        await page.mouse.move(0, 0);
+        await app.sidebar.hoverEnvironmentRow(SEED_TENANT, SEED_ENV_ALPHA);
+        await expect(dialog).toBeVisible({ timeout: 1_000 });
+        // The ceiling and the usage figures are unaffected by the failed read.
+        await expect(dialog).toContainText('of 2048Mi limit', { timeout: 1_000 });
+        await expect(dialog).toContainText('12.0%', { timeout: 1_000 });
+        // And nothing is claimed about a reservation nobody read.
+        await expect(dialog).not.toContainText('requested', { timeout: 1_000 });
+      },
+    );
   });
 });

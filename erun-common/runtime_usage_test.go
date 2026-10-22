@@ -578,7 +578,7 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
 	}
@@ -683,7 +683,7 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 		}
 		return RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
-	usage, err := RunRuntimeUsage(Context{}, runner, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}

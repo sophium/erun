@@ -1,6 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { OrchestratorNotice } from '@/app/orchestratorRestore';
 import type { UIEnvironmentActivity } from '@/uiEnvironmentActivityTypes';
 import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 
@@ -8,6 +7,28 @@ import type { UIEnvironmentUsageSnapshot } from '@/uiEnvironmentUsageTypes';
 // what an orchestrator uses a linked environment for. '' is undeclared, never
 // a default of either 'code', 'build', or 'runtime'.
 export type OrchestratorEnvRole = 'code' | 'build' | 'runtime' | '';
+
+// OrchestratorAlias is the erun platform alias a host-side orchestrator
+// declares as its own: which configured erun-type cloud alias it acts as.
+// Mirrors the Go eruncommon.OrchestratorConfig.Alias. '' declares none of its
+// own, which is the default and leaves the orchestrator following this
+// machine's own alias.
+export type OrchestratorAlias = string;
+
+// OrchestratorUseGateway, OrchestratorModel and OrchestratorEffort mirror the
+// Go eruncommon.OrchestratorConfig.UseGateway/Model/Effort: how the
+// orchestrator's Claude session launches. false routes nothing through the
+// erun-level gateway catalog, and '' is the default model or effort, never a
+// value of its own.
+export type OrchestratorUseGateway = boolean;
+export type OrchestratorModel = string;
+export type OrchestratorEffort = string;
+
+export interface OrchestratorLaunchSettings {
+  useGateway: OrchestratorUseGateway;
+  model: OrchestratorModel;
+  effort: OrchestratorEffort;
+}
 
 export interface OrchestratorEnvRef {
   tenant: string;
@@ -114,6 +135,25 @@ export interface OrchestratorInfo {
   // holds, so this exists to offer the same Restart affordance without the
   // "tools missing" wording that would not apply here.
   roleChanged: boolean;
+  // alias is the erun platform alias this orchestrator declares as its own,
+  // absent when it declares none. It is a *selection* among aliases this host
+  // already has, never a credential: a host-side orchestrator has no pod and
+  // inherits the host's own config and secret store through its PTY. The
+  // dialog seeds its control from here and sends it straight back on save, so
+  // a value written by `erun orchestrator set-alias` survives an unrelated
+  // edit made in the desktop.
+  alias?: OrchestratorAlias;
+  // useGateway/model/effort are the launch settings as configured, absent at
+  // their defaults. Like alias, the dialog seeds from them and sends them back
+  // on save, so a value written by `erun orchestrator set-*` survives an
+  // unrelated edit.
+  useGateway?: OrchestratorUseGateway;
+  model?: OrchestratorModel;
+  effort?: OrchestratorEffort;
+  // launchSettingsChanged is true when the configured launch settings differ
+  // from what the running session launched with. Like roleChanged it asks for
+  // a Restart without claiming tools are missing.
+  launchSettingsChanged: boolean;
 }
 
 export interface OrchestratorsState {
@@ -122,11 +162,6 @@ export interface OrchestratorsState {
   editing: OrchestratorInfo | null;
   busy: boolean;
   error: string;
-  // restoreNotices is what a restore had to say about how it resolved this
-  // launch's set of reopened orchestrators -- kept apart from `error` because
-  // most of these are not errors: a resumed tracked conversation is the
-  // mechanism working, not a failure to render through the same field as one.
-  restoreNotices: OrchestratorNotice[];
 }
 
 const initialState: OrchestratorsState = {
@@ -135,7 +170,6 @@ const initialState: OrchestratorsState = {
   editing: null,
   busy: false,
   error: '',
-  restoreNotices: [],
 };
 
 export const orchestratorsSlice = createSlice({
@@ -149,7 +183,6 @@ export const orchestratorsSlice = createSlice({
       state.dialogOpen = true;
       state.editing = action.payload;
       state.error = '';
-      state.restoreNotices = [];
     },
     closeOrchestratorDialog(state) {
       state.dialogOpen = false;
@@ -159,15 +192,11 @@ export const orchestratorsSlice = createSlice({
       state.busy = action.payload;
       if (action.payload) {
         state.error = '';
-        state.restoreNotices = [];
       }
     },
     setOrchestratorsError(state, action: PayloadAction<string>) {
       state.busy = false;
       state.error = action.payload;
-    },
-    setOrchestratorRestoreNotices(state, action: PayloadAction<OrchestratorNotice[]>) {
-      state.restoreNotices = action.payload;
     },
     // setEnvActivityForOrchestratorEnvs is the live half of the activity join:
     // a fetch (setOrchestrators) joins the poller's snapshot onto each env ref
@@ -226,7 +255,6 @@ export const {
   closeOrchestratorDialog,
   setOrchestratorsBusy,
   setOrchestratorsError,
-  setOrchestratorRestoreNotices,
   setEnvActivityForOrchestratorEnvs,
   setEnvUsageForOrchestratorEnvs,
 } = orchestratorsSlice.actions;

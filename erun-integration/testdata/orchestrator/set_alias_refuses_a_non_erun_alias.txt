@@ -1,0 +1,2 @@
+audit: erun orchestrator set-alias --alias aws-prod eng-1
+orchestrator eng-1: cloud provider alias "aws-prod" is a "aws"-type alias, not an erun platform alias -- name an erun platform alias this host has configured (`erun cloud init erun --api-url <url>` adds one), or pass "none" to declare none

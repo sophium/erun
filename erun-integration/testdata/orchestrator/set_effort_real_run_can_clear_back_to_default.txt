@@ -1,0 +1,2 @@
+Set effort default for orchestrator eng-1
+audit: erun orchestrator set-effort --effort default eng-1

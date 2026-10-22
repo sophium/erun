@@ -96,6 +96,8 @@ func (p podWatchParams) now() time.Time {
 type podWatchOutcome struct {
 	Failure *HelmReleaseContainerFailureError
 	// Pulling names the containers the last poll observed still waiting on
+	// their image, as described by describePullingContainer: the container and
+	// the image it is fetching.
 	// their image, as "<pod>/<container>". It is the one thing the watcher
 	// knows that helm does not: helm's rollout deadline is a fixed duration
 	// and expires the same way whether the image finished downloading or not,
@@ -118,7 +120,8 @@ type podStatusItem struct {
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		Containers []specContainerEntry `json:"containers"`
+		Containers     []specContainerEntry `json:"containers"`
+		InitContainers []specContainerEntry `json:"initContainers"`
 	} `json:"spec"`
 	Status struct {
 		Phase                 string                 `json:"phase"`
@@ -128,12 +131,15 @@ type podStatusItem struct {
 	} `json:"status"`
 }
 
-// specContainerEntry is `spec.containers[]`: the declared resource limits a
-// container asked for, which status.containerStatuses does not carry.
+// specContainerEntry is `spec.containers[]`: the declared resource limits and
+// requests a container asked for, which status.containerStatuses carries
+// neither of. Requests is what the scheduler admits the pod on, and no cgroup
+// file records it (see runtime_pod_requests.go).
 type specContainerEntry struct {
 	Name      string `json:"name"`
 	Resources struct {
-		Limits map[string]string `json:"limits"`
+		Limits   map[string]string `json:"limits"`
+		Requests map[string]string `json:"requests"`
 	} `json:"resources"`
 }
 
@@ -364,10 +370,10 @@ func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[s
 }
 
 // pullingContainers names every container of the release currently waiting on
-// its image, as "<pod>/<container>". A container whose pull has permanently
-// failed is excluded: that is a terminal failure the watcher aborts on, not a
-// rollout still working through its download, and reporting it as progress
-// would misdescribe the failure the abort already carries.
+// its image, as "<pod>/<container> (<image>)". A container whose pull has
+// permanently failed is excluded: that is a terminal failure the watcher aborts
+// on, not a rollout still working through its download, and reporting it as
+// progress would misdescribe the failure the abort already carries.
 func pullingContainers(pods []podStatusItem) []string {
 	var pulling []string
 	for _, pod := range pods {
@@ -383,11 +389,31 @@ func pullingContainers(pods []podStatusItem) []string {
 			if permanentImagePullFailure(container.State.Waiting.Message) {
 				continue
 			}
-			pulling = append(pulling, pod.Metadata.Name+"/"+container.Name)
+			pulling = append(pulling, describePullingContainer(pod.Metadata.Name, container))
 		}
 	}
 	sort.Strings(pulling)
 	return pulling
+}
+
+// describePullingContainer locates one container a rollout is waiting on and
+// names the image it is waiting for: "<pod>/<container> (<image>)".
+//
+// The image belongs in the report because the two reasons a rollout can end its
+// wait mid-pull need opposite responses, and the container name alone does not
+// separate them: a legitimately slow cold pull is answered by a longer
+// `deploy.timeout`, while an image tag that was never published -- a version
+// resolved off the wrong product's release line, say -- is answered by
+// deploying the right one, and no timeout makes it pull. Empty when the
+// container status carries no image, which the caller renders as the bare
+// locator rather than an empty parenthesis.
+func describePullingContainer(podName string, container containerStatusEntry) string {
+	locator := podName + "/" + container.Name
+	image := strings.TrimSpace(container.Image)
+	if image == "" {
+		return locator
+	}
+	return locator + " (" + image + ")"
 }
 
 // runKubectlGetPods dispatches to the subprocess or library path per the

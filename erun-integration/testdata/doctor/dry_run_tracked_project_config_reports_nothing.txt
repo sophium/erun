@@ -86,6 +86,7 @@ usage-dind:
   printf 'cpu_throttled_periods=%s\n' "$(awk '$1=="nr_throttled"{print $2}' $cg/cpu.stat 2>/dev/null || true)"
   printf 'disk_workspace=%s\n' "$(df -Pk <HOME> 2>/dev/null | tail -n1 || true)"
   printf 'disk_own_used_kb=%s\n' "$(timeout 30 du -sxk <HOME> 2>/dev/null | awk '{print $1}' || true)"
+kubectl --context test-context --namespace team-dev get pods -l app=team-devops -o json
 kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
 kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
 doctor-inspect:

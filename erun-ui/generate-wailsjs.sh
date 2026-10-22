@@ -37,17 +37,24 @@ STARTED_AT=$(date +%s)
 
 cd "$SCRIPT_DIR"
 
-# The bound API surface is defined by this module's own top-level and
-# headlessserver Go packages plus every erun-common type they can reference
-# (any of it can cross into a generated TS shape), and generation itself
-# depends on the pinned wails module version (go.mod/go.sum) and wails.json.
+# The bound API surface is defined by this module's own Go packages plus every
+# erun-common type they can reference (any of it can cross into a generated TS
+# shape), and generation itself depends on the pinned wails module version
+# (go.mod/go.sum) and wails.json.
+#
+# The module's own half is a whole-tree walk, not a hand-list of packages: a
+# package added under erun-ui/ defines bound API the moment it exists, and a
+# list naming only the packages someone listed the day they wrote it leaves a
+# cache hit standing over a source change. It is pruned where the tree holds
+# no bound API — installed node_modules, and the Playwright suite's own
+# project, whose fixtures live in their own Go module and are not compiled
+# into this one.
 #
 # Paths are relative to the module either way, so a key is a function of what
 # the repository contains rather than of where the checkout happens to sit.
 hash_bound_module_inputs() {
 	{
-		find . -maxdepth 1 -name '*.go' -print
-		find ./headlessserver -name '*.go' -print 2>/dev/null
+		find . \( -name node_modules -o -name playwright \) -prune -o -name '*.go' -print
 		printf '%s\n' ./wails.json ./go.mod ./go.sum
 	} | sort | xargs sha256sum | sha256sum | awk '{print $1}'
 }

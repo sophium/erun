@@ -121,6 +121,59 @@ func TestUsage(t *testing.T) {
 		golden.Equal(t, "usage/real_run_reports_cgroup_v2_usage", normalize.Apply(result.Combined))
 	})
 
+	// real_run_reports_the_scheduler_request is the scenario this reading
+	// exists for: every sizing surface reported only the cgroup *limit*, which
+	// reserves nothing, so an environment capped at 27Gi that reserves 1Gi read
+	// as if it held 27Gi. The request is not a cgroup file -- it lives in the
+	// pod spec alone -- so this stubs `kubectl get pods -o json` (the decision
+	// input dry-run cannot supply) and asserts the parsed reading and the text
+	// an operator reads it from.
+	t.Run("real_run_reports_the_scheduler_request", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubUsageKubectlExec(t, stubs, []string{
+			"cgroup_type=cgroup2fs",
+			"memory_current=413589504",
+			"memory_max=28991029248",
+			"memory_peak=1027301376",
+			"memory_oom_kill=0",
+			"cpu_max=1400000 100000",
+			"cpu_usage_before=581511501",
+			"cpu_usage_after=581611501",
+			"cpu_time_before_ns=1000000000",
+			"cpu_time_after_ns=2000000000",
+			"cpu_periods=376556",
+			"cpu_throttled_periods=425",
+			"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
+			"disk_own_used_kb=44040192",
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		jsonRun := erun.Run(t, []string{"usage", "--output", "json"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if jsonRun.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", jsonRun.ExitCode, jsonRun.Combined)
+		}
+		// 0.25 CPU declared in cores on the runtime container and 250m declared
+		// in millicores on the sidecar land on the same number, and the pod's
+		// own reservation is the two summed -- not the sum of the limits the
+		// same JSON carries beside them.
+		for _, want := range []string{
+			`"cpuMilli": 250`,
+			`"memoryBytes": 1073741824`,
+			`"cpuMilli": 500`,
+			`"memoryBytes": 2147483648`,
+		} {
+			if !strings.Contains(jsonRun.Combined, want) {
+				t.Fatalf("expected %s parsed from the pod spec, got:\n%s", want, jsonRun.Combined)
+			}
+		}
+		textRun := erun.Run(t, []string{"usage"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if textRun.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", textRun.ExitCode, textRun.Combined)
+		}
+		golden.Equal(t, "usage/real_run_reports_the_scheduler_request", normalize.Apply(textRun.Combined))
+	})
+
 	// real_run_runtime_env_omits_builds_caveat is the negative case: a
 	// runtime-type env has no erun-dind sidecar (every image build for it
 	// happens elsewhere, never in this pod), so the reading is the whole
@@ -512,18 +565,42 @@ func TestUsage(t *testing.T) {
 	})
 }
 
+// stubUsagePodRequestsList is the `kubectl get pods -o json` answer the
+// reservation reading is stubbed with: the chart's own fixed 0.25 CPU /
+// 1024Mi requests on both containers against limits in the tens of GiB, which
+// is the shape an environment erun deploys actually has (deploy passes only
+// .limits.). The pod's reservation is therefore 0.5 CPU / 2GiB while its
+// ceiling is 27Gi/20Gi -- the two figures a sizing judgement has to tell apart.
+const stubUsagePodRequestsList = `{"items": [{"metadata": {"name": "team-devops-7d9f-abcde"}, "spec": {"containers": [{"name": "erun-devops", "resources": {"limits": {"cpu": "14", "memory": "27Gi"}, "requests": {"cpu": "0.25", "memory": "1024Mi"}}}, {"name": "erun-dind", "resources": {"limits": {"cpu": "8", "memory": "20Gi"}, "requests": {"cpu": "0.25", "memory": "1024Mi"}}}], "initContainers": [{"name": "prepare-volumes", "resources": {"requests": {"cpu": "100m", "memory": "64Mi"}}}]}, "status": {"phase": "Running"}}]}`
+
+// stubUsagePodRequestsArm is the case arm every usage stub answers the pod-spec
+// read with. It matches both the argv a resolved environment produces
+// (context/namespace first) and the bare one, so a scenario whose env carries
+// no namespace still gets the reservation rather than an unexplained
+// unavailability.
+func stubUsagePodRequestsArm() []string {
+	return []string{
+		`  *" get pods "*|"get pods "*)`,
+		`    printf '%s\n' '` + stubUsagePodRequestsList + `'`,
+		`    ;;`,
+	}
+}
+
 // stubUsageKubectlExec stubs `kubectl exec` to answer the usage reading
 // script with fixed key=value lines, regardless of which container argv
 // targets — the script itself only runs for real inside a live cgroup v2
-// container, which this harness does not have. Every other kubectl
-// invocation exits 0 silently. Since RunRuntimeUsage now execs the same
-// script into both the runtime container and the erun-dind sidecar on a
-// build-capable env, this answers both identically; use
+// container, which this harness does not have. The pod-spec read the
+// reservation comes from is answered from stubUsagePodRequestsList; every
+// other kubectl invocation exits 0 silently. Since RunRuntimeUsage now execs
+// the same script into both the runtime container and the erun-dind sidecar
+// on a build-capable env, this answers both identically; use
 // stubUsageKubectlExecPerContainer when a scenario needs them to differ.
 func stubUsageKubectlExec(t testing.TB, stubsDir string, lines []string) {
 	t.Helper()
-	body := make([]string, 0, len(lines)+4)
-	body = append(body, `case "$*" in`, `  *" exec "*)`)
+	body := make([]string, 0, len(lines)+8)
+	body = append(body, `case "$*" in`)
+	body = append(body, stubUsagePodRequestsArm()...)
+	body = append(body, `  *" exec "*)`)
 	for _, line := range lines {
 		body = append(body, `    printf '%s\n' '`+line+`'`)
 	}
@@ -538,8 +615,10 @@ func stubUsageKubectlExec(t testing.TB, stubsDir string, lines []string) {
 // runtimeLines.
 func stubUsageKubectlExecPerContainer(t testing.TB, stubsDir string, runtimeLines, dindLines []string) {
 	t.Helper()
-	body := make([]string, 0, len(runtimeLines)+len(dindLines)+6)
-	body = append(body, `case "$*" in`, `  *" -c erun-dind "*)`)
+	body := make([]string, 0, len(runtimeLines)+len(dindLines)+10)
+	body = append(body, `case "$*" in`)
+	body = append(body, stubUsagePodRequestsArm()...)
+	body = append(body, `  *" -c erun-dind "*)`)
 	for _, line := range dindLines {
 		body = append(body, `    printf '%s\n' '`+line+`'`)
 	}

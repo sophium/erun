@@ -11,6 +11,14 @@ CREATE TABLE reviews (
   name TEXT NOT NULL,
   target_branch TEXT NOT NULL,
   source_branch TEXT NOT NULL,
+  -- issue_ref is the issue this review's work belongs to, in the canonical
+  -- owner/repo#number spelling (jobs.issue_ref uses the same one). NULL when
+  -- the author declared none, which is a review whose link, if any, is the
+  -- bare number its source branch names under the branch convention. The
+  -- declared value is what it is: it is never re-derived on read, so a
+  -- branch renamed after creation cannot move a review off the issue its
+  -- author recorded.
+  issue_ref TEXT,
   status TEXT NOT NULL,
   last_failed_build_id UUID,
   last_ready_build_id UUID,
@@ -23,6 +31,7 @@ CREATE TABLE reviews (
   CONSTRAINT reviews_target_branch_check CHECK (length(trim(target_branch)) > 0),
   CONSTRAINT reviews_source_branch_check CHECK (length(trim(source_branch)) > 0),
   CONSTRAINT reviews_repository_check CHECK (repository IS NULL OR length(trim(repository)) > 0),
+  CONSTRAINT reviews_issue_ref_check CHECK (issue_ref IS NULL OR length(trim(issue_ref)) > 0),
   -- MERGED is deliberately not in this list. A review reconciled against the
   -- target branch's own history after landing outside the queue has no build to
   -- name, and recording none is what keeps gatedTargetTip anchored on a real

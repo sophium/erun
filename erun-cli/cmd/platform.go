@@ -455,6 +455,8 @@ func newPlatformEnvCmd(store common.CloudReadStore, alias *string, promptRunner 
 		newPlatformEnvListCmd(store, alias, deps),
 		newPlatformEnvGetCmd(store, alias, deps),
 		newPlatformEnvRegisterCmd(store, alias, deps),
+		newPlatformEnvPushCmd(store, alias, deps),
+		newPlatformEnvPullCmd(store, alias, promptRunner, deps),
 		newPlatformEnvDeployCmd(store, alias, deps),
 		newPlatformEnvStopCmd(store, alias, deps),
 		newPlatformEnvDeleteCmd(store, alias, promptRunner, deps),
@@ -547,6 +549,7 @@ func newPlatformEnvGetCmd(store common.CloudReadStore, alias *string, deps commo
 
 func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
 	var params common.PlatformCreateEnvironmentParams
+	var localDefinition string
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register a hosted environment on the erun platform",
@@ -554,13 +557,27 @@ func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps 
 			"Writes a new environment row, immediately, and — for a runtime environment with " +
 			"--runtime-version set and a deploy executor configured on the platform — also starts " +
 			"a server-side deploy: the response's status moves registered -> provisioning -> " +
-			"running/failed, so poll `erun platform env get` to watch it land.",
+			"running/failed, so poll `erun platform env get` to watch it land.\n\n" +
+			"--adopt records a row for an environment that already exists on this machine, instead of " +
+			"asking the platform to provision one. Paired with --definition TENANT/ENVIRONMENT it also " +
+			"uploads that local environment's portable settings as definition revision 1 and records " +
+			"the hosted marker in the local config, so later `erun platform env push` / `pull` know " +
+			"which row this machine's copy corresponds to. Only the portable subset travels; the repo " +
+			"path, ports, sshd keys and cluster-local Secret names never leave the machine.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
-		Example:      "  erun platform env register --name prod --type runtime --context-id 018f... --runtime-version 1.4.2",
+		Example:      "  erun platform env register --name prod --type runtime --context-id 018f... --runtime-version 1.4.2\n  erun platform env register --name dev --type local-agent --adopt --kubernetes-context kind-dev --definition acme/dev",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			environment, err := common.RunPlatformRegisterEnvironment(ctx, store, *alias, params, deps)
+			var local *common.EnvDefinitionAdoptParams
+			if strings.TrimSpace(localDefinition) != "" {
+				tenant, environment, err := parseLocalEnvironmentRef(localDefinition)
+				if err != nil {
+					return err
+				}
+				local = &common.EnvDefinitionAdoptParams{Tenant: tenant, Environment: environment}
+			}
+			environment, definition, err := common.RunPlatformRegisterEnvironmentWithDefinition(ctx, store, *alias, params, local, deps)
 			if err != nil {
 				return err
 			}
@@ -572,6 +589,11 @@ func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps 
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
+				if local != nil {
+					if _, err := fmt.Fprintf(ctx.Stdout, "  uploaded %s/%s as definition revision %d\n", local.Tenant, local.Environment, definition.Revision); err != nil {
+						return err
+					}
+				}
 			}
 			return ctx.WriteResult(environment)
 		},
@@ -581,6 +603,123 @@ func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps 
 	cmd.Flags().StringVar(&params.ContextID, "context-id", "", "Cloud context to deploy into (see `erun platform context list`)")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context name to deploy into, if not using --context-id")
 	cmd.Flags().StringVar(&params.RuntimeVersion, "runtime-version", "", "Published erun runtime version to deploy (runtime environments only)")
+	cmd.Flags().BoolVar(&params.Adopt, "adopt", false, "Register a row for an environment that already exists on this machine, instead of asking the platform to provision one")
+	cmd.Flags().StringVar(&params.TenantID, "tenant-id", "", "Target tenant id (operations-tenant callers only; defaults to the caller's own tenant)")
+	cmd.Flags().StringVar(&localDefinition, "definition", "", "Upload this local environment's portable settings with the registration, as TENANT/ENVIRONMENT")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+// parseLocalEnvironmentRef splits the TENANT/ENVIRONMENT form the definition
+// flags take, refusing anything that does not name exactly one environment.
+func parseLocalEnvironmentRef(ref string) (string, string, error) {
+	trimmed := strings.TrimSpace(ref)
+	tenant, environment, found := strings.Cut(trimmed, "/")
+	if !found || strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" || strings.Contains(environment, "/") {
+		return "", "", fmt.Errorf("--definition takes TENANT/ENVIRONMENT, got %q", ref)
+	}
+	return strings.TrimSpace(tenant), strings.TrimSpace(environment), nil
+}
+
+// newPlatformEnvPushCmd re-uploads an already-registered local environment's
+// portable settings to the platform row its hosted marker names. It is the
+// sibling of `register --definition`: that one adopts a row and writes
+// revision 1, this one writes the next revision after local settings changed.
+func newPlatformEnvPushCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "push TENANT ENVIRONMENT",
+		Short: "Upload a registered local environment's settings to the platform",
+		Long: "Upload a registered local environment's settings to the platform.\n\n" +
+			"Only the portable subset travels: the settings that describe the environment itself. " +
+			"Anything that describes this machine or names a cluster-local object — the repo path, " +
+			"the local port range, sshd keys, image pull secrets, cloud aliases — is never uploaded, " +
+			"and neither is the root config.yaml or the secret store. Each upload advances the row's " +
+			"definition revision.\n\n" +
+			"The environment must already be marked as hosted: `erun platform env register --adopt " +
+			"--definition TENANT/ENVIRONMENT` records that marker. A marker that names a different " +
+			"tenant, platform or environment than this call resolves is refused rather than " +
+			"re-pointed.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		Example:      "  erun platform env push acme dev\n  erun platform env push acme dev --dry-run",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			result, err := common.RunPlatformPushEnvDefinition(ctx, store, *alias, common.EnvDefinitionPushParams{
+				Tenant:      args[0],
+				Environment: args[1],
+			}, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition push planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				if _, err := fmt.Fprintf(ctx.Stdout, "  uploaded %s/%s to %s (definition revision %d)\n",
+					args[0], args[1], result.Environment.EnvironmentID, result.Revision); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(result)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+// newPlatformEnvPullCmd pulls the platform's stored definition into a local
+// environment, creating it first when it does not exist on this machine.
+func newPlatformEnvPullCmd(store common.CloudReadStore, alias *string, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+	var params common.EnvDefinitionPullParams
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "pull TENANT ENVIRONMENT",
+		Short: "Pull a hosted environment's settings down onto this machine",
+		Long: "Pull a hosted environment's settings down onto this machine.\n\n" +
+			"Only the portable subset is written. Every field the platform has no opinion about — " +
+			"the repo path, the local port range, sshd, cluster-local Secret names, cloud aliases — " +
+			"is left exactly as this machine has it, including keys this erun cannot model.\n\n" +
+			"A platform-owned field that disagrees (the name, type or Kubernetes context) refuses " +
+			"rather than merging: the local config path is derived from the name, so a rename would " +
+			"write a second environment instead of updating this one. When the local copy and the " +
+			"platform have both changed since the last sync, the diff is shown and you are asked; " +
+			"-y accepts it without asking.\n\n" +
+			"Pulling into an environment that does not exist here yet needs --environment-id, since " +
+			"nothing local can say which platform row you mean.",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		Example:      "  erun platform env pull acme dev\n  erun platform env pull acme dev --environment-id 018f... --repo-path ~/src/acme",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			params.Tenant = args[0]
+			params.Environment = args[1]
+			confirm := pullConfirmation(ctx, promptRunner, args[0], args[1], yes)
+			result, err := common.RunPlatformPullEnvDefinition(ctx, store, *alias, params, confirm, deps)
+			if err != nil {
+				return err
+			}
+			if ctx.DryRun {
+				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition pull planned.")
+				return err
+			}
+			if ctx.Output != common.OutputJSON {
+				verb := "updated"
+				if result.Created {
+					verb = "created"
+				}
+				if _, err := fmt.Fprintf(ctx.Stdout, "  %s %s/%s from %s (definition revision %d)\n",
+					verb, args[0], args[1], result.Environment.EnvironmentID, result.Revision); err != nil {
+					return err
+				}
+			}
+			return ctx.WriteResult(result)
+		},
+	}
+	cmd.Flags().StringVar(&params.EnvironmentID, "environment-id", "", "Platform environment id to pull from (required when the local environment does not exist yet)")
+	cmd.Flags().StringVar(&params.LocalRepoPath, "repo-path", "", "Host repo path to record for a new environment of a type that needs one")
+	cmd.Flags().IntVar(&params.LocalPortRangeStart, "port-range-start", 0, "Local port range start for a new environment (default: the lowest free range on this machine)")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Accept a two-sided edit without prompting (for non-interactive callers)")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -651,6 +790,28 @@ func newPlatformEnvStopCmd(store common.CloudReadStore, alias *string, deps comm
 	}
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+// pullConfirmation renders the two-sided-edit diff and asks about it. It
+// returns nil when the caller passed --yes or has no prompt available, which
+// makes erun-common refuse a two-sided edit rather than resolve it silently —
+// the non-interactive transports' behaviour, reused here rather than
+// re-implemented.
+func pullConfirmation(ctx common.Context, promptRunner PromptRunner, tenant, environment string, yes bool) func(common.EnvDefinitionPlan) (bool, error) {
+	if yes || promptRunner == nil {
+		return nil
+	}
+	return func(plan common.EnvDefinitionPlan) (bool, error) {
+		if _, err := fmt.Fprintln(ctx.Stdout, "  This environment and the platform have both changed since the last sync:"); err != nil {
+			return false, err
+		}
+		for _, conflict := range plan.Conflicts {
+			if _, err := fmt.Fprintf(ctx.Stdout, "    %s: %s -> %s\n", conflict.Label, conflict.OrUnsetLocal(), conflict.OrUnsetPlatform()); err != nil {
+				return false, err
+			}
+		}
+		return confirmPrompt(promptRunner, fmt.Sprintf("Overwrite the local %s/%s settings above with the platform's", tenant, environment))
+	}
 }
 
 func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {

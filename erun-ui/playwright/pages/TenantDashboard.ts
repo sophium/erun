@@ -16,6 +16,7 @@ export type TenantDashboardTab =
   | 'Reviews'
   | 'Merge queue'
   | 'Gates'
+  | 'Pipeline'
   | 'Builds'
   | 'Audit log'
   | 'Registration'
@@ -176,6 +177,22 @@ export class TenantDashboard {
 
   gatesEmptyState(): Locator {
     return this.activePanel().getByText('No gate runs yet', { exact: true });
+  }
+
+  // Pipeline tab: the one view that spans planned work and the review
+  // pipeline, unioned on the issue each piece of work belongs to. Its rows are
+  // the union's rows -- a job with no branch and a review with no scope both
+  // appear, each saying which record it came from.
+  pipelineTable(): Locator {
+    return this.activePanel().getByRole('table');
+  }
+
+  pipelineRows(): Locator {
+    return this.pipelineTable().locator('tbody tr');
+  }
+
+  pipelineEmptyState(): Locator {
+    return this.activePanel().getByText('Nothing is in the pipeline', { exact: true });
   }
 
   reviewsTable(): Locator {

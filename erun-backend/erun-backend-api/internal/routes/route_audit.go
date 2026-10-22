@@ -52,6 +52,15 @@ var InternalAPIRoutes = map[string]bool{
 	// never something an operator clicks, the same self-report shape as the
 	// ai-session route above.
 	"POST /v1/environments/{environment_id}/events": true,
+	// Provisions an environment's own platform identity. Driven by the same
+	// client-side moment the platform credential itself is delivered in: the
+	// provisioning client (`erun init`, and the deploy retrofit) calls this
+	// with the operator's own session, then writes what it returns into the
+	// environment's Kubernetes Secret -- the channel the runtime chart already
+	// mounts. It is not an operator-clicked action, and there is nothing for a
+	// dialog to decide: the identity is a function of the environment, and
+	// calling it twice returns the same one.
+	"POST /v1/environments/{environment_id}/machine-identity": true,
 	// The read half of that log is a resume position, not a report: a client
 	// reconnecting to a stream hands back the cursor it last reached and gets
 	// the backlog it missed. Its operator-facing form is a live-updating view
@@ -71,6 +80,15 @@ var InternalAPIRoutes = map[string]bool{
 	// has no tenant-scoped job ids to filter by, not by giving an operator a
 	// capability the flat route does not already have.
 	"GET /v1/environments/{environment_id}/jobs": true,
+	// The definition upload used to be CLI-only, listed here on the grounds
+	// that nothing an operator clicks triggers it. The desktop now owns it
+	// from both ends -- the config watcher uploads an environment whose
+	// settings moved, and the hosted-marker panel's own control is the
+	// recovery action when that could not reach the platform -- so it is
+	// classified normally and bound through apiRouteWailsBindings below. The
+	// write->event->write loop that kept it off the desktop is closed by an
+	// origin filter and a definition digest (erun-ui/AGENTS.md
+	// § "Hosted definition transfer"), not by withholding the route.
 	// A one-time, operations-only repair action for a platform whose own
 	// OPERATIONS tenant bootstrapped under the legacy "operations" name before
 	// its ERUN_TENANT was read at bootstrap (see erun-backend-api/AGENTS.md's

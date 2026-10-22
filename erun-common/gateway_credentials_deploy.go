@@ -63,6 +63,43 @@ func applyGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) erro
 	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "gateway credentials secret", manifest, args)
 }
 
+// pruneGatewayCredentialsSecret removes the gateway credential from the env's
+// namespace once the runtime has been rolled out without the gateway.
+//
+// applyGatewayCredentialsSecret only ever creates it, so an environment that
+// left the gateway — the catalog switched off, or the env opted out — kept a
+// credential nothing reads any more. It runs after the rollout and only for
+// the runtime release: the pod being replaced still references the Secret
+// until the new one is up, and a component release in the same namespace does
+// not carry the env's Claude configuration to decide by.
+func pruneGatewayCredentialsSecret(ctx Context, deployInput HelmDeploySpec) error {
+	if deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
+		return nil
+	}
+	if EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
+		return nil
+	}
+	args := []string{}
+	if c := strings.TrimSpace(deployInput.KubernetesContext); c != "" {
+		args = append(args, "--context", c)
+	}
+	args = append(args, "-n", strings.TrimSpace(deployInput.Namespace), "delete", "secret", GatewaySecretName, "--ignore-not-found")
+	ctx.Trace("remove gateway credentials secret " + GatewaySecretName + " (environment does not use the gateway)")
+	ctx.TraceCommand("", "kubectl", args...)
+	if ctx.DryRun {
+		return nil
+	}
+	return deleteGatewayCredentialsSecret(args)
+}
+
+var deleteGatewayCredentialsSecret = func(args []string) error {
+	output, err := Command("kubectl", args...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("kubectl delete gateway credentials secret: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
 // gatewayCredentialForDeploy resolves the credential to deliver: the value saved
 // in erun's own operator secret store, or — when none is saved — the key this
 // machine's Claude Code already authenticates with *for this same gateway*.
@@ -79,6 +116,15 @@ func gatewayCredentialForDeploy(gateway *OpenRouterConfig) (string, error) {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
 	}
 	return resolveGatewayCredential(store, gateway.AuthTokenRefName(), gateway.Endpoint())
+}
+
+// ResolveGatewayCredential resolves the credential a host-side session sends to
+// gateway, with the same precedence a deploy uses: the value saved in erun's own
+// operator secret store, else this machine's Claude Code key when it belongs to
+// the same endpoint. The result is a secret: callers deliver it only through a
+// process environment, never argv, a trace, or a file erun writes.
+func ResolveGatewayCredential(gateway *OpenRouterConfig) (string, error) {
+	return gatewayCredentialForDeploy(gateway)
 }
 
 // resolveGatewayCredential is the decision itself, separated from the store's

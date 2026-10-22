@@ -63,6 +63,10 @@ export class TerminalPane {
     return this.page.locator('.xterm-rows');
   }
 
+  firstRow(): Locator {
+    return this.rows().locator(':scope > div').first();
+  }
+
   // The host div xterm mounts into; must carry a role/label so a screen-reader
   // user landing on it (e.g. via Tab or landmark navigation) knows what it is.
   host(): Locator {
@@ -106,8 +110,16 @@ export class TerminalPane {
 
   // Clears the screen and prints one line, so the topmost rendered row is known
   // text that a mouse drag can select deterministically.
+  //
+  // The cursor is left on the row below. The session behind the pane is a live
+  // shell, and a shell with line editing redraws its current line when the pane
+  // resizes it -- macOS's /bin/sh (bash 3.2 with readline) answers SIGWINCH
+  // with "\r\x1b[K" plus its prompt, while Linux's dash does nothing. That
+  // redraw arrives asynchronously, after whatever resize a spec provoked, so
+  // with the cursor still on row 0 it erases the printed line out from under
+  // the spec on one host and never on the other.
   async printOnlyLine(sessionId: number, text: string): Promise<void> {
-    await this.emitOutput(sessionId, `\x1b[2J\x1b[H${text}`);
+    await this.emitOutput(sessionId, `\x1b[2J\x1b[H${text}\r\n`);
   }
 
   // Moves the mouse over the start of the first rendered row without

@@ -2,6 +2,7 @@ import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
+import { handleHostedDefinitionUploaded } from './hostedDefinitionThunks';
 import type {
   AIActivityPayload,
   AppNotificationPayload,
@@ -12,6 +13,7 @@ import type {
   EnvNodePayload,
   EnvStatusPayload,
   EnvUsagePayload,
+  HostedDefinitionUploadedPayload,
   OrchestratorShellActivityPayload,
   SSHDInitCompletedPayload,
 } from './model';
@@ -57,6 +59,9 @@ export class TerminalWailsEvents {
       }),
       EventsOn('environments-changed', () => {
         void store.dispatch(reloadStateAfterEnvironmentChange());
+      }),
+      EventsOn('hosted-definition-uploaded', (payload: HostedDefinitionUploadedPayload) => {
+        void store.dispatch(handleHostedDefinitionUploaded(payload));
       }),
       EventsOn('ai-activity', (payload: AIActivityPayload) => {
         store.dispatch(handleAIActivity(payload));

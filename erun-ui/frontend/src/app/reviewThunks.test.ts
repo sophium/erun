@@ -70,6 +70,7 @@ function orchestrator(sessionId: number): OrchestratorInfo {
     whipCount: 0,
     restartRequired: false,
     roleChanged: false,
+    launchSettingsChanged: false,
   };
 }
 

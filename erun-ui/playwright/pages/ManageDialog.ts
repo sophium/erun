@@ -85,6 +85,48 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-platformaccount');
   }
 
+  // The Hosted environment panel on the General tab: which platform row this
+  // local environment corresponds to, whether this machine's own settings have
+  // moved since they were last sent, and the drift comparison behind its
+  // "Check for updates" button. It renders only for an environment that
+  // carries a hosted marker, so an unhosted env has no panel here at all.
+  // Scoped to the panel itself (a named region), not the dialog: the dialog
+  // carries other role=status elements -- the cloud-context "Not linked"
+  // empty state, for one -- so an unscoped status query is ambiguous.
+  //
+  // The panel's two status lines carry their own accessible names for the same
+  // reason: they are both live regions about this environment, and only their
+  // names tell them apart.
+  hostedPanel(): Locator {
+    return this.locator().getByRole('region', { name: 'Hosted environment' });
+  }
+
+  hostedCheckButton(): Locator {
+    return this.hostedPanel().getByRole('button', { name: /Check whether the platform's copy/ });
+  }
+
+  // This machine's own settings: the standing divergence, and the sentence an
+  // upload that just answered it reports.
+  hostedLocalChangeLine(): Locator {
+    return this.hostedPanel().getByRole('status', { name: "This machine's settings" });
+  }
+
+  hostedUploadButton(): Locator {
+    return this.hostedPanel().getByRole('button', {
+      name: "Upload this environment's settings to the platform",
+    });
+  }
+
+  hostedDriftLine(): Locator {
+    return this.hostedPanel().getByRole('status', { name: "The platform's definition" });
+  }
+
+  // Either line's failure state. Both are attempted failures, so both are
+  // alerts rather than statuses, per the shared design-language record.
+  hostedDriftError(): Locator {
+    return this.hostedPanel().getByRole('alert');
+  }
+
   // The runtime-only "Mount source code" toggle and the git remote it reveals.
   // The URL field is rendered only while the toggle is on.
   mountSourceCheckbox(): Locator {
@@ -258,6 +300,12 @@ export class ManageDialog {
     return this.page.locator('[data-slot="popover-content"]');
   }
 
+  // The panel's own search box: a control inside the panel, so a spec can put
+  // focus there without a pointer and then observe what moving it out does.
+  versionPickerSearchInput(): Locator {
+    return this.page.getByPlaceholder('Search versions...');
+  }
+
   // Shown in place of the checklist until a version is picked — the charts are
   // that version's, so there's nothing to choose before one is selected.
   deployComponentsHint(): Locator {
@@ -383,6 +431,13 @@ export class ManageDialog {
     return this.locator().getByTestId('manage-jobs-empty');
   }
 
+  // The reading placeholder, which is not the empty state: it is what the tab
+  // renders until its read has been answered, and it carries its own id so a
+  // wait for the empty state cannot settle on it.
+  jobsLoadingState(): Locator {
+    return this.locator().getByTestId('manage-jobs-loading');
+  }
+
   jobsUnreachable(): Locator {
     return this.locator().getByTestId('manage-jobs-unreachable');
   }
@@ -487,9 +542,23 @@ export class ManageDialog {
 
   // Mirrors the Go-side EnvConfig.RemoteWorktree() predicate: true for any env
   // type other than the local-agent variant.
+  //
+  // Reads an answer or fails; it never answers from a field that is not there.
+  // The Environment type control lives in the dialog's loaded body, and
+  // `ManageDialogContent` replaces that whole body with a "Loading config..."
+  // placeholder for as long as `configLoading` is set -- so the control is
+  // genuinely absent during the load. Folding "absent" into "not remote" made
+  // the negative assertions about it green without the field ever having been
+  // read, and left a caller unable to tell "this env is a local agent" from
+  // "nothing has rendered yet".
   async hasRemoteWorktree(): Promise<boolean> {
     const label = await this.envTypeFieldValue();
-    return label !== '' && !/local agent/i.test(label);
+    if (label === '') {
+      throw new Error(
+        'The Environment type field is not readable (the manage dialog body is still loading); refusing to answer whether this environment has a remote worktree.',
+      );
+    }
+    return !/local agent/i.test(label);
   }
 
   // Only renders for remote envs (autoStart is meaningless for local shells),
@@ -592,6 +661,13 @@ export class ManageDialog {
 
   claudeGatewayField(): Locator {
     return this.locator().locator('#environment-config-claude-gateway');
+  }
+
+  // The Radix listbox is portal'd to the document body, so the option is
+  // queried at the page root rather than inside the dialog.
+  async chooseClaudeGateway(label: string): Promise<void> {
+    await this.claudeGatewayField().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
   }
 
   // The gateway credential is one erun-level value, so this control no longer
