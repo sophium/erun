@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 
@@ -22,10 +24,7 @@ import (
 // PostgreSQL rather than a fake that agrees with itself.
 func identityBootstrapDatabase(t *testing.T) *sql.DB {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_IDENTITY_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_IDENTITY_DATABASE_URL to a migrated, empty-of-tenants PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

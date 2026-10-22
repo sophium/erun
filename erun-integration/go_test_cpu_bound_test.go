@@ -16,7 +16,6 @@ import (
 var goTestTargets = []string{
 	"test-erun-common",
 	"test-erun-ui",
-	"test-erun-backend-api",
 	"test-erun-mcp",
 	"test-erun-dns01-webhook",
 }

@@ -3,9 +3,10 @@ package main
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -15,10 +16,7 @@ import (
 // startup status reads the same tenants table their bootstrap writes.
 func startupIdentityDatabase(t *testing.T) *sql.DB {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_IDENTITY_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_IDENTITY_DATABASE_URL to a migrated, empty-of-tenants PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		t.Fatalf("open db: %v", err)

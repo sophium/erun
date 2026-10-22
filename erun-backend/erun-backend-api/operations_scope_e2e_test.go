@@ -7,10 +7,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -24,14 +25,11 @@ import (
 // EnvironmentRepository/TenantQuotaRepository's tenant scoping is proven
 // against the actual erun_operations RLS policy (USING (true)) rather than a
 // fake that would just agree with itself about which rows it decided to
-// return. Reuses ERUN_E2E_ENVIRONMENT_DATABASE_URL: same tables, same
-// tenant_quotas dependency the environment quota gate reads.
+// return. Runs against the package database internal/testpg provides: same
+// tables, same tenant_quotas dependency the environment quota gate reads.
 func operationsScopeDatabase(t *testing.T) (opsCtx, strangerCtx context.Context, opsTenantID, strangerTenantID string, db *sql.DB) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_ENVIRONMENT_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_ENVIRONMENT_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

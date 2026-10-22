@@ -187,22 +187,19 @@ func dockerfileFromRefIsPinned(ref string, stages map[string]struct{}) bool {
 	return tag != "" && tag != "latest"
 }
 
-// The erun-backend-api component's opt-in suites -- every case gated on an
-// ERUN_E2E_* variable -- are inert without a venue that sets one: they report
-// SKIP under a package line that still reads `ok`, which is the fail-open shape
-// this whole file exists to catch, one layer up from the build fingerprints.
-// The venue is that component's own `test` stage, and the two halves below are
-// what make it one: the stage has to run the component's E2E gate script, and
-// the builder has to depend on it through the `COPY --from=test` marker
-// dockerfileHasGateTestStage reads, so no image is produced when the suite
-// failed. Drop either half and every one of those cases returns to SKIP with
-// `make check` still green.
+// The erun-backend-api component's tests -- its database suites included, which
+// start PostgreSQL themselves -- are that image's gate, and the two halves below
+// are what make them one: the `test` stage has to run the module's own
+// `go test`, and the builder has to depend on it through the `COPY --from=test`
+// marker dockerfileHasGateTestStage reads, so no image is produced when the
+// suite failed. Drop either half and the image builds and publishes with its
+// tests never run.
 //
 // Naming the component rather than iterating every Dockerfile is deliberate.
 // A guard phrased "any Dockerfile that ships a test stage must consume it" goes
 // quiet in exactly the event it exists to catch, because deleting the stage
 // leaves nothing to iterate over.
-const optInE2EGateScript = "erun-devops/docker/erun-backend-api/e2e_gate_test.sh"
+const componentTestCommand = "go test -count=1 ./..."
 
 // testStageInstructionLines returns the instructions of the stage declared
 // `FROM ... AS test`, or nothing when the file declares no such stage. The
@@ -240,8 +237,8 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, optInE2EGateScript) {
-		t.Errorf("%s declares no `test` stage running %s — the component's ERUN_E2E_* suites are gated on a database URL, and with no venue setting one every database-backed case in them reports SKIP under a package line that still reads `ok`", venue, optInE2EGateScript)
+	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, componentTestCommand) {
+		t.Errorf("%s declares no `test` stage running %s — the component's tests, its database suites included, would never run before its image is built", venue, componentTestCommand)
 	}
 	if !dockerfileHasGateTestStage(path) {
 		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and the `COPY --from=test` that depends on it the image builds and publishes with the E2E gate absent, and erun's incremental promotion is free to serve a cached fingerprint image instead of running it, so the same green build reports either way", venue)

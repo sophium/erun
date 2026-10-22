@@ -65,9 +65,8 @@ var buildCheckCoverage = map[string]coverageEntry{
 		reason: "the Makefile's test-erun-mcp target runs `cd erun-mcp && go test ./...`",
 	},
 	"erun-backend/erun-backend-api": {
-		kind:   gatedByMakeTarget,
-		target: "test-erun-backend-api",
-		reason: "the Makefile's test-erun-backend-api target runs `cd erun-backend/erun-backend-api && go test ./...`",
+		kind:   deliberatelyExcluded,
+		reason: "its tests run in its own image's Dockerfile `test` stage, which `erun build` gives the Docker daemon its database suites start PostgreSQL through; `make check` has no daemon",
 	},
 	"erun-ui": {
 		kind:   gatedByMakeTarget,

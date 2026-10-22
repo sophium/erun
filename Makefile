@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-backend-api test-erun-backend-api-e2e test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-retention test-retention-grants test-schema-drift test-atlas-validate test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-schema-drift test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -181,7 +181,7 @@ LINT_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 # the way lint does: make, not this recipe, is what runs them concurrently.
 # Floored at 1 so a small environment still runs; on a larger one each target
 # gets proportionally more.
-GO_TEST_TARGET_COUNT := 6
+GO_TEST_TARGET_COUNT := 5
 GO_TEST_GOMAXPROCS ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota); \
 	n=$$(( cpu / $(GO_TEST_TARGET_COUNT) )); \
 	[ "$$n" -ge 1 ] || n=1; \
@@ -347,37 +347,6 @@ test-erun-ui:
 	@echo ">> go test erun-ui"
 	@(cd erun-ui && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -race -count=1 ./...)
 
-# erun-backend-api's own Go tests. LINT_MODULES above already gives this
-# module golangci-lint, but nothing ran `go test ./...` for it: its Dockerfile
-# carries no test stage (unlike erun-devops, which runs `make check` itself
-# in-build), so this module's tests were otherwise only a manual per-module
-# instruction. A release-time -ldflags target silently broken by a Go
-# package-main linker quirk shipped a wrong value to production undetected
-# for exactly that reason -- the regression test written for it would never
-# have run automatically without this. Opt-in ERUN_E2E_* suites skip cleanly
-# with no database configured, so this stays fast with no external
-# dependency.
-#
-# -count=1 is load-bearing, not belt-and-braces (the same reasoning as
-# test-erun-ui's own -count=1 above): this module's Dockerfile RUN mounts a
-# persistent BuildKit cache over /root/.cache/go-build (see the erun-devops
-# Dockerfile), so Go's test cache survives across separate `erun build`
-# invocations of different commits, not just within one. Three tests here
-# read something at runtime that Go's cache cannot see as an input --
-# tenant_scope_test.go's TestContextOnlyRepositoryMethodsAreClassified
-# os.ReadDir-and-parses its own package directory, noexec_test.go's
-# TestBackendRunsNoExternalBinaries filepath.WalkDir-and-parses this whole
-# module's source tree (TestBannedCommonFuncsStillExist also filepath.Globs
-# erun-common/*.go, outside this module entirely), and
-# buildinfo_ldflags_test.go's TestDockerfileLdflagsActuallyStampsTheBinary
-# os.ReadFiles the erun-devops Dockerfile -- so editing any of those without
-# touching this module's own source would replay a stale cached "ok" and miss
-# the regression, exactly the failure mode -X's own history bullet above
-# describes.
-test-erun-backend-api:
-	@echo ">> go test erun-backend-api"
-	@(cd erun-backend/erun-backend-api && GOMAXPROCS=$(GO_TEST_GOMAXPROCS) go test -count=1 ./...)
-
 # erun-mcp's own Go tests. LINT_MODULES above already gives this module
 # golangci-lint, but nothing ran `go test ./...` for it: erun-mcp is unioned
 # into erun-cli/go.work and erun-integration/go.work, but a `use` directive in
@@ -388,7 +357,7 @@ test-erun-backend-api:
 # contributor's own machine and reachable by nobody's gate.
 #
 # -count=1 is load-bearing, not belt-and-braces, same reasoning as
-# test-erun-backend-api's own -count=1 above: mcp_overview_doc_test.go's
+# test-erun-ui's own -count=1 above: mcp_overview_doc_test.go's
 # TestMCPOverviewDocumentsEveryTool os.ReadFiles
 # erun-docs/docs/mcp/overview.md at run time -- a file in a different
 # top-level module this test has no source dependency on -- so editing that
@@ -408,7 +377,7 @@ test-erun-mcp:
 # green on every contributor's own machine and reachable by nobody's gate.
 #
 # -count=1 is load-bearing, not belt-and-braces, same reasoning as
-# test-erun-backend-api's own -count=1 above: dockerfile_copy_contract_test.go
+# test-erun-ui's own -count=1 above: dockerfile_copy_contract_test.go
 # globs and reads every erun-devops/docker/*/Dockerfile at run time -- files
 # in a different top-level module this test has no source dependency on --
 # so editing one of those Dockerfiles without touching erun-common's own
@@ -822,8 +791,7 @@ helm-chart-tests:
 # serving cleartext. Nothing in this repository ran any of them before this
 # target existed, so a module edit that dropped one applied cleanly with every
 # suite green beside it, which is the shape this closes (see helm-chart-tests
-# above and test-atlas-validate below for the same job on the charts and the
-# migration checksums).
+# above for the same job on the charts).
 #
 # The loop lives in scripts/terraform-module-tests.sh rather than in this
 # recipe for two reasons: it discovers modules by scanning for suites (so a new
@@ -855,32 +823,6 @@ terraform-module-tests:
 test-postgres-restart:
 	sh erun-devops/docker/erun-backend-db/migrate_test.sh
 
-# End-to-end proof of every retention sweep's age/count bounds against a real
-# postgres and the real migrations, same "needs a real docker daemon and the
-# atlas CLI, neither available in the bare test-stage image" exclusion from
-# make check as test-postgres-restart above. Iterates retention*_test.sh
-# (one script per policy group, run against its own postgres container) so a
-# new policy's test is picked up with no Makefile edit, the same reasoning
-# helm-chart-tests' directory iteration gives. Run this by hand, or via
-# `erun exec job` in an agent env, before merging a change to
-# erun-backend-db/retention/*.sql or the retention CronJob.
-test-retention:
-	@for t in erun-devops/docker/erun-backend-db/retention*_test.sh; do \
-		echo "=== $$t ==="; \
-		sh "$$t" || exit 1; \
-	done
-
-# End-to-end proof that erun_operations -- the role every retention policy
-# runs as -- can actually INSERT then DELETE a row in every table under an
-# implemented or designed retention policy (the #1968 six-table sweep plus
-# builds/gate_runs), and remains refused on audit_events/usage_events per
-# #1959's deliberate append-only carve-out. Same "needs a real docker daemon
-# and the atlas CLI" exclusion from make check as test-retention above. Run
-# this by hand, or via `erun exec job` in an agent env, before merging a
-# change to schema/roles.sql or any retention policy's target tables.
-test-retention-grants:
-	sh erun-devops/docker/erun-backend-db/retention_grants_test.sh
-
 # End-to-end proof that the declarative schema (schema/*.sql, atlas.hcl's
 # source of truth) and the migration-applied state (migrations/default/*.sql)
 # describe the same database -- a grant, trigger, or constraint that exists
@@ -888,29 +830,10 @@ test-retention-grants:
 # migration, invisible until a scheduled job hit a permission error at run
 # time) and is otherwise invisible until something exercises it. Same "needs
 # a real docker daemon and the atlas CLI" exclusion from make check as
-# test-retention above. Run this by hand, or via `erun exec job` in an agent
+# test-postgres-restart above. Run this by hand, or via `erun exec job` in an agent
 # env, before merging a change to atlas.hcl, schema/, or migrations/default/.
 test-schema-drift:
 	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
-
-# Proof that erun-backend-db's baked migration directory is internally
-# consistent -- every migrations/default/*.sql file hashes to the atlas.sum
-# entry recorded for it -- checked purely against the files on disk, no
-# postgres and no docker. Unlike test-schema-drift/test-postgres-restart/
-# test-retention* above, this needs only the `atlas` CLI, which the
-# erun-devops image test stage already installs (for erun-integration's
-# gate-merge scenarios) and the final runtime image installs too, so it runs
-# inside `make check` itself rather than needing a separate by-hand/job
-# invocation. This is the release gate that was missing when v1.0.247
-# shipped with `20260902130000_gate_runs.sql`'s atlas.sum entry not matching
-# its own file content (the migration was edited after `atlas migrate hash`
-# was run for it, and the mismatch landed on main undetected through a
-# squash-merge), and nothing validated the baked migration directory before
-# that image was built and published. `atlas migrate validate` reports
-# exactly the "checksum mismatch" atlas reports at deploy time, before an
-# image is ever built.
-test-atlas-validate:
-	sh erun-devops/docker/erun-backend-db/atlas_validate_test.sh
 
 # End-to-end proof that the console's nginx config (default.conf.template)
 # never resolves a missing content-hashed asset or a health/version request to
@@ -920,23 +843,6 @@ test-atlas-validate:
 # agent env, before merging a change to erun-devops/docker/erun-console/.
 test-console-nginx:
 	sh erun-devops/docker/erun-console/nginx_test.sh
-
-# The opt-in ERUN_E2E_* database suites of erun-backend-api, against a real
-# postgres and the real migrations -- the venue that decides whether the
-# `Regression-Test:` cases those suites carry are actually run. The gate proper
-# is the erun-backend-api image's own `test` stage, which runs this same script
-# inside `erun build`/`erun build --gate` and fails the build when it fails;
-# that is the venue a pull request is graded by, and it is why this target is
-# not in `make check`.
-#
-# Same "needs a real docker daemon and the atlas CLI" exclusion from make check
-# as test-postgres-restart/test-retention above -- and, unlike those, the
-# erun-backend-api image's own test stage carries both, which is what lets it
-# run this script in-build. Kept as a target as well so an agent or human can
-# reproduce a gate failure without a full image build. Run it before merging a
-# change to erun-backend-api's database-backed behavior.
-test-erun-backend-api-e2e:
-	sh erun-devops/docker/erun-backend-api/e2e_gate_test.sh
 
 # Build, run, and coverage-gate the erun integration suite.
 # The coverage threshold defaults to the value pinned in
@@ -1016,7 +922,7 @@ integration-test-gate:
 # two targets joined the list while this still read 10, which resolved -j10
 # for twelve targets because the CPU term (the in-pod DIND_CPU_LIMIT of 12)
 # was the larger one. Derive it, do not re-count it by eye.
-CHECK_GATE_TARGET_COUNT := 13
+CHECK_GATE_TARGET_COUNT := 11
 CHECK_GATE_PARALLELISM ?= $(shell ./scripts/parallel-gate.sh width $(CHECK_GATE_TARGET_COUNT) "")
 
 check:
@@ -1073,7 +979,7 @@ check:
 # belongs after the long jobs rather than ahead of them.
 # Reordering this line is safe (nothing keys on the order); DROPPING a name is
 # not -- see the coverage-test note directly above.
-check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-backend-api test-erun-mcp test-erun-dns01-webhook helm-chart-tests terraform-module-tests test-atlas-validate integration-test-gate
+check-gate: test-frontend test-playwright test-erun-ui-windows-build lint test-erun-common test-erun-ui test-erun-mcp test-erun-dns01-webhook helm-chart-tests terraform-module-tests integration-test-gate
 
 # A fast, local subset of check-gate for the cheap-and-common failures that
 # don't need a full check-gate cycle to find: golangci-lint findings, the

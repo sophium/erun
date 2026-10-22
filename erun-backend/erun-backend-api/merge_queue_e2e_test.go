@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
@@ -34,10 +36,7 @@ type mergeQueueE2E struct {
 
 func mergeQueueE2EFromEnv(t *testing.T) mergeQueueE2E {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_MERGE_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_MERGE_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	return mergeQueueE2E{databaseURL: databaseURL}
 }
 

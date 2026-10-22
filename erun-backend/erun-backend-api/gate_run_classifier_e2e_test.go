@@ -6,10 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -36,10 +37,7 @@ type gateRunClassifierE2E struct {
 
 func gateRunClassifierE2EFromEnv(t *testing.T) gateRunClassifierE2E {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_GATE_RUN_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_GATE_RUN_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	return gateRunClassifierE2E{databaseURL: databaseURL}
 }
 

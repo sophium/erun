@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -21,10 +22,7 @@ import (
 // with itself. Needs only the database, no cluster.
 func releaseQueueDatabase(t *testing.T) (*repository.ReleaseRepository, context.Context, *sql.DB) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_RELEASE_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_RELEASE_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

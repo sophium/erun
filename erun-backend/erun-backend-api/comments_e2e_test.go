@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -37,10 +38,7 @@ type commentsFixture struct {
 
 func commentsDatabase(t *testing.T) commentsFixture {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_COMMENTS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_COMMENTS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
@@ -235,10 +233,7 @@ func commentsTenantFixture(t *testing.T, db *sql.DB, label, tenantType string) (
 // tenant's comments even though erun_operations' RLS policy makes them
 // visible too.
 func TestCommentListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
-	databaseURL := os.Getenv("ERUN_E2E_COMMENTS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_COMMENTS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

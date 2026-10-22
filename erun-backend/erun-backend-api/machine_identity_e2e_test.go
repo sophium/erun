@@ -3,9 +3,10 @@ package backendapi
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -31,10 +32,7 @@ const machineIdentityE2EOrgFieldKey = "urn:zitadel:iam:user:resourceowner:id"
 // is what lets the erun-side writes be counted.
 func machineIdentityDatabase(t *testing.T) (*sql.DB, string, string) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
