@@ -1,587 +1,51 @@
-# Declared once at the top so the test stage's own `helm` (for the
-# erun-devops/k8s chart tests, run via `make check`'s helm-chart-tests target)
-# and the final image's `helm` stay pinned to the same version instead of two
-# independent defaults drifting apart.
+# Shared by the test stage's tools and the final image's, so the charts and
+# modules are tested with the same helm/terraform the runtime image ships.
 ARG HELM_VERSION=v4.2.2
-
-# Declared once at the top for the same reason as HELM_VERSION above: the test
-# stage's own `atlas` (needed so `erun exec gate-merge`/`erun exec merge` can
-# regenerate a conflicted erun-backend-db atlas.sum for real inside
-# `make integration-test`, not just when a developer's own machine happens to
-# have atlas installed) and the final image's `atlas` stay pinned to the same
-# version.
+ARG TERRAFORM_VERSION=1.12.2
 ARG ATLAS_VERSION=v1.2.0
-
-# Declared once at the top for the same reason as HELM_VERSION above: the test
-# stage's own Playwright install-deps call (below) and the final image's
-# install-deps call must stay pinned to the same version, so the installed
-# Chromium runtime library set is identical whether the suite runs inside the
-# build or inside a deployed runtime pod.
+# Keep in sync with the @playwright/test version in erun-ui/playwright/yarn.lock
+# so the installed Chromium system libraries match the browser the suite
+# downloads at run time.
 ARG PLAYWRIGHT_VERSION=1.63.0
 
-# Declared once at the top for the same reason as HELM_VERSION above: the test
-# stage's own `terraform`, which runs the published modules' `terraform test`
-# suites via `make check`'s terraform-module-tests target, and the final
-# image's `terraform`, which tenant roots apply those same modules with, stay
-# pinned to the same version instead of two independent defaults drifting
-# apart. The two installs take their arch from different args (this stage is
-# BUILDPLATFORM, the final image is the target) -- only the version is shared,
-# and it is the whole reason the default moved up here.
-ARG TERRAFORM_VERSION=1.12.2
+# erun and emcp come from the erun-cli image built in the same run; this FROM
+# is the only use of ERUN_VERSION here, so `erun build` orders erun-cli first.
+ARG ERUN_VERSION=1.0.0
+FROM ghcr.io/sophium/erun-cli:${ERUN_VERSION} AS erun-cli
 
-# Pulled into the test stage purely to copy a pinned Node/Yarn toolchain out
-# of — see the node COPY below. No RUN of its own, so it needs no emulation
-# even though the test stage is pinned to BUILDPLATFORM (matches the `goroot`
-# stage's reasoning further down).
-# Pinned to $BUILDPLATFORM because its only consumer is the `test` stage below,
-# which is itself $BUILDPLATFORM: this toolchain runs `make test-frontend` at
-# build time and never ships in the final image. Left unpinned it resolves to
-# the TARGET platform, so a multi-arch release copied an amd64 `node` into an
-# arm64 stage and died with "running an x86 program on an arm64 OS". Only a
-# release builds both arches, so a native build never showed it.
-FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS node
-
-# Run the repository test gate inside the build, per the delivery-pipeline
-# convention (docs /pipeline, "How you set it up — and where tests run"):
-# a failing test fails the build and no image is tagged, so a green build
-# is a tested build. Pinned to BUILDPLATFORM so the suite runs natively
-# exactly once per build instead of once per target arch under emulation;
-# the builder stage depends on this stage's marker, so no artefact ships
-# untested while BuildKit still runs the two stages in parallel.
+# This image's own tests: the runtime scripts it bakes, the charts it deploys
+# and the Terraform modules tenants apply. The final stage depends on the
+# marker, so no image is produced when they fail.
 FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
-WORKDIR /src
-
-# dtach for erun-mcp's attach/PTY test suite (test-erun-mcp, below): those
-# tests exec a real `dtach -A` session and fail with "dtach: not found" on
-# the bare `golang` base this stage runs on. The final image gets dtach (and
-# the rest of this set) from erun-ubuntu now (see erun-ubuntu/Dockerfile);
-# this stage needs its own copy since it runs on a separate, unrelated base
-# (golang:1.26.0, not erun-ubuntu) that cannot inherit that base's packages.
-#
-# build-essential/pkg-config/libgtk-3-dev/libwebkit2gtk-4.1-dev/libsoup-3.0-dev
-# are the same Wails/webkit CGO deps needed here so `test-playwright` (root
-# Makefile) can `go build -tags desktop,production,webkit2_41` erun-app in
-# this stage. Verified empirically against this exact base (golang:1.26.0,
-# Debian trixie): the package set installs cleanly with no conflicts, and the
-# resulting build succeeds and runs `--headless` with zero display (see root
-# AGENTS.md's Integration Test Gate section).
-#
-# unzip is for the terraform install below: hashicorp publishes terraform only
-# as a .zip, and the final image's own copy of that install gets unzip from
-# erun-ubuntu, which this stage's golang base is not.
-#
-# Cache-mounted (rather than deduplicated into a shared base image the way
-# the final stage's copy was) because this stage's base is golang:1.26.0
-# (Debian), not erun-ubuntu (Ubuntu) -- the two images don't share a base to
-# fold the install into. The mount still turns the cost from "every build"
-# into "every build whose apt state was evicted"; removing the docker-clean
-# hook and setting Keep-Downloaded-Packages is what makes that retention
-# actually happen (see erun-ubuntu/Dockerfile's identical comment).
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists \
-    rm -f /etc/apt/apt.conf.d/docker-clean && \
-    echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache && \
-    apt-get update && apt-get install -y --no-install-recommends \
-        dtach build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev unzip
-
-# GOLANGCI_LINT_VERSION is the single checked-in source both this stage and the
-# builder stage below install from, so the repo-root pin and the image's
-# installed binary cannot drift the way a Dockerfile-only default did.
-COPY GOLANGCI_LINT_VERSION /src/GOLANGCI_LINT_VERSION
-
-# Build golangci-lint from source against this stage's Go toolchain — same
-# reason as the builder stage: a prebuilt binary's embedded analyzer libraries
-# (go/ast, go/types, go/parser) drift behind erun's go.mod Go version and abort
-# with "go language version used to build golangci-lint is lower than the
-# targeted Go version". Installed before the source COPYs (stable, expensive)
-# so source changes do not invalidate this layer. Pinned repo-wide.
-ARG GOLANGCI_LINT_VERSION
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '\n' < /src/GOLANGCI_LINT_VERSION)}" && \
-    GOBIN=/usr/local/bin go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
-
-# `helm` for `make check`'s helm-chart-tests target: the erun-devops/k8s
-# chart tests are pure `helm template` assertions -- no cluster, no docker --
-# so a pinned binary is all this bare golang image needs to run them. BUILDARCH
-# is Docker's predefined build-host-arch arg; the stage is pinned to
-# BUILDPLATFORM so it always matches the host actually running this RUN.
 ARG BUILDARCH
 ARG HELM_VERSION
-RUN curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${BUILDARCH}.tar.gz" && \
+ARG TERRAFORM_VERSION
+RUN apt-get update && apt-get install -y --no-install-recommends dtach jq nodejs unzip && \
+    curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${BUILDARCH}.tar.gz" && \
     tar -xzf /tmp/helm.tar.gz -C /tmp && \
     install -m 0755 "/tmp/linux-${BUILDARCH}/helm" /usr/local/bin/helm && \
-    rm -rf /tmp/helm.tar.gz "/tmp/linux-${BUILDARCH}"
-
-# `atlas` for the integration suite's real gate-merge/merge atlas.sum
-# regeneration scenarios (erun-integration/exec_test.go): those scenarios
-# invoke the real `atlas migrate hash`/`atlas migrate validate` via
-# ERUN_ATLAS_BIN, the same seam production code resolves it through, so the
-# suite proves the checksum this fix relies on is genuinely tamper-sensitive
-# rather than trusting a hand-rolled stub to reimplement atlas's own hashing.
-ARG ATLAS_VERSION
-RUN curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${BUILDARCH}-${ATLAS_VERSION}" && \
-    chmod 0755 /usr/local/bin/atlas
-
-# `terraform` for `make check`'s terraform-module-tests target, which runs the
-# published modules' own `terraform test` behaviour suites: mocked providers,
-# no cluster and no cloud account, so a pinned binary is all this stage needs
-# to run them (the modules' providers are fetched per run -- see
-# scripts/terraform-module-tests.sh). Same version as the final image's own
-# terraform, both read from the global ARG at the top of this file; the
-# install shape matches that one too, differing only in taking its arch from
-# BUILDARCH because this stage is pinned to BUILDPLATFORM.
-ARG TERRAFORM_VERSION
-RUN curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
+    curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${BUILDARCH}.zip" && \
     unzip -q /tmp/terraform.zip -d /tmp && \
     install -m 0755 /tmp/terraform /usr/local/bin/terraform && \
-    rm -rf /tmp/terraform.zip /tmp/terraform
-
-# Node/Yarn for `make test-frontend` (erun-kit + erun-console). Copied out of
-# the pinned `node` stage above rather than apt/curl-installed, same pattern
-# as `golangci-lint`/`goroot`: a pinned upstream image is the reproducible
-# source, not a floating NodeSource script. `yarn@1.22.22` matches the
-# `packageManager` field both workspace members pin.
-COPY --from=node /usr/local/bin/node /usr/local/bin/node
-COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
-RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
-    ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
-    npm install -g yarn@1.22.22
-
-# Chromium runtime libraries for erun-ui/playwright, mirroring the final
-# image's own install below (same reasoning, same pinned version) so
-# `test-playwright` (root Makefile) can run the suite inside this stage, not
-# only inside a deployed runtime pod. Needs `npx` from the Node/Yarn install
-# just above. Verified empirically: Playwright's own install-deps recognizes
-# and succeeds on this same Debian trixie base with no unsupported-platform
-# warning (see root AGENTS.md's Integration Test Gate section).
-ARG PLAYWRIGHT_VERSION
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt/lists \
-    npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium
-
-# TestRootDockerignoreExcludesDocsBuildArtifacts and
-# TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules assert real
-# docker-build behavior of this exact file, so it has to be present in the
-# build context it documents -- it excludes itself from nothing, but this
-# stage's COPYs are all by explicit path, so it needs its own line regardless.
-COPY .dockerignore /src/.dockerignore
-# TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
-# the repo's own checked-in project config; only this one file is needed, and
-# .dockerignore carves it out of the ".erun/*" exclusion for exactly this
-# reason.
-COPY .erun/config.yaml /src/.erun/config.yaml
-# TestGeneratedPinHistoryDoesNotDirtyACleanCheckout reads the checkout's own
-# .gitignore -- repoRoot resolves to this stage's /src -- and treats a missing
-# file as fatal rather than skipping, so it needs its own line here for the
-# same reason as the two above: this stage's COPYs are all by explicit path.
-COPY .gitignore /src/.gitignore
-COPY Makefile /src/Makefile
-COPY scripts /src/scripts
-COPY package.json yarn.lock /src/
-COPY erun-cli /src/erun-cli
-COPY erun-common /src/erun-common
-COPY erun-mcp /src/erun-mcp
-COPY erun-integration /src/erun-integration
-# erun-devops/dns01-webhook has no LINT_MODULES entry (no golangci-lint config
-# of its own) but does have a Makefile test target (test-erun-dns01-webhook),
-# so it needs the same COPY-or-`cd`-fails treatment as the modules below.
-COPY erun-devops/dns01-webhook /src/erun-devops/dns01-webhook
-# Every module in the Makefile's LINT_MODULES must land here or `make check`
-# cannot cd into it -- and so must every path those modules' tests read at run
-# time, which is not the same set. erun-ui's build-stamp guard deliberately
-# checks the package-manager formulae as well as the module's own scripts,
-# because a stamp corrected only in build.sh still leaves every installed
-# desktop unstamped; it reads them with os.ReadFile and treats a missing file as
-# fatal, so omitting them here fails the gate inside the build while a full
-# checkout passes. `erun-ui` also carries the `frontend/` Yarn-workspace
-# member whose own gate `test-frontend` now runs here too (see root
-# AGENTS.md's Makefile comment).
-COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
-# TestDockerfileLdflagsActuallyStampsTheBinary reads this Dockerfile at test
-# time to lock its -ldflags target to the real release build, so the test
-# stage needs the file even though nothing here builds the eapi image itself.
-COPY erun-devops/docker/erun-backend-api/Dockerfile /src/erun-devops/docker/erun-backend-api/Dockerfile
-# erun-common's TestCloudContextDefaultsMatchEntrypoint reads the expectations
-# table the entrypoint's shell twin is checked against, and the entrypoint's own
-# expressions out of entrypoint.sh, so both files have to be at the same
-# relative path here that they have in a full checkout -- this stage COPYs
-# erun-devops selectively (see the note above), not wholesale.
-COPY erun-devops/docker/erun-devops/cloud_context_defaults.tsv erun-devops/docker/erun-devops/entrypoint.sh /src/erun-devops/docker/erun-devops/
-# The pinned wails CLI, installed into GOPATH/bin where both callers of
-# erun-ui/generate-wailsjs.sh look for it (WAILS_BIN defaults to
-# "$(go env GOPATH)/bin/wails" in that script and in erun-ui/build.sh).
-# Without it the script falls into its fallback path, which `go install`s the
-# CLI into a temp dir and deletes it again on every single invocation --
-# measured at ~1m18s per run of test-frontend, the largest remaining step in
-# the in-build gate. Installed from erun-ui's own go.mod pin so the CLI and
-# the module it generates against cannot drift, and placed above the erun-ui
-# source COPY (same reasoning as GOLANGCI_LINT_VERSION above: stable and
-# expensive, so an ordinary source edit must not invalidate it).
-COPY erun-ui/go.mod erun-ui/go.sum /src/erun-ui/
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    WAILS_VERSION="$(cd /src/erun-ui && go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)" && \
-    go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
-
-COPY erun-ui /src/erun-ui
-COPY erun-kit /src/erun-kit
-COPY erun-console /src/erun-console
-COPY Formula /src/Formula
-COPY bucket /src/bucket
-# helm-chart-tests renders every erun-devops/k8s chart with `helm template`.
-# The charts and their *_test.sh scripts are the bulk of what is needed here --
-# not the rest of erun-devops (terraform-erun/, most of docker/) -- but see the
-# VERSION pins immediately below: the k8s tests are NOT render-only.
-COPY erun-devops/k8s /src/erun-devops/k8s
-# image-version_test.sh (under k8s/) compares each chart's image default against
-# the `docker/<image>/VERSION` pin the build publishes, so those pins must be
-# present even though nothing in this stage builds those images. It reads them
-# through a helper that treats a missing file as "the repo ships no such image"
-# and then SKIPS that image, so an omitted pin does not fail loudly -- it
-# quietly narrows the test's coverage until the `checked > 0` guard trips. All
-# seven are copied, not just erun-dind, because the templates pin postgres and
-# powerdns by literal and those are exactly the pairs the second half checks.
-# Missing pins fail the gate here while a full checkout passes: the inverse of
-# the usual in-build drift, and the reason this list must track the pins.
-COPY erun-devops/docker/erun-dind/VERSION /src/erun-devops/docker/erun-dind/VERSION
-COPY erun-devops/docker/erun-backend-postgres/VERSION /src/erun-devops/docker/erun-backend-postgres/VERSION
-COPY erun-devops/docker/erun-powerdns/VERSION /src/erun-devops/docker/erun-powerdns/VERSION
-COPY erun-devops/docker/erun-oci-registry/VERSION /src/erun-devops/docker/erun-oci-registry/VERSION
-COPY erun-devops/docker/erun-ubuntu/VERSION /src/erun-devops/docker/erun-ubuntu/VERSION
-COPY erun-devops/docker/erun-zitadel/VERSION /src/erun-devops/docker/erun-zitadel/VERSION
-COPY erun-devops/docker/erun-zitadel-login/VERSION /src/erun-devops/docker/erun-zitadel-login/VERSION
-# TestPassthroughWrapperDockerfilesReclaimProvenanceLabel (erun-common) globs
-# `erun-devops/docker/*/Dockerfile` and fails loudly when that finds fewer than
-# two wrappers, so this stage needs the Dockerfiles themselves, not just the
-# VERSION pins above (a wrapper is only recognised when its VERSION sibling is
-# present). Without them the glob matches nothing at /src, the canary trips, and
-# a full checkout still passes -- the same in-build-only failure the pins below
-# document. The whole tree is copied rather than a wildcard source: a wildcard
-# (`erun-devops/docker/*/Dockerfile`) flattens every match onto a single file at
-# the destination, which is precisely the empty discovery this copy prevents,
-# and an enumerated list would go stale the moment a wrapper is added.
-COPY erun-devops/docker /src/erun-devops/docker
-
-# terraform-module-tests (root Makefile) runs each published module's own
-# `terraform test` suite, so the tree those suites live in has to be here --
-# the COPY-or-`cd`-fails rule the LINT_MODULES note above states, applied to
-# the third erun-devops subtree this stage needs (k8s and docker are the other
-# two). The modules/ tree is copied whole rather than as a hand-listed set of
-# modules: the target discovers modules by scanning modules/*/tests, so a new
-# module's suite has to arrive with no Dockerfile edit, and an enumerated list
-# would go stale the moment one is added -- the same reasoning as the wrapper
-# Dockerfiles above. 244K of HCL, so it is not a fingerprint cost worth
-# narrowing further, and the destination is deliberately the exact directory
-# scripts/terraform-module-tests.sh cds into: erun-common's
-# TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides binds that
-# script's `${script_dir}/../...` root to a path this stage provides, and it
-# compares the two as written.
-COPY erun-devops/terraform-erun/modules /src/erun-devops/terraform-erun/modules
-# erun-backend-db-chart_test.sh cross-checks the data-retention doc's claimed
-# default and chart-value keys (retention.enabled, retention.dryRun) against
-# what this chart actually renders; only the one page is needed.
-COPY erun-docs/docs/deployment/data-retention.md /src/erun-docs/docs/deployment/data-retention.md
-# TestMCPOverviewDocumentsEveryTool cross-checks erun-common's registered MCP
-# tools against this page's "Full tool index" table; only the one file is
-# needed, not the built docs site.
-COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
-# TestBuildInfrastructureSignaturesAreDocumented (erun-integration) cross-
-# checks erun-common's known infrastructure-failure signature list against
-# this page's spec of the build failure classifier.
-COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
-# TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
-# config paths from erun-common's own resolvers and asserts this page documents
-# them; only the one file is needed.
-COPY erun-docs/docs/reference/config-locations.md /src/erun-docs/docs/reference/config-locations.md
-# TestOrchestratorSessionEnvVarsAreDocumented cross-checks the orchestrator
-# session variables erun-common actually sets against this page, which is the
-# one that enumerates them; only the one file is needed, not the built site.
-# Omitting it fails the gate with "no such file or directory" while a full
-# checkout passes, so this COPY is what makes the drift test real in the build.
-COPY erun-docs/docs/reference/env-vars.md /src/erun-docs/docs/reference/env-vars.md
-
-# TestEverySurfaceDescribingARepinNamesEveryPinSiteKind (erun-common) reads
-# every surface that enumerates what a re-pin rewrites and asserts each names
-# every kind; the pin-version skill and the `erun pin` CLI page are two of
-# those surfaces, and only those two files are needed, not the built docs
-# site. Omitting them fails the gate with "no such file or directory" while a
-# full checkout passes, so these COPYs are what make the drift test real in
-# the build -- same reasoning as every COPY above.
-COPY erun-skills/skills/erun-pin-version/SKILL.md /src/erun-skills/skills/erun-pin-version/SKILL.md
-COPY erun-docs/docs/cli/pin.md /src/erun-docs/docs/cli/pin.md
-
-# The two TestMergeSkillReadyRung* guards (erun-common) read the erun-merge
-# skill's own READY rung and assert the build policy it writes there, so that
-# one file has to sit at the same relative path here that it has in a full
-# checkout. It is the only skill file they read, and the same narrowing as the
-# pin-version COPY above applies: copying the wider erun-skills tree would put
-# every unrelated skill edit into this image's fingerprint for no test that
-# reads one. Omitting it fails the gate with "no such file or directory" while
-# a full checkout passes -- same reasoning as every COPY above.
-COPY erun-skills/skills/erun-merge/SKILL.md /src/erun-skills/skills/erun-merge/SKILL.md
-
-# `make check` runs golangci-lint across the Go modules, erun-ui's Go tests,
-# the frontend kit + console gates, the erun-devops/k8s chart tests, then the
-# integration suite + coverage gate. A failing step fails the build, the
-# builder stage's
-# COPY --from=test /test-ok fails, and no image is tagged. The Yarn cache
-# mount lets `yarn install` reuse fetched packages across builds the same way
-# the Go module/build caches do.
-#
-# DIND_MEMORY_LIMIT_MIB defaults to the erun-dind sidecar's own chart default
-# (runtime.dind.resources.limits.memory, "20480Mi" in
-# erun-devops/k8s/erun-devops/templates/service.yaml) and feeds
-# PARALLEL_GATE_MEMORY_LIMIT_MIB, which LINT_PARALLELISM/HELM_CHART_TEST_PARALLELISM
-# use to size their fan-out. This RUN step executes in a cgroup that is a
-# sibling of the sidecar's own limited cgroup, not a descendant of it, so
-# `cat /sys/fs/cgroup/memory.max` here reads "max" regardless of what the
-# sidecar is actually configured with -- scripts/parallel-gate.sh's own cgroup
-# reads are structurally blind in exactly this context. Passing the sidecar's
-# real ceiling in as a build arg is what lets the width calculation size
-# concurrent lint/test processes against the memory the operator actually
-# provisioned instead of silently dropping the memory term and sizing off CPU
-# quota alone (see that script's own comment on PARALLEL_GATE_MEMORY_LIMIT_MIB).
-# `erun build` itself passes this as a real --build-arg derived from the
-# building environment's actual EnvConfig.RuntimeDindPod (applyDindResourceBuildArgs
-# in erun-common/build_dind_resources.go), so the default below is only what a
-# bare `docker build` (no erun env resolved) falls back to -- it is
-# deliberately the same conservative constant the sidecar's own chart default
-# and NormalizeRuntimeDindPodResources use, never the host node's capacity. A
-# tenant image built from a `<tenant>-devops` Dockerfile with a different
-# sidecar memory default only needs to change this fallback to match; erun's
-# own resolved value already tracks the environment.
-ARG DIND_MEMORY_LIMIT_MIB=20480
-# DIND_CPU_LIMIT is the same blind-cgroup problem as DIND_MEMORY_LIMIT_MIB
-# above, for CPU instead of memory: this RUN step is a sibling of the
-# erun-dind sidecar's own limited cgroup, not a descendant of it, so cpu.max
-# reads "max" here regardless of the sidecar's configured limit and anything
-# deriving a width from the cgroup falls through to the node's real core
-# count. What this ARG carries is therefore the CPU budget the operator
-# actually provisioned for this environment's build work, resolved by
-# `erun build` from EnvConfig.RuntimeDindPod.
-#
-# Default mirrors runtime.dind.resources.limits.cpu /
-# eruncommon.DefaultRuntimeDindCPU ("12"), the same source
-# DIND_MEMORY_LIMIT_MIB's default mirrors for memory, and the same rule
-# produced it: a 24-CPU node divided across the two build-capable environments
-# erun assumes are building on it at once. It is a ceiling, not a reservation
-# -- see eruncommon.RuntimeDindCPULimit, which owns the rule and the reasons
-# both halves of it are what they are. The value used to be a flat 4, which
-# throttled a build to a sixth of an otherwise-idle node; that is the shape
-# this default exists to stop shipping. Like DIND_MEMORY_LIMIT_MIB above, this
-# is only the bare-`docker build` fallback -- the same constant the sidecar's
-# own chart default and NormalizeRuntimeDindPodResources use, never the node's
-# core count. A tenant image with a different sidecar CPU default only needs
-# to change this fallback to match.
-#
-# ERUN_PLAYWRIGHT_WORKERS is deliberately *not* derived from this ARG here any
-# more; the Makefile resolves it from the same CPU quota, beside every other
-# gate width (see its own comment). DIND_CPU_LIMIT is still what reaches that
-# quota through PARALLEL_GATE_CPU_LIMIT below, so a resized environment still
-# gets a wider suite -- but as one of the gate's widths rather than as an
-# inline halving of a resource limit.
-ARG DIND_CPU_LIMIT=12
-# PLAYWRIGHT_TEST_AREAS passes a smoke+area selection into this stage's
-# `make test-playwright` invocation below, per erun-ui/playwright/AGENTS.md's
-# "Area-scoped gate selection": "all" or unset runs the full suite, "smoke"
-# runs only tests/smoke, "smoke,<area>,..." runs smoke plus the named area
-# directories under tests/areas/. `erun build` never sets it, so the image
-# runs the full suite -- the fail-open direction, never zero coverage -- and
-# an unchanged erun-devops reuses its last successful build instead.
-ARG PLAYWRIGHT_TEST_AREAS=""
-# ERUN_PLAYWRIGHT_ARTIFACTS_DIR is the suite's one artifact root
-# (erun-ui/playwright/fixtures/artifacts.ts): Playwright's own output dir, the
-# HTML report, and every frame a spec captures by hand all resolve through it.
-# Set here to a container-local path instead of left at its default, which is
-# the suite's own directory inside /src.
-#
-# What this guards is not the reporters this stage writes (they land in a COPY
-# of the tree and are discarded with the build container). It is every *other*
-# in-container run of this suite that mirrors this stage, and above all
-# scripts/repro-gate-contention.sh: that one rebuilds this stage's arrangement
-# outside a build by bind-mounting an environment's own worktree over /src and
-# running as root, so artifacts left at the default path come back owned by uid
-# 0 in a tree the environment user owns -- where rm -rf cannot remove them and
-# every later run in that environment fails with a bare EACCES inside whichever
-# spec writes first, for every branch rather than only the one that poisoned
-# it. Declaring the container-local root here makes it part of what "the test
-# stage's environment" means, so a run that mirrors the stage inherits it
-# rather than having to re-derive why it needs one.
-ARG ERUN_PLAYWRIGHT_ARTIFACTS_DIR="/tmp/erun-playwright-artifacts"
-# golangci-lint's own analysis cache sat unmounted here even though the Go
-# module and build caches right above it were: HOME is /root in this stage
-# (root user, no ENV HOME override), so the tool's default cache dir is
-# /root/.cache/golangci-lint -- set explicitly rather than left to that
-# default resolving as expected. Content-hash keyed by golangci-lint itself
-# (file contents + linter/version identity), so a stale entry cannot make a
-# real finding disappear; it only skips re-analyzing files that did not
-# change. Measured on this exact cache (a single small module): cold ~32s,
-# warm ~1.2s.
-#
-# The frontend lint/format cache below is the TypeScript-side equivalent:
-# eslint/prettier's own --cache, mounted so it survives across builds. Both
-# tools are invoked (from the Makefile's test-frontend target) with
-# --cache-strategy content, not the metadata/mtime default, because every
-# COPY in this Dockerfile stamps a fresh mtime on every file on every build --
-# verified empirically that the metadata strategy is therefore a permanent
-# cache miss under Docker, while content hashing survives it (measured:
-# eslint 20s cold / 2.5s warm on one workspace after simulating a COPY's
-# mtime reset). The Makefile points both tools at $(CURDIR)/.cache/
-# frontend-lint, which resolves to /src/.cache/frontend-lint here (this
-# stage's WORKDIR), so one mount covers all three workspaces' eslint+prettier
-# caches without the Dockerfile needing to inject a path.
-#
-# test-playwright's own `playwright install chromium` (run.sh) had the same
-# unmounted-cache shape as golangci-lint: its default download target,
-# ~/.cache/ms-playwright, resolves to /root/.cache/ms-playwright here for the
-# same HOME=/root reason, and a live check of that directory on a real
-# environment found it holding ~640MB (chromium + chromium_headless_shell +
-# ffmpeg). Playwright itself decides whether to (re)download by checking the
-# already-installed revision against PLAYWRIGHT_VERSION before touching the
-# network, so a warm mount is a pure skip of an unchanged, pinned-version
-# download -- never a source of stale test behaviour, since the browser
-# binary is never what a source change here would need to invalidate.
-#
-# The yarn download cache mount itself was the same shape one layer deeper:
-# yarn classic has no ENV-driven default of its own, so it fell back to
-# $HOME/.cache/yarn (confirmed by reading yarn's own getCacheDir() and by
-# running it with HOME pointed at an owned test directory) -- /root/.cache/yarn
-# in this stage, never the /usr/local/share/.cache/yarn this RUN has always
-# mounted. YARN_CACHE_FOLDER (a real yarn classic config key yarn maps from
-# its env-var form, confirmed the same way) redirects it to the path that is
-# actually mounted, instead of moving the mount to match /root -- keeping the
-# established path every other yarn-using Dockerfile in the repo already
-# mounts. Measured with the real root workspace lockfile, cold vs. warm at
-# this exact path: yarn install 53s cold (1.5GB fetched from the registry) vs.
-# 10.7s warm. `--frozen-lockfile` resolves every package from yarn.lock
-# regardless of what the cache holds, so a cache hit only skips re-downloading
-# bytes already pinned by the lockfile; it can't change what gets installed.
-#
-# /src/.cache/frontend-tsbuildinfo is erun-ui/frontend/tsconfig.json's
-# tsBuildInfoFile, at a repo-relative path
-# (`../../.cache/frontend-tsbuildinfo/erun-ui-frontend.tsbuildinfo`) that
-# resolves here since this stage's WORKDIR is /src -- no env var needed, the
-# Dockerfile only has to mount the target the source config already names. It
-# is what makes `yarn typecheck` (tsc --noEmit with incremental) re-check only
-# what moved instead of the whole program, and tsc creates the directory
-# itself when the mount is empty.
-#
-# /src/.cache/frontend-vite is mounted for the same reason, but it is not a
-# saving on the build step. vite.config.ts's `cacheDir` is where Vite keeps
-# its dependency pre-bundling cache, and `vite build` -- what this stage's
-# `yarn build` runs -- does not produce one: measured with a real
-# pre-bundleable dependency (react/react-dom), the build succeeds and the
-# directory is never created. What does write there is vitest, which
-# test-frontend's `yarn test` runs and which caches under `<cacheDir>/vitest`,
-# plus the dev server (and the deprecated `vite optimize`). So read this mount
-# as vitest's cache and the in-pod dev loop, not as an acceleration of the
-# 180s vite build.
-#
-# ERUN_WAILSJS_CACHE_DIR is erun-ui/generate-wailsjs.sh's skip-when-unchanged
-# cache (see that script's own comment): it keys the generated bindings on the
-# Go source that defines the bound Wails API and, on a match, restores the
-# last-generated frontend/wailsjs/ instead of re-running `wails generate
-# module`. This is what makes the second of this build's two generations a
-# no-op -- test-frontend (below) generates it once, and build.sh generates it
-# again inside test-playwright's headless erun-app build -- and what survives a
-# COPY-layer cache invalidation (e.g. an unrelated frontend source edit) that
-# has nothing to do with the bound Go API. Unset outside this Dockerfile, so a
-# bare `./generate-wailsjs.sh` still regenerates unconditionally.
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/root/.cache/golangci-lint \
-    --mount=type=cache,target=/root/.cache/ms-playwright \
-    --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    --mount=type=cache,target=/src/.cache/frontend-lint \
-    --mount=type=cache,target=/src/.cache/frontend-vite \
-    --mount=type=cache,target=/src/.cache/frontend-tsbuildinfo \
-    --mount=type=cache,target=/root/.cache/erun-wailsjs \
-    GOLANGCI_LINT_CACHE=/root/.cache/golangci-lint \
-    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
-    ERUN_WAILSJS_CACHE_DIR=/root/.cache/erun-wailsjs \
-    ERUN_PLAYWRIGHT_LINT_CACHE_DIR=/src/.cache/frontend-lint \
-    ERUN_PLAYWRIGHT_ARTIFACTS_DIR="${ERUN_PLAYWRIGHT_ARTIFACTS_DIR}" \
-    PARALLEL_GATE_MEMORY_LIMIT_MIB="${DIND_MEMORY_LIMIT_MIB}" \
-    PARALLEL_GATE_CPU_LIMIT="${DIND_CPU_LIMIT}" \
-    PLAYWRIGHT_TEST_AREAS="${PLAYWRIGHT_TEST_AREAS}" \
-    make check && touch /test-ok
-
-# Pinned to BUILDPLATFORM: every RUN below cross-compiles via explicit
-# GOOS/GOARCH with CGO disabled, so the compiler itself can run natively on
-# the build host instead of under qemu emulation for the target arch. The
-# final image's own `go` binary comes from the separate `goroot` stage below,
-# not from here, so pinning this stage does not affect its arch.
-FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
+    rm -rf /tmp/helm.tar.gz "/tmp/linux-${BUILDARCH}" /tmp/terraform.zip /tmp/terraform
 
 WORKDIR /src
 
-# Copy module manifests first so dependency downloads stay cached when only source changes.
-COPY erun-cli/go.mod erun-cli/go.sum erun-cli/go.work erun-cli/go.work.sum /src/erun-cli/
-COPY erun-common/go.mod /src/erun-common/go.mod
-COPY erun-mcp/go.mod erun-mcp/go.sum /src/erun-mcp/
-COPY erun-devops/VERSION /src/erun-devops/VERSION
-COPY GOLANGCI_LINT_VERSION /src/GOLANGCI_LINT_VERSION
+COPY erun-devops/docker /src/erun-devops/docker
+COPY erun-devops/k8s /src/erun-devops/k8s
+COPY erun-devops/terraform-erun/modules /src/erun-devops/terraform-erun/modules
+# erun-backend-db-chart_test.sh checks the chart against this page's claims.
+COPY erun-docs/docs/deployment/data-retention.md /src/erun-docs/docs/deployment/data-retention.md
 
-WORKDIR /src/erun-cli
-
-ARG TARGETOS=linux
-ARG TARGETARCH
-ARG ERUN_COMMIT=""
-ARG ERUN_DATE=""
-ARG GOLANGCI_LINT_VERSION
-
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
-
-COPY erun-cli /src/erun-cli
-COPY erun-common /src/erun-common
-COPY erun-mcp /src/erun-mcp
-
-# Gate the two heavy compiles below on the test stage instead of gating only
-# the final artefact after them: test and builder are otherwise independent
-# stages (same base image, no data dependency), so BuildKit is free to -- and
-# does -- run them at once. That lets `make check`'s own golangci-lint pass
-# race a *second* full from-source golangci-lint build (this stage's own
-# install below) plus the erun/emcp compiles -- two heavy Go compilations
-# sharing the fixed-memory erun-dind sidecar at the same time on a genuine
-# full rebuild, which is what actually exhausts it, not concurrent
-# architectures (the per-platform build loop already runs strictly one at a
-# time). Moving the gate here also means a failing test no longer lets
-# builder spend a full compile before discovering it.
-COPY --from=test /test-ok /tmp/erun-test-ok
-
-ARG ERUN_VERSION
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    ERUN_VERSION="${ERUN_VERSION:-$(tr -d '\n' < /src/erun-devops/VERSION)}" && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${ERUN_DATE}" -o /out/erun . && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
-
-# Build golangci-lint from source against this stage's Go toolchain so
-# the lint binary's embedded analyzer libraries (go/ast, go/types,
-# go/parser) always match the Go version targeted by go.mod. The
-# upstream prebuilt tarball is compiled with whatever Go the
-# golangci-lint maintainers used at release time, which drifts behind
-# erun's go.mod bumps and aborts pre-commit with "go language version
-# used to build golangci-lint is lower than the targeted Go version".
-#
-# GOBIN is intentionally left unset: `go install` refuses to write to an
-# explicit GOBIN when cross-compiling, so with the stage pinned to
-# BUILDPLATFORM (TARGETARCH != host on the foreign-arch pass) the install
-# instead lands under $(go env GOPATH)/bin/, in a <GOOS>_<GOARCH>/ subdir
-# when cross-compiling or directly in bin/ when it matches the host.
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    GOLANGCI_LINT_VERSION="${GOLANGCI_LINT_VERSION:-$(tr -d '\n' < /src/GOLANGCI_LINT_VERSION)}" && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}" && \
-    mkdir -p /out && \
-    find "$(go env GOPATH)/bin" -name golangci-lint -exec cp {} /out/golangci-lint \;
+RUN for t in erun-devops/docker/erun-devops/*_test.sh erun-devops/k8s/*_test.sh; do \
+        echo ">> ${t}" && sh "${t}" || exit 1; \
+    done && \
+    for m in erun-devops/terraform-erun/modules/*/; do \
+        [ -d "${m}tests" ] || continue; \
+        echo ">> ${m}" && (cd "${m}" && terraform init -backend=false -input=false && terraform test) || exit 1; \
+    done && \
+    touch /test-ok
 
 # Target-arch Go toolchain for the final image's own `go` binary (needed for
 # in-pod contribute-mode builds, e.g. erun-ui). Deliberately not pinned to
@@ -593,11 +57,7 @@ FROM ghcr.io/sophium/erun-ubuntu:noble-20260217-1
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
-# HELM_VERSION's default lives in the global ARG at the top of this file,
-# shared with the test stage's own helm install.
 ARG HELM_VERSION
-# TERRAFORM_VERSION's default lives in the global ARG at the top of this file,
-# shared with the test stage's own terraform install.
 ARG TERRAFORM_VERSION
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
@@ -610,14 +70,7 @@ ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.222
 ARG AWS_CLI_VERSION=2.32.16
-# ATLAS_VERSION's default lives in the global ARG at the top of this file,
-# shared with the test stage's own atlas install.
 ARG ATLAS_VERSION
-# Default lives in the global ARG at the top of this file, shared with the
-# test stage's own install-deps call. Keep it in sync with the
-# @playwright/test version resolved in erun-ui/playwright/yarn.lock so the
-# installed Chromium system libraries match the browser the suite downloads
-# at run time.
 ARG PLAYWRIGHT_VERSION
 
 USER root
@@ -634,11 +87,6 @@ USER root
 # compile. Cost: roughly +400 MB on the base image. Worth it because the
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
-#
-# Cache-mounted per the same reasoning as the test stage's own apt-get
-# above; docker-clean is already disabled and Keep-Downloaded-Packages
-# already set by erun-ubuntu, so this stage inherits that config rather than
-# repeating it.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists \
     apt-get update && \
@@ -712,9 +160,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -rf /root/.npm
 
 COPY --from=goroot /usr/local/go /usr/local/go
-COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
-COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
-COPY --from=builder --chmod=0755 /out/golangci-lint /usr/local/bin/golangci-lint
+COPY --from=test /test-ok /tmp/erun-test-ok
+COPY --from=erun-cli --chmod=0755 /erun /usr/local/bin/erun
+COPY --from=erun-cli --chmod=0755 /emcp /usr/local/bin/emcp
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/skills-install.sh /usr/local/bin/erun-install-skills
 COPY --chmod=0755 erun-devops/docker/erun-devops/agents-install.sh /usr/local/bin/erun-install-agents

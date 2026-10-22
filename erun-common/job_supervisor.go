@@ -90,8 +90,7 @@ type StartEnvironmentJobParams struct {
 	// record as its own parent (see EnvironmentJob.StartedByJobID). Leave it
 	// empty for the common case: the supervisor this spawns inherits its own
 	// process's ERUN_JOB_ID for free when the start itself runs as a plain
-	// nested subprocess of another job's work (agent-gate.sh, an agent's own
-	// Bash tool). Set it explicitly only when forwarding this start through a
+	// nested subprocess of another job's work (an agent's own Bash tool). Set it explicitly only when forwarding this start through a
 	// channel that cannot carry that inheritance itself — the MCP edge, most
 	// notably, since a request reaching it crosses into that server's own
 	// long-lived process, which has no ERUN_JOB_ID of its own regardless of
@@ -903,8 +902,8 @@ func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params Environ
 		cmd := Command(command[0], command[1:]...)
 		cmd.Dir = params.Dir
 		// ERUN_JOB_ID always rides along, not only when the caller sets Env: it is
-		// what lets a nested `job start` run from inside this work (agent-gate.sh's
-		// detach-and-await, or an agent driving it directly) record this job as its
+		// what lets a nested `job start` run from inside this work (an agent
+		// detaching a gate and awaiting it) record this job as its
 		// StartedByJobID, so this job's own finish check can tell that nested job
 		// apart from an unrelated one sharing the environment. It stays the same
 		// job.ID across every reinvoked turn, which is what lets a job this turn

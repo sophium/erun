@@ -14,9 +14,8 @@ cross-repository structural gates, not production helpers.
 - `internal/harnessexec` is the module's only way to spawn a child process; see
   § "Subprocess bounds" below. Every other package, test file, and stub binary
   builds its commands through it.
-- Only subprocess coverage contributes to this gate's CLI/common percentage.
-  Owner unit suites may validate genuinely non-CLI behavior; they do not contribute
-  to that percentage.
+- Owner unit suites may validate genuinely non-CLI behavior; CLI-reachable
+  behavior is covered here, through the compiled binary.
 
 ## Scenario shape and dry-run contract
 
@@ -63,8 +62,8 @@ cross-repository structural gates, not production helpers.
 - `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is the gate that
   reds for that invariant: an AST sweep of the whole module's source, so the
   ordering is a property of the source rather than of a schedule, and the
-  ordinary `go test ./...` at `scripts/integration-test.sh`'s compare-mode line
-  fails on the pre-fix tree with no `-race` anywhere. It reports the handler's
+  ordinary `go test ./...` the erun-cli image's test stage runs fails on the
+  pre-fix tree with no `-race` anywhere. It reports the handler's
   read, the offending assignment and the line serving began. It also carries its
   own fixture test, so the shapes it must catch and the legitimate ones it must
   leave alone are pinned independently of this module's real stubs.
@@ -99,14 +98,12 @@ cross-repository structural gates, not production helpers.
   assignment graph to follow, which is why it is a shape detector rather than an
   alias analysis. It is a floor under the invariant, not a proof of it.
 - The **behavioral half is still not gated**: only `-race` reports the actual
-  read/write pair, and **no gated venue runs `-race` for this module** --
-  `scripts/integration-test.sh`'s own `go test` (the suite behind both
-  `make integration-test` and `make check-gate`) passes `-count=1`, `-parallel`
-  and `-timeout` and nothing else, and the Makefile wires `-race` for
-  `erun-common` and `erun-ui` alone. The ordering probes below are therefore
-  green in the gate on the pre-fix tree too; they are evidence that the pair is
-  real, and the sweep above is the gate. Run the probes explicitly with
-  `go test -race -count=1 -run <probe> .`.
+  read/write pair, and **no gated venue runs `-race` for this module** -- the
+  erun-cli image's test stage passes it `-count=1` and `-timeout` and nothing
+  else, and wires `-race` for `erun-common` alone. The ordering probes below are
+  therefore green in the gate on the pre-fix tree too; they are evidence that
+  the pair is real, and the sweep above is the gate. Run the probes explicitly
+  with `go test -race -count=1 -run <probe> .`.
 - A probe pinning the ordering drives its request from a separate `curl`
   process: an in-process client's own netpoll round trip orders the two accesses
   and hides the race, so an in-process probe stays silent even under `-race`.
@@ -167,20 +164,17 @@ cross-repository structural gates, not production helpers.
   the fixture's high port range and busy-port guard; neither the scenario nor its
   top-level test may be parallel. Treat a busy-port skip as missing coverage,
   not a clean verdict, and do not add host-dependent skips to new scenarios.
-- Size test concurrency with `parallel-gate.sh`'s CPU-quota-aware width, not raw
-  host core count/GOMAXPROCS. Real supervisors judged by heartbeat deadlines can
+- Real supervisors judged by heartbeat deadlines can
   falsely appear dead under starvation; observable polling alone cannot fix a
   starved producer. Keep their current parallel execution, but investigate real
   failures through resource evidence and width/heartbeat calibration, not retries
   until green or reflexive whole-suite serialization.
-- The suite's `go test -timeout` is a budget, not a constant: the gate derives
-  it from the resolved CPU quota and clamps it below `harnessexec.HangNet`, and
-  the gate script's fallback is that same clamp. Never let a deadline the gate
-  can resolve reach `HangNet` — the backstop is sized to outlast the deadline so
-  it cannot fail a healthy child, and an uncapped budget reorders the two. Go's
-  ten-minute default is what failed a correct tree on a contended node
-  (erun#2631); a slow run that is progressing is not a failed run, so restore a
-  budget by fixing the derivation rather than by loosening an assertion.
+- The suite's `go test -timeout` (the erun-cli image's test stage passes 45m)
+  must stay below `harnessexec.HangNet`: the backstop is sized to outlast the
+  deadline so it cannot fail a healthy child, and a deadline past it reorders
+  the two. Go's ten-minute default is what failed a correct tree on a contended
+  node; a slow run that is progressing is not a failed run, so restore a budget
+  by raising the deadline rather than by loosening an assertion.
 
 ## Goldens and normalization
 
@@ -204,31 +198,17 @@ cross-repository structural gates, not production helpers.
   (`internal/normalize/timingorder_golden_test.go`) reorders every real golden's
   timing block with an indentation-derived parser deliberately independent of
   `timingLinePattern` and requires canonicalization to reproduce it byte for byte.
-  It reads goldens outside its own compiled inputs, so it depends on
-  `scripts/integration-test.sh` running this module with `-count=1`.
-- Record through direct `UPDATE_GOLDEN=1 go test ...` or the script's explicit
-  `--update-golden` mode, then read every changed golden against intended behavior
-  and compare on clean state. A golden diff is a behavior diff, not generated noise.
-- The gate script refuses inherited `UPDATE_GOLDEN`; explicit regeneration skips
-  coverage enforcement and is never a passing compare-mode gate.
+  It reads goldens outside its own compiled inputs, so it depends on the test
+  stage running this module with `-count=1`.
+- Record through `UPDATE_GOLDEN=1 go test ...`, then read every changed golden
+  against intended behavior and compare on clean state. A golden diff is a
+  behavior diff, not generated noise. A run with `UPDATE_GOLDEN` set writes
+  instead of comparing, so it is never a passing gate.
 - Explain changed testdata in review. If dry-run and real-run disagree, repair
   the production trace/effect boundary before recording a new expectation.
 
-## Coverage gate
+## Coverage
 
-- Root `make integration-test` drives `scripts/integration-test.sh`: fresh raw
-  counters, instrumented CLI run, merged CLI/common statement coverage, then the
-  script-owned threshold. Keep `CoverPkgs` and enforcement aligned when scope changes.
-- The threshold is a contract, not a target: raise it in the same commit as the
-  scenarios that earned the increase, keeping a small margin below the measured
-  total, and lower it only after the PR has discussed the shortfall — restore
-  coverage with meaningful CLI scenarios first. That margin is the explicit
-  `coverage_measured` / `coverage_margin` pair the script derives its default
-  from, so state it by moving `coverage_measured` to what a real run on main
-  reaches (`coverage/profile.txt`'s total, not the script's own 20-line tail)
-  and leaving `coverage_margin` at its floor; the bounds on that floor live in
-  `coverage_threshold_test.go`. Function-touched rate is diagnostic,
-  not the enforced metric.
 - Prefer integration coverage for CLI-reachable behavior and remove equivalent
   white-box duplication. Do not invent public code paths merely to reach genuinely
   transport-specific or defensive internals; use the owning suite for those.
@@ -296,18 +276,6 @@ from that same map. Parse the separate module's route source rather than importi
 exclude intentionally unauthenticated mux routes. Test classification logic
 with synthetic inputs independently of the repository wiring.
 
-## Build-check coverage gate
-
-- Discover Go modules with tests and Yarn packages with test scripts. Every suite
-  needs a `buildCheckCoverage` entry naming a real Make target or a reasoned exclusion.
-- Verify target reachability from `check-gate`, a recipe referencing the actual
-  module, and absence of stale classifications. Workspace membership and lint
-  participation do not imply a sibling's tests run.
-- Common's unit suite is wired through `test-erun-common`; CLI behavior uses
-  this integration suite. Desktop Playwright is wired through `test-playwright`.
-  Console's real-stack suites remain explicit,
-  separate runs. Windows cross-compilation does not prove native desktop behavior.
-
 ## Doc-drift gate
 
 - Cross-check a high-risk, mechanically comparable claim against its owning code
@@ -318,7 +286,8 @@ with synthetic inputs independently of the repository wiring.
 - Keep chart-value assertions beside the chart renderer (e.g. retention controls),
   not a duplicate rendering mechanism here. Do not build a generic prose-truth checker.
 - All structural tests reading external files must run with `go test -count=1`.
-  Add each new external input to the image test stage's COPY set in the same change.
+  Add each new external input to the erun-cli image test stage's COPY set
+  (`erun-devops/docker/erun-cli/Dockerfile`) in the same change.
 
 ## CLI help drift gate
 

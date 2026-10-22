@@ -52,12 +52,7 @@ if [ -d frontend ]; then
 	mkdir -p frontend/dist
 fi
 
-# Pass the skip-when-unchanged cache dir through when the caller set one, so
-# this call (reached inside test-playwright's headless erun-app build) hits the
-# generation test-frontend already did instead of re-running `wails generate
-# module`. Inherited, never hardcoded here: unset means unconditional
-# generation, exactly as a bare ./generate-wailsjs.sh run.
-ERUN_WAILSJS_CACHE_DIR="${ERUN_WAILSJS_CACHE_DIR:-}" WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
+WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
 
 if [ -d frontend ]; then
 	# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
@@ -79,10 +74,8 @@ if [ -d frontend ]; then
 		# cannot isolate (stream parsing, row-state derivation). They were
 		# runnable but ungated, which is the same as absent.
 		"$YARN_BIN" test
-		# Go-side lint gate, kept here too (redundant with `make check`'s own
-		# LINT_MODULES entry for erun-ui) as a fast local signal for anyone
-		# iterating on the desktop build directly without running the full
-		# repo gate.
+		# Go-side lint gate, through the golangci-lint version this module's
+		# go.mod pins as a tool.
 		#
 		# The cache is scoped to this checkout because golangci-lint keys it by
 		# module, not by working tree: a second checkout of erun-ui would
@@ -91,7 +84,7 @@ if [ -d frontend ]; then
 		# finding still renders the path of the run that cached it, so
 		# .golangci.yml matches excluded paths by segment instead of anchoring
 		# them to a working tree.
-		(cd "$SCRIPT_DIR" && GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-$SCRIPT_DIR/.golangci-cache}" golangci-lint run ./...)
+		(cd "$SCRIPT_DIR" && GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-$SCRIPT_DIR/.golangci-cache}" go tool golangci-lint run ./...)
 	fi
 	"$YARN_BIN" build
 	cd "$SCRIPT_DIR"

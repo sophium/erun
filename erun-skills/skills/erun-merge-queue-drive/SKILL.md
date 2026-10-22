@@ -133,6 +133,10 @@ stop this drive; do not clear another live lease or schedule probes beside it.
   conflict confined to `atlas.sum` is not in `skipped` at all: the command
   regenerates it from the migrations already on disk and the source lands, so a
   batch member that landed despite a conflicting checksum needs no follow-up.
+- A skip whose reason starts `regression-test policy:` is a defect fix whose
+  reproduction declaration does not hold (root `AGENTS.md` § "A Defect Fix
+  Names Its Reproduction"). Report the reason to the review's author, who
+  amends the trailers and pushes; never land it any other way.
 - An empty/all-skipped result is **not** a green build. Stop before building or
   pushing. Report real conflicts against the observed source commit; classify
   fetch/access/infrastructure failures separately instead of failing every review
@@ -157,7 +161,6 @@ than reporting a merged fix as failed:
 erun version --no-registry   # the `erun <version>` line is the pod's binary
 ```
 
-`scripts/agent-gate.sh` names the same version for `make check`, and
 `erun-merge`'s build rung reads it too.
 
 ## 2. Build the merge commit

@@ -36,8 +36,7 @@ import (
 // the next read rather than pinning it until somebody notices.
 //
 // The one exemption is lineage. A gate job that starts nested work of its own
-// (agent-gate.sh detaching a gate from inside an agent job, an agent's own Bash
-// tool) must not be refused by its own ancestor's claim — that is the holder
+// (an agent detaching a gate from its own Bash tool inside an agent job) must not be refused by its own ancestor's claim — that is the holder
 // starting its own work, not contention — so a start whose parent chain reaches
 // the holder proceeds, and deliberately takes no second claim to fight the
 // first with.

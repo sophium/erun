@@ -24,7 +24,6 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		"Repository execution utilities",
 		newExecDiffCmd(findProjectRoot, runGit),
 		newExecRawCmd(findProjectRoot, runRaw),
-		newExecResolvePlaywrightAreasCmd(findProjectRoot),
 		newExecWriteCmd(findProjectRoot),
 		newExecCommitCmd(findProjectRoot),
 		newExecPushCmd(findProjectRoot, store, deps),
@@ -63,40 +62,6 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text (alias for --output json)")
 	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
 	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
-	return cmd
-}
-
-// newExecResolvePlaywrightAreasCmd builds `erun exec resolve-playwright-areas`,
-// which resolves the change-scoped smoke+area Playwright selection
-// (erun-common.ResolvePlaywrightTestAreaSelection) for the repository's own
-// Makefile, so a developer or agent iterating locally does not always pay for
-// the full suite.
-func newExecResolvePlaywrightAreasCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "resolve-playwright-areas",
-		Short: "Resolve the smoke+area Playwright test selection for the current diff",
-		Long: "Resolve the smoke+area Playwright test selection a local `make check` runs, from the current " +
-			"git diff against the merge base (see erun-ui/playwright/AGENTS.md). Always exits 0 and prints " +
-			"\"all\" when the selection cannot be resolved (no git repository, or no merge base against any " +
-			"candidate upstream branch) -- the fail-safe direction, matching the Dockerfile's own unset-" +
-			"PLAYWRIGHT_TEST_AREAS default of running everything.",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if findProjectRoot == nil {
-				findProjectRoot = common.FindProjectRoot
-			}
-			ctx := commandContext(cmd)
-			selection := "all"
-			if _, projectRoot, err := findProjectRoot(); err == nil {
-				if resolved, ok := common.ResolvePlaywrightTestAreaSelection(ctx, projectRoot); ok {
-					selection = resolved
-				}
-			}
-			_, err := fmt.Fprintln(ctx.Stdout, selection)
-			return err
-		},
-	}
 	return cmd
 }
 
@@ -398,8 +363,8 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
 			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
 			"--source needs no separator at all).\n\n" +
-			"Each source branch's own load-bearing trailers — `Closes #N`, and the `Reproduces:` / " +
-			"`Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
+			"Each source branch's own load-bearing trailers — `Closes #N`, `Defect-Fix:`, and the " +
+			"`Reproduces:` / `Regression-Test:` lines a defect fix declares — are appended beneath the message it is given, so " +
 			"what the branch declared about itself survives a squash that replaces the rest of its history. " +
 			"The message stays the commit's subject and the whole of its own body, and a trailer the message " +
 			"already carries is not repeated. They are read from every line of the branch's own commit bodies " +
@@ -416,8 +381,9 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"and the source lands like a clean squash rather than being skipped. A source that contributes " +
 			"nothing is skipped the same way: when its squash stages no changes because its content is already " +
 			"on the target, it is recorded as skipped with that reason rather than failing the batch, so an " +
-			"already-landed branch is a no-op instead of a dead merge. A batch where every source is skipped " +
-			"lands nothing and exits non-zero.\n\n" +
+			"already-landed branch is a no-op instead of a dead merge. A defect fix whose declaration does not " +
+			"resolve against what its squash staged is skipped the same way, with a `regression-test policy:` " +
+			"reason. A batch where every source is skipped lands nothing and exits non-zero.\n\n" +
 			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
 			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
 			"corrupt each other's accounting — a drive has already reported pushing a commit that belonged to " +

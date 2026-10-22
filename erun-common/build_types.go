@@ -119,11 +119,10 @@ type DockerBuildSpec struct {
 	// DindCPULimit / DindMemoryLimitMiB carry this build's actual erun-dind
 	// sidecar resource limits (EnvConfig.RuntimeDindPod, normalized) into a
 	// Dockerfile that declares matching DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
-	// ARGs, so a component's in-build test stage (the erun-devops runtime
-	// image's own `make check`) can size its concurrent fan-out against what this build's dind
-	// sidecar is actually entitled to, instead of the Dockerfile's own
-	// hardcoded ARG default or the host node's raw, cgroup-invisible capacity
-	// (erun-devops/AGENTS.md's dind cgroup blind-spot notes). Left empty for a
+	// ARGs, so a component's in-build test stage can size its concurrent
+	// fan-out against what this build's dind sidecar is actually entitled to,
+	// instead of the Dockerfile's own hardcoded ARG default or the host node's
+	// raw, cgroup-invisible capacity. Left empty for a
 	// Dockerfile that declares neither ARG, so an unrelated build's docker
 	// command is unchanged. See applyDindResourceBuildArgs.
 	DindCPULimit       string

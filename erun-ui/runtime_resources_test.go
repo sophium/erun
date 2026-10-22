@@ -358,7 +358,7 @@ func TestRuntimeResourceStatusReportsSchedulableCapacityFromRequests(t *testing.
 
 // assertCapacityRemedyIsNotASmallerLimit pins the one thing the report's
 // operator was told to do and must not be told again. The runtime container's
-// limit is sized for the cold `make check-gate` an agent runs inside it, so
+// limit is sized for the cold full build an agent runs inside it, so
 // shrinking it re-creates the out-of-memory kills that destroy the run and its
 // unpushed work; the levers that actually move a fully-committed node are a
 // namespace quota and fewer environments on it.

@@ -44,7 +44,7 @@ package integration
 //
 // The scope is the module's own source, test and helper alike, and it reads
 // .go files rather than only what is compiled into the test binary, so it must
-// run uncached: scripts/integration-test.sh already runs this module with
+// run uncached: the erun-cli image's test stage already runs this module with
 // -count=1.
 
 import (

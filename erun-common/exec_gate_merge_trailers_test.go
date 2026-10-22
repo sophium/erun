@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -175,8 +178,17 @@ func TestGateMergeOneSourceCarriesAHardWrappedReproducesTrailer(t *testing.T) {
 		"Regression-Test: erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts::a hover card dropped while the boot lands is re-hovered, not read as absent\n"
 	var committed string
 	deps := gateMergeTrailerSeam(branchBody, &committed)
+	const spec = "erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts"
+	deps.StagedPaths = func(Context, string) ([]string, error) { return []string{spec}, nil }
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, spec)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, spec), []byte("test('a hover card dropped while the boot lands is re-hovered, not read as absent', ...)"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "bug/2459", Message: "Re-hover the orchestrator card a boot landing drops mid-read"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+	if _, _, err := gateMergeOneSource(testTraceContext(false), root, GateMergeSource{Branch: "bug/2459", Message: "Re-hover the orchestrator card a boot landing drops mid-read"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
 		t.Fatalf("gate-merge one source: %v", err)
 	}
 
@@ -267,22 +279,30 @@ func TestGateMergeTrailersFromBodyStopsAClosingReferenceAtItsOwnLine(t *testing.
 // the closing spelling stops exercising once it stands complete on its own line.
 // A "Token:" line this squash does not carry still ends the entry above it, so
 // the line stays out of the value rather than being folded into it. Treating
-// one as a continuation instead is what would carry a real "Defect-Fix: yes" or
-// "Refs #N" onto the target as part of the declaration above it.
+// one as a continuation instead is what would carry a "Signed-off-by:" or
+// "Refs #N" onto the target as part of the declaration above it. The
+// "Defect-Fix:" beneath them is carried on its own line and folds nothing.
 func TestGateMergeTrailersFromBodyStopsAContinuableValueAtAnUnrecognisedTrailer(t *testing.T) {
 	body := "Fix the widget\n\n" +
 		"Reproduces: the parts arrived in append order rather than the order they\n" +
 		"were declared.\n" +
+		"Signed-off-by: A Author <a@example.com>\n" +
+		"Refs #2642\n" +
 		"Defect-Fix: yes\n" +
-		"Refs #2642\n"
+		"the line under a single-line trailer is not its value\n"
 
 	got := gateMergeTrailersFromBody(body)
-	want := []string{"Reproduces: the parts arrived in append order rather than the order they\nwere declared."}
+	want := []string{
+		"Reproduces: the parts arrived in append order rather than the order they\nwere declared.",
+		"Defect-Fix: yes",
+	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d carried trailers, got %d: %q", len(want), len(got), got)
 	}
-	if got[0] != want[0] {
-		t.Fatalf("expected the value to end at the unrecognised trailer, got %q", got[0])
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("trailer %d: expected %q, got %q", i, want[i], got[i])
+		}
 	}
 }
 
@@ -389,5 +409,38 @@ func TestGateMergeOneSourceIgnoresTrailersThatAreNotLoadBearing(t *testing.T) {
 	}
 	if strings.Contains(committed, "Note: this is a workaround") {
 		t.Fatalf("expected an unrecognised trailing line to stay behind, got:\n%s", committed)
+	}
+}
+
+// TestGateMergeOneSourceSkipsADefectFixThatNamesNoReproduction is the seam
+// between the squash and the regression-test policy: a bug/ branch that
+// declares no reproduction is backed out with a hard reset, reported as a
+// skip naming the policy, and never committed, so the rest of the batch still
+// gates against a clean tree.
+func TestGateMergeOneSourceSkipsADefectFixThatNamesNoReproduction(t *testing.T) {
+	var gitCalls []string
+	var committed string
+	deps := gateMergeTrailerSeam("Fix the widget\n\nCloses #2601\n", &committed)
+	runGit := deps.RunGit
+	deps.RunGit = func(root string, stdout, stderr io.Writer, args ...string) error {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		return runGit(root, stdout, stderr, args...)
+	}
+
+	landed, skipped, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "bug/2601-widget", Message: "Fix the widget"}, "origin", "refs/erun/gate-merge/main", deps)
+	if err != nil {
+		t.Fatalf("a policy refusal must be a skip, not a batch failure: %v", err)
+	}
+	if landed != nil || skipped == nil {
+		t.Fatalf("expected the source to be skipped, got landed=%+v skipped=%+v", landed, skipped)
+	}
+	if !strings.HasPrefix(skipped.Reason, "regression-test policy: ") || !strings.Contains(skipped.Reason, `"Regression-Test:"`) {
+		t.Fatalf("expected the skip to name the missing declaration, got %q", skipped.Reason)
+	}
+	if !slices.Contains(gitCalls, "reset --hard HEAD") {
+		t.Fatalf("expected the squash to be backed out, got git calls %q", gitCalls)
+	}
+	if committed != "" {
+		t.Fatalf("a refused source must not be committed, got %q", committed)
 	}
 }

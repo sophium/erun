@@ -24,9 +24,9 @@ package integration
 // two-word call form would only invite entries to be added to it.
 //
 // This test reads .go files under the module rather than only what is
-// compiled into it, so it must run uncached: scripts/integration-test.sh
-// already runs this module with -count=1. The whole module is COPYed into the
-// image test stage, so the scanned input is present wherever the gate runs.
+// compiled into it, so it must run uncached: the erun-cli image's test stage
+// already runs this module with -count=1. The whole module is COPYed into that
+// stage, so the scanned input is present wherever the gate runs.
 
 import (
 	"fmt"

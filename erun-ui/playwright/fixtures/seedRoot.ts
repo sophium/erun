@@ -259,7 +259,7 @@ function erunConfigDir(): string {
 
 // e2eK3dEnabled gates every real-cluster branch below; when false the suite is
 // the default inert/offline harness. Enable it only on a Docker + k3d + binfmt
-// host — never in the default `run.sh` or `make integration-test`.
+// host — never in the default `run.sh` or the component's test stage.
 export function e2eK3dEnabled(): boolean {
   return process.env.ERUN_E2E_K3D === '1';
 }

@@ -71,8 +71,8 @@ Examples:
   # Kick off a release that is meant to keep running past this run's own turn.
   erun exec job start --tenant team --environment dev --name release --handoff -- erun release
 
-  # Run a full check that must not share the environment with anything else.
-  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate
+  # Run a full build that must not share the environment with anything else.
+  erun exec job start --tenant team --environment dev --name build --exclusive -- erun build
 
 Flags:
       --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt

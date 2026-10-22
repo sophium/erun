@@ -145,9 +145,9 @@ emitted; type is the single source of truth.
 {{- $runtimeLimits := default dict $runtimeResources.limits -}}
 {{- $runtimeRequests := default dict $runtimeResources.requests -}}
 {{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}
-{{- /* Sized for the `make check-gate` an agent runs inside this container, not
-       for a serving app: it is the same ten-target gate the dind sidecar runs
-       during an image build, which is why that sidecar's own default is 20Gi.
+{{- /* Sized for the builds and tests an agent runs inside this container, not
+       for a serving app: the same component builds the dind sidecar runs,
+       which is why that sidecar's own default is 20Gi.
        Defaults mirror eruncommon.DefaultRuntimePodCPU/Memory in
        erun-common/runtime_resources.go — keep the two in sync; that constant's
        own comment records the measurement this number comes from. */ -}}

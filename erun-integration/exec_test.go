@@ -581,60 +581,6 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/dry_run_with_time_flag_prints_elapsed_on_error", normalize.Apply(result.Combined))
 	})
 
-	t.Run("resolve_playwright_areas_help", func(t *testing.T) {
-		setup := env.New(t)
-		result := erun.Run(t, []string{"exec", "resolve-playwright-areas", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "exec/resolve_playwright_areas_help", normalize.Apply(result.Combined))
-	})
-
-	t.Run("resolve_playwright_areas_no_change_is_smoke", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedGitRepo(t, setup.Cwd)
-		result := erun.Run(t, []string{"exec", "resolve-playwright-areas"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "exec/resolve_playwright_areas_no_change_is_smoke", normalize.Apply(result.Combined))
-	})
-
-	t.Run("resolve_playwright_areas_outside_git_project_fails_safe_to_all", func(t *testing.T) {
-		// No SeedGitRepo -- findProjectRoot fails, so the command must still
-		// exit 0 and print "all" rather than error: a gap in the git history
-		// must cost time, never coverage (root AGENTS.md's Playwright
-		// area-scoped gate selection rule).
-		setup := env.New(t)
-		result := erun.Run(t, []string{"exec", "resolve-playwright-areas"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "exec/resolve_playwright_areas_outside_git_project_fails_safe_to_all", normalize.Apply(result.Combined))
-	})
-
-	t.Run("resolve_playwright_areas_erun_ui_source_change_runs_all", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedGitRepo(t, setup.Cwd)
-		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-ui", "orchestrator.go"), "package main\n")
-		result := erun.Run(t, []string{"exec", "resolve-playwright-areas"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "exec/resolve_playwright_areas_erun_ui_source_change_runs_all", normalize.Apply(result.Combined))
-	})
-
-	t.Run("resolve_playwright_areas_spec_change_narrows_to_its_area", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedGitRepo(t, setup.Cwd)
-		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-ui", "playwright", "tests", "areas", "sidebar", "sidebar-new.spec.ts"), "// new sidebar spec\n")
-		result := erun.Run(t, []string{"exec", "resolve-playwright-areas"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "exec/resolve_playwright_areas_spec_change_narrows_to_its_area", normalize.Apply(result.Combined))
-	})
-
 	t.Run("write_help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"exec", "write", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -2716,13 +2662,11 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 // has no happens-before edge to that handler's read.
 //
 // The ordering that fixes is not observable without -race, and no gated venue
-// runs -race for this module: scripts/integration-test.sh's own `go test` --
-// the integration suite both `make integration-test` and `make check-gate`
-// run -- passes -count=1, -parallel and -timeout and nothing else, and -race
-// is wired in the Makefile for erun-common and erun-ui alone. So this test is
-// green in the gate on the pre-fix tree as well as the post-fix one, and a
-// green gate is evidence for its behavioral half only. Run the ordering half
-// explicitly with:
+// runs -race for this module: the erun-cli image's test stage runs it with
+// -count=1 and -timeout and nothing else, and -race is wired for erun-common
+// alone. So this test is green in the gate on the pre-fix tree as well as the
+// post-fix one, and a green gate is evidence for its behavioral half only. Run
+// the ordering half explicitly with:
 //
 //	cd erun-integration && go test -race -count=1 -run \
 //	  '^TestGithubRulesetStubServerAssignsItsURLBeforeItServes$' .

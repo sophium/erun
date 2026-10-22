@@ -1,34 +1,33 @@
 ARG ERUN_VERSION=1.0.0
 
-# Stage 1: build the Docusaurus static site.
 # Pinned to the build host's platform: the site it emits is static assets with
-# no architecture, so building it once natively beats building it again under
-# emulation for the foreign arch every multi-arch build.
-FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS builder
+# no architecture, so it is built (and checked) once natively.
+FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS deps
 
-WORKDIR /src
+WORKDIR /src/erun-docs
 
 # Install deps first so source edits don't bust the cache.
 COPY erun-docs/package.json erun-docs/yarn.lock /src/erun-docs/
 
-WORKDIR /src/erun-docs
-
-# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
-# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
-# never the /usr/local/share/.cache/yarn mounted below -- verified against
-# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
-# reproduced live (a real yarn install with the mount target unset resolved
-# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
-# every other yarn-using Dockerfile in the repo already uses.
+# YARN_CACHE_FOLDER: yarn classic otherwise caches under $HOME/.cache/yarn,
+# not the mounted /usr/local/share/.cache/yarn.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
-# Copy the rest and build.
 COPY erun-docs /src/erun-docs
 
-RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    yarn build
+# The site's own check is this image's gate: the builder depends on this stage
+# through `COPY --from=test`, so no image is produced when it fails.
+FROM deps AS test
+
+RUN yarn typecheck && touch /test-ok
+
+FROM deps AS builder
+
+COPY --from=test /test-ok /tmp/erun-test-ok
+
+RUN yarn build
 
 # Stage 2: tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
 FROM node:20.18.1-alpine

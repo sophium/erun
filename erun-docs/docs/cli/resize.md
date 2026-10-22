@@ -25,7 +25,7 @@ erun resize --tenant my-tenant --environment dev --apply-recommendation
 erun resize --tenant my-tenant --environment dev --apply-recommendation --dry-run
 ```
 
-Raise `--dind-memory` when a multi-arch `erun release`/`erun build --release` OOMs: a full rebuild runs `make check` for both target architectures inside the sidecar, concurrently, and every image build runs there — not in the runtime container.
+Raise `--dind-memory` when a multi-arch `erun release`/`erun build --release` OOMs: a full rebuild runs every component's test stage for both target architectures inside the sidecar, concurrently, and every image build runs there — not in the runtime container.
 
 `--apply-recommendation` needs usage history retained inside the environment's own runtime pod, so run it there (over SSH, or through the environment's own MCP `resize` tool) — a host-side laptop invocation has nothing to read and refuses rather than guessing. It only ever sizes the runtime pod, never the sidecar.
 

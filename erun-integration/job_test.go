@@ -685,7 +685,7 @@ func TestJob(t *testing.T) {
 
 	t.Run("a_job_started_by_the_holder_runs_under_its_claim_instead_of_being_refused", func(t *testing.T) {
 		// Lineage is the one exemption, and it has to exist: a gate job that
-		// detaches its own nested work (agent-gate.sh from inside an agent job)
+		// detaches its own nested work (a gate started from inside an agent job)
 		// would otherwise be refused by its own ancestor's claim, which would
 		// make the mechanism unusable exactly where it is needed. The nested job
 		// takes no second claim -- releasing one on its way out would drop the
@@ -1492,8 +1492,8 @@ func TestJob(t *testing.T) {
 
 	t.Run("a_job_that_ends_while_a_job_it_started_is_still_running_reads_as_gate_incomplete", func(t *testing.T) {
 		// The reproduction this closes: an agent job runs a gate through its own
-		// `job start` (exactly what agent-gate.sh's detach-and-await does from
-		// inside an agent's Bash tool) and then ends -- by backgrounding itself,
+		// `job start` (detach and await, from inside an agent's Bash tool) and
+		// then ends -- by backgrounding itself,
 		// running out of turns, or an outer `timeout` killing the foreground
 		// wait -- while the gate has not reached a verdict. The gate is a
 		// separate, detached job on purpose, so it is never a member of the
@@ -1645,8 +1645,8 @@ func TestJob(t *testing.T) {
 	})
 
 	t.Run("startedJobFailed_ignores_a_superseded_earlier_attempt_under_the_same_name", func(t *testing.T) {
-		// agent-gate.sh folds the tree and command into the nested job's --id,
-		// so an agent that fixes what a gate found and reruns it gets a fresh
+		// A caller that folds the tree and command into the nested job's --id
+		// means an agent that fixes what a gate found and reruns it gets a fresh
 		// id under the same --name -- the earlier failing attempt's record is
 		// never replaced (only reusing an id outright does that). Without
 		// accounting for that, a parent would keep naming the stale failure

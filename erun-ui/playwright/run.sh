@@ -37,13 +37,6 @@
 # `./run.sh --grep sidebar` and `yarn test --grep sidebar` both work.
 #
 # Env vars:
-#   PLAYWRIGHT_TEST_AREAS  The resolved area selection (see the
-#                          area-scoped-selection block below). Unset/"all"
-#                          runs everything; "smoke" or "smoke,<area>,..."
-#                          narrows the default target to tests/smoke plus the
-#                          named tests/areas/<area> directories. Ignored when
-#                          an explicit target is already given, or in
-#                          --e2e-k3d mode.
 #   ERUN_PLAYWRIGHT_ARTIFACTS_DIR
 #                          Root for everything the suite leaves behind --
 #                          Playwright's output dir, the HTML report, and every
@@ -51,15 +44,12 @@
 #                          Unset keeps them in the suite directory, which is
 #                          what lets a reviewing orchestrator read a pod's
 #                          frames out of the synced worktree. Set it for a run
-#                          whose tree is not its to write to: every
-#                          in-container gate run (the erun-devops Dockerfile's
-#                          test stage and scripts/repro-gate-contention.sh,
-#                          which bind-mounts the worktree over /src and runs as
-#                          root) points it at a container-local path, because
-#                          artifacts written as root into an environment's own
-#                          tree cannot be removed there and fail every later
-#                          run in that environment. An unusable root is
-#                          refused at config load, naming the directory.
+#                          whose tree is not its to write to, such as a root
+#                          container over a bind-mounted worktree: artifacts
+#                          written as root into an environment's own tree
+#                          cannot be removed there and fail every later run in
+#                          that environment. An unusable root is refused at
+#                          config load, naming the directory.
 
 set -eu
 
@@ -68,14 +58,12 @@ set -eu
 # stranger it has no business signaling, so it correctly no-ops. Whether that
 # holds depends entirely on how this script was reached: `erun exec job
 # start`'s Setpgid already makes a standalone `./run.sh` invocation the
-# leader, but nothing gives it a fresh group when a Makefile recipe runs it
-# nested inside another job's own process tree (test-playwright inside `make
-# check-gate`, itself already detached with AGENT_GATE_DETACHED=1 set) -- there
-# it is just an ordinary child sharing that ancestor's group, its own reap is
-# a correct no-op, and nothing else in that tree reaps the sleep-stub session
-# orphans it spawns either. That gap, not a flaw in the reap logic itself, is
-# what let a fully-passing `make check-gate` run (not just a standalone suite
-# run) record as abandoned.
+# leader, but nothing gives it a fresh group when another script runs it
+# nested inside a job's own process tree -- there it is just an ordinary
+# child sharing that ancestor's group, its own reap is a correct no-op, and
+# nothing else in that tree reaps the sleep-stub session orphans it spawns
+# either. That gap, not a flaw in the reap logic itself, is what let a
+# fully-passing nested run record as abandoned.
 #
 # setsid gives the real work a fresh, genuinely private session+group up
 # front, unconditionally, so reap_process_group always has one it provably
@@ -150,20 +138,6 @@ fi
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 ERUN_UI_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 BIN_PATH="$ERUN_UI_DIR/bin/erun-app"
-
-# Detach the whole run through scripts/agent-gate.sh, the same wrapper `make
-# check` uses, so this suite (longer than `make check` itself) never sits as
-# an ordinary foreground command for an in-pod coding agent's harness to
-# auto-background into a bare task handle. Outside an agent pod agent-gate.sh
-# execs straight through with no behaviour change. RUN_SH_AGENT_GATED marks
-# that this invocation already made that one pass, so the re-exec of this
-# same script (either agent-gate.sh's own straight-through, or the job body
-# it starts) does not route through here again.
-if [ -z "${AGENT_GATE_DETACHED:-}" ] && [ "${RUN_SH_AGENT_GATED:-0}" != "1" ]; then
-	RUN_SH_AGENT_GATED=1
-	export RUN_SH_AGENT_GATED
-	exec "$ERUN_UI_DIR/../scripts/agent-gate.sh" ui-playwright "erun-ui/playwright/run.sh $*" -- "$SCRIPT_DIR/run.sh" "$@"
-fi
 
 # From here on this is the real work: build, lint, and the suite itself, now
 # running in its own private session/group (see the setsid block above). Wire
@@ -279,7 +253,6 @@ PORT=34123
 PLAYWRIGHT_ARGS=""
 E2E_K3D=0
 SKIP_LINT=0
-SKIP_APP_GATES=0
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -289,22 +262,6 @@ while [ $# -gt 0 ]; do
 			;;
 		--skip-lint)
 			SKIP_LINT=1
-			shift
-			;;
-		--skip-app-gates)
-			# Skip only the gates build.sh runs around the desktop binary
-			# (erun-ui/frontend typecheck, lint, format:check, test, and
-			# golangci-lint erun-ui), not this suite's own. `make check`
-			# passes it because test-playwright depends on test-frontend,
-			# which has already run exactly those gates as its own parallel
-			# jobs -- build.sh would be running them a second time, and
-			# they are the largest step in the in-image gate.
-			#
-			# Deliberately not --skip-lint: that would also drop this
-			# workspace's own typecheck/lint/format:check, which
-			# test-frontend does not cover (it gates erun-kit,
-			# erun-console and erun-ui/frontend, never erun-ui/playwright).
-			SKIP_APP_GATES=1
 			shift
 			;;
 		--e2e-k3d)
@@ -511,7 +468,7 @@ fi
 
 if [ "$BUILD_NEEDED" -eq 1 ]; then
 	_step_started=$(date +%s)
-	if [ "$SKIP_LINT" -eq 1 ] || [ "$SKIP_APP_GATES" -eq 1 ]; then
+	if [ "$SKIP_LINT" -eq 1 ]; then
 		"$ERUN_UI_DIR/build.sh" --skip-lint "$BIN_PATH"
 	else
 		"$ERUN_UI_DIR/build.sh" "$BIN_PATH"
@@ -545,23 +502,9 @@ if [ "$SKIP_LINT" -eq 1 ]; then
 	printf '>> SKIPPING typecheck/lint/format:check (--skip-lint)\n' >&2
 else
 	_step_started=$(date +%s)
-	# ERUN_PLAYWRIGHT_LINT_CACHE_DIR opts into eslint/prettier result caching,
-	# the same way the Makefile's three workspace gates already cache into
-	# FRONTEND_LINT_CACHE_DIR. Unset (a bare local run) keeps the previous
-	# uncached behaviour rather than scattering cache files into the tree.
-	# Content-addressed rather than mtime-based, because every COPY into the
-	# image build context resets mtimes and would defeat a timestamp check.
 	"$YARN_BIN" typecheck
-	if [ -n "${ERUN_PLAYWRIGHT_LINT_CACHE_DIR:-}" ]; then
-		mkdir -p "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint"
-		"$YARN_BIN" lint -- --cache --cache-strategy content \
-			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/eslint/playwright/"
-		"$YARN_BIN" format:check -- --cache --cache-strategy content \
-			--cache-location "$ERUN_PLAYWRIGHT_LINT_CACHE_DIR/prettier-playwright.json"
-	else
-		"$YARN_BIN" lint
-		"$YARN_BIN" format:check
-	fi
+	"$YARN_BIN" lint
+	"$YARN_BIN" format:check
 	printf '>> playwright: typecheck + lint + format:check [%ss]\n' "$(($(date +%s) - _step_started))" >&2
 fi
 
@@ -608,43 +551,6 @@ if [ "$E2E_K3D" -eq 1 ]; then
 	# to the e2e dir when the caller did not pass an explicit one.
 	if [ -z "$PLAYWRIGHT_ARGS" ]; then
 		PLAYWRIGHT_ARGS='"tests/e2e"'
-	fi
-fi
-
-# Area-scoped selection (root AGENTS.md's "smoke + changed areas" design;
-# the root Makefile's test-playwright resolves PLAYWRIGHT_TEST_AREAS through
-# `erun exec resolve-playwright-areas` from the Playwright spec-file diff
-# against the merge base). Unset or "all" runs the full suite
-# unchanged; "smoke" or "smoke,<area>,..." narrows the default target to
-# those directories under tests/. An explicit caller target -- a bare CLI
-# arg, or the e2e-k3d default above -- always wins; this only supplies a
-# default when nothing else already set one.
-#
-# Which selection the gate used is reported on both branches, not only on the
-# narrowing one. A run that covers everything has to be as legible as a
-# narrowed one: unset, empty, and literally "all" all mean the full suite, and
-# a resolver that failed upstream looks exactly like a tree that genuinely
-# resolved to "all" from here. Staying quiet on the full-suite branch is what
-# let `make check` inside an agent pod run the full suite on a clean tree
-# while a local `erun exec resolve-playwright-areas` on that same tree printed
-# `smoke` -- the difference existed only in a value nobody printed.
-if [ -z "$PLAYWRIGHT_ARGS" ] && [ "$E2E_K3D" -eq 0 ]; then
-	if [ -n "${PLAYWRIGHT_TEST_AREAS:-}" ] && [ "$PLAYWRIGHT_TEST_AREAS" != "all" ]; then
-		dirs="tests/smoke"
-		old_ifs="$IFS"
-		IFS=,
-		for token in $PLAYWRIGHT_TEST_AREAS; do
-			if [ "$token" != "smoke" ] && [ -n "$token" ]; then
-				dirs="$dirs tests/areas/$token"
-			fi
-		done
-		IFS="$old_ifs"
-		for d in $dirs; do
-			PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS \"$d\""
-		done
-		printf '>> playwright: area selection %s -> running %s\n' "$PLAYWRIGHT_TEST_AREAS" "$dirs" >&2
-	else
-		printf '>> playwright: area selection %s -> running the full suite\n' "${PLAYWRIGHT_TEST_AREAS:-unset}" >&2
 	fi
 fi
 

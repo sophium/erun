@@ -183,21 +183,15 @@ fi
 A clean tree skips the commit.
 
 **A defect fix names its reproduction before it is pushed.** Root `AGENTS.md`
-§ "A Defect Fix Names Its Reproduction" requires a `bug/` branch to name, in a
-commit trailer, the test case that reproduces the failure the report
-described — or to declare a kind from the closed exemption set. Check it here,
-after the commit and before the push, which is the last point an amend is
-free:
-
-```sh
-node scripts/check-regression-coverage.mjs || exit 1
-```
-
-Skip only when the checkout is not this repository (the script lives in
-`sophium/erun`). When it fails, it prints the exact trailer block to add:
-amend it onto a commit in the range and re-run this rung. Do not push past a
-red here and do not rename the branch to dodge it — the whole point is that a
-fix ships with the case that would have caught the defect.
+§ "A Defect Fix Names Its Reproduction" requires a `bug/` branch (or one
+declaring `Defect-Fix: yes`) to name, in commit trailers, the `Reproduces:`
+failure and the `Regression-Test: <path>::<case>` that reproduces it — or
+`Regression-Test: none` with a `Regression-Test-Exemption:` kind from the
+closed set. `erun exec gate-merge` enforces it when the queue lands the
+branch: a source that fails is skipped with a `regression-test policy: …`
+reason and never lands. Check the trailers here, after the commit and before
+the push, which is the last point an amend is free; do not rename the branch
+to dodge the rule.
 
 ```sh
 erun exec push "$(git rev-parse --abbrev-ref HEAD)"
@@ -268,8 +262,8 @@ binary is a release, routinely one or two behind this checkout, so a fix to
 erun's own build or landing layer is inert here until the environment is
 upgraded (`erun pin` / `erun deploy`): a green result after such a merge says
 the branch builds, not that the fix ran. Read the version that will actually
-run it before drawing that conclusion — `scripts/agent-gate.sh` names the same
-one for `make check`, and `erun-merge-queue-drive` for `erun exec gate-merge`:
+run it before drawing that conclusion — `erun-merge-queue-drive` reads the same
+one for `erun exec gate-merge`:
 
 ```sh
 erun version --no-registry   # the `erun <version>` line is the pod's binary

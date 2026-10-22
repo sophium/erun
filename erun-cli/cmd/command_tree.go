@@ -78,10 +78,6 @@ var cliOnlyAgentFacingCommands = map[string]bool{
 	"devops container build": true,
 	"devops container push":  true,
 	"devops k8s deploy":      true,
-	// A repository build-tooling utility that resolves the change-scoped
-	// Playwright smoke+area selection for the repository's own Makefile --
-	// a build-system concern, not an end-user action with a desktop surface.
-	"exec resolve-playwright-areas": true,
 }
 
 // IsAgentFacingCLIOnlyCommand reports whether a CLI-only command path (no

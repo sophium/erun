@@ -10,7 +10,7 @@ import "sort"
 // platform the desktop reads.
 //
 // A build's step tree is small today (image -> platform), but breaking
-// erun-devops into its Dockerfile stages and `make check` phases has been
+// each image into its Dockerfile steps and `>> <phase>` markers has been
 // proposed and could turn that into dozens of rows. Rather than carry the
 // full tree, BuildProfileSummary stores the build's own totals plus the
 // buildProfileTopStepCount costliest steps by duration -- bounded regardless

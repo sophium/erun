@@ -984,9 +984,9 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_default_verbosity_surfaces_docker_builds_own_output_on_failure", func(t *testing.T) {
-		// The release path builds quietly, so when the in-build `make
-		// check` test stage failed, all that survived was
-		// `process "/bin/sh -c make check ..." did not complete successfully:
+		// The release path builds quietly, so when an in-build test stage
+		// failed, all that survived was
+		// `process "/bin/sh -c ..." did not complete successfully:
 		// exit code: 2` — no lint finding, no failing test name. docker build's
 		// own output (what BuildKit's plain progress captured, including a
 		// failing RUN step's stdout/stderr) must now reach the user even at
@@ -1019,9 +1019,8 @@ func TestBuild(t *testing.T) {
 		// per-platform timing row used to be the finest granularity available --
 		// it could say a build was slow, never which part. BuildKit's own
 		// --progress=plain output (already captured for the two scenarios above)
-		// carries a per-Dockerfile-step DONE line, and the Makefile's own
-		// `>> <phase>` markers ride inside the `RUN make check` step's own output
-		// lines. Both must now surface as their own rows in the step timing table
+		// carries a per-Dockerfile-step DONE line, and a step's own
+		// `>> <phase>` markers ride inside that step's output lines. Both must now surface as their own rows in the step timing table
 		// instead of collapsing into the platform's one duration.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")

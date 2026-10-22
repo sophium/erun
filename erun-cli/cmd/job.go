@@ -153,8 +153,8 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'\n\n" +
 			"  # Kick off a release that is meant to keep running past this run's own turn.\n" +
 			"  erun exec job start --tenant team --environment dev --name release --handoff -- erun release\n\n" +
-			"  # Run a full check that must not share the environment with anything else.\n" +
-			"  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate",
+			"  # Run a full build that must not share the environment with anything else.\n" +
+			"  erun exec job start --tenant team --environment dev --name build --exclusive -- erun build",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			envMap, err := parseJobEnvFlags(env)

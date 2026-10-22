@@ -1,12 +1,12 @@
 ARG ERUN_VERSION=1.0.0
 
-# The component's own tests are this image's gate: the builder below depends on
-# this stage through `COPY --from=test`, so no image is produced when they fail.
-# The stage only calls the module's ordinary `go test ./...`. Its database
-# suites start PostgreSQL themselves through Testcontainers, against the Docker
-# daemon `erun build` provides at DOCKER_HOST -- reachable from a
-# `RUN --network=host` step, which `erun build` grants a Dockerfile with a
-# `test` stage.
+# The component's own lint and tests are this image's gate: the builder below
+# depends on this stage through `COPY --from=test`, so no image is produced when
+# they fail. The stage only calls the module's ordinary `go tool golangci-lint
+# run` and `go test ./...`. Its database suites start PostgreSQL themselves
+# through Testcontainers, against the Docker daemon `erun build` provides at
+# DOCKER_HOST -- reachable from a `RUN --network=host` step, which `erun build`
+# grants a Dockerfile with a `test` stage.
 FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
 
 WORKDIR /src
@@ -27,6 +27,11 @@ COPY erun-backend/erun-backend-db /src/erun-backend/erun-backend-db
 # opens ../../../../erun-devops/docker/erun-backend-api/Dockerfile at run time
 # to prove the release ldflags line still reaches the compiled binary.
 COPY erun-devops/docker/erun-backend-api /src/erun-devops/docker/erun-backend-api
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/root/.cache/golangci-lint \
+    go tool golangci-lint run ./...
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \

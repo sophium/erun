@@ -941,3 +941,12 @@ func TestListControlPlanes(t *testing.T) {
 		}
 	})
 }
+
+func lineContaining(text, substr string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, substr) {
+			return line
+		}
+	}
+	return ""
+}

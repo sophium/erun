@@ -18,8 +18,8 @@
 # works).
 #
 # Lives beside the chart rather than inside it, like the other k8s chart tests:
-# helm renders every file under templates/, and `make helm-chart-tests` picks up
-# any erun-devops/k8s/*_test.sh with no Makefile edit.
+# helm renders every file under templates/, and the erun-devops image's test
+# stage runs every erun-devops/k8s/*_test.sh with no Dockerfile edit.
 
 set -eu
 

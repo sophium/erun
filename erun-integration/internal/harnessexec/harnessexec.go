@@ -55,9 +55,9 @@ const WaitDelay = 10 * time.Second
 //
 // It is a backstop, not a latency SLA, and it is set longer than the suite's
 // own package deadline so it can never fail a healthy child: that deadline is
-// the INTEGRATION_TEST_TIMEOUT the gate derives (see the Makefile), capped so
-// its maximum is a value this constant can be compared against at build time
-// rather than a number that moves with the environment. What this catches is a
+// the fixed -timeout the erun-cli image's test stage passes, a value this
+// constant can be compared against rather than a number that moves with the
+// environment. What this catches is a
 // run whose deadline was raised past that cap or disabled outright, where an
 // unbounded wait would otherwise never conclude at all.
 //

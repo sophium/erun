@@ -63,10 +63,8 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 // applyDindResourceBuildArgs threads the building environment's actual
 // erun-dind sidecar resource limits (EnvConfig.RuntimeDindPod) into build's
 // DindCPULimit/DindMemoryLimitMiB fields when its Dockerfile declares the
-// matching ARG. Before this, the erun-devops Dockerfile's own test stage
-// sized its concurrency off either the ARG's hardcoded default or (for
-// scripts/parallel-gate.sh's cgroup reads) the host node's raw capacity,
-// since a RUN step in the test stage runs in a cgroup that is a sibling of
+// matching ARG. Without it, a test stage sizes its concurrency off either the
+// ARG's hardcoded default or the host node's raw capacity, since a RUN step in the test stage runs in a cgroup that is a sibling of
 // the dind sidecar's own limited cgroup, not a descendant of it, and so
 // cannot read the sidecar's real limit off the filesystem itself.
 func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment string, build *DockerBuildSpec) {

@@ -13,8 +13,8 @@ import (
 // (erun-devops/k8s/erun-devops/templates/service.yaml — keep the two in sync).
 //
 // DefaultRuntimePodMemory is sized for the heaviest work that container is
-// expected to run, not for a serving app: `make check-gate` runs inside it when
-// an agent gates its own branch in-pod, and that is the same ten-target gate
+// expected to run, not for a serving app: an agent runs the repository's lint
+// and tests inside it when it gates its own branch in-pod, the same work
 // (lint incl. golangci-lint type-checking the AWS SDK, three frontend
 // workspaces, Wails/CGO tests, a headless Chromium per Playwright worker) the
 // dind sidecar runs during an image build -- which is why the sidecar's own
@@ -22,8 +22,8 @@ import (
 // 8916Mi, sized before that gate grew, i.e. at under half of what the same work
 // is sized for on the build side.
 //
-// The number comes from running that gate in containers of each size on the
-// same 6-CPU environment (the same image, `make -j6 check-gate`), "cold"
+// The number comes from running that gate, ten targets at a time, in
+// containers of each size on the same 6-CPU environment (the same image), "cold"
 // meaning a first run after a fresh checkout -- cold Go build and
 // golangci-lint caches, which is what a new environment, a branch switch or a
 // pruned build cache looks like:
@@ -79,7 +79,7 @@ const (
 // the shape the sidecar was already implicitly assigned while that bug was
 // live — but every image build runs in this sidecar, not the runtime
 // container, and a live cache-miss `erun release` OOMed against that number:
-// a single `make check` inside the erun-devops build (golangci-lint
+// a single gate run inside the erun-devops build (golangci-lint
 // type-checking the AWS SDK is the driver) measured a peak of ~15.2Gi, so
 // 8916Mi was under half of what one gate run alone needs. Raised to 20Gi —
 // comfortably above the measured peak, not merely above the old default —
@@ -160,13 +160,10 @@ const (
 
 // DefaultRuntimeDindCPU is the dind sidecar's CPU limit for an environment
 // that has never been sized (`NormalizeRuntimeDindPodResources`), and the
-// namespace-quota floor's own dind term (`MinimumRuntimeNamespaceQuota`). Two
-// files cannot read it and write it down again, so both are read back and
-// compared against it on every run
-// (runtime_dind_default_mirrors_test.go): the erun-devops chart's
-// `runtime.dind.resources.limits.cpu` fallback, and the Dockerfile's own
-// DIND_CPU_LIMIT ARG default, which is only what a bare `docker build` with no
-// erun environment resolved falls back to.
+// namespace-quota floor's own dind term (`MinimumRuntimeNamespaceQuota`). The
+// erun-devops chart's `runtime.dind.resources.limits.cpu` fallback cannot read
+// it and writes it down again, so it is read back and compared against it on
+// every run (runtime_dind_default_mirrors_test.go).
 var DefaultRuntimeDindCPU = RuntimeDindCPULimit(DefaultRuntimeDindCPUNodeCPUMilli, DefaultRuntimeDindCPUCoTenants)
 
 // RuntimeDindCPULimit sizes one environment's erun-dind build cap from the

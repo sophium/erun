@@ -94,17 +94,16 @@ func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) 
 	}
 }
 
-// TestRealDevopsDockerfileStillConsumesItsTestStage pins the real artefact the
-// synthetic cases only model: the erun-devops image must be produced only once
+// TestRealCLIDockerfileStillConsumesItsTestStage pins the real artefact the
+// synthetic cases only model: the erun-cli image must be produced only once
 // its test stage has passed, so a successful build of it -- and the fp tag
 // written after one -- means its tests ran and passed.
 //
-// Reads a sibling module, so it must run uncached; test-erun-common already
-// passes -count=1.
-func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
-	const path = "../erun-devops/docker/erun-devops/Dockerfile"
+// Reads a sibling module, so it must run uncached (go test -count=1).
+func TestRealCLIDockerfileStillConsumesItsTestStage(t *testing.T) {
+	const path = "../erun-devops/docker/erun-cli/Dockerfile"
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("the erun-devops Dockerfile is not readable at %s: %v", path, err)
+		t.Fatalf("the erun-cli Dockerfile is not readable at %s: %v", path, err)
 	}
 	if !dockerfileHasConsumedTestStage(path) {
 		t.Fatalf("%s no longer declares a stage `AS test` consumed by a later `COPY --from=test`, so its image would build and publish with its tests never run", path)

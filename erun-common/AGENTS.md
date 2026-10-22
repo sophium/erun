@@ -147,15 +147,6 @@ demonstrated:
 
 ## Gate execution and verdicts
 
-- Long routine validation uses `scripts/agent-gate.sh`: direct execution outside
-  agent pods, tracked detachment plus bounded await inside them. Keep inner
-  check-gate prerequisites on the underlying targets so they do not detach twice.
-  Extend by runtime needs, not target name. Release callers supervise their own
-  jobs; release is not automatically wrapped. Run `scripts/agent-gate_test.sh`
-  when changing the wrapper.
-- `scripts/parallel-gate.sh` owns quota/memory-aware fan-out sizing. Independent
-  fan-outs must budget aggregate memory, including race-enabled test overhead,
-  not each reserve the whole ceiling. Run its script tests when changing it.
 - Batch gate-merge takes ordered sources, fetches once, and composes them on one
   prospective tree. On a squash conflict, restore the batch's last committed
   state, record skipped files/reason, and continue. A conflict confined to
@@ -187,41 +178,16 @@ demonstrated:
   it RECORDED with its version.
 - `dockerfileDeclaresTestStage` scopes the host-network entitlement to
   Dockerfiles with a `test` stage. Keep the stage name exact (`AS test`, not a
-  `test-` prefix); `dockerfile_copy_contract_test.go` pins that the real
-  component Dockerfiles consume their test stage.
-- Preserve the gate wrapper's distinction between a clean pass, an exit-zero
-  process that left unsupervised work (reported with an explicit warning and job
-  ID), and a genuine failure. The orphan warning is not proof of completed work;
-  callers must inspect the job's own record. A wrapper's bounded-wait timeout is
-  also not the underlying gate verdict (`scripts/agent-gate.sh`).
-- A recorded pass is replayed only for the run that produced it: its tree, its
-  command, and the environment it executed under. The environment travels with
-  the record instead of in the job id -- the id is also what a re-invocation
-  after an expired bounded wait attaches to, so moving it with the environment
-  would find no job there and start a second gate beside the first. A recorded
-  pass from a differing environment is named loudly and run fresh, never
-  replayed: keyed on the whole environment minus the wrapper's own control
-  variables, so a knob nobody thought to enumerate still separates two runs --
-  and so does the pod, whose name the container puts in HOSTNAME, so a recorded
-  pass does not survive the pod that produced it being replaced. A run still
-  *live* under a differing environment is the one case the wrapper cannot run
-  fresh, since the exclusive claim refuses a second gate beside it: it names
-  the mismatch loudly and attaches, reporting that run's verdict as that
-  environment's and not the caller's.
-- A wait expiring is the wrapper's own deadline, never the gated job's outcome.
-  On expiry the wrapper reads the job's own record, so a job that finished is
-  reported by its actual result and 124 is reserved for one still genuinely
-  running; an unreadable record is that same non-verdict, never a failure. That
-  non-verdict path must say so plainly and name the job, since the exit status
-  alone is not readable as "not a failure" once `make` is in between: GNU Make
-  collapses any nonzero recipe exit to its generic exit 2, so a caller reading
-  only `make check`'s exit status cannot tell a bounded-wait timeout from a real
-  failure. The `check` target therefore prints INCONCLUSIVE on 124, and the
-  wrapper's own 124 survives only for a direct caller.
-- Keep the default foreground-safe (bail at the first timeout) and let a caller
-  that is not foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`,
-  which re-awaits the same job across bounded `job await` calls until it reaches
-  a real verdict. `ERUN_JOB_ID` being set does not distinguish the two callers.
+  `test-` prefix); `build_test_stage_test.go` and
+  `dockerfile_copy_contract_test.go` pin that the erun-cli and
+  erun-backend-api Dockerfiles consume their test stage. A component's test
+  stage only calls the module's own commands (`go tool golangci-lint run`,
+  `go test`); it holds no test logic of its own.
+- Long validation inside an agent pod runs as a detached `erun exec job start`
+  awaited with bounded `job await` calls (root § "One Agent Job Is One Run").
+  A wait expiring is the caller's own deadline, never the job's outcome: read
+  the job's own record before reporting a verdict, and distinguish a clean
+  pass, an exit-zero run that left unsupervised work, and a genuine failure.
 
 ## Release recovery
 
@@ -437,9 +403,9 @@ yet, and should not be assumed to hold until it has.
 
 ## Validation
 
-- After Go changes run `go test -count=1 -race ./...`. The root
-  `test-erun-common` target runs it in `check-gate`; race coverage is essential
-  for leases, job supervisors, and workspace sync.
+- After Go changes run `go tool golangci-lint run` and
+  `go test -count=1 -race ./...`. The erun-cli image's test stage runs both;
+  race coverage is essential for leases, job supervisors, and workspace sync.
 - Exercise binary-reachable behavior through integration scenarios; remove unit
   tests duplicating those scenarios. Keep focused tests for otherwise unreachable
   behavior and concurrency. See `erun-integration/AGENTS.md` § "Known integration

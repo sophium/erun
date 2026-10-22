@@ -13,7 +13,7 @@
 .codex
 # .erun/config.yaml is checked into git (the repo's own project config) and
 # TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
-# it inside the erun-devops test stage, so it is carved out with the same
+# it inside the erun-cli test stage, so it is carved out with the same
 # ".erun/*" plus negation shape ProjectConfigGitIgnoreFix documents for
 # .gitignore -- a bare ".erun" exclusion cannot be un-excluded per file
 # (docker cannot re-include a file whose parent directory is excluded).
@@ -26,8 +26,8 @@
 **/.DS_Store
 
 # Same asymmetry, for the two things `terraform init` writes into the module
-# tree it initializes: the terraform-module-tests gate target runs it against
-# every module under erun-devops/terraform-erun (and the module guides tell a
+# tree it initializes: the erun-devops test stage runs it against every module
+# under erun-devops/terraform-erun with tests (and the module guides tell a
 # developer to run it by hand). Root .gitignore excludes both unanchored at any
 # depth, so the fingerprint already ignores them; without these rules the real
 # build context would still carry ~105MB of provider binaries per initialized
@@ -54,8 +54,8 @@ __debug_bin*
 /erun-integration/coverage
 /erun-integration/bin
 
-# eslint/prettier --cache output (Makefile's test-frontend target); never
-# COPYd into a build context, mirrored here only for hygiene
+# eslint/prettier --cache output; never COPYd into a build context, mirrored
+# here only for hygiene
 /.cache/
 
 # Local packaging / release artifacts
@@ -64,10 +64,9 @@ __debug_bin*
 /erun-cli/bin
 
 # Desktop UI build outputs. /erun-ui/frontend/wailsjs is the one exception
-# to "not consumed by service Dockerfiles": the erun-devops test stage's
-# `make check` (test-frontend) regenerates it in-image via
-# erun-ui/generate-wailsjs.sh before typechecking/building erun-ui/frontend,
-# so a possibly-stale host copy must never leak into the build context.
+# to "not consumed by service Dockerfiles": the erun-ui test stage
+# regenerates it in-image via erun-ui/generate-wailsjs.sh before
+# typechecking/building erun-ui/frontend, so a possibly-stale host copy must never leak into the build context.
 /erun-ui/bin
 /erun-ui/build/bin
 /erun-ui/frontend/node_modules
@@ -82,8 +81,8 @@ __debug_bin*
 /erun-ui/.golangci-cache
 
 # Root yarn workspace (erun-kit, erun-console, erun-ui/frontend): the
-# erun-devops test stage runs `yarn install` + the kit/console gates
-# in-image, so hoisted deps and build outputs are regenerated there and must
+# erun-console and erun-ui test stages run `yarn install` in-image, so hoisted
+# deps and build outputs are regenerated there and must
 # never enter the build context — the workspace root node_modules alone is
 # hundreds of MB, and its presence would diverge the context from the
 # fingerprint the same way /erun-docs/node_modules would.

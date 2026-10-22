@@ -14,13 +14,13 @@ import (
 // which part of the build was slow. BuildKit's own `--progress=plain` output
 // (already captured by runDockerBuildOnce, never discarded) already answers
 // that question at two levels of granularity: which Dockerfile step ran how
-// long, and — for the `RUN make check` step specifically — which of the
-// Makefile's own `>> <phase>` markers ran how long inside it. Both levels are
+// long, and — for a step that prints `>> <phase>` markers — which of those
+// phases ran how long inside it. Both levels are
 // parsed here and attached as timing children under the per-platform step.
 
 // buildkitVertexStartPattern matches BuildKit's per-step start line, e.g.
 //
-//	#7 [4/8] RUN make check
+//	#7 [4/8] RUN go test ./...
 //	#3 [internal] load metadata for docker.io/library/golang:1.26.0
 //
 // The bracketed field is the stage index for a real Dockerfile instruction,
@@ -38,15 +38,15 @@ var buildkitVertexStartPattern = regexp.MustCompile(`^#(\d+) \[([^\]]*)\] (.*)$`
 var buildkitVertexDonePattern = regexp.MustCompile(`^#(\d+) DONE ([\d.]+)s$`)
 
 // buildProgressPhasesTopN bounds how many phase rows attach at one level of
-// the tree — a Dockerfile can have dozens of steps, and a `make check` run
-// dozens of `>> phase` markers. Rows beyond the costliest N fold into one
+// the tree — a Dockerfile can have dozens of steps, and one step dozens of
+// `>> phase` markers. Rows beyond the costliest N fold into one
 // synthetic "smaller steps" row (same shape as timing.go's own
 // "(unaccounted)"/"(ran concurrently)" synthetic rows) so nothing is silently
 // dropped from the total, but the tree stays a summary rather than a log.
 const buildProgressPhasesTopN = 15
 
-// buildProgressConcurrentSentinel is the marker `make check` prints before it
-// fans check-gate out with `-j`. Phase spans are derived from the gap between
+// buildProgressConcurrentSentinel is the marker a step prints before it runs
+// its phases concurrently. Phase spans are derived from the gap between
 // one `>> phase` line and the next, which measures that phase's own work only
 // while the step runs its phases one at a time. Once several targets
 // interleave their output, a span covers whatever else was running too, so
@@ -62,11 +62,10 @@ const buildProgressConcurrentSentinel = "concurrent-phase-spans"
 const buildProgressConcurrentSuffix = " (elapsed window, concurrent)"
 
 // buildProgressSelfTimedPattern matches a phase marker that carries its own
-// measured duration, e.g. `>> golangci-lint erun-ui [83s]`.
-// scripts/parallel-gate.sh emits these: it replays every job's captured
-// output only after the whole batch finishes, so the interval between two of
-// its markers describes the replay rather than the work, and a span-derived
-// duration for them is meaningless. A self-reported figure is the job's own
+// measured duration, e.g. `>> golangci-lint erun-ui [83s]`. A runner that
+// replays each job's captured output only after the whole batch finishes
+// emits these: the interval between two of its markers describes the replay
+// rather than the work, so a span-derived duration for them is meaningless. A self-reported figure is the job's own
 // wall clock and is preferred wherever present.
 var buildProgressSelfTimedPattern = regexp.MustCompile(`^(.*) \[([0-9]+)s\]$`)
 
@@ -174,7 +173,7 @@ func applyVertexDone(line string, vertices map[string]*buildKitVertex) {
 
 // applyPhaseMarker records one `>> <phase>` line a step printed.
 // buildkitStepOutputPattern (build_failure_reason.go) matches any line a step
-// printed; only the Makefile's own phase markers are structured enough here
+// printed; only `>> <phase>` markers are structured enough here
 // to become sub-phases.
 func applyPhaseMarker(line string, vertices map[string]*buildKitVertex) {
 	match := buildkitStepOutputPattern.FindStringSubmatch(line)

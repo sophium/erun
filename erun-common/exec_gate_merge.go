@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -73,8 +75,9 @@ type GateMergeLandedSource struct {
 
 // GateMergeSkippedSource is one source branch that did not land — a
 // conflicting squash, a branch this could not even resolve after fetching
-// (e.g. deleted since the caller decided to batch it), or one whose squash
-// staged nothing because its content is already on the target. The rest of
+// (e.g. deleted since the caller decided to batch it), one whose squash
+// staged nothing because its content is already on the target, or a defect
+// fix that fails the regression-test policy. The rest of
 // the batch still builds; a skip here is reported, not fatal.
 type GateMergeSkippedSource struct {
 	SourceBranch    string   `json:"sourceBranch"`
@@ -146,7 +149,9 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // skipConflictedGateMergeSource). A source whose squash stages nothing is
 // skipped the same way: it contributes no change, which is a no-op rather
 // than an error, and it is recorded so the caller can tell "already landed"
-// from "broken". Sources is required to be non-empty.
+// from "broken". A defect fix whose declaration fails the regression-test
+// policy is skipped too (evaluateMergeRegressionPolicy). Sources is required
+// to be non-empty.
 //
 // The working tree must be clean before this runs: unlike the ordinary
 // exec merge/commit/push primitives, this checks out a different local
@@ -223,7 +228,7 @@ func validateGateMergeSources(sources []GateMergeSource) error {
 // shape each token's value must have sits beside the token. These are the
 // lines this repository's own guidance makes load-bearing for a landed commit
 // — "Closes #N" from the contribution rules, and the regression-reproduction
-// trailers from "A Defect Fix Names Its Reproduction" — because they are
+// and Defect-Fix trailers from "A Defect Fix Names Its Reproduction" — because they are
 // declarations about the change that a later reader looks for on the target,
 // not commentary the branch author happened to leave behind. Copying every
 // trailing line a branch's commits might contain onto an unattended commit on
@@ -246,6 +251,7 @@ var gateMergeCarriedTrailerLines = []gateMergeCarriedTrailerLine{
 	{pattern: regexp.MustCompile(`^Regression-Test:[ \t]+\S.*$`)},
 	{pattern: regexp.MustCompile(`^Regression-Test-Existing:[ \t]+\S.*$`)},
 	{pattern: regexp.MustCompile(`^Regression-Test-Exemption:[ \t]+\S.*$`)},
+	{pattern: regexp.MustCompile(`^Defect-Fix:[ \t]+(?i:yes|no|true|false)$`), singleLine: true},
 }
 
 // gateMergeCarriedTrailerLine is one spelling this squash carries: the pattern
@@ -309,23 +315,25 @@ func gateMergeTrailerLogArgs(base, sourceRef string) []string {
 }
 
 // gateMergeCarriedTrailers reads the trailers a source branch's own commits
-// declare, in the order they appear. Empty means the branch declares none,
+// declare, in the order they appear, and the raw commit bodies they came from
+// for the regression-test policy. Empty means the branch declares none,
 // which is not an error. A git failure here is fatal for the batch rather than
 // silently absent: the whole point of reading these is that their absence is
 // invisible on the target, so a read that failed must not be swallowed into
 // the same empty result as a branch that declared nothing.
-func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps GateMergeWorkingTreeDependencies) ([]string, error) {
+func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps GateMergeWorkingTreeDependencies) ([]string, []string, error) {
 	args := gateMergeTrailerLogArgs(base, sourceRef)
 	ctx.TraceCommand(root, "git", args...)
 	output, err := runGitCapturingOutput(root, deps, args...)
 	if err != nil {
-		return nil, fmt.Errorf("read the trailers on %s: %w", sourceRef, err)
+		return nil, nil, fmt.Errorf("read the trailers on %s: %w", sourceRef, err)
 	}
+	bodies := strings.Split(output, "\x00")
 	var trailers []string
-	for _, body := range strings.Split(output, "\x00") {
+	for _, body := range bodies {
 		trailers = append(trailers, gateMergeTrailersFromBody(body)...)
 	}
-	return trailers, nil
+	return trailers, bodies, nil
 }
 
 // gateMergeTrailersFromBody extracts the carried trailer entries from one
@@ -529,7 +537,9 @@ func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, a
 // against a clean tree — `git merge --abort` is not available here, since
 // `--squash` deliberately never records a MERGE_HEAD to abort. A squash that
 // stages nothing is likewise a skip: the source contributes no change, so
-// there is nothing to commit and no reason to fail the batch. Any other git
+// there is nothing to commit and no reason to fail the batch. A source that
+// fails the regression-test policy is backed out and skipped the same way as
+// a conflict (refuseGateMergeSourceOnPolicy). Any other git
 // failure (a bad ref, a real I/O error) is fatal for the whole batch, since
 // it says something is wrong beyond this one branch.
 func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
@@ -572,9 +582,19 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		}, nil
 	}
 
-	trailers, err := gateMergeCarriedTrailers(ctx, root, targetRef, sourceRef, deps)
+	return commitGateMergeSource(ctx, root, source, sourceCommit, sourceRef, targetRef, staged, deps)
+}
+
+// commitGateMergeSource commits a squash that staged something, under the
+// caller's message plus the branch's carried trailers — unless the branch
+// fails the regression-test policy, when it is backed out and skipped.
+func commitGateMergeSource(ctx Context, root string, source GateMergeSource, sourceCommit, sourceRef, targetRef string, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+	trailers, bodies, err := gateMergeCarriedTrailers(ctx, root, targetRef, sourceRef, deps)
 	if err != nil {
 		return nil, nil, err
+	}
+	if skipped, err := refuseGateMergeSourceOnPolicy(root, source, sourceCommit, bodies, staged, deps); skipped != nil || err != nil {
+		return nil, skipped, err
 	}
 	if output, err := runGitCapturingOutput(root, deps, "commit", "-m", gateMergeCommitMessage(source.Message, trailers)); err != nil {
 		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, output)
@@ -591,6 +611,27 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 		Commit:          commit,
 		CarriedTrailers: trailers,
 	}, nil, nil
+}
+
+// refuseGateMergeSourceOnPolicy backs a squashed source out and skips it when
+// it fails the regression-test policy (evaluateMergeRegressionPolicy). The
+// rest of the batch still gates, exactly as after a conflict. It returns
+// nil, nil when the source may land.
+func refuseGateMergeSourceOnPolicy(root string, source GateMergeSource, sourceCommit string, bodies, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeSkippedSource, error) {
+	readFile := func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(root, filepath.FromSlash(path))) }
+	policyErr := evaluateMergeRegressionPolicy(source.Branch, bodies, staged, readFile)
+	if policyErr == nil {
+		return nil, nil
+	}
+	var resetStderr bytes.Buffer
+	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
+		return nil, fmt.Errorf("git reset --hard after refusing %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+	}
+	return &GateMergeSkippedSource{
+		SourceBranch: source.Branch,
+		SourceCommit: sourceCommit,
+		Reason:       "regression-test policy: " + policyErr.Error(),
+	}, nil
 }
 
 // skipConflictedGateMergeSource classifies a failed `git merge --squash` for

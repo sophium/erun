@@ -93,6 +93,13 @@ EOF
 printf '%s\n' "\$*" >>"${run_dir}/trim-argv"
 exit 0
 EOF
+    # The skill and agent installers are baked helpers with their own tests;
+    # outside the image they are absent, and the configure scripts run under
+    # `set -e`, so a missing one would silently stop the settings relay.
+    for helper in erun-install-skills erun-install-agents; do
+        printf '#!/bin/sh\nexit 0\n' >"${run_dir}/bin/${helper}"
+        chmod +x "${run_dir}/bin/${helper}"
+    done
     chmod +x "${run_dir}/bin/emcp" "${run_dir}/bin/erun" "${run_dir}/bin/erun-trim-cache"
     log="${run_dir}/log"
     : >"${log}"

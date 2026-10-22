@@ -229,8 +229,8 @@ func (c Context) recordTimingCache(cache *cacheDecision) {
 // timingPlatformObserver returns a callback that records one finished
 // per-architecture child under the context's current step, tagged with the
 // same cache decision every architecture of one image build shares, and
-// breaks that child down further into the Dockerfile steps (and, inside
-// `RUN make check`, the Makefile's own phases) BuildKit's own captured
+// breaks that child down further into the Dockerfile steps (and, inside a
+// step, its own `>> <phase>` markers) BuildKit's own captured
 // `--progress=plain` output already names — see build_progress_phases.go. It
 // is wired onto DockerBuildSpec.PlatformObserver rather than threaded through
 // DockerImageBuilderFunc, so builder implementations that build every
@@ -314,7 +314,7 @@ type timingRow struct {
 // runs, not the test process), and two of its near-instant steps (a real `git
 // push` against a local bare origin, and the version-bump commit beside it)
 // were observed to drift past the previous 100ms floor under the CPU
-// contention of a full `make check` run, flipping their reported order
+// contention of a full test-stage run, flipping their reported order
 // between otherwise-identical runs. 1s keeps the floor well below any
 // genuinely different-duration real step while comfortably covering that
 // contention.

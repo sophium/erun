@@ -13,10 +13,13 @@ composition and release invariants belong to root/shared logic, not chart policy
 
 - Preserve the base-image dependency graph and publish bases before dependents.
   Put genuinely shared OS setup in `erun-ubuntu`; keep runtime-specific wiring here.
-- Pin tooling and downloads. `GOLANGCI_LINT_VERSION` at repository root is the
-  shared pin for image, local lint, and hook checks; do not add independent defaults.
-  Put stable expensive layers before source copies; architecture-specific layers
-  are separate cache boundaries.
+- Pin tooling and downloads. A Go module pins golangci-lint as a `tool` directive
+  in its own `go.mod` and runs it as `go tool golangci-lint run`, unless the tool's
+  dependency graph would move the module's shipped dependencies (dns01-webhook:
+  cert-manager/k8s.io) — then its test stage pins it as
+  `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<version>`. The
+  runtime image ships no lint binary. Put stable expensive layers before source copies;
+  architecture-specific layers are separate cache boundaries.
 - Published base fingerprints live in `.erun/config.yaml` under
   `docker.fingerprints`. Derive, never guess, the fingerprint; update it with the
   published content. A changed base requires a new tag because `IfNotPresent`
@@ -123,14 +126,12 @@ composition and release invariants belong to root/shared logic, not chart policy
   operator's declaration alone. What they resolve to, and the co-tenant count at
   which they stop changing any ceiling, is `erun-common/AGENTS.md` § "Release
   recovery".
-- Size the runtime container's own default for the gate it runs, not for a serving
-  app: agents run `make check-gate` in it — the same ten-target gate the sidecar
-  runs during an image build. `DefaultRuntimePodMemory` and the chart's
+- Size the runtime container's own default for the builds and tests it runs, not
+  for a serving app. `DefaultRuntimePodMemory` and the chart's
   `runtime.resources.limits.memory` fallback move together, and a lowered limit
   re-creates the OOM kills that destroy an in-pod agent run and its unpushed work.
-  A cold full gate has been measured pinning a 6Gi limit (peak equal to the limit,
-  ceiling hits throughout lint) against 78% of 16384Mi with no ceiling hits, and
-  a warm one at about a quarter of it.
+  A cold full repository gate was measured pinning a 6Gi limit (peak equal to the
+  limit, ceiling hits throughout lint) against 78% of 16384Mi with no ceiling hits.
 - **The sizing warning above runs one way only, and a bigger limit is not the safe
   direction.** A limit is containment for the container holding it, not a claim the
   node can back it. Every environment pod is Burstable at priority 0: requests are
@@ -165,10 +166,7 @@ composition and release invariants belong to root/shared logic, not chart policy
   `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
   buildkitd's runc/containerd workers, so writing one changes no key.
   `dind-entrypoint.sh` carries the measured detail beside the wrapper.
-- Thread resolved environment CPU/memory limits through
-  `applyDindResourceBuildArgs` into the test-stage parallel-gate overrides;
-  unbounded cgroup readings must not size fan-out for the entire host.
-  Report killed/resource-exhausted builds as resource failures, not lint verdicts.
+- Report killed/resource-exhausted builds as resource failures, not lint verdicts.
 - Size the dind CPU cap from the node, never as a flat safe-looking constant:
   a CPU limit is a ceiling, not a reservation, so a build capped well under the
   node is throttled while the node sits idle, which is what a CPU-pressure
@@ -176,13 +174,9 @@ composition and release invariants belong to root/shared logic, not chart policy
   `RuntimeDindCPULimit` (erun-common/runtime_resources.go) owns the rule — the
   node's CPUs divided across the build-capable environments expected to be
   building on it at once, floored at `MinimumRuntimeDindCPU` — and
-  `DefaultRuntimeDindCPU`, the chart's `runtime.dind.resources.limits.cpu`
-  fallback and the Dockerfile's `DIND_CPU_LIMIT` ARG default are three copies
-  of one number that move together (`runtime_dind_default_mirrors_test.go`).
-- Decide the desktop suite's Playwright worker count in the Makefile beside the
-  other quota-derived gate widths, never in the Dockerfile as arithmetic on
-  `DIND_CPU_LIMIT`: the two are independent decisions, and a value set in the
-  build's RUN step silently wins over the Makefile's.
+  `DefaultRuntimeDindCPU` and the chart's `runtime.dind.resources.limits.cpu`
+  fallback are two copies of one number that move together
+  (`runtime_dind_default_mirrors_test.go`).
 - CPU enforcement uses a distinct, tested mechanism: `dind-entrypoint.sh` mirrors
   its live `cpu.max` into a per-pod capped parent and in-pod builds pass that parent
   per invocation. Do not apply this to host builds or change daemon placement.
@@ -271,24 +265,22 @@ composition and release invariants belong to root/shared logic, not chart policy
   deploy installs an explicit published version. Build defaults to both supported
   architectures; non-release builds may explicitly select a platform. Releases
   require the full platform set. Do not describe deploy as a build or push path.
-- Keep `make check` in the image test stage and its success-marker dependency
-  before the builder's heavy compilation steps, preventing independent stages
-  from competing with the gate.
+- Every component tests itself as part of its own build: its Dockerfile declares
+  `AS test`, which only calls the component's own plain commands (`go tool
+  golangci-lint run`, `go test ./...`, `yarn test`, a `*_test.sh`), and a later
+  stage takes `COPY --from=test /test-ok` before its heavy work, so no image is
+  produced when they fail. Test logic belongs to the component, never to this
+  module.
 - Pin native tests, cross-compilers, and architecture-independent builders to
   `BUILDPLATFORM`. Do not pin final target layers or stages executing target
   binaries. Copy target toolchains from an unpinned, copy-only stage when needed.
-- The test stage must carry the inputs and pinned toolchains for every wired gate:
-  all Go test/lint modules, all Yarn workspace members, generated Wails bindings,
-  Helm chart tests, Wails/webkit dependencies, and Playwright Chromium dependencies.
-  Keep the root Makefile and Docker COPY set aligned as members/gates change.
-  `erun-common/dockerfile_copy_contract_test.go` is the static check, and both its
-  halves compare against the COPYs of the stage that runs `make check` — not the
-  whole file, since another stage's COPYs are ones the gate cannot read. One half
-  reads the scripts the Makefile names and checks both the script file and the
-  directory it resolves its root through; the other reads the repository-root paths
-  the gate's Go tests open, including those written relative to a test's own package
-  directory. Each fails in the run that introduces a path this stage does not COPY.
-  Windows cross-compilation needs no Windows SDK here; it does not prove native UI.
+- A test stage COPYs its component plus exactly what its tests read and installs the
+  pinned toolchain they run with; a path its tests open that the stage does not
+  COPY fails in the build while a full checkout passes. The `erun-devops` image's
+  own test stage runs its baked scripts' tests (`docker/erun-devops/*_test.sh`), the
+  chart tests (`k8s/*_test.sh`) and each Terraform module's `terraform test`; it
+  takes `erun` and `emcp` from the `erun-cli` image built in the same run
+  (`FROM ghcr.io/sophium/erun-cli:${ERUN_VERSION}`), its only use of `ERUN_VERSION`.
 - Use sequential per-platform plain `docker build`, local arch tags, and fingerprint
   tags. Push assembles the per-arch images into a manifest list; preserve
   `--provenance=false`. Validate required binfmt support before building.
@@ -307,15 +299,6 @@ composition and release invariants belong to root/shared logic, not chart policy
   build, and a BuildKit cache hit on the test stage reuses a tested layer the same
   way. `build_test_stage_test.go` locks promotion and rebuild for such a
   Dockerfile.
-- The test stage is also the definition other in-container runs of the Playwright
-  suite mirror, so its environment carries `ERUN_PLAYWRIGHT_ARTIFACTS_DIR`: the
-  suite's one artifact root (Playwright's output dir, the HTML report, every frame a
-  spec captures) pointed at a container-local path. A run that mirrors the stage by
-  bind-mounting a worktree over `/src` as root — `scripts/repro-gate-contention.sh`
-  does — otherwise leaves artifacts owned by uid 0 in a tree the environment user
-  owns, where `rm -rf` cannot remove them and every later run in that environment
-  fails with a bare `EACCES` inside whichever spec writes first, for every branch.
-  Change the value here and the mirror changes with it.
 - Previews show concrete commands for the operations selected, without adding
   build/push actions to a pure deploy.
 - **A test needing a real container runtime reaches it from a `RUN` step via the
@@ -355,35 +338,21 @@ composition and release invariants belong to root/shared logic, not chart policy
   classes never belong in a `test` stage.** In scope: a Testcontainers-style
   ephemeral dependency (a postgres, a compose-style sidecar) via
   `RUN --network=host` + `DOCKER_HOST=tcp://127.0.0.1:2375` — it needs a daemon, not
-  a deployment, and the build already has one. Out of scope permanently: a test
-  needing the build's own output (`erun-ui/playwright` needs a built `erun-app`, and
-  this stage cannot depend on the `builder` stage it gates without inverting the
-  marker order), and a test asserting a deployed version (that runs after `deploy`,
-  per the `/pipeline` convention, never during build).
-- **`erun-backend-api` is the first component migrated into that venue, and it is
-  the template for the rest.** Its Dockerfile declares `AS test`, consumes the
-  entitlement with `RUN --network=host` against `DOCKER_HOST=tcp://127.0.0.1:2375`
-  through a client it copies from its own pinned `test-toolchain` stage, and its
-  `builder` stage depends on the result via `COPY --from=test /test-ok` — so the
-  image cannot be built when the gate fails. The stage runs
-  `erun-devops/docker/erun-backend-api/e2e_gate_test.sh`: a real `postgres:18.3`
-  fixture plus `erun-backend-db`'s real Atlas migrations, one database per package
-  (the platform-bootstrap suites assert whole-database state and are not mutually
-  isolated), and every `ERUN_E2E_*_DATABASE_URL` the module's tests read derived from
-  those sources rather than listed, so a suite added later is covered when it lands.
-  The run fails when a database-gated case skips with the database configured,
-  because that is the shape this venue exists to remove: without it the module was
-  reached only by `make check`'s bare `go test -count=1 ./...` with no `ERUN_E2E_*`
-  variable set, so every database-backed case reported `SKIP` under a package line
-  that still read `ok`. The same script runs by hand via `make
-  test-erun-backend-api-e2e`.
-- The remaining in-scope instances are still unmigrated:
-  `erun-backend-db/migrate_test.sh` and `erun-console/nginx_test.sh` each need
-  only a real docker daemon (`migrate_test.sh` additionally needs the atlas CLI)
-  and remain the root Makefile's `test-postgres-restart`/`test-console-nginx`
-  targets, run by hand or via `erun exec job` before merging a change to the
-  behavior they cover. The retention and schema drift checks moved into
-  erun-backend-api's Go suites, which its image test stage runs.
+  a deployment, and the build already has one. A test needing a built binary builds
+  it inside the test stage, which cannot depend on the `builder` stage it gates
+  without inverting the marker order. Out of scope permanently: a test asserting a
+  deployed version (that runs after `deploy`, per the `/pipeline` convention, never
+  during build).
+- **`erun-backend-api` is the template for that venue.** Its test stage runs
+  `go test ./...` in a `RUN --network=host` step against
+  `DOCKER_HOST=tcp://127.0.0.1:2375`; its database suites start PostgreSQL
+  themselves through Testcontainers, so nothing in this module decides which
+  suites run. The retention and schema drift checks are among those Go suites.
+- Two real-daemon script tests are not in any build and run by hand before merging
+  a change to the behavior they cover — `sh <path>` directly, or via `erun exec
+  job`: `docker/erun-backend-db/migrate_test.sh` (reset/migration/recovery; also
+  needs the atlas CLI) and `docker/erun-console/nginx_test.sh` (shipped nginx
+  behavior).
 
 ## Release Workflow
 
@@ -405,13 +374,10 @@ composition and release invariants belong to root/shared logic, not chart policy
 
 - Test Docker dependency/cache/version contracts and shared plus tenant chart
   behavior. Keep release-sensitive common, CLI, and MCP suites aligned.
-- `helm-chart-tests` uses render-only tests without a cluster; new tests under
-  `k8s` are discovered automatically. Keep real-daemon tests separate and explicit:
-  `test-postgres-restart` for reset/migration/recovery, `test-console-nginx`
-  for shipped nginx behavior, and `test-erun-backend-api-e2e` for the
-  `erun-backend-api` opt-in `ERUN_E2E_*` database suites (the same script that
-  module's own image `test` stage runs in every build). Run affected
-  entrypoint/helper script tests too.
+- Chart tests under `k8s` are render-only, need no cluster, and are discovered by
+  the `erun-devops` test stage's glob, as are the baked scripts' tests under
+  `docker/erun-devops`. Keep real-daemon tests separate and explicit (see Build
+  Workflow).
 - Live RBAC, resource isolation, and restart guarantees need corresponding real
   probes when changed; render tests alone cannot establish them.
 - Guidance-only edits use root's consistency/reference validation exemption.

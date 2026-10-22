@@ -262,8 +262,8 @@ func shrinkGateIncompleteWait(t *testing.T, waitCap, poll time.Duration) {
 	})
 }
 
-// An agent job that runs a gate through its own `job start` (agent-gate.sh's
-// detach-and-await, or an agent driving the same primitive directly) and then
+// An agent job that runs a gate through its own `job start` (detach and
+// await) and then
 // ends -- however that end comes about: the agent backgrounding the run
 // itself, exhausting its turns, or an outer `timeout` killing the foreground
 // wait -- must not read as a clean success while the gate it started has not
@@ -459,9 +459,9 @@ func TestEnvironmentJobThatStartedAFinishedButFailedJobIsNotReportedAsSuccess(t 
 }
 
 // The gate-incomplete detection above depends on a nested `job start` reading
-// back the parent job's id from its own environment, exactly the way
-// agent-gate.sh's `erun exec job start` (run from inside the agent's own Bash
-// tool) reads it back today. This locks that half of the wiring directly:
+// back the parent job's id from its own environment, the way an
+// `erun exec job start` run from inside the agent's own Bash tool reads it
+// back. This locks that half of the wiring directly:
 // the job's own child process must see ERUN_JOB_ID naming this job.
 func TestEnvironmentJobSupervisorPropagatesItsOwnIDToTheWorksProcess(t *testing.T) {
 	isolateActivityCache(t)

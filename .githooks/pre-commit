@@ -1,172 +1,34 @@
 #!/usr/bin/env sh
+# Formats staged files and re-stages them. Lint and tests run in each
+# component's own build (`erun build`), not here.
 set -eu
-
-if [ "${SKIP_GOLANGCI_LINT:-0}" = "1" ]; then
-  echo "SKIP_GOLANGCI_LINT=1 detected; skipping pre-commit lint." >&2
-  exit 0
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-  echo "error: git command not found; required for pre-commit hook" >&2
-  exit 1
-fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
-CHANGED=$(git diff --cached --name-only --diff-filter=ACMR || true)
-CHANGED_GO=$(printf '%s\n' "$CHANGED" | grep -E '\.go$' || true)
-CHANGED_FRONTEND=$(printf '%s\n' "$CHANGED" | grep -E '^erun-ui/(frontend|playwright)/' || true)
-CHANGED_ISSUE_REF=$(printf '%s\n' "$CHANGED" | grep -E '^(erun-kit/src/|erun-ui/frontend/src/|erun-console/src/).*\.tsx?$' || true)
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$STAGED" ] || exit 0
 
-if [ -z "$CHANGED_GO" ] && [ -z "$CHANGED_FRONTEND" ] && [ -z "$CHANGED_ISSUE_REF" ]; then
-  exit 0
+STAGED_GO=$(printf '%s\n' "$STAGED" | grep -E '\.go$' || true)
+if [ -n "$STAGED_GO" ]; then
+  printf '%s\n' "$STAGED_GO" | tr '\n' '\0' | xargs -0 gofmt -w
+  printf '%s\n' "$STAGED_GO" | tr '\n' '\0' | xargs -0 git add
 fi
 
-# --- Go: lint EVERY Go module, each from its own directory so its .golangci.yml
-# applies. This is intentionally broader than the in-build gate (Makefile
-# LINT_MODULES), which can't lint erun-ui in the build image's toolchain — but
-# locally that CGO/webkit toolchain is present, so the hook covers erun-ui (and
-# the backend) too. Linting only a subset let a cyclop finding in erun-common
-# reach the build gate (#595/#597); config-enabled linters like cyclop only fire
-# from inside the module that enables them. Modules are discovered so a new
-# go.mod is covered automatically.
-if [ -n "$CHANGED_GO" ]; then
-  if ! command -v golangci-lint >/dev/null 2>&1; then
-    cat <<'MSG' >&2
-error: golangci-lint is not installed.
-Install it from https://golangci-lint.run/welcome/install/ and ensure it is on your PATH.
-MSG
-    exit 1
+# Each prettier project formats from its own directory so its .prettierrc.json
+# and .prettierignore apply. erun-console/playwright is its own project.
+PRETTIER="$REPO_ROOT/node_modules/.bin/prettier"
+for project in erun-kit erun-console erun-console/playwright erun-ui/frontend erun-ui/playwright; do
+  files=$(printf '%s\n' "$STAGED" | grep -E "^$project/" || true)
+  if [ "$project" = erun-console ]; then
+    files=$(printf '%s\n' "$files" | grep -vE '^erun-console/playwright/' || true)
   fi
-  # A golangci-lint newer or older than the pin can flag (or miss) different
-  # things than the image build's pinned install, so a --fix here can rewrite
-  # code the pinned version would then reject -- assert the version instead of
-  # trusting whatever is on PATH.
-  PIN=$(tr -d '\n' < "$REPO_ROOT/GOLANGCI_LINT_VERSION")
-  PIN_NUM=${PIN#v}
-  INSTALLED=$(golangci-lint --version 2>&1)
-  case "$INSTALLED" in
-    *"version $PIN_NUM "*) ;;
-    *)
-      echo "error: golangci-lint version mismatch: pinned $PIN, found: $INSTALLED" >&2
-      echo "install the pinned version: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$PIN" >&2
-      exit 1
-      ;;
-  esac
-  GO_MODULE_DIRS=$(find "$REPO_ROOT" -name go.mod -not -path '*/node_modules/*' -not -path '*/.git/*' -exec dirname {} \; | sort)
-  for module_dir in $GO_MODULE_DIRS; do
-    # A module nested inside another module's tree (an ancestor dir carries its
-    # own go.mod) is isolated by design and kept out of the parent's go.work —
-    # e.g. the playwright winstub fixture, which seedRoot.ts builds with
-    # GOWORK=off. Under the ambient workspace golangci-lint would reject it
-    # ("directory prefix . does not contain modules listed in go.work") and abort
-    # the whole hook, so lint it standalone the same way it is built.
-    gowork_off=
-    ancestor=$(dirname "$module_dir")
-    while [ "$ancestor" != "$REPO_ROOT" ] && [ "$ancestor" != "/" ]; do
-      if [ -f "$ancestor/go.mod" ]; then
-        gowork_off=1
-        break
-      fi
-      ancestor=$(dirname "$ancestor")
-    done
-    printf 'golangci-lint --fix %s\n' "${module_dir#"$REPO_ROOT"/}"
-    (
-      cd "$module_dir"
-      if [ -n "$gowork_off" ]; then
-        GOWORK=off golangci-lint run --fix ./...
-      else
-        golangci-lint run --fix ./...
-      fi
-    )
-  done
-  printf 'Restaging Go files touched by golangci-lint...\n'
-  printf '%s\n' "$CHANGED_GO" | while IFS= read -r go_file; do
-    if [ -n "$go_file" ] && [ -f "$go_file" ]; then
-      git add "$go_file"
-    fi
-  done
-fi
-
-# --- Frontend: lint the desktop app's frontend + Playwright projects when their
-# sources change (eslint via `yarn lint`). Best-effort: skipped with a warning
-# when yarn or a project's node_modules are absent so a Go-only contributor is
-# never blocked. Unlike the Go path it does not auto-fix — TS fixes are left to
-# the author to review.
-#
-# erun-ui/frontend imports the generated Wails bindings (wailsjs/), which are
-# gitignored/dockerignored like any other generated artifact, so a checkout's
-# copy is only as current as the last surface that regenerated it. Linting
-# against a stale copy reports type-aware errors inside source the commit does
-# not touch -- a binding that does not resolve reads as `any` -- and that false
-# failure vetoes the commit, including the squash a merge gate commits through
-# this hook. So regenerate first, via the same generator the Makefile's
-# test-frontend and erun-ui/build.sh call (it writes only gitignored artifacts,
-# never staged content), and skip this workspace's lint when the bindings
-# cannot be regenerated rather than lint against ones that cannot be trusted.
-# Playwright does not read wailsjs/, so it is left alone.
-regenerate_wailsjs() {
-  if [ ! -x "$REPO_ROOT/erun-ui/generate-wailsjs.sh" ]; then
-    echo "note: erun-ui/generate-wailsjs.sh missing or not executable; skipping erun-ui/frontend lint" >&2
-    return 1
+  [ -n "$files" ] || continue
+  if [ ! -x "$PRETTIER" ]; then
+    echo "note: root node_modules missing; skipping prettier (run 'yarn install' at the repo root)" >&2
+    break
   fi
-  printf 'regenerating erun-ui/frontend wailsjs bindings\n'
-  if ! "$REPO_ROOT/erun-ui/generate-wailsjs.sh"; then
-    cat <<'MSG' >&2
-note: could not regenerate erun-ui/frontend's Wails bindings; skipping its
-      lint here rather than reporting lint errors against stale generated
-      code. Run ./erun-ui/generate-wailsjs.sh to regenerate them by hand; the
-      check gate regenerates them for its own run either way.
-MSG
-    return 1
-  fi
-  return 0
-}
-
-if [ -n "$CHANGED_FRONTEND" ]; then
-  if command -v yarn >/dev/null 2>&1; then
-    for fe in erun-ui/frontend erun-ui/playwright; do
-      if printf '%s\n' "$CHANGED_FRONTEND" | grep -q "^$fe/"; then
-        if [ -d "$REPO_ROOT/$fe/node_modules" ]; then
-          if [ "$fe" = "erun-ui/frontend" ]; then
-            regenerate_wailsjs || continue
-          fi
-          printf 'yarn lint %s\n' "$fe"
-          (
-            cd "$REPO_ROOT/$fe"
-            yarn --silent lint
-          )
-        else
-          echo "note: $fe/node_modules missing; skipping its lint (run 'yarn install' there to enable)" >&2
-        fi
-      fi
-    done
-  else
-    echo "note: yarn not found; skipping frontend lint" >&2
-  fi
-fi
-
-# --- Issue-reference gate: scripts/check-issue-references.mjs is the
-# whole-tree TypeScript-side check for root AGENTS.md § "Code Comments" (no
-# tracker reference in a code comment; see that script's own header for why
-# a script rather than a per-package ESLint rule). It needs only the
-# `typescript` package the root workspace's own `yarn install` resolves, not
-# each package's own node_modules, so it runs here independent of the Go/
-# frontend-lint gates above whenever a change touches one of the three
-# source roots it scans -- catching a violation in seconds instead of a full
-# merge-gate cycle later.
-if [ -n "$CHANGED_ISSUE_REF" ]; then
-  if command -v node >/dev/null 2>&1; then
-    if [ -d "$REPO_ROOT/node_modules/typescript" ]; then
-      printf 'issue-reference gate (erun-kit, erun-ui/frontend, erun-console)\n'
-      node "$REPO_ROOT/scripts/check-issue-references.mjs" erun-kit/src erun-ui/frontend/src erun-console/src
-    else
-      echo "note: node_modules/typescript missing at repo root; skipping issue-reference gate (run 'yarn install' at repo root to enable)" >&2
-    fi
-  else
-    echo "note: node not found; skipping issue-reference gate" >&2
-  fi
-fi
-
-printf 'pre-commit lint completed.\n'
+  printf '%s\n' "$files" | sed "s|^$project/||" | tr '\n' '\0' |
+    (cd "$project" && xargs -0 "$PRETTIER" --write --ignore-unknown --log-level warn)
+  printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 git add
+done

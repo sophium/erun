@@ -10,13 +10,11 @@ import * as path from 'node:path';
 // carries a pod's frames out to a reviewing orchestrator, so an in-environment
 // run has to leave them there (see visualFrames.ts).
 //
-// The override exists for runs whose tree is not theirs to write to. Both
-// in-container gate paths set it (the erun-devops Dockerfile's test stage and
-// scripts/repro-gate-contention.sh): the latter bind-mounts an environment's
-// own worktree over /src and runs as root, so a report written into the default
-// location comes back owned by uid 0 -- which the environment user cannot
-// remove, and which fails every later run in that environment rather than only
-// the run that wrote it.
+// The override exists for runs whose tree is not theirs to write to. A root
+// container over a bind-mounted worktree is the shape: a report written into
+// the default location comes back owned by uid 0 -- which the environment user
+// cannot remove, and which fails every later run in that environment rather
+// than only the run that wrote it.
 export const TEST_RESULTS_DIRNAME = 'test-results';
 export const PLAYWRIGHT_REPORT_DIRNAME = 'playwright-report';
 
@@ -53,11 +51,10 @@ export function assertArtifactDirectoriesUsable(): void {
 // a bare EACCES that names no cause. The second is quieter and worse -- the
 // directory is writable, but belongs to another user, so whatever this run
 // writes there is not the owner's to remove. A root-privileged container run
-// against an environment's worktree is exactly that shape (the arrangement
-// scripts/repro-gate-contention.sh mirrors bind-mounts the tree over /src and
-// runs as root), and it is worth refusing even though the writer itself would
-// succeed: the environment is left unable to clean its own tree, and every
-// later run there fails for every branch rather than only the one that wrote.
+// against an environment's bind-mounted worktree is exactly that shape, and it
+// is worth refusing even though the writer itself would succeed: the
+// environment is left unable to clean its own tree, and every later run there
+// fails for every branch rather than only the one that wrote.
 //
 // A world-writable entry is exempt from the ownership arm, which is what keeps
 // a deliberate out-of-tree root (a shared temp directory, say) usable by a
