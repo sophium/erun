@@ -28,8 +28,6 @@ import (
 // through psql for the declared side -- then compared with plain SQL
 // introspection ordered by name, so incremental-migration column order is
 // never mistaken for drift.
-//
-// Ported from erun-devops/docker/erun-backend-db/schema_drift_test.sh.
 
 const (
 	schemaDriftDBModuleDir     = "../erun-backend-db"

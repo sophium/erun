@@ -24,8 +24,8 @@ RUN apk add --no-cache ca-certificates postgresql16-client && \
 
 COPY --from=atlas-fetcher /atlas /usr/local/bin/atlas
 COPY erun-backend/erun-backend-db /opt/erun-backend-db
-COPY --chmod=0755 erun-devops/docker/erun-backend-db/migrate.sh /usr/local/bin/erun-backend-db-migrate
-COPY --chmod=0755 erun-devops/docker/erun-backend-db/retention.sh /usr/local/bin/erun-backend-db-retention
+COPY --chmod=0755 erun-backend/erun-backend-db/bin/migrate.sh /usr/local/bin/erun-backend-db-migrate
+COPY --chmod=0755 erun-backend/erun-backend-db/bin/retention.sh /usr/local/bin/erun-backend-db-retention
 
 # Refuse to build an image whose baked migration directory is internally
 # inconsistent (v1.0.247 shipped with an atlas.sum entry that did not match

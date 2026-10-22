@@ -20,7 +20,7 @@ import (
 // out the way the erun-backend-db image lays them out for retention.sh.
 const (
 	retentionPolicyDir           = "../erun-backend-db/retention"
-	retentionScriptPath          = "../../erun-devops/docker/erun-backend-db/retention.sh"
+	retentionScriptPath          = "../erun-backend-db/bin/retention.sh"
 	retentionContainerPolicyDir  = "/opt/erun-backend-db/retention"
 	retentionContainerEntrypoint = "/usr/local/bin/erun-backend-db-retention"
 )

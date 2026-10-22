@@ -16,7 +16,7 @@
 #      the same atlas commands migrate.sh runs — the command the repair
 #      CronJob (migrate-repair-cronjob.yaml) invokes on its own schedule.
 #
-# Lives beside migrate.sh rather than in erun-integration: it needs a real
+# Lives with the erun-backend-db chart rather than in erun-integration: it needs a real
 # docker daemon and the real atlas CLI, neither of which the erun-devops image
 # test stage carries (there is no nested docker daemon available inside a
 # `docker build` RUN step), unlike the k8s/*_chart_test.sh scripts, which need
