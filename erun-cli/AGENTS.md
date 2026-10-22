@@ -38,9 +38,9 @@ This is the shared quality bar for CLI help and MCP descriptions.
   CLI and MCP descriptions must agree semantically, while fitting their surfaces.
 - Review literal rendered help for accuracy and usefulness, not length. Quote
   user-visible wording when reporting quality; cite source when identifying edits.
-- The integration CLI-help gate checks registered example/prose flags and gate-run
-  status vocabulary. It does not establish useful prose, truthful defaults, or
-  complete descriptions; those still require review.
+- The integration CLI-help gate checks registered example/prose flags. It does
+  not establish useful prose, truthful defaults, or complete descriptions; those
+  still require review.
 
 ## Exit-Code Contract: Reporting Commands Vs Gating Checks
 

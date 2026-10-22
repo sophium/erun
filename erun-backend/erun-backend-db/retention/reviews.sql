@@ -13,16 +13,16 @@
 --
 -- Referential order matters here in a way it didn't for comments/releases:
 -- reviews is the parent every review-lifecycle table hangs off, with six
--- inbound FKs, five of them RESTRICT. The design's own guard list names
--- comments/review_reviewers/releases/gate_runs but omits builds -- builds.
--- review_id is RESTRICT exactly like the other four, and any review that
--- ever had a GATE build attempt (the common case) has at least one builds
--- row pointing at it regardless of whether that build is one of the
--- pinned last_*_build_id columns. Deleting a review while an unpinned
--- builds/gate_runs row still references it would hit a live FK violation,
--- so this file's guard checks builds directly rather than trusting that
--- some other sweep already cleared it -- no policy here covers builds -- see
--- the header note on effectiveness below.
+-- inbound FKs, most of them RESTRICT. The design's own guard list names
+-- comments/review_reviewers/releases but omits builds -- builds.review_id is
+-- RESTRICT exactly like the others, and any review that ever had a build
+-- recorded against it (the common case) has at least one builds row
+-- pointing at it regardless of whether that build is one of the pinned
+-- last_*_build_id columns. Deleting a review while an unpinned builds row
+-- still references it would hit a live FK violation, so this file's guard
+-- checks builds directly rather than trusting that some other sweep already
+-- cleared it -- no policy here covers builds -- see the header note on
+-- effectiveness below.
 --
 -- review_reviewers has no self-cleanup path anywhere in the codebase (see
 -- the design), so this sweep prunes it itself, in the same transaction,
@@ -30,18 +30,18 @@
 -- survives this round, so "who reviewed this" is never lost for a review
 -- still standing.
 --
--- Effectiveness note: until builds/gate_runs retention exists, a CLOSED
--- review that ever had any GATE build attempt keeps at least one builds row
+-- Effectiveness note: until builds retention exists, a CLOSED review that
+-- ever had a build recorded against it keeps at least one builds row
 -- forever, which fails this file's own builds guard forever. That is
 -- expected, not a bug: this policy is still correct and safe to run now, it
 -- will simply find few or no eligible rows on a tenant whose closed reviews
--- all went through at least one gate attempt, until those two tables are
--- swept and their rows start aging out.
+-- all had at least one build, until builds are swept and their rows start
+-- aging out.
 --
 -- Blast radius if the bound below is misconfigured: an unrecoverable loss
 -- of review history and its reviewer assignments -- not a crash, since
 -- nothing reads a deleted review to make a live decision. The builds/
--- comments/releases/gate_runs/review_merge_queue guards below bound that
+-- comments/releases/review_merge_queue guards below bound that
 -- loss to reviews with no surviving artifact of their own, but a bound
 -- written too loose still discards real review provenance sooner than a
 -- real audit would want.
@@ -79,7 +79,6 @@ guarded_eligible AS (
   WHERE NOT EXISTS (SELECT 1 FROM comments c WHERE c.tenant_id = e.tenant_id AND c.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM releases rel WHERE rel.tenant_id = e.tenant_id AND rel.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.tenant_id = e.tenant_id AND b.review_id = e.review_id)
-    AND NOT EXISTS (SELECT 1 FROM gate_runs g WHERE g.tenant_id = e.tenant_id AND g.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM review_merge_queue q WHERE q.tenant_id = e.tenant_id AND q.review_id = e.review_id)
 )
 SELECT 'reviews' AS table_name, count(*) AS eligible_for_deletion FROM guarded_eligible;
@@ -100,7 +99,6 @@ guarded_eligible AS (
   WHERE NOT EXISTS (SELECT 1 FROM comments c WHERE c.tenant_id = e.tenant_id AND c.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM releases rel WHERE rel.tenant_id = e.tenant_id AND rel.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.tenant_id = e.tenant_id AND b.review_id = e.review_id)
-    AND NOT EXISTS (SELECT 1 FROM gate_runs g WHERE g.tenant_id = e.tenant_id AND g.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM review_merge_queue q WHERE q.tenant_id = e.tenant_id AND q.review_id = e.review_id)
 )
 SELECT 'review_reviewers' AS table_name, count(*) AS eligible_for_deletion
@@ -129,7 +127,6 @@ guarded_eligible AS (
   WHERE NOT EXISTS (SELECT 1 FROM comments c WHERE c.tenant_id = e.tenant_id AND c.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM releases rel WHERE rel.tenant_id = e.tenant_id AND rel.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.tenant_id = e.tenant_id AND b.review_id = e.review_id)
-    AND NOT EXISTS (SELECT 1 FROM gate_runs g WHERE g.tenant_id = e.tenant_id AND g.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM review_merge_queue q WHERE q.tenant_id = e.tenant_id AND q.review_id = e.review_id)
 ),
 reviews_eligible AS (
@@ -184,7 +181,6 @@ guarded_eligible AS (
   WHERE NOT EXISTS (SELECT 1 FROM comments c WHERE c.tenant_id = e.tenant_id AND c.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM releases rel WHERE rel.tenant_id = e.tenant_id AND rel.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.tenant_id = e.tenant_id AND b.review_id = e.review_id)
-    AND NOT EXISTS (SELECT 1 FROM gate_runs g WHERE g.tenant_id = e.tenant_id AND g.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM review_merge_queue q WHERE q.tenant_id = e.tenant_id AND q.review_id = e.review_id)
 )
 -- review_reviewers deletes before reviews, in the same transaction, so a
@@ -208,7 +204,6 @@ guarded_eligible AS (
   WHERE NOT EXISTS (SELECT 1 FROM comments c WHERE c.tenant_id = e.tenant_id AND c.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM releases rel WHERE rel.tenant_id = e.tenant_id AND rel.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.tenant_id = e.tenant_id AND b.review_id = e.review_id)
-    AND NOT EXISTS (SELECT 1 FROM gate_runs g WHERE g.tenant_id = e.tenant_id AND g.review_id = e.review_id)
     AND NOT EXISTS (SELECT 1 FROM review_merge_queue q WHERE q.tenant_id = e.tenant_id AND q.review_id = e.review_id)
 )
 DELETE FROM reviews r

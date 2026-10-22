@@ -43,10 +43,9 @@ FROM --platform=$BUILDPLATFORM golang:1.26.0 AS builder
 # The marker the `test` stage above leaves behind, copied before the builder's
 # own work so a failed gate stops the build here rather than after compiling a
 # binary nothing will ship. This instruction is also what makes the test stage a
-# required part of the build graph: it is the `COPY --from=test` that
-# dockerfileHasGateTestStage reads, so erun refuses to promote a cached
-# fingerprint image for this Dockerfile and `erun build --gate` executes the
-# stage instead of accepting BuildKit's replay of it.
+# required part of the build graph: an image built from this Dockerfile has
+# always passed its tests, so a fingerprint promotion or a BuildKit cache hit
+# reuses a tested result.
 COPY --from=test /test-ok /tmp/erun-test-ok
 
 WORKDIR /src

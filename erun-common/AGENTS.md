@@ -162,49 +162,33 @@ demonstrated:
   atlas.sum is the exception: it is regenerated from the migration files on disk
   and the source lands rather than being skipped. Refuse an all-empty batch.
   Do not loop single-source invocations that reset away earlier work.
-- Keep one gate_run per batch and preserve ordered landed/skipped composition
-  in its log artifact. Mapping one batch build to multiple review acceptances
-  remains an API design question, not an execution shortcut.
-- `gate_run_failure_classifier.go` owns infrastructure signatures. Start/report
-  inspect failure text and bounded local log content, visibly reclassifying known
-  infrastructure failures as INCONCLUSIVE. A failed review GATE build with the
-  same signature must be refused instead of changing the review to FAILED;
-  its boolean success field cannot represent a non-verdict. Test both records.
+- Preserve a batch's ordered landed/skipped composition in its gate-merge
+  output. A batch lands as one merge commit build; mapping that build to
+  several review acceptances remains an API design question, not an execution
+  shortcut.
+- `build_failure_classifier.go` owns erun's known infrastructure failure
+  signatures (`BuildInconclusiveSignatures`). `review record-build --failed`
+  refuses a failure detail matching one instead of moving the review to
+  FAILED: `builds.successful` cannot represent a non-verdict, so the remedy is
+  to re-run the build and record that result.
 - Release cadence/coalescing is an unwired design in
   `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
   Do not treat drift reporting as an automated release drainer.
-- A build's own trace states what the builder did with its Dockerfile's `test`
-  stage, not what the plan intended. `dockerfileHasGateTestStage` keeps a gate
-  image out of the *fingerprint* promotion path, but BuildKit's layer cache sits
-  underneath that guard and can serve the whole test stage on its own: the build
-  finishes in seconds at zero CPU, `make check` never executes, and the exit code
-  is 0 — the same green as a real gate run. Two mechanisms close it, and neither
-  is optional. A run that declares itself the merge queue's gate
-  (`ForceGateTestStage`, set from `--gate`) makes its own `docker build`
-  invalidate just that stage (`--no-cache-filter`, `dockerBuildGateStageArgs`), so
-  declaring a gate costs the gate and not a cold rebuild of the shared cache. A
-  wholly replayed stage is otherwise **refused by the run that declared itself
-  the merge queue's gate** (`ensureGateTestStageExecuted`): the merge queue
-  gates with `erun build --gate` (erun-merge-queue-drive § 2), and a gate's exit
-  status is the entirety of what `erun review record-build --gate` records, so a
-  memoized verdict cannot stand in for it. A plain `erun build` still **reports**
-  the replay — the `test stage (…): REPLAYED` outcome line is printed for every
-  build — but it does not fail on one: its rung (the erun-merge skill's READY
-  step, and every other plain build) claims only that the commit builds, which a
-  layer-cache hit on byte-identical inputs establishes as well as the run that
-  first executed the stage. Refusing those failed a promise no rung made, and
-  failed it wholesale — in a plan with two gate-bearing images, a diff that left
-  either one's inputs untouched replayed that one and failed the whole run
-  (#2718). Do not widen that refusal back to every build; keep it keyed on the
-  declaration.
-  `gateTestStagePlanLines` announces the
-  plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
-  reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
-  captured `--progress=plain` stream, which is the one report a warm cache cannot
-  fake (an in-image marker is replayed along with the layer holding it). Keep the
-  stage's `FROM` step out of that evidence: BuildKit reports it DONE even when
-  every instruction below it was CACHED, which would hide the replay
-  (`build_gate_test_stage_evidence.go`).
+- Testing is part of building. A component's Dockerfile runs its lint and
+  tests in a `test` stage the final stage consumes (`COPY --from=test`), so no
+  image exists unless they passed. An unchanged component reuses its last
+  successful result: a fingerprint tag is written only after a successful
+  `docker build`, so promoting from it (`applyIncrementalPromotion`) is reuse
+  of a tested result, and a BuildKit layer-cache hit on byte-identical inputs
+  is equally valid. Every image, tested or not, takes the same promotion path
+  (`build_test_stage_test.go`); an all-promoted plan is a successful build.
+  There is no `--gate` build and no GATE build kind for new builds: the merge
+  queue builds the composed merge commit with a plain `erun build` and records
+  it RECORDED with its version.
+- `dockerfileDeclaresTestStage` scopes the host-network entitlement to
+  Dockerfiles with a `test` stage. Keep the stage name exact (`AS test`, not a
+  `test-` prefix); `dockerfile_copy_contract_test.go` pins that the real
+  component Dockerfiles consume their test stage.
 - Preserve the gate wrapper's distinction between a clean pass, an exit-zero
   process that left unsupervised work (reported with an explicit warning and job
   ID), and a genuine failure. The orphan warning is not proof of completed work;

@@ -300,17 +300,13 @@ composition and release invariants belong to root/shared logic, not chart policy
   is a different artifact even without source changes. Snapshot identity uses its
   stable base-snapshot value. Promotion requires every requested architecture;
   do not silently reuse an incomplete platform set.
-- **Incremental promotion never skips a Dockerfile matching the test-stage-gate
-  convention (`AS test` plus a later `COPY --from=test`), however unchanged its
-  inputs are.** A matching fp-tagged image proves the *inputs* are unchanged, not
-  that the gate ran: promoting one reports the same exit 0 as a build that actually
-  ran `make check`. Detect the convention by Dockerfile content
-  (`dockerfileHasGateTestStage`), always rebuild such a Dockerfile instead of
-  promoting it, and refuse outright if a build is ever marked both `GateTestStage`
-  and `Promote`. This is deliberately narrower than disabling the Docker build
-  cache generally: BuildKit's per-instruction layer cache inside a real
-  `docker build` is untouched. `build_gate_test_stage_test.go` locks the detection
-  and the refusal.
+- **An unchanged component's fingerprint promotion is its last successful
+  build, tests included, and is a valid result.** A Dockerfile with a consumed
+  test stage (`AS test` plus a later `COPY --from=test`) promotes from its fp tag
+  like any other image, because fp tags are written only after a successful
+  build, and a BuildKit cache hit on the test stage reuses a tested layer the same
+  way. `build_test_stage_test.go` locks promotion and rebuild for such a
+  Dockerfile.
 - The test stage is also the definition other in-container runs of the Playwright
   suite mirror, so its environment carries `ERUN_PLAYWRIGHT_ARTIFACTS_DIR`: the
   suite's one artifact root (Playwright's output dir, the HTML report, every frame a
@@ -369,8 +365,7 @@ composition and release invariants belong to root/shared logic, not chart policy
   entitlement with `RUN --network=host` against `DOCKER_HOST=tcp://127.0.0.1:2375`
   through a client it copies from its own pinned `test-toolchain` stage, and its
   `builder` stage depends on the result via `COPY --from=test /test-ok` — so the
-  image cannot be built when the gate fails, and `erun build --gate` invalidates and
-  executes that stage by name. The stage runs
+  image cannot be built when the gate fails. The stage runs
   `erun-devops/docker/erun-backend-api/e2e_gate_test.sh`: a real `postgres:18.3`
   fixture plus `erun-backend-db`'s real Atlas migrations, one database per package
   (the platform-bootstrap suites assert whole-database state and are not mutually

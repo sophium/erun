@@ -4,7 +4,7 @@ title: erun jobs
 
 # `erun jobs`
 
-The platform's record of work **in flight**: what agents and orchestrators are working on right now, and what recently finished. Builds and gate runs are reported *after* the work completes; a job is claimed *before* it starts, which is the half that lets two actors see each other and stop duplicating work.
+The platform's record of work **in flight**: what agents and orchestrators are working on right now, and what recently finished. Builds are reported *after* the work completes; a job is claimed *before* it starts, which is the half that lets two actors see each other and stop duplicating work.
 
 Four subcommands: `list`, `show`, `start`, and `finish`. This is the host-side counterpart to `erun exec job`, which starts and observes work inside one environment — `erun jobs` observes the tenant's whole queue, including work that never entered an environment at all.
 
@@ -80,4 +80,3 @@ The scope claim is server-side coordination, not a distributed lock: two claims 
 
 - [MCP overview § Jobs](/mcp/overview#jobs) — the `jobs_list`/`jobs_show`/`jobs_start`/`jobs_finish` tool spec.
 - `erun exec job` — starting and observing work inside one environment (not yet covered by a page of its own).
-- [`erun gate list`](/cli/gate#gate-list) — the same queue view for the merge gate, whose records are reported after the fact rather than claimed before.

@@ -63,7 +63,7 @@ func TestDeploy(t *testing.T) {
 		// The reported failure: an environment initialised before anything
 		// provisioned a platform alias records no platform-alias Secret, so the
 		// runtime chart mounts nothing, the entrypoint's seeder correctly finds
-		// nothing, and the pod can never call the platform API -- `erun gate
+		// nothing, and the pod can never call the platform API -- `erun review
 		// list` among them. Deploying it from a host that is signed in is the one
 		// step such an environment takes that can fix it, and this is what that
 		// deploy now renders: the Secret applied, its name threaded into the helm

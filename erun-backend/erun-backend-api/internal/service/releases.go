@@ -14,7 +14,7 @@ import (
 // repository (internal/repository/releases.go) and are exercised directly by
 // its own SQL-contract tests; nothing here dispatches an attempt — the
 // environment that runs `erun release` reports its own outcome, the same
-// shift the merge queue's gate build made (see AGENTS.md "Merge Queue").
+// shift the merge queue's own build made (see AGENTS.md "Merge Queue").
 type ReleaseQueueRepository interface {
 	Create(ctx context.Context, release model.Release) (model.Release, error)
 	Get(ctx context.Context, releaseID string) (model.Release, error)

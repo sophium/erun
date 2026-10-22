@@ -9,8 +9,8 @@ import (
 )
 
 // A build's per-platform timing step used to bottom out at one duration, no
-// matter how long the underlying `docker build` ran. On a gate build where
-// one image is 97-99% of total wall clock, that single number cannot say
+// matter how long the underlying `docker build` ran. On a build where one
+// image's test stage is 97-99% of total wall clock, that single number cannot say
 // which part of the build was slow. BuildKit's own `--progress=plain` output
 // (already captured by runDockerBuildOnce, never discarded) already answers
 // that question at two levels of granularity: which Dockerfile step ran how
@@ -36,17 +36,6 @@ var buildkitVertexStartPattern = regexp.MustCompile(`^#(\d+) \[([^\]]*)\] (.*)$`
 // one BuildKit never finished) has no known duration and is left out of the
 // phase tree rather than reported as zero.
 var buildkitVertexDonePattern = regexp.MustCompile(`^#(\d+) DONE ([\d.]+)s$`)
-
-// buildkitVertexCachedPattern matches the line BuildKit prints instead of a
-// DONE line when it served a step from its own layer cache:
-//
-//	#7 CACHED
-//
-// This is the builder's own statement that it did not execute the step in this
-// build, and it is the only signal that survives a warm cache: anything the
-// step itself wrote to the image is replayed verbatim along with it, so a
-// marker inside the image cannot tell a replayed step from a live one.
-var buildkitVertexCachedPattern = regexp.MustCompile(`^#(\d+) CACHED$`)
 
 // buildProgressPhasesTopN bounds how many phase rows attach at one level of
 // the tree — a Dockerfile can have dozens of steps, and a `make check` run
@@ -92,17 +81,7 @@ type buildProgressPhase struct {
 // buildKitVertex accumulates everything parseBuildKitVertices learns about
 // one numbered BuildKit step across the whole captured output.
 type buildKitVertex struct {
-	label string
-	// stage is the name of the stage this step belongs to (`test` for a
-	// Dockerfile stage declared `AS test`), or empty for a step of an unnamed
-	// stage and for BuildKit's own `[internal]` steps.
-	stage string
-	// cached records that BuildKit reported this step CACHED — served from its
-	// layer cache rather than executed. Read together with hasDone: a step can
-	// carry both lines (a stage's `FROM` prints DONE, then a later CACHED once
-	// the stage it opens is settled), and only a step with CACHED and no DONE
-	// was demonstrably not executed here.
-	cached   bool
+	label    string
 	hasDone  bool
 	doneSecs float64
 	markers  []buildKitPhaseMarker
@@ -140,11 +119,11 @@ func buildKitProgressPhases(output string) []buildProgressPhase {
 // numbered step in first-seen order alongside what is known about it. A step
 // with no start line (BuildKit always emits one before anything else about
 // that step) is never recorded, so a DONE or output line for an unknown id is
-// silently ignored rather than fabricating a step for it. The four line
+// silently ignored rather than fabricating a step for it. The three line
 // shapes are mutually exclusive (a start line's bracketed stage index, a DONE
-// line's literal "DONE", a CACHED line's literal "CACHED", and an output
-// line's decimal offset can never match the same line), so every line is
-// offered to all four in turn rather than short-circuiting on the first match.
+// line's literal "DONE", and an output line's decimal offset can never match
+// the same line), so every line is offered to all three in turn rather than
+// short-circuiting on the first match.
 func parseBuildKitVertices(output string) (order []string, vertices map[string]*buildKitVertex) {
 	vertices = map[string]*buildKitVertex{}
 	for _, raw := range strings.Split(output, "\n") {
@@ -153,7 +132,6 @@ func parseBuildKitVertices(output string) (order []string, vertices map[string]*
 			order = append(order, id)
 		}
 		applyVertexDone(line, vertices)
-		applyVertexCached(line, vertices)
 		applyPhaseMarker(line, vertices)
 	}
 	return order, vertices
@@ -171,37 +149,8 @@ func applyVertexStart(line string, vertices map[string]*buildKitVertex) (id stri
 	if _, exists := vertices[id]; exists {
 		return id, false
 	}
-	vertices[id] = &buildKitVertex{label: strings.TrimSpace(match[3]), stage: buildkitVertexStage(match[2])}
+	vertices[id] = &buildKitVertex{label: strings.TrimSpace(match[3])}
 	return id, true
-}
-
-// buildkitVertexStage reads the stage a step belongs to from BuildKit's own
-// bracketed field. That field is `<stage> <n>/<m>` for a named stage
-// (`test 4/5`), `<n>/<m>` for an unnamed one, and a fixed keyword such as
-// `internal` for BuildKit's own steps, so only a named stage yields a name.
-//
-// Nothing is re-derived from the Dockerfile here: the name BuildKit labels a
-// stage with is the same name the Dockerfile declared, which is what lets the
-// gate evidence find the steps of the `AS test` stage the gate convention
-// (dockerfileHasGateTestStage) fixes on.
-func buildkitVertexStage(bracket string) string {
-	fields := strings.Fields(bracket)
-	if len(fields) < 2 || !strings.Contains(fields[len(fields)-1], "/") {
-		return ""
-	}
-	return strings.Join(fields[:len(fields)-1], " ")
-}
-
-// applyVertexCached records that BuildKit served a step from its layer cache,
-// when the CACHED line names a vertex already seen via a start line.
-func applyVertexCached(line string, vertices map[string]*buildKitVertex) {
-	match := buildkitVertexCachedPattern.FindStringSubmatch(line)
-	if match == nil {
-		return
-	}
-	if v, ok := vertices[match[1]]; ok {
-		v.cached = true
-	}
 }
 
 // applyVertexDone records a step's completion duration when its DONE line

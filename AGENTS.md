@@ -267,7 +267,7 @@ controls: its own final turn.
 
 The defect this rule exists to prevent is not "a fix with no tests". It is narrower, and it is what an audit of ~80 closed issues actually found, three times over in three unrelated subsystems (desktop dashboard, desktop dialog, release pipeline): **the fix is correct, the neighbouring states all get tests, and the one state the report described gets none.** In each case a refactor away, the operator-visible bug comes straight back with a green suite beside it.
 
-- `#1932`'s gates tab got tests for "renders returned runs", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for `ListGateRuns` **failing**, which is the state the live platform is actually in.
+- `#1932`'s dashboard tab got tests for "renders returned rows", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for its list read **failing**, which is the state the live platform is actually in.
 - `#1934`'s title is literally "one failed read blanks the other's already-resolved panel", and all nine of its tests stub both reads to the *same* class of outcome. None crosses them.
 - `#1921`'s docker stub is all-or-nothing on `image inspect`, so no scenario has the local answer *present* while the registry answers *missing* — precisely the disagreement that produced the reported `unknown blob`.
 
@@ -335,15 +335,16 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
   more.
 - Run the full `make check` gate before merging. This repository uses its own
   build and merge queue; do not add GitHub Actions for build or test gating.
-- **"The suite" in a gate conversation means the area-scoped selection, not the
-  full run.** `erun build` resolves it per change
-  (`erun-ui/playwright/AGENTS.md` § "Area-scoped gate selection"), not
-  unconditionally the full run for every build — that section's classification
-  rule decides which coverage a given change actually earns, and its own history
-  records a correctness gap the classification once had (a desktop
-  application-code change that touched no spec file selected smoke-only, so a
-  green gate did not mean the specs covering that change had run) and the fix
-  that closed it.
+- **"The suite" depends on where it runs.** A local `make check` or
+  `make test-playwright` runs the area-scoped selection, resolved per change
+  through `erun exec resolve-playwright-areas`
+  (`erun-ui/playwright/AGENTS.md` § "Area-scoped gate selection"); that
+  section's classification rule decides which coverage a given change earns, and
+  its own history records a correctness gap the classification once had (a
+  desktop application-code change that touched no spec file selected
+  smoke-only) and the fix that closed it. `erun build` resolves no selection:
+  the image's test stage runs the full suite, and an unchanged component reuses
+  its last successful build instead of re-running it.
 - Structural tests that read sibling modules, directory trees, or generated
   artifacts outside their compiled inputs must run uncached (`go test -count=1`)
   in their module's gate. Add that wiring with the test; a cached pass cannot
@@ -357,7 +358,7 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
 - **This is not a decision.** #2086 proposes change-scoped suites on the merge gate and the unconditional full suite (including `test-playwright`) on the release gate only. Its own author commented fourteen minutes after filing it: the design was still being worked through with the operator, "the trigger model, the stage vocabulary, and where each suite belongs are all open," and no implementation should start until the operator confirms the plan. Read every "Recommendation" and "Rejected" line in #2086 as a position in an open discussion, not settled guidance. Do not wire a path→suite map, split `test-playwright` off the merge gate, or otherwise implement from that issue without first checking whether the operator has since confirmed a plan.
 - **The specific rationale #2086 gives against running everything unconditionally ("Option A" in its own vocabulary) was already stale the day it was filed.** #2086 rejects Option A because it "puts four known flakes on every merge" (#1786, #1772, #1945, #2045). All four are closed (#1786, #1772: 2026-08-31; #1945, #2045: 2026-09-03), and separately — not as a response to #2086 — `check-gate` gained `test-playwright` unconditionally the same day #2086 was filed (`c446e9fc`, merged 2026-09-04T06:13Z, ~2 hours after the issue). That landing was not casual: #2021's own review thread measured the suite honestly before merging it (2/5 clean → 4/5 after four specs were fixed with real root causes → the residual filed as #2045 rather than papered over → #2045 turned out to be a genuine application bug, not a test problem → 5/5, then re-measured 3/3 at 517/517 against the actual tree it would gate). So Option A is not a hypothetical being weighed against the issue's proposed C/D; it is what `check-gate` runs today, on the strength of a measured, not assumed, stability record. That does not retroactively decide #2086 — the ~15 extra minutes `test-playwright` adds to the gate (§ "Integration Test Gate" above; ~7m gate alone vs. ~21-22m with the suite) is a real, separate cost change-scoping or a release-only tier would still reduce — but whoever resumes this discussion should argue from latency, not from a flake count that has since been fixed.
 - **Two constraints bind whatever the operator eventually decides, because they come from measured failure modes, not preference:**
-  - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg is closed at the source: `applyIncrementalPromotion` never promotes a Dockerfile matching the test-stage-gate convention, so the gate always goes through a real `docker build` — `dockerfileHasGateTestStage`, `build_gate_test_stage_test.go`; the scoping leg is unaffected by that closure and still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
+  - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg: a fingerprint promotion now reuses the component's last successful build, whose test stage ran, so it is a valid result — but the trace must still name it a promotion rather than a fresh run; the scoping leg still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
   - Change-scoping decides *which* suites run for a diff, not the venue or concurrency they run under. This repository's venue- and concurrency-dependent bugs this week (#2076 — auth-failure-retry scenarios failing only inside `erun build`; #2151 — a Playwright spec flaking only under repeated same-worker runs) were found by running suites in their real venue at real concurrency, not by running everything on every diff. A change-scoped gate only misses them if its path→suite map fails to route the diffs that trigger them to the suite that contains them — a mapping-completeness risk, not a scoping-in-principle risk — and only if the suites it does select run somewhere other than the real build environment. Neither #2076 nor #2151 is an argument against scoping; both are arguments for keeping "which suites run" and "where and how they run" as separate questions, and for erring toward running when a mapping is uncertain.
 - This section exists so a future reader checking AGENTS.md before touching the gate — human or agent — finds the hold on #2086 here too, not only in the issue's own comment thread.
 
@@ -386,9 +387,10 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
   own. A `--release` at that step instead publishes a two-architecture
   `-pr.<sha>` image and chart set per pull request that nothing consumes, and
   it discards the environment's `docker.platforms` pin, which a release never
-  consults. The merge queue's own gate build is `erun build --gate` — not a
-  release either, and `--gate` is what makes it execute the Dockerfile's test
-  stage rather than accept BuildKit's replay of it (see `erun-common/AGENTS.md`
+  consults. The merge queue builds its merge commit the same way, with a plain
+  `erun build` recorded with the version it minted — not a release either. Every
+  build runs each component's lint and tests, and an unchanged component reusing
+  its last successful result is a valid result (see `erun-common/AGENTS.md`
   § "Gate execution and verdicts").
 - That pre-merge build reads `docker.platforms` from the **checked-out
   branch's** `.erun/config.yaml`, so a branch cut before the pin landed still

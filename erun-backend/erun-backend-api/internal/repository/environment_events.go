@@ -116,7 +116,7 @@ func (r *EnvironmentEventRepository) Append(ctx context.Context, event model.Env
 
 // classifyEnvironmentEventError maps environment_events' foreign key and
 // CHECK constraints onto the repository's sentinel errors, mirroring
-// classifyGateRunError: an environmentId the caller's tenant cannot see fails
+// classifyJobError: an environmentId the caller's tenant cannot see fails
 // the same foreign key check whether it genuinely doesn't exist or just isn't
 // this tenant's.
 func classifyEnvironmentEventError(err error) error {

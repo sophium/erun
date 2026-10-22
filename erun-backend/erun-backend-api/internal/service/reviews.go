@@ -188,7 +188,7 @@ func (e *ReviewNotMergingError) Unwrap() error { return repository.ErrConflict }
 // InvalidTransitionError refuses a caller's PATCH .../status asserting MERGE
 // directly, or MERGED from any status other than MERGE — AdvanceMergeQueue is
 // the only path to MERGE, and MERGED from MERGE still has to pass
-// verifyGateBuild/verifyRepositoryState below.
+// verifyMergeBuild/verifyRepositoryState below.
 type InvalidTransitionError struct {
 	From         model.ReviewStatus
 	To           model.ReviewStatus
@@ -202,10 +202,10 @@ func (e *InvalidTransitionError) Error() string {
 func (e *InvalidTransitionError) Unwrap() error { return repository.ErrInvalidInput }
 
 // MergeNotVerifiedError refuses a MERGED report the platform could not
-// independently confirm against the real repository: a successful GATE build
-// recorded for a different commit or review, or a reported commit that is
-// not verifiably on the target branch with the parent this review was gated
-// against. Whoever calls UpdateStatus, the transition only happens when this
+// independently confirm against the real repository: a build that is not a
+// successful build of this review, or a build whose commit is not verifiably
+// on the target branch, descended from — and not equal to — the tip this
+// review was gated against. Whoever calls UpdateStatus, the transition only happens when this
 // check passes — see AGENTS.md "Merge Queue".
 type MergeNotVerifiedError struct {
 	Reason string
@@ -230,7 +230,7 @@ func (e *MissingBuildIDError) Unwrap() error { return repository.ErrInvalidInput
 // validTargetsFor lists the statuses a caller's PATCH .../status may set from
 // the review's current status, mirroring the Status lifecycle documented in
 // collaboration/reviews.md. MERGE never appears: only AdvanceMergeQueue
-// reaches it. MERGED appears from MERGE — where verifyGateBuild and
+// reaches it. MERGED appears from MERGE — where verifyMergeBuild and
 // verifyRepositoryState have to pass — and from the three statuses a review
 // can be sitting at while its work has already landed without the queue,
 // where reconcileMerged's own check has to pass instead.
@@ -522,7 +522,7 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 
 	// MERGED has two verification stories, and which one applies is decided
 	// by where the review is, not by what the caller claims: one holding
-	// MERGE is the queue's, and is confirmed against its GATE build; any
+	// MERGE is the queue's, and is confirmed against its merge build; any
 	// other review is one whose work landed without the queue, and is
 	// confirmed against the target branch's own history.
 	if status == model.ReviewStatusMerged {
@@ -574,10 +574,11 @@ func resolveReportedRepository(review model.Review, remoteURL string) (string, e
 }
 
 // acceptMerged is the one path to MERGED, open to any caller — the guarantee
-// is no longer who calls it, but what it can verify: a successful GATE build
-// already recorded against this exact review and commit (verifyGateBuild),
-// and that commit's real presence on the target branch, descended from the
-// tip this review was gated against (verifyRepositoryState). Any check
+// is no longer who calls it, but what it can verify: a successful build
+// already recorded against this exact review (verifyMergeBuild), and that
+// build's commit's real presence on the target branch, descended from and
+// distinct from the tip this review was gated against
+// (verifyRepositoryState). Any check
 // failing refuses with *MergeNotVerifiedError; nothing about the review
 // changes.
 func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, buildID, remoteURL, repositoryIdentity string) (model.Review, error) {
@@ -594,7 +595,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 	if err != nil {
 		return model.Review{}, err
 	}
-	if err := s.verifyGateBuild(review, build); err != nil {
+	if err := s.verifyMergeBuild(review, build); err != nil {
 		return model.Review{}, err
 	}
 	if err := s.verifyRepositoryState(ctx, review, repositoryIdentity, build.CommitID, remoteURL); err != nil {
@@ -627,7 +628,7 @@ func (s *ReviewService) acceptMerged(ctx context.Context, review model.Review, b
 // reconcileMerged is the other way to MERGED, for a review whose work landed
 // through something other than this platform's merge queue — in practice a
 // GitHub squash merge, where the branch's own commits are deliberately not
-// made ancestors of the target and no GATE build was ever recorded, so
+// made ancestors of the target and no merge build was ever recorded, so
 // neither of acceptMerged's conditions can ever hold no matter how long the
 // review sits there. Without this the only way out was CLOSED, which renders
 // landed work as abandoned and so is worse than leaving it OPEN — and the
@@ -671,17 +672,22 @@ func (s *ReviewService) reconcileMerged(ctx context.Context, review model.Review
 	return updated, nil
 }
 
-// verifyGateBuild is condition 3: a successful GATE build already recorded
-// against this exact review, not a caller's word for it.
-func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) error {
+// verifyMergeBuild is condition 3: a successful build already recorded
+// against this exact review, not a caller's word for it. The build's kind is
+// not consulted: the merge commit's build is an ordinary recorded build, and a
+// historical GATE build of a review already at MERGE still qualifies. Which
+// commit the build is of is verifyRepositoryState's question.
+func (s *ReviewService) verifyMergeBuild(review model.Review, build model.Build) error {
 	if build.ReviewID != review.ReviewID {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s is not a build of review %s", build.BuildID, review.ReviewID)}
 	}
-	if build.Kind != model.BuildKindGate {
-		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s is a %s build, not a GATE build", build.BuildID, build.Kind)}
-	}
 	if !build.Successful {
 		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s did not succeed", build.BuildID)}
+	}
+	// The READY build is the source branch's, not the merge's: even where its
+	// commit reached the target unchanged, the merge was never built.
+	if build.BuildID == review.LastReadyBuildID {
+		return &MergeNotVerifiedError{Reason: fmt.Sprintf("build %s is the READY build of source commit %s; record the build of the merge commit that landed this review", build.BuildID, build.CommitID)}
 	}
 	return nil
 }
@@ -690,7 +696,9 @@ func (s *ReviewService) verifyGateBuild(review model.Review, build model.Build) 
 // verifiably on the target branch, and the target tip this review was gated
 // against — the platform's own record of what that tip was, since only one
 // review may be MERGE per target branch at a time (see AGENTS.md "Merge
-// Queue") — is still really its ancestor. This is a reachability check, not
+// Queue") — is still really its ancestor, and is not the commit itself. A
+// commit is its own ancestor, so a build of the gated tip would otherwise
+// pass while naming a merge in which nothing landed. This is a reachability check, not
 // a strict parent-equality one: the release flow pushes its own
 // `[skip ci]` commits directly to the target branch between one review
 // landing and the next being reported, and requiring the
@@ -728,6 +736,9 @@ func (s *ReviewService) verifyRepositoryState(ctx context.Context, review model.
 	}
 	if gatedTip == "" {
 		return nil
+	}
+	if strings.EqualFold(gatedTip, commit) {
+		return &MergeNotVerifiedError{Reason: fmt.Sprintf("commit %s is the target tip this review was gated against; record the build of the merge commit that landed this review", commit)}
 	}
 	descendsFromGatedTip, err := s.verifier.IsAncestor(ctx, remoteURL, review.TargetBranch, gatedTip, commit)
 	if err != nil {
@@ -933,7 +944,7 @@ func (s *ReviewService) enqueueReview(ctx context.Context, review model.Review) 
 
 // reviewLastBuildColumn names the last-build column a caller-reported status
 // populates. MERGED has no case here: acceptMerged sets LastMergedBuildID
-// itself once verifyGateBuild/verifyRepositoryState pass, rather than going
+// itself once verifyMergeBuild/verifyRepositoryState pass, rather than going
 // through this generic buildID cross-check.
 func reviewLastBuildColumn(status model.ReviewStatus) string {
 	switch status {

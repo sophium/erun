@@ -72,7 +72,7 @@ export const submitAdvanceMergeQueue =
       dispatch(
         showNotification(
           'success',
-          `Advanced ${review.name || review.reviewId} to merge — its gate build is starting.`,
+          `Advanced ${review.name || review.reviewId} to merge — its merge-commit build is starting.`,
         ),
       );
     } catch (error) {

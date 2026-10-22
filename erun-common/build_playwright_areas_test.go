@@ -17,29 +17,6 @@ func writeFileForTest(t *testing.T, dir, relPath, content string) {
 	}
 }
 
-func TestDockerfileConsumesPlaywrightTestAreas(t *testing.T) {
-	dir := t.TempDir()
-	withArg := filepath.Join(dir, "Dockerfile.with")
-	if err := os.WriteFile(withArg, []byte("FROM golang\nARG PLAYWRIGHT_TEST_AREAS=\"\"\n"), 0o644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-	if !dockerfileConsumesPlaywrightTestAreas(withArg) {
-		t.Fatalf("expected Dockerfile declaring the ARG to be detected")
-	}
-
-	withoutArg := filepath.Join(dir, "Dockerfile.without")
-	if err := os.WriteFile(withoutArg, []byte("FROM golang\n"), 0o644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-	if dockerfileConsumesPlaywrightTestAreas(withoutArg) {
-		t.Fatalf("expected Dockerfile without the ARG to be undetected")
-	}
-
-	if dockerfileConsumesPlaywrightTestAreas(filepath.Join(dir, "missing")) {
-		t.Fatalf("expected a missing Dockerfile to be undetected, not to panic or false-positive")
-	}
-}
-
 // newPlaywrightAreaTestRepo lays out just enough of the real tree shape
 // (erun-ui/playwright/tests/{smoke,areas/<area>,fixtures,pages}) on branch
 // "main" for ResolvePlaywrightTestAreaSelection to classify a later diff
@@ -241,35 +218,5 @@ func TestResolvePlaywrightTestAreaSelectionNoMergeBaseFailsSafe(t *testing.T) {
 
 	if _, ok := ResolvePlaywrightTestAreaSelection(testContext(), dir); ok {
 		t.Fatalf("expected no resolvable merge base against any candidate branch to fail safe (ok=false)")
-	}
-}
-
-func TestApplyPlaywrightAreaBuildArgsSkipsWhenDockerfileDoesNotDeclareTheArg(t *testing.T) {
-	dir := newPlaywrightAreaTestRepo(t)
-	dockerfile := filepath.Join(dir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, []byte("FROM golang\n"), 0o644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-	build := &DockerBuildSpec{DockerfilePath: dockerfile}
-	applyPlaywrightAreaBuildArgs(testContext(), dir, build)
-	if build.PlaywrightTestAreas != "" {
-		t.Fatalf("expected PlaywrightTestAreas to stay empty when the Dockerfile declares no matching ARG, got %q", build.PlaywrightTestAreas)
-	}
-}
-
-func TestApplyPlaywrightAreaBuildArgsSetsSelectionWhenDockerfileDeclaresTheArg(t *testing.T) {
-	dir := newPlaywrightAreaTestRepo(t)
-	writeFileForTest(t, dir, "erun-ui/playwright/tests/areas/sidebar/sidebar-new.spec.ts", "// new sidebar spec\n")
-	runGitForTest(t, dir, "add", ".")
-	runGitForTest(t, dir, "commit", "-q", "-m", "sidebar spec")
-
-	dockerfile := filepath.Join(dir, "Dockerfile")
-	if err := os.WriteFile(dockerfile, []byte("FROM golang\nARG PLAYWRIGHT_TEST_AREAS=\"\"\n"), 0o644); err != nil {
-		t.Fatalf("write dockerfile: %v", err)
-	}
-	build := &DockerBuildSpec{DockerfilePath: dockerfile}
-	applyPlaywrightAreaBuildArgs(testContext(), dir, build)
-	if build.PlaywrightTestAreas != "smoke,sidebar" {
-		t.Fatalf("expected PlaywrightTestAreas=smoke,sidebar, got %q", build.PlaywrightTestAreas)
 	}
 }

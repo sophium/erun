@@ -188,11 +188,11 @@ func dockerfileFromRefIsPinned(ref string, stages map[string]struct{}) bool {
 }
 
 // The erun-backend-api component's tests -- its database suites included, which
-// start PostgreSQL themselves -- are that image's gate, and the two halves below
-// are what make them one: the `test` stage has to run the module's own
-// `go test`, and the builder has to depend on it through the `COPY --from=test`
-// marker dockerfileHasGateTestStage reads, so no image is produced when the
-// suite failed. Drop either half and the image builds and publishes with its
+// start PostgreSQL themselves -- run as part of building that image, and the two
+// halves below are what make them so: the `test` stage has to run the module's
+// own `go test`, and the builder has to depend on it through the
+// `COPY --from=test` marker dockerfileHasConsumedTestStage reads, so no image
+// is produced when the suite failed. Drop either half and the image builds and publishes with its
 // tests never run.
 //
 // Naming the component rather than iterating every Dockerfile is deliberate.
@@ -240,8 +240,8 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, componentTestCommand) {
 		t.Errorf("%s declares no `test` stage running %s — the component's tests, its database suites included, would never run before its image is built", venue, componentTestCommand)
 	}
-	if !dockerfileHasGateTestStage(path) {
-		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and the `COPY --from=test` that depends on it the image builds and publishes with the E2E gate absent, and erun's incremental promotion is free to serve a cached fingerprint image instead of running it, so the same green build reports either way", venue)
+	if !dockerfileHasConsumedTestStage(path) {
+		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and the `COPY --from=test` that depends on it the image builds and publishes with its tests never run, and a fingerprint written after that build would let later builds reuse an untested result", venue)
 	}
 }
 

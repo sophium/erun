@@ -1,6 +1,6 @@
 // RTK Query endpoints for the job queue: what agents and orchestrators are
 // working on right now, and what they recently finished. A job is recorded
-// *before* the work starts, which is the half builds and gate runs do not
+// *before* the work starts, which is the half builds do not
 // have -- they report outcomes after the fact.
 //
 // Read-only on purpose. The queue is written by the actor doing the work

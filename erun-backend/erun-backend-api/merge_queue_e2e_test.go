@@ -212,17 +212,20 @@ func e2eReportGreenBuild(t *testing.T, baseURL, reviewID string) {
 	}
 }
 
-// e2ePostGateBuild is the environment reporting its own gate outcome —
-// GATE builds are no longer written only by the platform.
-func e2ePostGateBuild(t *testing.T, baseURL, reviewID, commit string, successful bool, failureDetail string) string {
+// e2ePostMergeBuild is the environment promoted to MERGE recording its
+// successful build of the prepared merge commit as an ordinary RECORDED build
+// with the version it minted — the build a MERGED report then names. It is
+// the same route and shape as any other build of a commit, which is why the
+// refusal tests below use it for the source tip and the gated tip too.
+func e2ePostMergeBuild(t *testing.T, baseURL, reviewID, commit string) string {
 	t.Helper()
-	body := map[string]any{"kind": "GATE", "commitId": commit, "successful": successful}
-	if failureDetail != "" {
-		body["failureDetail"] = failureDetail
-	}
-	code, respBody := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", body)
+	code, respBody := e2eRequest(t, baseURL, http.MethodPost, "/v1/reviews/"+reviewID+"/builds", map[string]any{
+		"commitId":   commit,
+		"successful": true,
+		"version":    "0.0.1",
+	})
 	if code != http.StatusCreated {
-		t.Fatalf("report gate build for %s: HTTP %d: %s", reviewID, code, respBody)
+		t.Fatalf("record build of %s for %s: HTTP %d: %s", commit, reviewID, code, respBody)
 	}
 	var build struct {
 		BuildID string `json:"buildId"`
@@ -260,7 +263,7 @@ func readMergeReview(t *testing.T, baseURL, reviewID string) mergeReviewResponse
 
 // TestMergeQueueAcceptsAVerifiedMergeEndToEnd is the environment-driven
 // happy path: promote to MERGE, do the real merge/push exactly as an
-// environment would, report the gate build, and have MERGED accepted because
+// environment would, record the merge commit's build, and have MERGED accepted because
 // it checks out against the real repository — not because of who reported it.
 func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	config := mergeQueueE2EFromEnv(t)
@@ -277,7 +280,7 @@ func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	}
 
 	mergeCommit := remote.merge(t, remote.main, sourceBranch, "merge "+sourceBranch)
-	buildID := e2ePostGateBuild(t, srv.URL, reviewID, mergeCommit, true, "")
+	buildID := e2ePostMergeBuild(t, srv.URL, reviewID, mergeCommit)
 
 	code, merged := e2eReportMerged(t, srv.URL, reviewID, buildID, remote.url)
 	if code != http.StatusOK {
@@ -288,6 +291,78 @@ func TestMergeQueueAcceptsAVerifiedMergeEndToEnd(t *testing.T) {
 	}
 	if merged.LastMergedBuildID != buildID {
 		t.Fatalf("lastMergedBuildId = %s, want %s", merged.LastMergedBuildID, buildID)
+	}
+}
+
+// TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip: the build that
+// took the review to READY is a real, successful build recorded on the review
+// — of the source branch's tip. Once the branch is squash-merged, naming that
+// build for MERGED names a commit that never landed on the target, so it is
+// refused and the review stays at MERGE; the build of the merge commit that
+// did land is then accepted.
+func TestMergeQueueRefusesTheReadyBuildOfAnUnlandedSourceTip(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	sourceBranch := uniqueBranchName(t, "feature-ready")
+	sourceTip := remote.branch(t, sourceBranch, "ready.txt")
+
+	reviewID := e2eOpenReview(t, srv.URL, "merge-queue-e2e-ready-build", remote.main, sourceBranch)
+	readyBuild := e2ePostMergeBuild(t, srv.URL, reviewID, sourceTip)
+	if status := readMergeReview(t, srv.URL, reviewID).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("review status = %s, want MERGE after its source build went green", status)
+	}
+
+	mergeCommit := remote.merge(t, remote.main, sourceBranch, "merge "+sourceBranch)
+
+	if code, _ := e2eReportMerged(t, srv.URL, reviewID, readyBuild, remote.url); code != http.StatusConflict {
+		t.Fatalf("report MERGED naming the READY build of the source tip: HTTP %d, want 409 MERGE_NOT_VERIFIED", code)
+	}
+	if status := readMergeReview(t, srv.URL, reviewID).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("status after the refusal = %s, want the review left at MERGE", status)
+	}
+
+	mergeBuild := e2ePostMergeBuild(t, srv.URL, reviewID, mergeCommit)
+	code, merged := e2eReportMerged(t, srv.URL, reviewID, mergeBuild, remote.url)
+	if code != http.StatusOK || merged.Status != model.ReviewStatusMerged || merged.LastMergedBuildID != mergeBuild {
+		t.Fatalf("report MERGED naming the merge commit's build: HTTP %d status=%s lastMergedBuildId=%s, want 200 MERGED against %s",
+			code, merged.Status, merged.LastMergedBuildID, mergeBuild)
+	}
+}
+
+// TestMergeQueueRefusesABuildOfTheGatedTip: the previous merge's commit is on
+// the target branch and, being its own ancestor, "descends" from the gated
+// tip — so a review at MERGE naming a build of that commit would pass both
+// repository checks while nothing of its own landed. It is refused.
+func TestMergeQueueRefusesABuildOfTheGatedTip(t *testing.T) {
+	config := mergeQueueE2EFromEnv(t)
+	srv := startMergeQueueAPI(t, config)
+	remote := newMergeQueueRemote(t)
+	branchA := uniqueBranchName(t, "feature-a")
+	branchB := uniqueBranchName(t, "feature-b")
+	remote.branch(t, branchA, "a.txt")
+	remote.branch(t, branchB, "b.txt")
+
+	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-gated-tip-a", remote.main, branchA)
+	e2eReportGreenBuild(t, srv.URL, reviewA)
+	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
+	buildA := e2ePostMergeBuild(t, srv.URL, reviewA, mergeCommitA)
+	if code, merged := e2eReportMerged(t, srv.URL, reviewA, buildA, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
+	}
+
+	reviewB := e2eOpenReview(t, srv.URL, "merge-queue-e2e-gated-tip-b", remote.main, branchB)
+	e2eReportGreenBuild(t, srv.URL, reviewB)
+	if status := readMergeReview(t, srv.URL, reviewB).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("review B status = %s, want MERGE", status)
+	}
+	gatedTipBuild := e2ePostMergeBuild(t, srv.URL, reviewB, mergeCommitA)
+
+	if code, _ := e2eReportMerged(t, srv.URL, reviewB, gatedTipBuild, remote.url); code != http.StatusConflict {
+		t.Fatalf("report MERGED naming a build of the gated tip: HTTP %d, want 409 MERGE_NOT_VERIFIED", code)
+	}
+	if status := readMergeReview(t, srv.URL, reviewB).Status; status != model.ReviewStatusMerge {
+		t.Fatalf("status after the refusal = %s, want review B left at MERGE", status)
 	}
 }
 
@@ -323,7 +398,7 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-a", remote.main, branchA)
 	e2eReportGreenBuild(t, srv.URL, reviewA)
 	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
-	buildA := e2ePostGateBuild(t, srv.URL, reviewA, mergeCommitA, true, "")
+	buildA := e2ePostMergeBuild(t, srv.URL, reviewA, mergeCommitA)
 	if code, merged := e2eReportMerged(t, srv.URL, reviewA, buildA, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
 	}
@@ -338,7 +413,7 @@ func TestMergeQueueRefusesAMergeReportedAgainstAStaleTarget(t *testing.T) {
 
 	reviewC := e2eOpenReview(t, srv.URL, "merge-queue-e2e-c", remote.main, branchC)
 	e2eReportGreenBuild(t, srv.URL, reviewC)
-	buildC := e2ePostGateBuild(t, srv.URL, reviewC, staleMergeCommit, true, "")
+	buildC := e2ePostMergeBuild(t, srv.URL, reviewC, staleMergeCommit)
 
 	code, _ := e2eReportMerged(t, srv.URL, reviewC, buildC, remote.url)
 	if code != http.StatusConflict {
@@ -369,7 +444,7 @@ func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *te
 	reviewA := e2eOpenReview(t, srv.URL, "merge-queue-e2e-release-a", remote.main, branchA)
 	e2eReportGreenBuild(t, srv.URL, reviewA)
 	mergeCommitA := remote.merge(t, remote.main, branchA, "merge "+branchA)
-	buildA := e2ePostGateBuild(t, srv.URL, reviewA, mergeCommitA, true, "")
+	buildA := e2ePostMergeBuild(t, srv.URL, reviewA, mergeCommitA)
 	if code, merged := e2eReportMerged(t, srv.URL, reviewA, buildA, remote.url); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("review A did not merge: HTTP %d status=%s", code, merged.Status)
 	}
@@ -379,7 +454,7 @@ func TestMergeQueueAcceptsAMergeReportedAfterUnrelatedCommitsLandInBetween(t *te
 	reviewB := e2eOpenReview(t, srv.URL, "merge-queue-e2e-release-b", remote.main, branchB)
 	e2eReportGreenBuild(t, srv.URL, reviewB)
 	mergeCommitB := remote.merge(t, remote.main, branchB, "merge "+branchB)
-	buildB := e2ePostGateBuild(t, srv.URL, reviewB, mergeCommitB, true, "")
+	buildB := e2ePostMergeBuild(t, srv.URL, reviewB, mergeCommitB)
 
 	code, merged := e2eReportMerged(t, srv.URL, reviewB, buildB, remote.url)
 	if code != http.StatusOK {
@@ -401,7 +476,7 @@ func isAncestorCommit(t *testing.T, dir, ancestor, descendant string) bool {
 	return cmd.Run() == nil
 }
 
-// reconcileMerged reports MERGED for a review with no gate build to name —
+// reconcileMerged reports MERGED for a review with no merge build to name —
 // the shape a squash-landed review is in. Everything else about the request
 // is the ordinary PATCH .../status call.
 func reconcileMerged(t *testing.T, baseURL, reviewID, remoteURL string) (int, mergeReviewResponse) {
@@ -438,7 +513,7 @@ func TestReconcileMergedAcceptsASquashLandedBranchEndToEnd(t *testing.T) {
 
 	// The half of the reproduction that matters: a squash merge leaves the
 	// branch's own commits out of the target's history, which is why the
-	// gate-build path had nothing to point at.
+	// merge-build path had nothing to point at.
 	checkout := t.TempDir()
 	runGit(t, checkout, "clone", remote.url, ".")
 	if isAncestorCommit(t, checkout, branchTip, squashCommit) {
@@ -514,7 +589,7 @@ func TestReconcileMergedLeavesTheNextQueueMergeVerifiable(t *testing.T) {
 	}
 
 	mergeCommit := remote.merge(t, remote.main, queuedBranch, "queued work (#2)")
-	buildID := e2ePostGateBuild(t, srv.URL, queuedReview, mergeCommit, true, "")
+	buildID := e2ePostMergeBuild(t, srv.URL, queuedReview, mergeCommit)
 	code, merged := e2eReportMerged(t, srv.URL, queuedReview, buildID, remote.url)
 	if code != http.StatusOK {
 		t.Fatalf("queue-driven MERGED after a reconciled merge on the same branch: HTTP %d, want 200", code)

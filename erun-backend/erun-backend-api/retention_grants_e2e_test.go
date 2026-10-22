@@ -21,7 +21,7 @@ import (
 // gap is closed, and that it was the only one: every other table under an
 // implemented or designed retention policy (the six-table sweep --
 // comments, releases, reviews, ai_sessions, invites, invite_requests -- plus
-// builds/gate_runs, which predate the sweep) grants DELETE too.
+// builds, which predate the sweep) grants DELETE too.
 //
 // A has_table_privilege() check can be satisfied by a GRANT that looks right
 // on paper while row-level security still blocks the statement, so every
@@ -142,12 +142,6 @@ VALUES ('00000000-0000-0000-0000-000000000007', 'https://issuer.example', 'grant
 			insert: `INSERT INTO builds (build_id, tenant_id, environment_id, kind, successful, commit_id, version)
 VALUES ('00000000-0000-0000-0000-000000000008', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000003', 'RECORDED', true, 'build-commit-1', 'v0.0.1')`,
 			delete: `DELETE FROM builds WHERE build_id = '00000000-0000-0000-0000-000000000008'`,
-		},
-		{
-			name: "gate_runs",
-			insert: `INSERT INTO gate_runs (gate_run_id, tenant_id, source_branch, target_branch, source_commit, merge_commit, status)
-VALUES ('00000000-0000-0000-0000-000000000009', '00000000-0000-0000-0000-000000000001', 'feat-grants', 'main', 'src-commit-1', 'merge-commit-1', 'RUNNING')`,
-			delete: `DELETE FROM gate_runs WHERE gate_run_id = '00000000-0000-0000-0000-000000000009'`,
 		},
 	}
 

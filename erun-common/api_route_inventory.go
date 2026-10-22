@@ -24,7 +24,7 @@ import (
 // actually be exercised against a deployed plane.
 
 // APIRoute is one route erun-backend-api's router registers: a canonical
-// method and path template, e.g. GET /v1/gate-runs/{gate_run_id}.
+// method and path template, e.g. GET /v1/reviews/{review_id}.
 type APIRoute struct {
 	Method string `json:"method"`
 	Path   string `json:"path"`

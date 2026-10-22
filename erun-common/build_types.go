@@ -101,23 +101,6 @@ type DockerBuildSpec struct {
 	// build is skipped and the existing image is re-tagged and pushed instead of
 	// rebuilt.
 	Promote bool
-	// GateTestStage marks a Dockerfile whose builder stage depends on a `test`
-	// stage's marker (see dockerfileHasGateTestStage) — i.e. this build is the
-	// project's own merge gate. applyIncrementalPromotion never sets Promote for
-	// such a build, and DockerImageBuilder refuses outright if it ever finds the
-	// two set together, so a cached fingerprint can never stand in for the gate
-	// having actually run.
-	GateTestStage bool
-	// ForceGateTestStage makes this build's `docker build` invalidate the test
-	// stage's layers (`--no-cache-filter=<stage>`), so the stage executes in this
-	// run instead of being served from BuildKit's layer cache. It is set by a run
-	// that declares itself the merge queue's gate (`--gate`): a gate's whole claim
-	// is that make check ran against this tree, and a memoized verdict from a
-	// previous build of byte-identical content is not that claim. It deliberately
-	// invalidates *only* the test stage — the rest of the layer cache, which is
-	// shared and expensive, is untouched, so declaring a gate costs the gate and
-	// not a cold rebuild.
-	ForceGateTestStage bool
 	// MissingFingerprintPlatforms lists platforms that lacked a matching
 	// fingerprint tag, so the trace can explain why a build is rebuilding rather
 	// than promoting. For non-multi-platform builds the slot is the empty string.
@@ -136,8 +119,8 @@ type DockerBuildSpec struct {
 	// DindCPULimit / DindMemoryLimitMiB carry this build's actual erun-dind
 	// sidecar resource limits (EnvConfig.RuntimeDindPod, normalized) into a
 	// Dockerfile that declares matching DIND_CPU_LIMIT / DIND_MEMORY_LIMIT_MIB
-	// ARGs, so an in-build gate (the erun-devops runtime image's own `make
-	// check`) can size its concurrent fan-out against what this build's dind
+	// ARGs, so a component's in-build test stage (the erun-devops runtime
+	// image's own `make check`) can size its concurrent fan-out against what this build's dind
 	// sidecar is actually entitled to, instead of the Dockerfile's own
 	// hardcoded ARG default or the host node's raw, cgroup-invisible capacity
 	// (erun-devops/AGENTS.md's dind cgroup blind-spot notes). Left empty for a
@@ -145,15 +128,6 @@ type DockerBuildSpec struct {
 	// command is unchanged. See applyDindResourceBuildArgs.
 	DindCPULimit       string
 	DindMemoryLimitMiB string
-	// PlaywrightTestAreas carries the smoke+area selection resolved from the
-	// Playwright spec-file diff against the merge base (see
-	// applyPlaywrightAreaBuildArgs) into a Dockerfile that declares a matching
-	// PLAYWRIGHT_TEST_AREAS ARG, so the in-build gate runs only the areas whose
-	// specs changed instead of the full suite on every build. Left empty for a
-	// Dockerfile that declares no such ARG, or when the selection could not be
-	// resolved (no git repo, no merge base) -- the Dockerfile's own ARG default
-	// then runs the full suite, the fail-safe direction.
-	PlaywrightTestAreas string
 	// CgroupParent names the cgroup every RUN-instruction container this build
 	// creates should nest under, so it inherits a real, enforced CPU quota
 	// instead of escaping the erun-dind sidecar's own kubelet-declared limit as
@@ -211,10 +185,6 @@ type BuildExecutionSpec struct {
 	// (validate); a build that pushes publishes them.
 	componentCharts []HelmChartPublishSpec
 	skippedLinux    bool
-	// gate marks the merge queue's gate build (`erun build --gate`): a run whose
-	// exit code is read as the verdict on a tree by `review record-build --gate`.
-	// Such a run must execute something -- see ensureGateBuildActuallyBuilt.
-	gate bool
 }
 
 type DockerPushExecutionSpec struct {
@@ -245,14 +215,6 @@ type DockerCommandTarget struct {
 	E2E bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
-	// Gate declares this build the merge queue's gate: the run whose exit code
-	// `review record-build --gate` turns into the verdict on a tree. A gate build
-	// never *forces* a rebuild -- the per-Dockerfile guard that already keeps its
-	// test stage live (dockerfileHasGateTestStage) still decides that -- but it
-	// refuses to report success for a run that would execute nothing at all,
-	// which is the one outcome a cache hit cannot be distinguished from by the
-	// caller reading the exit code. See ensureGateBuildActuallyBuilt.
-	Gate bool
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
 	// resolve docker/release contexts directly.
 	DisableBuildScriptDiscovery bool

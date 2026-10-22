@@ -13,7 +13,7 @@ Not to be confused with [registry image retention](/deployment/registries#hosted
 | Tables | Status |
 |---|---|
 | `reviews`, `review_reviewers`, `comments`, `releases`, `ai_sessions`, `invites`, `invite_requests` | **Enforced, opt-in** — a daily sweep deletes eligible rows in every tenant that has [turned retention on](#turning-retention-on-and-off); it's off by default |
-| `builds`, `gate_runs` | **Not enforced.** No policy file in the sweep covers either table, so rows accumulate with no bound today. |
+| `builds` | **Not enforced.** No policy file in the sweep covers it, so rows accumulate with no bound today. |
 | `audit_events`, `usage_events` | **Not enforced — deliberately.** These two keep growing without limit on purpose: neither database role holds `DELETE` on them (`schema/roles.sql` grants only `SELECT, INSERT, REFERENCES`), and guessing a window that deletes an audit row which turns out to matter is worse than the storage cost of keeping it. |
 
 ## Previewing a sweep — dry run
@@ -98,13 +98,13 @@ Every deletion below is a hard `DELETE` inside a transaction. There's no soft-de
 |---|---|
 | Closed comment threads | The discussion itself. Only `CLOSED` threads are ever eligible, so no open conversation is at risk. |
 | Releases | The record of what version a given commit produced. The uniqueness guard that stops the same commit from being released twice also disappears with the row — the git tag and published image outside the database are unaffected, but the database's own memory of "this commit was already released" is gone. |
-| Closed, unmerged reviews | The review's history and every reviewer ever assigned to it (its `review_reviewers` rows are removed in the same transaction). A review that ever ran a gate build, still has comments or a release attached, or reached `MERGED` is left alone. |
+| Closed, unmerged reviews | The review's history and every reviewer ever assigned to it (its `review_reviewers` rows are removed in the same transaction). A review that ever had a build recorded against it, still has comments or a release attached, or reached `MERGED` is left alone. |
 | Exited AI sessions | The session's last known terminal state — how it ended. A session still in progress is never touched. |
 | Consumed invites | The record of who was let into the tenant, by whom, and when. There's no second copy of this anywhere — accepting an invite doesn't write an audit-log entry. |
 | Expired, never-consumed invites | Only "did we actually send invite X" — a debugging fact, not an access record. |
 | Decided invite requests | The request's own content, and for a decline, the only record of *why* — `decline_reason` has no copy elsewhere. |
 
-`builds`, `gate_runs`, `audit_events`, and `usage_events` are not swept at all today (see the status table above), so nothing is lost from them yet — they simply keep growing.
+`builds`, `audit_events`, and `usage_events` are not swept at all today (see the status table above), so nothing is lost from them yet — they simply keep growing.
 
 ## Confirming a scheduled run happened
 

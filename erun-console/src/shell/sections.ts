@@ -6,7 +6,6 @@ import {
   Inbox,
   KeyRound,
   LayoutDashboard,
-  ListChecks,
   ListTree,
   Mail,
   Server,
@@ -27,7 +26,6 @@ export type ConsoleSectionId =
   | 'mcp-access'
   | 'invites'
   | 'requests'
-  | 'gate-runs'
   | 'jobs'
   | 'pipeline'
   | 'tenants'
@@ -58,17 +56,13 @@ const BASE_SECTIONS: ConsoleSection[] = [
   // on whoami's capability set rather than at the nav level (see
   // requests/RequestsPanel.tsx).
   { id: 'requests', label: 'Requests', icon: Inbox },
-  // Gate runs (erun#1932) is every tenant's own view of the merge-queue gate:
-  // what is being gated right now, and what recent gates decided (GET
-  // /v1/gate-runs is TenantUserClass -- no tenant type restricts it).
-  { id: 'gate-runs', label: 'Gate runs', icon: ListChecks },
   // Jobs is every tenant's own view of what is being worked on right now
   // (GET /v1/jobs is TenantUserClass -- no tenant type restricts it). It
   // reads only the caller's own tenant, which is why it is deliberately not
   // in SCOPE_AWARE_SECTIONS below: the scope selector would otherwise claim
   // a reach this panel does not have.
   { id: 'jobs', label: 'Jobs', icon: Activity },
-  // Pipeline is every tenant's own view spanning both of the above and the
+  // Pipeline is every tenant's own view spanning the job queue above and the
   // review lifecycle (GET /v1/pipeline is TenantUserClass, and it reads only
   // the caller's own tenant -- the same reason Jobs is not scope-aware).
   { id: 'pipeline', label: 'Pipeline', icon: ListTree },

@@ -8,8 +8,8 @@ import (
 
 // build_report.go lets an ordinary `erun build` self-report its own outcome
 // to the erun platform, so a build no longer needs a review to exist
-// anywhere (erun#1954). Every existing platform command in this module
-// (review_commands.go, gate_run_commands.go) treats a missing/broken alias
+// anywhere. Every existing platform command in this module
+// (review_commands.go, platform_commands.go) treats a missing/broken alias
 // or an unreachable platform as a hard, propagated error, because a human
 // asked for that specific call. This is the opposite contract on purpose:
 // `erun build` runs constantly, in every environment, most of which have no

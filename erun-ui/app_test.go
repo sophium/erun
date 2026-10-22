@@ -2012,8 +2012,7 @@ func TestTenantDashboardTenantMismatchOnlyNamesATenantThatDoesNotCorrespond(t *t
 
 // erunPlatformDashboardFixtures is erunPlatformDashboardHandler's fixture
 // body for every path, keyed by path rather than a switch — a switch here
-// once tripped golangci-lint's cyclomatic-complexity cap the moment a gate-run
-// case joined the rest.
+// once tripped golangci-lint's cyclomatic-complexity cap.
 // platformTenantName is the name the fixture's whoami reports for the tenant
 // behind the bearer. It is the caller's choice rather than a constant because
 // the local tenant a dashboard is opened from and the platform tenant its
@@ -2026,7 +2025,6 @@ func erunPlatformDashboardFixtures(platformTenantName string) map[string]string 
 		"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 		"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
 		"/v1/builds":                  `{"builds":[]}`,
-		"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
 		// The pipeline fixture carries both halves of the union in one view:
 		// a planned job with no branch and no review behind it, and a review
 		// whose only issue link was parsed out of its branch name.
@@ -2068,7 +2066,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 	t.Helper()
 
 	assertERunPlatformDashboardUser(t, dashboard)
-	if len(dashboard.MergeQueue) != 1 || len(dashboard.GateRuns) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+	if len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	if dashboard.PlatformAlias != testERunAlias {
@@ -2076,7 +2074,7 @@ func assertERunPlatformDashboard(t *testing.T, dashboard uiTenantDashboard, requ
 	}
 	assertERunPlatformDashboardAuditEvents(t, dashboard.AuditEvents)
 	assertERunPlatformDashboardPipeline(t, dashboard.Pipeline)
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/pipeline,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/pipeline,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if strings.Join(requests, ",") != want {
 		t.Fatalf("unexpected API requests: %+v, want %q", requests, want)
 	}

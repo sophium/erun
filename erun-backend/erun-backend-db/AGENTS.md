@@ -172,11 +172,11 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Move reviews through the queue by deleting and inserting `review_merge_queue` rows. Requeue a review by deleting any old queue row, setting the review back to `READY`, and inserting a new row so it sorts at the end.
 - `READY` reviews may appear in `review_merge_queue`. The active `MERGE` review must be removed from `review_merge_queue` when it is promoted, so the queue table contains only waiting reviews. One queue per `(repository, target_branch)` is what makes `MERGE` unambiguous: `QueuedRepositories` is what a promotion that names no repository reads before refusing an ambiguous one.
 - `CLOSED` reviews must not appear in the merge queue.
-- Build records identify a review or environment; GATE requires a review and NULL version, RECORDED requires a non-empty version. A failed GATE requires failure detail. Enforce the kind/version pairing in SQL, not only application code; keep `TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail`.
+- Build records identify a review or environment. Every new build is `RECORDED` with a non-empty version, including the merge queue's build of a prepared merge commit; `failure_detail` is an optional reason on any failed build. `GATE` is a retired kind the API refuses to write. Keep `builds.kind` and all four of its CHECKs so historical `GATE` rows (review-linked, NULL version, failure detail when failed) stay valid, and never delete or rewrite those rows: `reviews.last_merged_build_id` points at them and the next queue merge's verification anchors on that pointer. Enforce the kind/version pairing in SQL, not only application code; keep `TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid`.
 - A successful build moves an `OPEN` or `FAILED` review into its repository's target-branch merge queue as `READY`; if there is no active `MERGE` review for that repository and target branch, the next queued review may be promoted to `MERGE`.
 - A failed build for a queued or merging review moves it to `FAILED` and removes it from the merge queue.
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
-- The `gate_runs` table stores the first-class record of one attempt to gate a prospective merge — independent of whether an erun review exists for the change. Reviews are one producer (a review-driven merge reports a gate run alongside its GATE build); a repository whose changes arrive as GitHub pull requests, with no erun review at all, is the other. `status` is one of `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE` — a wrapper timing out or a run interrupted by an environment fault must report `INCONCLUSIVE`, never `FAILED`, since `FAILED` asserts a real verdict was reached. A `FAILED` row must carry `failing_step` (which gate step produced the red verdict); `log_ref` is an optional pointer to where to read it. `merge_commit` is NULL only when the run failed before that commit existed at all (a squash conflict). `review_id` is nullable and, when set, foreign-keys `(tenant_id, review_id)` to `reviews`.
+- The `gate_runs` table was dropped by `20261022120000_drop_gate_runs.sql`; a merge is landed against an ordinary recorded build of the merge commit instead. Do not reintroduce it, and do not edit the committed migrations that created it.
 - Audit events are stored in PostgreSQL.
 - Every tenant-owned PostgreSQL OLTP table must include `tenant_id`, enforce tenant-scoped uniqueness with composite unique indexes, and have PostgreSQL RLS.
 - API request handling must resolve tenant from the bearer token issuer before running tenant-owned queries.
@@ -231,14 +231,14 @@ schema inventory in this guide.
 
 - Proposed: age OR count bound, initially 30 days / 2,000 rows. Key build caps by
   tenant/environment now that `builds.environment_id` exists; define handling
-  for unattached/null environments when implementing. Gate-run keying must follow
-  its actual schema. No policy file implements this proposal yet.
+  for unattached/null environments when implementing. No policy file implements
+  this proposal yet.
 - Exempt builds referenced by reviews' last-build pointers or `releases.build_id`
-  with explicit NOT EXISTS guards. MERGED reviews must retain their pinned build.
-  Do not weaken FKs to make pruning succeed.
+  with explicit NOT EXISTS guards. MERGED reviews must retain their pinned build,
+  including a historical GATE build. Do not weaken FKs to make pruning succeed.
 - Use the existing scheduled retention runner, not lazy pruning on reads.
   Explicitly filter tenant, age, and rank under the cross-tenant operations role.
-  Builds/gate_runs already permit DELETE; audit/usage do not.
+  Builds already permit DELETE; audit/usage do not.
 - Bounds are starting estimates, not measured production obligations. Tune from
   actual per-tenant counts after rollout; no speculative rollup is required.
   The policy is additive SQL under `retention/`, not a new mechanism.
@@ -303,12 +303,12 @@ Do not silently change windows or exemptions while refactoring.
 
 - CLOSED only: 90 days from updated_at OR 2,000 per tenant. Live and MERGED
   reviews are exempt; MERGED-history retention remains an operator decision.
-- Guard surviving comments, releases, builds (including unpinned builds),
-  gate_runs, and queue membership. Remove reviewer assignments only together
-  with their deleted review.
+- Guard surviving comments, releases, builds (including unpinned and
+  historical GATE builds), and queue membership. Remove reviewer assignments
+  only together with their deleted review.
 - Eligible CLOSED reviews may clear stale failed/ready pins so future build
   retention can progress. Never null a MERGED review's required build pin.
-- Until build/gate-run retention exists, referenced CLOSED reviews may remain
+- Until build retention exists, referenced CLOSED reviews may remain
   indefinitely. That limits effectiveness, not referential safety.
 - Any future MERGED policy must handle the review/pinned-build FK cycle and
   release backreferences, not assume null-then-delete can satisfy the checks.

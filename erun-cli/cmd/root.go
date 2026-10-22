@@ -170,7 +170,6 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newContextCmd(d.configStore, runPrompt, runSelect, common.CloudContextDependencies{}),
 		newPlatformCmd(d.configStore, runPrompt, cloudDependencies()),
 		newReviewCmd(d.configStore, cloudDependencies()),
-		newGateCmd(d.configStore, cloudDependencies()),
 		newJobsCmd(d.configStore, cloudDependencies()),
 		newListCmd(d.configStore, common.FindProjectRoot),
 		newOutputsCmd(d.resolveOpen),

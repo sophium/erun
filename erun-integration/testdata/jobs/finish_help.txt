@@ -8,7 +8,7 @@ Usage:
 Examples:
   erun jobs finish job_01H... --status SUCCEEDED
   erun jobs finish job_01H... --status RUNNING   # the planned work has begun
-  erun jobs finish job_01H... --summary "waiting on the gate build"
+  erun jobs finish job_01H... --summary "waiting on the merge-queue build"
 
 Flags:
       --dry-run               Resolve and trace mutating actions without executing them.

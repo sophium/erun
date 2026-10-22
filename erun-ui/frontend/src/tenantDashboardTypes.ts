@@ -78,14 +78,10 @@ export interface UITenantDashboard {
   reviews?: UITenantDashboardReview[];
   mergeQueue?: UITenantDashboardReview[];
   builds?: UITenantDashboardBuild[];
-  // gateRuns is the Gates tab's own queue: what is being gated right now,
-  // and what recent gates decided, independent of whether the change gated
-  // is an erun review at all.
-  gateRuns?: UIGateRun[];
   // pipeline is the Pipeline tab's own view: every job and review the platform
   // holds for this tenant, unioned on the issue each belongs to. It spans the
-  // reviews and gate runs above rather than repeating them — a piece of
-  // planned work has no branch at all, so only this list can show it.
+  // reviews above rather than repeating them — a piece of planned work has no
+  // branch at all, so only this list can show it.
   pipeline?: UIPipelineIssue[];
   auditEvents?: UITenantDashboardAudit[];
   panels?: UITenantDashboardPanel[];
@@ -518,26 +514,6 @@ export interface UIPlatformUser {
   userId: string;
   tenantId: string;
   username: string;
-}
-
-// UIGateRun mirrors eruncommon.PlatformGateRun's JSON-safe subset the Gates
-// tab renders. failingStep/logRef are set only for a FAILED run; an
-// INCONCLUSIVE run (a wrapper timeout, an environment fault -- never a real
-// verdict) carries neither and must render as its own distinct state, not
-// as red (see erun-backend-api/AGENTS.md's "Gate Runs").
-export interface UIGateRun {
-  gateRunId: string;
-  sourceBranch: string;
-  targetBranch: string;
-  sourceCommit: string;
-  mergeCommit?: string;
-  reviewId?: string;
-  reviewName?: string;
-  status: string;
-  failingStep?: string;
-  logRef?: string;
-  createdAt?: string;
-  updatedAt?: string;
 }
 
 // UIPipelineItem is one piece of work on one rung, with the record it came

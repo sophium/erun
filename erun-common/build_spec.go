@@ -205,7 +205,6 @@ func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot
 		Platforms:      platforms,
 	}
 	applyDindResourceBuildArgs(store, projectRoot, environment, &build)
-	applyPlaywrightAreaBuildArgs(ctx, projectRoot, &build)
 	if err := applyDockerSecrets(ctx, projectRoot, environment, &build); err != nil {
 		return DockerBuildSpec{}, err
 	}

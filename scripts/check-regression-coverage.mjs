@@ -245,8 +245,8 @@ function resolveNamedCase(spec, change, io, { requireInDiff }) {
 // A declared reproduction that resolves, is a test, and is part of the diff
 // can still be one that no gate ever executes. .erun-backend-api's opt-in
 // end-to-end suites read an ERUN_E2E_* variable and skip when it is unset, and
-// no gate target sets any of them: `make check-gate` (and so `erun build
-// --gate`) runs `go test ./...` non-verbosely, which prints no SKIP line at
+// no gate target sets any of them: `make check-gate` (and so `erun build`)
+// runs `go test ./...` non-verbosely, which prints no SKIP line at
 // all, so the gate reports a clean `ok` for every package whose entire
 // database contract went unexercised. That is the shape a fix for a
 // database-only defect takes when it ships green against a fake repository

@@ -9,9 +9,8 @@ import (
 )
 
 // newJobsCmd builds `erun jobs`: the platform-backed view of what agents and
-// orchestrators are working on right now, and what recently finished. It is
-// the host-side counterpart to `erun gate list`, and it answers the question
-// the environment-scoped `erun exec job` verbs cannot -- those observe work in
+// orchestrators are working on right now, and what recently finished. It
+// answers the question the environment-scoped `erun exec job` verbs cannot -- those observe work in
 // one environment, this observes the tenant's whole queue, including work that
 // never entered an environment at all.
 //
@@ -165,7 +164,7 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 		SilenceUsage: true,
 		Example: "  erun jobs finish job_01H... --status SUCCEEDED\n" +
 			"  erun jobs finish job_01H... --status RUNNING   # the planned work has begun\n" +
-			"  erun jobs finish job_01H... --summary \"waiting on the gate build\"",
+			"  erun jobs finish job_01H... --summary \"waiting on the merge-queue build\"",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
 			params.JobID = args[0]

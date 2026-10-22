@@ -49,7 +49,7 @@ type BuildResultChart struct {
 // Scripts names the project build scripts the execution ran instead of images.
 // A caller reads the plan from this result rather than the trace: an empty
 // Version beside a non-empty Scripts is a script-only build, which mints no
-// image version and tests nothing an image gate would have tested.
+// image version and tests nothing an image's build/test stage would have tested.
 type BuildResult struct {
 	Version     string             `json:"version"`
 	BaseVersion string             `json:"baseVersion,omitempty"`

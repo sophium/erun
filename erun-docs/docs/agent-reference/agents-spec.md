@@ -99,7 +99,7 @@ The two agents this topology names, both shipped in the runtime image (`/etc/eru
 |---|---|
 | Role | Standing role for an environment where features get built. |
 | Watches for | Assigned work; its own reviews' comment threads. |
-| Does | Implements the assigned work in its own environment. Takes it to `READY` with [`/erun-merge`](/agent-reference/skills-spec#erun-merge) rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the gate mint the release. |
+| Does | Implements the assigned work in its own environment. Takes it to `READY` with [`/erun-merge`](/agent-reference/skills-spec#erun-merge) rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the merge queue build and land it; the release the accepted review enqueues mints the version that ships. |
 | Never does | Call `erun review queue override-advance` as routine — that is a deliberate, separately-authorized escape hatch, not a way to skip a slow reviewer. Resolve a thread it did not open. |
 
 ### `erun-reviewer`

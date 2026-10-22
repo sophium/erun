@@ -312,7 +312,7 @@ with synthetic inputs independently of the repository wiring.
 
 - Cross-check a high-risk, mechanically comparable claim against its owning code
   source and one designated public spec. The infrastructure signature check uses
-  `GateRunInconclusiveSignatures()` and `agent-reference/skills-spec.md`, tolerating
+  `BuildInconclusiveSignatures()` and `agent-reference/skills-spec.md`, tolerating
   prose changes via distinctive nouns. It does not prove all related pages agree
   or that nuanced prose is correct; those need a manual sweep.
 - Keep chart-value assertions beside the chart renderer (e.g. retention controls),
@@ -328,9 +328,8 @@ with synthetic inputs independently of the repository wiring.
 - Reconstruct context-sensitive top-level build/push commands from their own
   constructors when cwd omits them. Container subcommands are not interchangeable:
   top-level push has additional flags.
-- Gate-run status vocabulary is a separate code-owned check, including backend
-  case normalization at each input entry point. Extend this pattern only for
-  other specifically justified vocabularies.
+- Value vocabularies are not checked here. Add a separate code-owned check only
+  for a specifically justified vocabulary.
 - These checks do not establish useful prose, effective sentinel defaults, or all
   enum semantics. Human help review belongs to `erun-cli/AGENTS.md`.
   External-source reads require `-count=1` and matching Docker COPY inputs.

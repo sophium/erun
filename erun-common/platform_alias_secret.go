@@ -13,8 +13,8 @@ import (
 // registry credential, over the same channel and at the same point in init.
 //
 // The invariant: every platform command (`erun review show`, `erun exec
-// gate-merge`, `erun review record-build --gate`, `erun exec gate-run
-// start/report`, `erun review report-merged`, `erun gate list`) resolves through
+// gate-merge`, `erun review record-build`, `erun review report-merged`,
+// `erun jobs list`) resolves through
 // newPlatformClientForAlias, which needs a configured erun-type cloud provider
 // alias; and the only way to create one the CLI offers requires an interactive
 // OIDC login, which no unattended pod can complete. So the session has to be

@@ -95,7 +95,7 @@ func reportRulesetBypass(ctx Context, remote string, notice rulesetBypassNotice)
 		rules = strings.Join(notice.Rules, "; ")
 	}
 	ctx.Info(fmt.Sprintf("push: %s admitted this push by bypassing %s -- the credential in use holds a bypass grant, so these were not satisfied: %s", remote, target, rules))
-	ctx.Info("push: run `erun exec reconcile-bypass` to check a bypassed push against the gate run that accounts for it.")
+	ctx.Info("push: run `erun exec reconcile-bypass` to check a bypassed push against the successful build that accounts for it.")
 }
 
 // reportRulesetBypassFromPushArgs reports a bypass GitHub wrote on a `git push`

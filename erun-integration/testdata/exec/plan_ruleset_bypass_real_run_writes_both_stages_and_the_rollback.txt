@@ -8,7 +8,7 @@ Ruleset 11081432 ("main") on sophium/erun
 
 Stage 1 -- grant the queue identity bypass alongside today's actors:
   gh api --method PUT repos/sophium/erun/rulesets/11081432 --input plan/ruleset-11081432-stage1.json
-Then prove the queue under the new identity: run one real gated merge as erun-merge-queue before stage 2.
+Then prove the queue under the new identity: run one real queued merge as erun-merge-queue before stage 2.
 
 Stage 2 -- demote every other always-bypass actor to pull_request:
   gh api --method PUT repos/sophium/erun/rulesets/11081432 --input plan/ruleset-11081432-stage2.json

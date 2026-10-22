@@ -18,12 +18,12 @@ var (
 // so an in-pod build can read the budget the operator provisioned for it
 // instead of through the config store, which has no environment entry inside
 // the pod. `erun resize --dind-cpu` moves the sidecar's configured limit, but
-// a gate build kept sizing off the config-store fallback default because the
+// a build's test stage kept sizing off the config-store fallback default because the
 // in-pod config store resolves no environment and envConfig was always nil in
 // that context.
 //
 // These values are a sizing budget, not the cap itself: the Dockerfile only
-// feeds them to its own gate-concurrency arithmetic, because a RUN step in the
+// feeds them to its own test-concurrency arithmetic, because a RUN step in the
 // test stage runs as a sibling of the sidecar's limited cgroup and so cannot
 // read the sidecar's real limit off the filesystem itself. The
 // limit they are resolved from is nonetheless enforced on that same build work
@@ -63,12 +63,12 @@ func dockerfileConsumesDindMemoryLimit(dockerfilePath string) bool {
 // applyDindResourceBuildArgs threads the building environment's actual
 // erun-dind sidecar resource limits (EnvConfig.RuntimeDindPod) into build's
 // DindCPULimit/DindMemoryLimitMiB fields when its Dockerfile declares the
-// matching ARG. Before this, the erun-devops Dockerfile's own in-build gate
+// matching ARG. Before this, the erun-devops Dockerfile's own test stage
 // sized its concurrency off either the ARG's hardcoded default or (for
 // scripts/parallel-gate.sh's cgroup reads) the host node's raw capacity,
 // since a RUN step in the test stage runs in a cgroup that is a sibling of
 // the dind sidecar's own limited cgroup, not a descendant of it, and so
-// cannot read the sidecar's real limit off the filesystem itself (erun#2081).
+// cannot read the sidecar's real limit off the filesystem itself.
 func applyDindResourceBuildArgs(store DockerStore, projectRoot, environment string, build *DockerBuildSpec) {
 	needsCPU := dockerfileConsumesDindCPULimit(build.DockerfilePath)
 	needsMemory := dockerfileConsumesDindMemoryLimit(build.DockerfilePath)

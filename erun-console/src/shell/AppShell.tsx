@@ -9,7 +9,6 @@ import { readTokenIdentity } from '../auth/identity';
 import { ConfigView } from '../config/ConfigView';
 import { AISessionsPanel } from '../environments/AISessionsPanel';
 import { EnvironmentsPanel } from '../environments/EnvironmentsPanel';
-import { GateRunsPanel } from '../gateRuns/GateRunsPanel';
 import { InvitesPanel } from '../identity/InvitesPanel';
 import { OrgSettingsPanel } from '../identity/OrgSettingsPanel';
 import { SmtpSettingsPanel } from '../identity/SmtpSettingsPanel';
@@ -133,8 +132,6 @@ function SectionContent({
           rateLimitWindowSeconds={config.inviteRequestRateLimitWindowSeconds}
         />
       );
-    case 'gate-runs':
-      return <GateRunsPanel token={token} />;
     case 'jobs':
       return <JobsPanel token={token} />;
     case 'pipeline':

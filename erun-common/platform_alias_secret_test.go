@@ -108,7 +108,7 @@ func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 // failure. Before this change an agent pod's root config carried no erun alias
 // and nothing could give it one, so every platform call resolved through
 // newPlatformClientForAlias and aborted with "no erun platform cloud provider
-// alias is configured" before its first network call -- `erun gate list` among
+// alias is configured" before its first network call -- `erun review show` among
 // them, exiting 127, with no remedy reachable from inside the pod.
 //
 // This composes on the pod's side exactly what the entrypoint composes in
@@ -410,7 +410,7 @@ func signedInDefaultHostStore(t *testing.T, provider CloudProviderConfig) {
 // anything provisioned a platform alias records no Secret name, so the runtime
 // chart mounts nothing, so the entrypoint's seeder finds nothing to seed -- and
 // nothing on the deploy path ever changed that, leaving the pod permanently
-// unable to call the platform API (the reported `erun gate list` abort). Before
+// unable to call the platform API (the reported platform-command abort). Before
 // this change a deploy of that environment carried no platform-alias Secret and
 // no name for the chart to mount; this drives one against a host that is signed
 // in and asserts the environment leaves the deploy with both, and with the record

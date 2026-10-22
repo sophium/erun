@@ -18,13 +18,13 @@ import (
 // in erun-backend-db/AGENTS.md ("Reviews") says it should, and nothing else --
 // against a real migrated PostgreSQL, not a mock. Reviews has six inbound
 // foreign keys (comments, releases, review_reviewers, review_merge_queue,
-// gate_runs, builds), so this locks the referential order directly rather than
+// builds), so this locks the referential order directly rather than
 // trusting the design's own guard list, which omits builds.
 //
 // Locks these properties against persisted database state:
 //
 //  1. a CLOSED review past the 90-day age bound with no referencing row in any
-//     of comments/releases/builds/gate_runs/review_merge_queue is deleted
+//     of comments/releases/builds/review_merge_queue is deleted
 //     together with its review_reviewers rows.
 //  2. a CLOSED review past the age bound with an unpinned builds row still
 //     pointing at it survives.
@@ -32,7 +32,7 @@ import (
 //     survives (guarded by the same builds row), but the pin itself is nulled;
 //     the build row is untouched.
 //  4. a CLOSED review past the age bound referenced by a comment, a release, a
-//     gate_runs row, or a review_merge_queue row each survives.
+//     historical GATE build row, or a review_merge_queue row each survives.
 //  5. an OPEN review, however old, is exempt.
 //  6. a MERGED review, however old, is exempt entirely, and its pinned build
 //     survives too.
@@ -59,7 +59,7 @@ INSERT INTO tenants (tenant_id, name) VALUES
   ('{{p}}000000000003', 'builds-pinned{{n}}'),
   ('{{p}}000000000004', 'comments-guard{{n}}'),
   ('{{p}}000000000005', 'releases-guard{{n}}'),
-  ('{{p}}000000000006', 'gate-runs-guard{{n}}'),
+  ('{{p}}000000000006', 'legacy-gate-build-guard{{n}}'),
   ('{{p}}000000000007', 'queue-guard{{n}}'),
   ('{{p}}000000000008', 'open{{n}}'),
   ('{{p}}000000000009', 'merged{{n}}'),
@@ -85,23 +85,23 @@ INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, 
 INSERT INTO review_reviewers (tenant_id, review_id, user_id) VALUES
   ('{{p}}000000000001', '{{p}}000000000101', '{{p}}100000000001');
 
--- 2: builds-unpinned -- CLOSED, 200 days old, an unpinned successful GATE
--- build still references it via builds.review_id alone.
+-- 2: builds-unpinned -- CLOSED, 200 days old, an unpinned successful build
+-- still references it via builds.review_id alone.
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status, created_at, updated_at) VALUES
   ('{{p}}000000000201', '{{p}}000000000002', '{{p}}100000000002', 'r', 'main', 'feat', 'CLOSED', now() - interval '200 days', now() - interval '200 days');
 INSERT INTO review_reviewers (tenant_id, review_id, user_id) VALUES
   ('{{p}}000000000002', '{{p}}000000000201', '{{p}}100000000002');
 INSERT INTO builds (build_id, tenant_id, review_id, kind, successful, commit_id, version) VALUES
-  ('{{p}}000000000202', '{{p}}000000000002', '{{p}}000000000201', 'GATE', true, 'c', NULL);
+  ('{{p}}000000000202', '{{p}}000000000002', '{{p}}000000000201', 'RECORDED', true, 'c', '1.0.0');
 
--- 3: builds-pinned -- starts OPEN so a FAILED GATE build can reference it,
+-- 3: builds-pinned -- starts OPEN so a failed build can reference it,
 -- then backdated to CLOSED with the build pinned as last_failed_build_id.
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status) VALUES
   ('{{p}}000000000301', '{{p}}000000000003', '{{p}}100000000003', 'r', 'main', 'feat', 'OPEN');
 INSERT INTO review_reviewers (tenant_id, review_id, user_id) VALUES
   ('{{p}}000000000003', '{{p}}000000000301', '{{p}}100000000003');
 INSERT INTO builds (build_id, tenant_id, review_id, kind, successful, commit_id, version, failure_detail) VALUES
-  ('{{p}}000000000302', '{{p}}000000000003', '{{p}}000000000301', 'GATE', false, 'c', NULL, 'gate failed');
+  ('{{p}}000000000302', '{{p}}000000000003', '{{p}}000000000301', 'RECORDED', false, 'c', '1.0.0', 'build failed');
 ALTER TABLE reviews DISABLE TRIGGER reviews_set_timestamps;
 UPDATE reviews SET status = 'CLOSED', last_failed_build_id = '{{p}}000000000302',
        created_at = now() - interval '200 days', updated_at = now() - interval '200 days'
@@ -120,11 +120,12 @@ INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, 
 INSERT INTO releases (tenant_id, review_id, target_branch, commit_id, status, version) VALUES
   ('{{p}}000000000005', '{{p}}000000000501', 'main', 'c', 'released', 'v1');
 
--- 6: gate-runs-guard -- CLOSED, 200 days old, referenced by a gate_runs row.
+-- 6: legacy-gate-build-guard -- CLOSED, 200 days old, referenced only by a
+-- historical GATE build row, a kind no longer written but still on the books.
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status, created_at, updated_at) VALUES
   ('{{p}}000000000601', '{{p}}000000000006', '{{p}}100000000006', 'r', 'main', 'feat', 'CLOSED', now() - interval '200 days', now() - interval '200 days');
-INSERT INTO gate_runs (tenant_id, review_id, source_branch, target_branch, source_commit, merge_commit, status) VALUES
-  ('{{p}}000000000006', '{{p}}000000000601', 'feat', 'main', 'c', 'c', 'PASSED');
+INSERT INTO builds (build_id, tenant_id, review_id, kind, successful, commit_id, version, failure_detail) VALUES
+  ('{{p}}000000000602', '{{p}}000000000006', '{{p}}000000000601', 'GATE', false, 'c', NULL, 'gate failed');
 
 -- 7: queue-guard -- CLOSED, 200 days old, referenced by a review_merge_queue row.
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status, created_at, updated_at) VALUES
@@ -136,8 +137,9 @@ INSERT INTO review_merge_queue (tenant_id, target_branch, review_id) VALUES
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status, created_at, updated_at) VALUES
   ('{{p}}000000000801', '{{p}}000000000008', '{{p}}100000000008', 'r', 'main', 'feat', 'OPEN', now() - interval '200 days', now() - interval '200 days');
 
--- 9: merged -- starts OPEN so a successful GATE build can reference it, then
--- backdated to MERGED with the build pinned as last_merged_build_id.
+-- 9: merged -- starts OPEN so a historical successful GATE build can
+-- reference it, then backdated to MERGED with the build pinned as
+-- last_merged_build_id.
 INSERT INTO reviews (review_id, tenant_id, author_user_id, name, target_branch, source_branch, status) VALUES
   ('{{p}}000000000901', '{{p}}000000000009', '{{p}}100000000009', 'r', 'main', 'feat', 'OPEN');
 INSERT INTO builds (build_id, tenant_id, review_id, kind, successful, commit_id, version) VALUES
@@ -230,7 +232,6 @@ func retentionReviewsCleanup(t *testing.T, f retentionReviewsFixture) {
 	in := "(" + f.tenantList() + ")"
 	for _, stmt := range []string{
 		`DELETE FROM review_merge_queue WHERE tenant_id IN ` + in,
-		`DELETE FROM gate_runs WHERE tenant_id IN ` + in,
 		`DELETE FROM releases WHERE tenant_id IN ` + in,
 		`DELETE FROM comments WHERE tenant_id IN ` + in,
 		`DELETE FROM review_reviewers WHERE tenant_id IN ` + in,
@@ -344,7 +345,8 @@ func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testin
 	// 4-7: each guard keeps its review alive.
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a comment must survive", reviewCount, f.id("000000000401"))
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a release must survive", reviewCount, f.id("000000000501"))
-	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a gate_runs row must survive", reviewCount, f.id("000000000601"))
+	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a historical GATE build must survive", reviewCount, f.id("000000000601"))
+	retentionReviewsExpect(t, db, "1", "the historical GATE build itself must be untouched", buildCount, f.id("000000000602"))
 	retentionReviewsExpect(t, db, "1", "a CLOSED review referenced by a review_merge_queue row must survive", reviewCount, f.id("000000000701"))
 
 	// 8: OPEN survives no matter how old.

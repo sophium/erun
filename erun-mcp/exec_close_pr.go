@@ -15,7 +15,7 @@ type ExecClosePRInput struct {
 	Branch        string `json:"branch" jsonschema:"source branch whose open pull request should close — the review's sourceBranch"`
 	TargetBranch  string `json:"targetBranch" jsonschema:"the pull request's base branch — the review's targetBranch"`
 	RemoteURL     string `json:"remoteUrl" jsonschema:"the github.com remote the pull request lives on"`
-	GatedCommit   string `json:"gatedCommit" jsonschema:"branch's tip when the gate actually fetched and tested it; closing is refused if the pull request's current head does not match"`
+	GatedCommit   string `json:"gatedCommit" jsonschema:"branch's tip when the merge queue actually fetched and built it; closing is refused if the pull request's current head does not match"`
 	LandingCommit string `json:"landingCommit" jsonschema:"the commit that actually landed on targetBranch, recorded in a comment on the pull request"`
 	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, trace the lookup without closing or commenting on anything"`
 	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`

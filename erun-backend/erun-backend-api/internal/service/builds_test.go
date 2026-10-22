@@ -70,54 +70,57 @@ func TestBuildCreateAcceptsASnapshotVersion(t *testing.T) {
 	}
 }
 
-// TestBuildCreateRefusesAFailedGateBuildWithNoFailureDetail: the gate's own
-// account of why it did not succeed is the only thing that makes a failed
-// GATE build actionable.
-func TestBuildCreateRefusesAFailedGateBuildWithNoFailureDetail(t *testing.T) {
-	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
-	_, err := svc.Create(context.Background(), model.Build{
-		ReviewID: "review-1", CommitID: validCommitID, Kind: model.BuildKindGate, Successful: false,
-	})
-
-	var missingFailureDetail *MissingFailureDetailError
-	if !errors.As(err, &missingFailureDetail) {
-		t.Fatalf("Create error = %v, want *MissingFailureDetailError", err)
-	}
-	if !errors.Is(err, repository.ErrInvalidInput) {
-		t.Fatalf("Create error = %v, want it to unwrap to ErrInvalidInput", err)
-	}
-}
-
-// TestBuildCreateAcceptsAGateBuildWithNoVersion: a GATE build publishes
-// nothing, so it must not be held to RECORDED's version grammar.
-func TestBuildCreateAcceptsAGateBuildWithNoVersion(t *testing.T) {
+// TestBuildCreateRefusesTheRetiredGateKind: every build is written as
+// RECORDED with a version, including the merge queue's build of a prepared
+// merge commit, so a GATE build is refused before it reaches the repository.
+func TestBuildCreateRefusesTheRetiredGateKind(t *testing.T) {
 	repo := &fakeBuildRepo{}
 	svc := NewBuildService(repo, fakeBuildReviewService{})
 	_, err := svc.Create(context.Background(), model.Build{
 		ReviewID: "review-1", CommitID: validCommitID, Kind: model.BuildKindGate, Successful: true,
 	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if repo.created.Kind != model.BuildKindGate {
-		t.Fatalf("created build kind = %q, want GATE to pass through", repo.created.Kind)
-	}
-}
 
-// TestBuildCreateRefusesAGateBuildWithNoReview: a GATE build always gates a
-// specific review's merge, so an unattached build can never claim that kind.
-func TestBuildCreateRefusesAGateBuildWithNoReview(t *testing.T) {
-	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
-	_, err := svc.Create(context.Background(), model.Build{
-		EnvironmentID: "env-1", CommitID: validCommitID, Kind: model.BuildKindGate, Successful: true,
-	})
-
-	var gateRequiresReview *GateBuildRequiresReviewError
-	if !errors.As(err, &gateRequiresReview) {
-		t.Fatalf("Create error = %v, want *GateBuildRequiresReviewError", err)
+	var unsupported *UnsupportedBuildKindError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("Create error = %v, want *UnsupportedBuildKindError", err)
 	}
 	if !errors.Is(err, repository.ErrInvalidInput) {
 		t.Fatalf("Create error = %v, want it to unwrap to ErrInvalidInput", err)
+	}
+	if repo.created.CommitID != "" {
+		t.Fatalf("a GATE build reached the repository: %+v", repo.created)
+	}
+}
+
+// TestBuildCreateRequiresAVersionOnAMergeQueueBuild: the build recorded on a
+// review at MERGE is an ordinary build, held to the same version grammar as
+// any other.
+func TestBuildCreateRequiresAVersionOnAMergeQueueBuild(t *testing.T) {
+	svc := NewBuildService(&fakeBuildRepo{}, fakeBuildReviewService{})
+	_, err := svc.Create(context.Background(), model.Build{
+		ReviewID: "review-1", CommitID: validCommitID, Successful: true,
+	})
+
+	var invalidVersion *InvalidVersionError
+	if !errors.As(err, &invalidVersion) {
+		t.Fatalf("Create error = %v, want *InvalidVersionError for a build with no version", err)
+	}
+}
+
+// TestBuildCreatePersistsAFailureDetailOnAnyFailedBuild: failureDetail is an
+// optional reason on any failed build, not a field one kind owns.
+func TestBuildCreatePersistsAFailureDetailOnAnyFailedBuild(t *testing.T) {
+	repo := &fakeBuildRepo{}
+	svc := NewBuildService(repo, fakeBuildReviewService{})
+	_, err := svc.Create(context.Background(), model.Build{
+		ReviewID: "review-1", CommitID: validCommitID, Version: "1.0.0", Successful: false,
+		FailureDetail: "erun build failed: go vet found 3 issues",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if repo.created.Kind != model.BuildKindRecorded || repo.created.FailureDetail == "" {
+		t.Fatalf("created = %+v, want a RECORDED build carrying its failure detail", repo.created)
 	}
 }
 

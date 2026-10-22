@@ -64,7 +64,7 @@
 # used to be scaled inversely with this pod's own resolved quota, which made
 # the lint's deadline -- and so the meaning of a lint red -- a property of the
 # machine that ran it: the 22-core environment resolved the 15m floor, the
-# 8-core ones 41m, and `erun review record-build --gate --failed` cannot tell
+# 8-core ones 41m, and `erun review record-build --failed` cannot tell
 # a lint that found something from one killed by a deadline its environment
 # never had a chance to meet. The scaling's premise was that wall-clock scales
 # as 1/cores; the measured runs do not, because a lint's fixed phases --
@@ -263,7 +263,7 @@ INTEGRATION_TEST_TIMEOUT ?= $(shell cpu=$$(./scripts/parallel-gate.sh cpu-quota)
 # "0 issues." -- and then overrides the code it decided from that report with
 # the run's own deadline, so a clean analysis that outlived --timeout exits as
 # a timeout and reads as a lint failure to anything watching the status,
-# including `erun review record-build --gate --failed`.
+# including `erun review record-build --failed`.
 #
 # The lineage, because the deadline has moved twice and each move has a
 # reason. The timeout used to be a flat 15m, calibrated on a build container
@@ -641,15 +641,14 @@ test-frontend:
 # Keep worker fixtures isolated and validate repeated-run determinism when
 # changing their lifecycle; see erun-ui/playwright/AGENTS.md.
 #
-# `erun build` narrows what this target actually runs: it resolves a
-# PLAYWRIGHT_TEST_AREAS build-arg (applyPlaywrightAreaBuildArgs in
-# erun-common/build_playwright_areas.go) from the Playwright spec-file diff
-# against the merge base and threads it into this Dockerfile's RUN step as
-# an env var of the same name, which run.sh reads directly (see its own
-# header comment) -- no argument passing needed here since Make already
-# exports the recipe's environment into everything it execs. See
-# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection" section for the
-# area taxonomy and the selection rule.
+# What this target runs is decided by PLAYWRIGHT_TEST_AREAS, which run.sh
+# reads directly (see its own header comment) -- no argument passing needed
+# here since Make already exports the recipe's environment into everything it
+# execs. Inside an `erun build` the erun-devops Dockerfile's test stage leaves
+# it at its empty default, so the image runs the full suite; a local run
+# resolves an area selection below. See erun-ui/playwright/AGENTS.md's
+# "Area-scoped gate selection" section for the area taxonomy and the selection
+# rule.
 #
 # A real prerequisite, not just prose: run.sh builds the production-tagged
 # erun-app, which needs both erun-ui/frontend/dist (the go:embed in
@@ -675,16 +674,11 @@ test-playwright: test-erun-ui-windows-build test-frontend
 	@echo ">> erun-ui/playwright suite (desktop tags)"
 	@(cd erun-ui/playwright && ./run.sh --skip-app-gates)
 
-# A plain local `make check`/`make test-playwright` never goes through `erun
-# build`'s own resolution above, so PLAYWRIGHT_TEST_AREAS stayed unset here
-# and this target always ran the full suite (~21-23 minutes) while the gate
-# that actually protects `main` ran in tens of seconds -- backwards, since a
-# local run is supposed to be a cheaper preview of the same gate, not a
-# stricter one. Resolve the identical selection here too, via `erun exec
-# resolve-playwright-areas` (a thin CLI wrapper around the same
-# erun-common.ResolvePlaywrightTestAreaSelection function `erun build` calls
-# above), so a developer or agent iterating locally pays the same cost the
-# gate does. This is a target-specific variable using `?=`, so it is only
+# A plain local `make check`/`make test-playwright` resolves an area selection
+# from the change, via `erun exec resolve-playwright-areas` (a thin CLI
+# wrapper around erun-common.ResolvePlaywrightTestAreaSelection), so a
+# developer or agent iterating locally does not pay for the full suite (~21-23
+# minutes) on every run. This is a target-specific variable using `?=`, so it is only
 # evaluated when the caller has not already supplied PLAYWRIGHT_TEST_AREAS --
 # the Dockerfile test stage's own build-arg thread, including its
 # empty-string "run everything" default, is left untouched. `export` (no

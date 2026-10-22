@@ -85,42 +85,19 @@ func dockerfileHasVersionedFrom(dockerfilePath string) bool {
 	return dockerfileVersionedFromPattern.Match(data)
 }
 
-// Both patterns require the stage name to be exactly `test`. A word-boundary
-// match is not enough: `AS test-toolchain` and `COPY --from=test-toolchain`
-// satisfy one, and the pair then reads as the gate convention while the
-// Dockerfile runs no gate at all -- exempting it from fingerprint promotion and
-// granting it the host-network entitlement for nothing. Naming a stage after
-// the toolchain it installs is ordinary, and the erun-backend-api Dockerfile
-// carries exactly such a stage beside its real gate stage.
+// The pattern requires the stage name to be exactly `test`. A word-boundary
+// match is not enough: `AS test-toolchain` satisfies one while the Dockerfile
+// declares no test stage at all, which would grant it the host-network
+// entitlement for nothing. Naming a stage after the toolchain it installs is
+// ordinary, and the erun-backend-api Dockerfile carries exactly such a stage
+// beside its real test stage.
 var dockerfileTestStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+test(?:\s|$)`)
 
-var dockerfileCopyFromTestPattern = regexp.MustCompile(`(?im)^\s*COPY\s+--from=test(?:\s|$)`)
-
-// dockerfileHasGateTestStage reports whether a Dockerfile declares a `test`
-// stage that a later stage depends on via `COPY --from=test` — the
-// `erun-devops` convention (see its AGENTS.md "Build Workflow") where the
-// builder stage's `COPY --from=test /test-ok` marker only exists once `make
-// check` has actually run and passed inside the `test` stage. Such a
-// Dockerfile is the build's own merge gate: promoting a cached fingerprint
-// image for it would skip invoking `docker build` at all, so the gate never
-// runs even though the overall build still reports success.
-func dockerfileHasGateTestStage(dockerfilePath string) bool {
-	data, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return false
-	}
-	return dockerfileTestStagePattern.Match(data) && dockerfileCopyFromTestPattern.Match(data)
-}
-
 // dockerfileDeclaresTestStage reports whether a Dockerfile declares a `test`
-// stage at all, whether or not a later stage consumes it through the
-// `COPY --from=test` marker dockerfileHasGateTestStage additionally requires.
-//
-// It answers a different question from dockerfileHasGateTestStage and must not
-// be collapsed into it: that one asks whether this build is the project's own
-// merge gate (a promotion-eligibility question), this one asks whether the
-// build has a place for tests to run. Sharing the stage-name pattern keeps the
-// two from drifting on what counts as a `test` stage.
+// stage at all: whether the build has a place for tests to run, which is the
+// question the host-network entitlement is scoped by. Whether a later stage
+// consumes it (`COPY --from=test`, so the image is only produced once the
+// tests pass) is a separate structural contract the Dockerfile tests pin.
 func dockerfileDeclaresTestStage(dockerfilePath string) bool {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {

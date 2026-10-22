@@ -12,14 +12,14 @@ import (
 	"time"
 )
 
-// close_pull_request.go closes the GitHub pull request a merge queue gate
+// close_pull_request.go closes the GitHub pull request a merge queue
 // actually shipped. `erun exec gate-merge` lands a squash commit whose SHA is
 // not the branch head GitHub tracks, so GitHub never reconciles a queued
 // merge with its open pull request on its own -- the PR stays open forever
-// with no link to what actually shipped (erun#1895). This runs after `erun
+// with no link to what actually shipped. This runs after `erun
 // review report-merged` has already succeeded and closes that gap: find the
 // branch's open pull request (a no-op, not an error, when there is none),
-// refuse loudly if its head moved since the gate fetched it, otherwise
+// refuse loudly if its head moved since the merge drive fetched it, otherwise
 // record the landing commit in a comment and close it.
 
 // ClosePullRequestParams is the `erun exec close-pr` input.
@@ -33,11 +33,11 @@ type ClosePullRequestParams struct {
 	// targetBranch. Disambiguates when Branch has open pull requests
 	// against more than one base.
 	TargetBranch string
-	// GatedCommit is Branch's tip at the moment the gate actually fetched
-	// and tested it (GateMergeLandedSource.SourceCommit). Closing is
-	// refused when the pull request's current head no longer matches this:
-	// something pushed to Branch after the gate fetched it, so the gated
-	// content is not what closing would discard.
+	// GatedCommit is Branch's tip at the moment the merge drive fetched and
+	// built it (GateMergeLandedSource.SourceCommit). Closing is refused when
+	// the pull request's current head no longer matches this: something
+	// pushed to Branch after it was fetched, so the built content is not
+	// what closing would discard.
 	GatedCommit string
 	// LandingCommit is the commit that actually landed on TargetBranch,
 	// recorded in a comment on the pull request so a later reader does not
@@ -62,7 +62,7 @@ type ClosePullRequestResult struct {
 // head no longer matches GatedCommit -- the same class of loud, named
 // refusal `erun exec push`'s own branch-mismatch check gives, because
 // closing the pull request here would silently discard whatever moved the
-// branch after the gate fetched it.
+// branch after the merge drive fetched it.
 type ClosePullRequestHeadMovedError struct {
 	Branch, GatedCommit, ActualHead string
 	Number                          int

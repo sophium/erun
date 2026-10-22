@@ -12,7 +12,7 @@ import (
 // order it should land. Message becomes that branch's own squash commit
 // message — normally the branch's review name (AGENTS.md: "Review name is
 // the squash merge message") — since a landed branch becomes a real commit
-// on TargetBranch if the gate passes. The branch's own load-bearing trailers
+// on TargetBranch if the build of the merge commit succeeds. The branch's own load-bearing trailers
 // (see gateMergeCarriedTokens) are appended beneath it, so what the branch
 // declared about its own commit survives a squash that would otherwise
 // replace the branch's history with this one message.
@@ -23,14 +23,14 @@ type GateMergeSource struct {
 
 // GateMergeWorkingTreeParams squash-merges Sources onto a fresh local
 // checkout of TargetBranch, one commit per landed source — the git half of
-// gating a merge queue promotion. The environment a review's merge queue
+// composing a merge queue promotion. The environment a review's merge queue
 // promotes to MERGE runs this before `erun build`: fetch every branch, build
 // the prospective merge onto the target's *current* remote tip (never the
 // working tree's own existing branch, and never a source branch as its
-// author left it), leaving a stack of squash commits ready to gate before
+// author left it), leaving a stack of squash commits ready to build before
 // anything is pushed.
 //
-// A single review's ordinary gate is the Sources-of-one case. Batching
+// A single review's ordinary merge is the Sources-of-one case. Batching
 // (Sources with more than one entry) is what lets a caller test whether
 // several unmerged branches compile *together*, not just individually —
 // something no repeated single-source call can see, since each call resets
@@ -75,7 +75,7 @@ type GateMergeLandedSource struct {
 // conflicting squash, a branch this could not even resolve after fetching
 // (e.g. deleted since the caller decided to batch it), or one whose squash
 // staged nothing because its content is already on the target. The rest of
-// the batch still gates; a skip here is reported, not fatal.
+// the batch still builds; a skip here is reported, not fatal.
 type GateMergeSkippedSource struct {
 	SourceBranch    string   `json:"sourceBranch"`
 	SourceCommit    string   `json:"sourceCommit,omitempty"`

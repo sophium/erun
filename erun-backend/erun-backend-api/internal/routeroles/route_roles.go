@@ -43,7 +43,7 @@ const (
 	// TenantAgentRole is the bit TenantAgent's derived grant set is built
 	// from — the machine role an environment's own identity holds. It is a
 	// deliberate strict subset of TenantUser's reach: an unattended
-	// environment drives the merge-queue gate and reports its own build, and
+	// environment drives the merge queue and reports its own build, and
 	// nothing else. Extend it only after identifying a real additional
 	// caller, the same discipline the whole narrower-role model exists for.
 	TenantAgentRole
@@ -65,8 +65,8 @@ const (
 	// does not.
 	TenantAdminOnly Roles = TenantAdminRole
 	// TenantAgentClass means TenantUser, TenantAdmin and TenantAgent all
-	// grant this route — a route that is part of driving the merge-queue
-	// gate or reporting the environment's own build. Every route classified
+	// grant this route — a route that is part of driving the merge queue or
+	// reporting the environment's own build. Every route classified
 	// this way is a subset member, never a route of its own.
 	TenantAgentClass Roles = TenantUserRole | TenantAdminRole | TenantAgentRole
 )
@@ -79,10 +79,10 @@ const (
 // this against internal/routes/*.go directly.
 //
 // TenantAgentClass appears on exactly the routes an environment's own
-// identity performs while it drives the merge-queue gate and reports its own
-// build: reading its own capabilities and the reviews it is gated against,
-// reporting the GATE build, starting and reporting the gate run, reporting
-// the merge, and the unattached `erun build` self-report. Two boundaries are
+// identity performs while it drives the merge queue and reports its own
+// build: reading its own capabilities and the reviews it is merging,
+// recording the build of the prepared merge commit, reporting the merge, and
+// the unattached `erun build` self-report. Two boundaries are
 // deliberate rather than omissions. GET /v1/builds is not among them: it is
 // the tenant-wide build history, read by the desktop dashboard and the
 // console, and no environment flow reads it — the self-report needs only the
@@ -147,25 +147,15 @@ var Routes = map[string]Roles{
 	// GET/POST /v1/builds is the same build-history surface, tenant-wide
 	// rather than review-nested (erun#1954). A review's own builds are part
 	// of reading that review — `erun review show` fetches them alongside its
-	// comments — and reporting the GATE build is the whole reason the
-	// machine role exists. The tenant-wide list is not: see Routes' own doc
-	// comment for why TenantAgent gets the POST half of /v1/builds without
-	// the GET half.
+	// comments — and recording the build of the prepared merge commit is the
+	// whole reason the machine role exists. The tenant-wide list is not: see
+	// Routes' own doc comment for why TenantAgent gets the POST half of
+	// /v1/builds without the GET half.
 	"GET /v1/reviews/{review_id}/builds":            TenantAgentClass,
 	"POST /v1/reviews/{review_id}/builds":           TenantAgentClass,
 	"GET /v1/reviews/{review_id}/builds/{build_id}": TenantUserClass,
 	"GET /v1/builds":                                TenantUserClass,
 	"POST /v1/builds":                               TenantAgentClass,
-
-	// gate_runs.go — reading and driving gate runs is part of the same
-	// merge-queue workflow TenantUser already drives for reviews and builds.
-	// The environment driving the gate reports its own run, so the create
-	// and update pair is the machine role's; the reads are the operator's
-	// view of the queue's history.
-	"GET /v1/gate-runs":                 TenantUserClass,
-	"POST /v1/gate-runs":                TenantAgentClass,
-	"GET /v1/gate-runs/{gate_run_id}":   TenantUserClass,
-	"PATCH /v1/gate-runs/{gate_run_id}": TenantAgentClass,
 
 	// environment_events.go — reading an environment's event log and
 	// appending to it is reading and operating environments that already
@@ -208,7 +198,7 @@ var Routes = map[string]Roles{
 	// normally own them (see internal/service's machine identity service). The
 	// classification is still TenantUser, and deliberately so: the credential
 	// is strictly weaker than the mcp-token this same class already mints —
-	// TenantAgent reaches the merge-queue gate and the build self-report,
+	// TenantAgent reaches the merge queue and the build self-report,
 	// while a minted MCP token can carry erun:admin and drive a raw exec in
 	// the environment — and the caller is an operator provisioning an
 	// environment that already exists in their own tenant, which is what this

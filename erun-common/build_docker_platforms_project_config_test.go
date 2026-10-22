@@ -21,7 +21,7 @@ func repoRootForDockerPlatformsProjectConfigTest(t *testing.T) string {
 }
 
 // TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments locks in
-// that a non-release gate build here stays amd64-only: it publishes nothing, so
+// that a non-release build here stays amd64-only: it publishes nothing, so
 // an environment whose node is confirmed x86_64 also building linux/arm64 under
 // qemu emulation would buy an artifact nobody consumes.
 //
@@ -50,7 +50,7 @@ func TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments(t *tes
 	want := []string{"linux/amd64"}
 	for _, environment := range []string{"code1", "code2", "code3", "code4"} {
 		if got := cfg.DockerPlatformsForEnvironment(environment); !reflect.DeepEqual(got, want) {
-			t.Errorf("DockerPlatformsForEnvironment(%q) = %v, want %v (every agent environment on this x86_64 node should build amd64 only, so a non-release gate build there stops paying for emulated arm64)", environment, got, want)
+			t.Errorf("DockerPlatformsForEnvironment(%q) = %v, want %v (every agent environment on this x86_64 node should build amd64 only, so a non-release build there stops paying for emulated arm64)", environment, got, want)
 		}
 	}
 

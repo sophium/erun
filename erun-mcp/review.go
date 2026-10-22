@@ -189,8 +189,7 @@ type ReviewRecordBuildInput struct {
 	platformAliasInput
 	ReviewID      string `json:"reviewId" jsonschema:"review id to record the build against"`
 	CommitID      string `json:"commitId" jsonschema:"full 40-character commit hash the build ran against"`
-	Gate          bool   `json:"gate,omitempty" jsonschema:"record the merge queue's own GATE build kind instead of an ordinary build — set by the environment a review's merge queue promoted to MERGE, reporting its own build of the prospective merge; a GATE build carries no version"`
-	Version       string `json:"version,omitempty" jsonschema:"version the build minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one), required even for a failed build; a RECORDED build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required; omit when gate is true"`
+	Version       string `json:"version" jsonschema:"version the build minted, from the run's own build result (a plain erun build --output json, or --dry-run --output json when it failed before printing one), required even for a failed build; a recorded build publishes nothing, so this is metadata no platform path resolves and a --release produced version is accepted but not required"`
 	Successful    bool   `json:"successful" jsonschema:"whether the build succeeded; false records a failed build"`
 	FailureDetail string `json:"failureDetail,omitempty" jsonschema:"why the build failed; only meaningful when successful is false"`
 }
@@ -211,14 +210,14 @@ func reviewRecordBuildTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.CommitID) == "" {
 			return nil, ReviewRecordBuildResult{}, fmt.Errorf("reviewId and commitId are required")
 		}
-		if !input.Gate && strings.TrimSpace(input.Version) == "" {
-			return nil, ReviewRecordBuildResult{}, fmt.Errorf("version is required unless gate is true")
+		if strings.TrimSpace(input.Version) == "" {
+			return nil, ReviewRecordBuildResult{}, fmt.Errorf("version is required")
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_record-build"
 		build, err := eruncommon.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, eruncommon.ReviewRecordBuildParams{
-			ReviewID: input.ReviewID, CommitID: input.CommitID, Gate: input.Gate, Version: input.Version,
+			ReviewID: input.ReviewID, CommitID: input.CommitID, Version: input.Version,
 			Successful: input.Successful, FailureDetail: input.FailureDetail,
 		}, cloudDependencies())
 		if err != nil {
@@ -231,7 +230,7 @@ func reviewRecordBuildTool(runtime RuntimeConfig) func(context.Context, *mcp.Cal
 type ReviewReportMergedInput struct {
 	platformAliasInput
 	ReviewID  string `json:"reviewId" jsonschema:"review id to report merged"`
-	BuildID   string `json:"buildId" jsonschema:"the successful GATE build's id"`
+	BuildID   string `json:"buildId,omitempty" jsonschema:"the successful recorded build of the merge commit that landed; omit for work that landed without the queue"`
 	RemoteURL string `json:"remoteUrl" jsonschema:"the git remote the platform fetches to verify the merge, in any form git accepts; an SSH remote is read over its host's HTTPS without credentials"`
 }
 
@@ -242,14 +241,14 @@ type ReviewReportMergedResult struct {
 }
 
 // reviewReportMergedTool is for the environment a review's merge queue
-// promoted to MERGE, once it has fetched, gate-built, and pushed the
-// prospective merge itself. The platform verifies rather than trusts this
+// promoted to MERGE, once it has fetched, built, recorded, and pushed the
+// prospective merge itself, and for work that landed without the queue. The platform verifies rather than trusts this
 // report — see AGENTS.md "Merge Queue" — so a call here is not itself the
 // authority; a MERGE_NOT_VERIFIED refusal leaves the review at MERGE.
 func reviewReportMergedTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReviewReportMergedInput) (*mcp.CallToolResult, ReviewReportMergedResult, error) {
-		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.BuildID) == "" || strings.TrimSpace(input.RemoteURL) == "" {
-			return nil, ReviewReportMergedResult{}, fmt.Errorf("reviewId, buildId, and remoteUrl are required")
+		if strings.TrimSpace(input.ReviewID) == "" || strings.TrimSpace(input.RemoteURL) == "" {
+			return nil, ReviewReportMergedResult{}, fmt.Errorf("reviewId and remoteUrl are required")
 		}
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)

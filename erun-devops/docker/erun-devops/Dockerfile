@@ -287,9 +287,9 @@ COPY erun-docs/docs/deployment/data-retention.md /src/erun-docs/docs/deployment/
 # tools against this page's "Full tool index" table; only the one file is
 # needed, not the built docs site.
 COPY erun-docs/docs/mcp/overview.md /src/erun-docs/docs/mcp/overview.md
-# TestGateRunInfrastructureSignaturesAreDocumented (erun-integration) cross-
+# TestBuildInfrastructureSignaturesAreDocumented (erun-integration) cross-
 # checks erun-common's known infrastructure-failure signature list against
-# this page's spec of the gate-run/gate-build failure classifier.
+# this page's spec of the build failure classifier.
 COPY erun-docs/docs/agent-reference/skills-spec.md /src/erun-docs/docs/agent-reference/skills-spec.md
 # TestConfigLocationsDocMatchesResolver (erun-integration) derives the per-user
 # config paths from erun-common's own resolvers and asserts this page documents
@@ -383,16 +383,13 @@ ARG DIND_MEMORY_LIMIT_MIB=20480
 # gets a wider suite -- but as one of the gate's widths rather than as an
 # inline halving of a resource limit.
 ARG DIND_CPU_LIMIT=12
-# PLAYWRIGHT_TEST_AREAS carries `erun build`'s resolved smoke+area selection
-# (applyPlaywrightAreaBuildArgs in erun-common/build_playwright_areas.go,
-# derived from the Playwright spec-file diff against the merge base) into
-# this stage's `make test-playwright` invocation below, per the design in
-# erun-ui/playwright/AGENTS.md's "Area-scoped gate selection": "all" or unset
-# runs the full suite, "smoke" runs only tests/smoke, "smoke,<area>,..." runs
-# smoke plus the named area directories under tests/areas/. Left at its
-# default empty string for a bare `docker build` with no erun build-arg
-# resolution -- the safe, fail-open direction is the full suite, never zero
-# coverage.
+# PLAYWRIGHT_TEST_AREAS passes a smoke+area selection into this stage's
+# `make test-playwright` invocation below, per erun-ui/playwright/AGENTS.md's
+# "Area-scoped gate selection": "all" or unset runs the full suite, "smoke"
+# runs only tests/smoke, "smoke,<area>,..." runs smoke plus the named area
+# directories under tests/areas/. `erun build` never sets it, so the image
+# runs the full suite -- the fail-open direction, never zero coverage -- and
+# an unchanged erun-devops reuses its last successful build instead.
 ARG PLAYWRIGHT_TEST_AREAS=""
 # ERUN_PLAYWRIGHT_ARTIFACTS_DIR is the suite's one artifact root
 # (erun-ui/playwright/fixtures/artifacts.ts): Playwright's own output dir, the

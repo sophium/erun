@@ -37,7 +37,7 @@
 # `./run.sh --grep sidebar` and `yarn test --grep sidebar` both work.
 #
 # Env vars:
-#   PLAYWRIGHT_TEST_AREAS  `erun build`'s resolved gate selection (see the
+#   PLAYWRIGHT_TEST_AREAS  The resolved area selection (see the
 #                          area-scoped-selection block below). Unset/"all"
 #                          runs everything; "smoke" or "smoke,<area>,..."
 #                          narrows the default target to tests/smoke plus the
@@ -611,10 +611,10 @@ if [ "$E2E_K3D" -eq 1 ]; then
 	fi
 fi
 
-# erun build's area-scoped gate selection (root AGENTS.md's "smoke + changed
-# areas" design; PLAYWRIGHT_TEST_AREAS is the build-arg
-# applyPlaywrightAreaBuildArgs in erun-common threads from the Playwright
-# spec-file diff against the merge base). Unset or "all" runs the full suite
+# Area-scoped selection (root AGENTS.md's "smoke + changed areas" design;
+# the root Makefile's test-playwright resolves PLAYWRIGHT_TEST_AREAS through
+# `erun exec resolve-playwright-areas` from the Playwright spec-file diff
+# against the merge base). Unset or "all" runs the full suite
 # unchanged; "smoke" or "smoke,<area>,..." narrows the default target to
 # those directories under tests/. An explicit caller target -- a bare CLI
 # arg, or the e2e-k3d default above -- always wins; this only supplies a

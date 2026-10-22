@@ -14,8 +14,8 @@ package integration
 // it -- at 912s, and again at 1296s, against a next-slowest module of 527s.
 // The change under that gate touched no Go file. Outside, that is
 // indistinguishable from a real lint failure: `erun review record-build
-// --gate --failed` ejects a review from the merge queue on it, and a failed
-// test stage tags no image, so it costs a full cold gate build too.
+// --failed` ejects a review from the merge queue on it, and a failed test
+// stage tags no image, so it costs a full cold build too.
 //
 // Every case below drives the real `lint` recipe -- real make, real fan-out --
 // with a stub golangci-lint on PATH replaying one output shape and exit

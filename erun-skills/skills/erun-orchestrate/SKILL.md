@@ -188,10 +188,10 @@ not know exists.
 
 - **Invariant.** A branch this orchestrator caused to exist goes `erun-merge`
   (branch → a review at `READY`), then `review record-build`, then the target's
-  merge queue, then `erun-merge-queue-drive` (gate the prospective merge, push on
-  green, report `MERGED`). `MERGED` is verified against the recorded GATE build and
-  the remote's own tip; a closed pull request asserts a landing rather than proving
-  one, so it is never the finish line.
+  merge queue, then `erun-merge-queue-drive` (build the prospective merge, push on
+  green, report `MERGED`). `MERGED` is verified against a successful recorded build
+  of the merge commit and the remote's own tip; a closed pull request asserts a
+  landing rather than proving one, so it is never the finish line.
 - **Dispatch.** Read the target's merge guidance *before* dispatching work that ends
   in a merge, and make registering the change the last required step of every brief
   you write. A brief that ends at "open a pull request" has no landing step in it,

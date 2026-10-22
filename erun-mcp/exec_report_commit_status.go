@@ -8,14 +8,14 @@ import (
 )
 
 // ExecReportCommitStatusInput reports a GitHub commit status for a merge
-// queue gate result — the last step that turns a build's outcome into
+// queue build result — the last step that turns a build's outcome into
 // something a required status check on the remote's branch protection can
 // point at.
 type ExecReportCommitStatusInput struct {
 	Commit      string `json:"commit" jsonschema:"full commit SHA the status attaches to — the review's source-branch tip, never the local prospective squash-merge commit exec_gate-merge produces"`
 	State       string `json:"state" jsonschema:"commit status state: success, failure, error, or pending"`
 	RemoteURL   string `json:"remoteUrl" jsonschema:"the github.com remote to report the status against"`
-	Description string `json:"description" jsonschema:"short human-readable summary, naming which gate step failed when state is not success"`
+	Description string `json:"description" jsonschema:"short human-readable summary, naming which step failed when state is not success"`
 	Context     string `json:"context,omitempty" jsonschema:"status check name a required-status-checks rule names; defaults to erun/merge-gate"`
 	TargetURL   string `json:"targetUrl,omitempty" jsonschema:"optional link a reader clicks through to from the status"`
 	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, trace the request without sending it"`

@@ -76,25 +76,17 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"exec_commit":     {Family: "exec", CLIPath: []string{"exec", "commit"}, Title: "Commit working-tree changes", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_push":       {Family: "exec", CLIPath: []string{"exec", "push"}, Title: "Push a working-tree branch to a remote", ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true},
 	"exec_merge":      {Family: "exec", CLIPath: []string{"exec", "merge"}, Title: "Merge a branch into the working tree", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
-	"exec_gate-merge": {Family: "exec", CLIPath: []string{"exec", "gate-merge"}, Title: "Build the prospective merge a merge queue promotion (or batch) gates", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
+	"exec_gate-merge": {Family: "exec", CLIPath: []string{"exec", "gate-merge"}, Title: "Compose the prospective merge commit a merge queue promotion (or batch) builds", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: false, AgentFacing: true},
 	"exec_report-commit-status": {
-		Family: "exec", CLIPath: []string{"exec", "report-commit-status"}, Title: "Report a GitHub commit status for a merge queue gate result",
+		Family: "exec", CLIPath: []string{"exec", "report-commit-status"}, Title: "Report a GitHub commit status for a merge queue build result",
 		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
 	"exec_close-pr": {
-		Family: "exec", CLIPath: []string{"exec", "close-pr"}, Title: "Close the GitHub pull request a merge queue gate actually shipped",
+		Family: "exec", CLIPath: []string{"exec", "close-pr"}, Title: "Close the GitHub pull request a merge queue actually shipped",
 		ReadOnly: false, Destructive: true, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
-	"exec_gate-run_start": {
-		Family: "exec", CLIPath: []string{"exec", "gate-run", "start"}, Title: "Record the beginning of one gate attempt",
-		ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true,
-	},
-	"exec_gate-run_report": {
-		Family: "exec", CLIPath: []string{"exec", "gate-run", "report"}, Title: "Report a gate run's outcome",
-		ReadOnly: false, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
-	},
 	"exec_reconcile-bypass": {
-		Family: "exec", CLIPath: []string{"exec", "reconcile-bypass"}, Title: "Check ruleset-bypassed pushes against passed gate runs",
+		Family: "exec", CLIPath: []string{"exec", "reconcile-bypass"}, Title: "Check ruleset-bypassed pushes against successful builds",
 		ReadOnly: true, Destructive: false, Idempotent: true, OpenWorld: true, AgentFacing: true,
 	},
 	"exec_plan-ruleset-bypass": {
@@ -176,8 +168,8 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"review_record-build": {Family: "review", CLIPath: []string{"review", "record-build"}, Title: "Record a build against a review", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// Reporting MERGED is the other half of the same unattended flow: only the
 	// environment a review's merge queue promoted to MERGE ever calls this,
-	// after it has fetched, gate-built, and pushed the prospective merge
-	// itself — no desktop surface authors this report either.
+	// after it has composed, built, and pushed the prospective merge itself —
+	// no desktop surface authors this report either.
 	"review_report-merged": {Family: "review", CLIPath: []string{"review", "report-merged"}, Title: "Report a review MERGED, verified as a queue-driven merge or as work that landed elsewhere", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// Requeue recovers a merge-queue wedge: a review stuck at
 	// MERGE with no desktop button to move it, only ever hit by whichever
@@ -192,22 +184,14 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"review_queue_list":             {Family: "review", CLIPath: []string{"review", "queue", "list"}, Title: "List a merge queue", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_queue_advance":          {Family: "review", CLIPath: []string{"review", "queue", "advance"}, Title: "Advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
 	"review_queue_override-advance": {Family: "review", CLIPath: []string{"review", "queue", "override-advance"}, Title: "Override the unresolved-thread gate and advance a merge queue", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true},
-	// gate_list/gate_show are genuinely human-facing reads (an operator or an
-	// agent wants "what is gating now"), unlike the exec_gate-run-* pair
-	// below. AgentFacing here is a deliberate, temporary scope decision for
-	// this feature's CLI/MCP-first delivery, not a claim that no human ever
-	// calls these directly — a follow-up issue tracks adding a
-	// console/desktop surface; remove AgentFacing once it exists.
-	"gate_list": {Family: "gate", CLIPath: []string{"gate", "list"}, Title: "List gate runs: what is gating now, and what recent gates decided", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
-	"gate_show": {Family: "gate", CLIPath: []string{"gate", "show"}, Title: "Show one gate run in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// The jobs_* tools are the platform-backed queue: what agents and
 	// orchestrators are working on right now, and what recently finished.
 	// jobs_list/jobs_show are human-facing reads with a real operator surface
 	// (erun-console's Jobs section), so they are not AgentFacing.
 	// jobs_start/jobs_finish are the self-report writes an actor makes about
 	// its own work -- an operator watches the queue, never edits someone
-	// else's row -- which is the same AgentFacing exemption the
-	// exec_gate-run_start/exec_gate-run_report pair carries.
+	// else's row -- which is the same AgentFacing exemption review_record-build
+	// carries.
 	"jobs_list":   {Family: "jobs", CLIPath: []string{"jobs", "list"}, Title: "List jobs: what is being worked on now, and what recently finished", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"jobs_show":   {Family: "jobs", CLIPath: []string{"jobs", "show"}, Title: "Show one job in full", ReadOnly: true, Destructive: false, Idempotent: false, OpenWorld: true},
 	"jobs_start":  {Family: "jobs", CLIPath: []string{"jobs", "start"}, Title: "Record that this actor is starting a piece of work", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
@@ -275,8 +259,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	"terraform": {Family: "", CLIPath: nil, Title: "Run the environment's Terraform root", ReadOnly: false, Destructive: true, Idempotent: false, OpenWorld: true},
 	// e2e has no desktop surface to reference yet -- AgentFacing here is a
 	// deliberate, temporary scope decision for this feature's CLI/MCP-first
-	// delivery, not a claim that no human ever runs it, mirroring gate_list
-	// above. A follow-up issue tracks adding a desktop "Run e2e" surface;
+	// delivery, not a claim that no human ever runs it. A follow-up issue tracks adding a desktop "Run e2e" surface;
 	// remove AgentFacing once it exists.
 	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's Playwright suite against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// job_start has no working handler: it is a removed-tool stub (see

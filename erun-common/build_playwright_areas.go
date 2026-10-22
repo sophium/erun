@@ -1,31 +1,14 @@
 package eruncommon
 
 import (
-	"os"
-	"regexp"
 	"sort"
 	"strings"
 )
 
-// dockerfilePlaywrightAreasPattern matches the PLAYWRIGHT_TEST_AREAS ARG
-// declaration (erun-devops/docker/erun-devops/Dockerfile and any tenant
-// `-devops` Dockerfile derived from it). Only such a Dockerfile gets the
-// matching --build-arg; every other build's docker command is unchanged --
-// the same scoping shape dockerfileConsumesDindCPULimit uses.
-var dockerfilePlaywrightAreasPattern = regexp.MustCompile(`(?m)^\s*ARG\s+PLAYWRIGHT_TEST_AREAS\b`)
-
-func dockerfileConsumesPlaywrightTestAreas(dockerfilePath string) bool {
-	data, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return false
-	}
-	return dockerfilePlaywrightAreasPattern.Match(data)
-}
-
 // playwrightRoot / playwrightAreasRoot / playwrightSmokeRoot are relative to
 // the repository root and mirror the layout erun-ui/playwright/AGENTS.md
-// documents: tests/smoke/ always runs, tests/areas/<area>/ is what `erun
-// build` selects between, and everything else under playwrightRoot -- the
+// documents: tests/smoke/ always runs, tests/areas/<area>/ is what the
+// selection chooses between, and everything else under playwrightRoot -- the
 // harness (run.sh), its dependency manifest (package.json), fixtures, page
 // objects, global setup/teardown, playwright.config.ts, and anything else
 // added there later -- is infrastructure the whole suite depends on. That is
@@ -49,29 +32,6 @@ const (
 // mapping that can drift out of date silently.
 const erunUIRoot = "erun-ui/"
 
-// applyPlaywrightAreaBuildArgs threads the smoke+area selection resolved from
-// the Playwright spec-file diff against the merge base into
-// build.PlaywrightTestAreas when the Dockerfile declares the matching ARG.
-// Left empty (the Dockerfile's own ARG default, which runs the full suite) when
-// the Dockerfile does not consume it, or when the selection could not be
-// resolved -- a gap in the git history must cost time, never coverage.
-//
-// Empty is therefore this field's one unresolved signal, and its only one: a
-// successful resolution is never empty (classifyPlaywrightChangedFiles returns
-// "all" for the full suite). tracePlaywrightGateSelection reports the threaded
-// value at default verbosity and relies on that, so a resolution that started
-// returning "" for the full suite would make the build claim "unresolved" over
-// a real answer -- TestClassifyPlaywrightChangedFilesNeverReturnsAnEmptySelection
-// pins it.
-func applyPlaywrightAreaBuildArgs(ctx Context, projectRoot string, build *DockerBuildSpec) {
-	if !dockerfileConsumesPlaywrightTestAreas(build.DockerfilePath) {
-		return
-	}
-	if selection, ok := ResolvePlaywrightTestAreaSelection(ctx, projectRoot); ok {
-		build.PlaywrightTestAreas = selection
-	}
-}
-
 // ResolvePlaywrightTestAreaSelection derives what the Playwright suite should
 // run:
 //
@@ -88,11 +48,10 @@ func applyPlaywrightAreaBuildArgs(ctx Context, projectRoot string, build *Docker
 //
 // Returns ok=false when the selection cannot be resolved (not a git
 // repository, or no merge base against any candidate upstream branch) so the
-// caller leaves the Dockerfile's own ARG default in place -- always the full
-// suite, never zero coverage, per the issue's fail-safe direction. Exported
-// for `erun exec resolve-playwright-areas`, which lets a local `make check`
-// resolve the same selection the gate's own build-arg threading does instead
-// of always running the full suite.
+// caller runs the full suite, never zero coverage. Exported for `erun exec
+// resolve-playwright-areas`, which lets a local `make check` narrow the suite
+// to the changed areas; `erun build` does not thread it into any image, since
+// a diff-relative selection is not a function of a component's inputs.
 func ResolvePlaywrightTestAreaSelection(ctx Context, projectRoot string) (string, bool) {
 	mergeBase, ok := resolvePlaywrightMergeBase(ctx, projectRoot)
 	if !ok {
@@ -153,7 +112,7 @@ func classifyPlaywrightChangedFiles(changed []string) string {
 // Markdown under playwrightRoot is carved out deliberately, not by
 // oversight: a `.md` file such as erun-ui/playwright/AGENTS.md is read by
 // humans and agents, never by the harness or a spec, so it cannot break a
-// test. Buying it the ~21-minute full suite would cost real gate time for a
+// test. Buying it the ~21-minute full suite would cost real test time for a
 // change with zero ability to regress anything the suite checks.
 func playwrightChangeAffectsEveryArea(file string) bool {
 	if strings.HasPrefix(file, erunUIRoot) && !strings.HasPrefix(file, playwrightRoot) {

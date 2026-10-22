@@ -9,7 +9,7 @@ import "sort"
 // tree that already lands in ~/.erun/timing/build-*.json to also reach the
 // platform the desktop reads.
 //
-// A gate build's step tree is small today (image -> platform), but breaking
+// A build's step tree is small today (image -> platform), but breaking
 // erun-devops into its Dockerfile stages and `make check` phases has been
 // proposed and could turn that into dozens of rows. Rather than carry the
 // full tree, BuildProfileSummary stores the build's own totals plus the

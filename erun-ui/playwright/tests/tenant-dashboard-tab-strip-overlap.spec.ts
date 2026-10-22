@@ -43,15 +43,15 @@ import {
 // deliberately has no collaboration API to read. Every panel is
 // unrestricted, because the defect is a property of the full-length strip.
 //
-// The strip was nine tabs when #2145 was reported and is ten now that the
-// Pipeline tab has joined it. Every width below is re-measured against the
-// longer strip: a tab added later is exactly the change that can push a
-// wrapped second row back over the panel controls, which is the defect
-// this spec exists to catch.
+// The strip was nine tabs when #2145 was reported, grew to ten with the
+// Pipeline tab, and is nine again now that the Gates tab is gone. A tab
+// added later is exactly the change that can push a wrapped second row back
+// over the panel controls, which is the defect this spec exists to catch, so
+// the count is pinned.
 
 const DEFAULT_VIEWPORT = { width: 1440, height: 1200 };
 
-const REPORTED_TAB_COUNT = 10;
+const REPORTED_TAB_COUNT = 9;
 
 function seedDashboardEnvironment(title: string): string {
   const environment = uniqueEnvironmentName(title);
@@ -90,7 +90,6 @@ async function fulfillDashboard(route: Route, environment: string): Promise<void
           { tab: 'users' },
           { tab: 'reviews' },
           { tab: 'queue' },
-          { tab: 'gates' },
           { tab: 'builds' },
           { tab: 'audit' },
           { tab: 'registration' },
@@ -245,7 +244,7 @@ for (const { width, note } of [
   test.describe(`tenant dashboard tab strip at ${String(width)}px`, () => {
     test.use({ viewport: { width, height: 900 } });
 
-    test(`the ten-tab strip does not overlap itself or the panel at ${String(width)}px (${note})`, async ({
+    test(`the nine-tab strip does not overlap itself or the panel at ${String(width)}px (${note})`, async ({
       app,
       page,
     }) => {

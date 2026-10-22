@@ -46,18 +46,23 @@ import (
 // gateGoTestModuleDirs lists the modules whose `go test` runs inside the
 // erun-devops image test stage -- the Go half of what `make check-gate`
 // covers. Every entry must also be named by a check-gate prerequisite recipe,
-// which gateGoTestModuleDirsInMakefile checks; the one asymmetry is
-// erun-integration, whose `go test ./...` lives inside
-// erun-integration/scripts/integration-test.sh rather than in the Makefile's
-// own recipe (integration-test-gate invokes that script).
+// and every module such a recipe names must be an entry; gateGoTestModuleFindings
+// checks both directions. The one asymmetry is erun-integration, whose
+// `go test ./...` lives inside erun-integration/scripts/integration-test.sh
+// rather than in the Makefile's own recipe (integration-test-gate invokes that
+// script). erun-backend-api is deliberately absent: its tests run in its own
+// image's test stage, which COPYs what they read.
 var gateGoTestModuleDirs = []string{
 	"erun-common",
 	"erun-mcp",
 	"erun-ui",
-	"erun-backend/erun-backend-api",
 	"erun-devops/dns01-webhook",
 	"erun-integration",
 }
+
+// gateGoTestModuleOutsideMakefile is the one gateGoTestModuleDirs entry whose
+// `go test` no check-gate recipe names directly.
+const gateGoTestModuleOutsideMakefile = "erun-integration"
 
 // gateGoTestRepoRootHelperNames is the canary for this file's structural
 // helper detection, not a coverage list: helpers are found by shape (a
@@ -805,6 +810,12 @@ func gateGoTestModuleFindings(t *testing.T, root string, moduleDirs []string) []
 			findings = append(findings, "check-gate runs `go test` in "+module+", which gateGoTestModuleDirs does not "+
 				"register -- a module missing from that list is a module whose repo-root reads this guard never reads, "+
 				"so add it there rather than relying on the gate to catch what it cannot see")
+		}
+	}
+	for _, module := range moduleDirs {
+		if module != gateGoTestModuleOutsideMakefile && !slices.Contains(gateModules, module) {
+			findings = append(findings, "gateGoTestModuleDirs registers "+module+", but no check-gate recipe runs `go test` "+
+				"there -- its repo-root reads are held to an image that never runs them, so remove the entry")
 		}
 	}
 	return findings

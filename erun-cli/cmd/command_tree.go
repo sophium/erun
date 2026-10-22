@@ -78,10 +78,9 @@ var cliOnlyAgentFacingCommands = map[string]bool{
 	"devops container build": true,
 	"devops container push":  true,
 	"devops k8s deploy":      true,
-	// A repository build-tooling utility that resolves the same Playwright
-	// smoke+area gate selection `erun build` threads into the Docker
-	// build-arg, for a local `make check` run to consume -- a build-system
-	// concern, not an end-user action with a desktop surface.
+	// A repository build-tooling utility that resolves the change-scoped
+	// Playwright smoke+area selection for the repository's own Makefile --
+	// a build-system concern, not an end-user action with a desktop surface.
 	"exec resolve-playwright-areas": true,
 }
 
@@ -149,14 +148,6 @@ var cliOnlyAgentFacingFlags = map[string]bool{
 	// Contract"). The drift it reports is already surfaced; only the exit code
 	// is CLI-shaped.
 	"list --fail-on-drift": true,
-	// Declares a build the merge queue's gate: it executes the Dockerfile's test
-	// stage instead of accepting BuildKit's replay of it, and a run that would
-	// build nothing fails rather than certifying a tree (see
-	// erun-common/AGENTS.md § "Gate execution and verdicts"). It exists for the
-	// orchestrator that promotes and reports a review, and for the merge queue's
-	// own exit-code contract; the desktop's build action has no queue behind it
-	// and no record to protect.
-	"build --gate": true,
 	// Scripted-composition switches, in their own usage strings' words: they
 	// let a caller chain expose/unexpose after another command without first
 	// checking whether the project declares a platform block, and let one run

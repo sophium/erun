@@ -123,7 +123,7 @@ all incoming links/anchors.
 
 ### Mechanically checked claims
 
-The MCP tool index, retention chart controls, and gate-run infrastructure
+The MCP tool index, retention chart controls, and build infrastructure-failure
 signatures have targeted source-to-spec checks in their owning test suites.
 A green build does not prove other prose is true or all companion pages match.
 Add checks beside the source they read for specific high-risk comparable facts;

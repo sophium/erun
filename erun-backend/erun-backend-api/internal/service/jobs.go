@@ -45,7 +45,7 @@ func (e *JobScopeHeldError) Unwrap() error { return repository.ErrConflict }
 
 // JobAlreadyFinishedError refuses a write against a job that already
 // finished: an outcome is immutable once reached, the same discipline that
-// keeps a gate run's verdict and a review's recorded builds append-only.
+// keeps a review's recorded builds append-only.
 type JobAlreadyFinishedError struct {
 	JobID  string
 	Status model.JobStatus

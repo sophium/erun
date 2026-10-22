@@ -32,125 +32,11 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 		newExecGateMergeCmd(findProjectRoot),
 		newExecReportCommitStatusCmd(),
 		newExecClosePRCmd(),
-		newExecGateRunCmd(store, deps),
 		newExecReconcileBypassCmd(store, deps),
 		newExecPlanRulesetBypassCmd(),
 		newExecRouteCheckCmd(store, deps),
 		jobCmd,
 	)
-}
-
-// newExecGateRunCmd builds `erun exec gate-run`, the pair of self-report
-// calls the environment driving a gate uses to make its own attempt visible
-// on the erun platform — start/report, never a human-facing
-// listing (that is `erun gate list`/`show`).
-func newExecGateRunCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
-	var alias string
-	cmd := newCommandGroup(
-		"gate-run",
-		"Report a gate run's start and outcome to the erun platform",
-		newExecGateRunStartCmd(store, &alias, deps),
-		newExecGateRunReportCmd(store, &alias, deps),
-	)
-	cmd.PersistentFlags().StringVar(&alias, "erun-alias", "", "erun platform cloud alias to target (defaults to the sole configured erun-type alias)")
-	return cmd
-}
-
-func newExecGateRunStartCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.GateRunStartParams
-	cmd := &cobra.Command{
-		Use:   "start",
-		Short: "Record the beginning of one gate attempt",
-		Long: "Record the beginning of one attempt to gate a prospective merge -- the branch, the prospective " +
-			"squash-merge commit, and the target -- so `erun gate list` can show it as currently gating, " +
-			"independent of whether an erun review exists for the change. Prints the new gate run's id; pass it " +
-			"to `erun exec gate-run report` once the gate finishes.\n\n" +
-			"A run with no trackable running phase at all -- a squash conflict before any build ever starts -- " +
-			"may set --status directly to failed or inconclusive and omit --merge-commit.\n\n" +
-			"--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local " +
-			"file --log-ref points at names a known erun infrastructure failure (a registry or the network " +
-			"giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.\n\n" +
-			"--dry-run traces the request without sending it.",
-		Example: "  erun exec gate-run start --source-branch feature/x --target-branch main \\\n" +
-			"    --source-commit $(git rev-parse feature/x) --merge-commit $(git rev-parse HEAD)",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			ctx := commandContext(cmd)
-			run, err := common.RunGateRunStart(ctx, store, *alias, params, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec gate-run start planned.")
-				return err
-			}
-			if ctx.Output != common.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "Started gate run %s (%s -> %s, status=%s).\n",
-					run.GateRunID, run.SourceBranch, run.TargetBranch, run.Status); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(run)
-		},
-	}
-	cmd.Flags().StringVar(&params.SourceBranch, "source-branch", "", "Branch being gated (required)")
-	cmd.Flags().StringVar(&params.TargetBranch, "target-branch", "", "Branch the prospective merge lands onto (required)")
-	cmd.Flags().StringVar(&params.SourceCommit, "source-commit", "", "Source branch tip commit this run tested (required)")
-	cmd.Flags().StringVar(&params.MergeCommit, "merge-commit", "", "Prospective squash-merge commit this run tested (required unless --status is failed or inconclusive)")
-	cmd.Flags().StringVar(&params.ReviewID, "review-id", "", "erun review this run gates, if one exists")
-	cmd.Flags().StringVar(&params.Status, "status", "", "Status to start at: running (default), failed, or inconclusive")
-	cmd.Flags().StringVar(&params.FailingStep, "failing-step", "", "Which gate step failed (required when --status is failed)")
-	cmd.Flags().StringVar(&params.LogRef, "log-ref", "", "Where to read this run's own output (a job id, URL, or path)")
-	addDryRunFlag(cmd)
-	return cmd
-}
-
-func newExecGateRunReportCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.GateRunReportParams
-	cmd := &cobra.Command{
-		Use:   "report GATE_RUN_ID",
-		Short: "Report a gate run's outcome",
-		Long: "Move GATE_RUN_ID from running to a terminal verdict: passed, failed, or inconclusive.\n\n" +
-			"A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must " +
-			"report inconclusive -- never failed, which asserts a real gate step actually produced a red " +
-			"verdict. --failing-step is required when --status is failed.\n\n" +
-			"--status failed is reported as inconclusive instead when --failing-step, --log-ref, or a local " +
-			"file --log-ref points at names a known erun infrastructure failure (a registry or the network " +
-			"giving up, e.g. a ghcr.io TLS handshake timeout) rather than a real verdict about the change.\n\n" +
-			"Reporting against a gate run that already has an outcome is refused: a verdict is immutable once " +
-			"reached.\n\n" +
-			"--dry-run traces the request without sending it.",
-		Example: "  erun exec gate-run report abc123 --status passed\n" +
-			"  erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json\n" +
-			"  erun exec gate-run report abc123 --status inconclusive --log-ref 'wrapper hit its own 8m cap'",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
-			params.GateRunID = args[0]
-			run, err := common.RunGateRunReport(ctx, store, *alias, params, deps)
-			if err != nil {
-				return err
-			}
-			if ctx.DryRun {
-				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec gate-run report planned.")
-				return err
-			}
-			if ctx.Output != common.OutputJSON {
-				if _, err := fmt.Fprintf(ctx.Stdout, "Reported gate run %s as %s.\n", run.GateRunID, run.Status); err != nil {
-					return err
-				}
-			}
-			return ctx.WriteResult(run)
-		},
-	}
-	cmd.Flags().StringVar(&params.Status, "status", "", "Outcome: passed, failed, or inconclusive (required)")
-	cmd.Flags().StringVar(&params.FailingStep, "failing-step", "", "Which gate step failed (required when --status is failed)")
-	cmd.Flags().StringVar(&params.LogRef, "log-ref", "", "Where to read this run's own output (a job id, URL, or path)")
-	cmd.Flags().StringVar(&params.MergeCommit, "merge-commit", "", "Prospective squash-merge commit, if not already set when the run started")
-	addDryRunFlag(cmd)
-	return cmd
 }
 
 func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) *cobra.Command {
@@ -181,18 +67,16 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 }
 
 // newExecResolvePlaywrightAreasCmd builds `erun exec resolve-playwright-areas`,
-// which lets a local `make check` resolve the same smoke+area Playwright
-// selection `erun build` threads into the gate's own PLAYWRIGHT_TEST_AREAS
-// build-arg (erun-common.ResolvePlaywrightTestAreaSelection), so a developer
-// or agent iterating locally pays the same cost the authoritative gate does
-// instead of always running the full suite.
+// which resolves the change-scoped smoke+area Playwright selection
+// (erun-common.ResolvePlaywrightTestAreaSelection) for the repository's own
+// Makefile, so a developer or agent iterating locally does not always pay for
+// the full suite.
 func newExecResolvePlaywrightAreasCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve-playwright-areas",
 		Short: "Resolve the smoke+area Playwright test selection for the current diff",
-		Long: "Resolve the same smoke+area Playwright test selection `erun build` computes for the gate's " +
-			"PLAYWRIGHT_TEST_AREAS build-arg, from the current git diff against the merge base " +
-			"(erun-ui/playwright/AGENTS.md's \"Area-scoped gate selection\"). Always exits 0 and prints " +
+		Long: "Resolve the smoke+area Playwright test selection a local `make check` runs, from the current " +
+			"git diff against the merge base (see erun-ui/playwright/AGENTS.md). Always exits 0 and prints " +
 			"\"all\" when the selection cannot be resolved (no git repository, or no merge base against any " +
 			"candidate upstream branch) -- the fail-safe direction, matching the Dockerfile's own unset-" +
 			"PLAYWRIGHT_TEST_AREAS default of running everything.",
@@ -502,16 +386,15 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 	)
 	cmd := &cobra.Command{
 		Use:   "gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...]",
-		Short: "Build the prospective merge a merge queue promotion (or batch) gates",
+		Short: "Prepare the prospective merge a merge queue promotion (or batch) builds",
 		Long: "Fetch --target and every --source from the remote, check out a fresh local branch named --target " +
 			"at its own current remote tip, then squash-merge each --source onto it in turn, each as its own " +
 			"commit — leaving a stack of one commit per landed source. Repeat --source to batch several " +
-			"unmerged branches into one prospective merge, so the gate that follows tests whether they compile " +
-			"*together*, not just individually; a single --source is the ordinary one-branch gate. This is for " +
-			"the environment a review's merge queue promotes to MERGE: gate-merge, then `erun build --gate` " +
-			"against the result (--gate is what makes the build execute the Dockerfile's test stage rather " +
-			"than report a replay of it), then `erun review record-build --gate` and, only on success, " +
-			"`erun exec push` and `erun review report-merged`.\n\n" +
+			"unmerged branches into one prospective merge, so the build that follows tests whether they compile " +
+			"*together*, not just individually; a single --source is the ordinary one-branch merge. This is for " +
+			"the environment a review's merge queue promotes to MERGE: gate-merge, then a plain `erun build` " +
+			"of the result, then `erun review record-build` with the version that build minted and, only on " +
+			"success, `erun exec push` and `erun review report-merged`.\n\n" +
 			"Commit messages are read verbatim from stdin, never a shell argument, so nothing in them is " +
 			"reinterpreted: one message per --source, in the same order, separated by NUL bytes (a single " +
 			"--source needs no separator at all).\n\n" +
@@ -527,13 +410,13 @@ func newExecGateMergeCmd(findProjectRoot common.ProjectFinderFunc) *cobra.Comman
 			"tree is currently on, so uncommitted work there is refused rather than silently carried onto the " +
 			"prospective merge.\n\n" +
 			"A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean " +
-			"state and the conflict recorded in the result, and the rest of the batch still gates against the " +
+			"state and the conflict recorded in the result, and the rest of the batch still builds against the " +
 			"tree as it stood before that attempt. A conflict confined to atlas.sum, the regenerable migration " +
 			"checksum, is the exception: it is regenerated from the migration files already on disk and staged, " +
 			"and the source lands like a clean squash rather than being skipped. A source that contributes " +
 			"nothing is skipped the same way: when its squash stages no changes because its content is already " +
 			"on the target, it is recorded as skipped with that reason rather than failing the batch, so an " +
-			"already-landed branch is a no-op instead of a dead gate. A batch where every source is skipped " +
+			"already-landed branch is a no-op instead of a dead merge. A batch where every source is skipped " +
 			"lands nothing and exits non-zero.\n\n" +
 			"Refused outright while something else holds this environment exclusively: this rewrites the one " +
 			"shared worktree, so two gate-merges in flight at once do not merely slow each other down, they " +
@@ -622,7 +505,7 @@ func gateMergeCarriedTrailerSummary(trailers []string) string {
 }
 
 // reportGateMergeResult prints each landed and skipped source, then refuses
-// if the batch landed nothing at all — there is nothing to gate against an
+// if the batch landed nothing at all — there is nothing to build against an
 // unchanged target.
 func reportGateMergeResult(ctx common.Context, result common.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
@@ -649,22 +532,22 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "report-commit-status COMMIT",
-		Short: "Report a GitHub commit status for a merge queue gate result",
-		Long: "Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate " +
-			"(`erun exec gate-merge`, `erun build --gate`, `erun review record-build --gate`): report success once the " +
-			"gate build is green, or failure the moment it is not, naming which gate step failed in " +
+		Short: "Report a GitHub commit status for a merge queue build result",
+		Long: "Report a commit status on GitHub for COMMIT. This is the last step in the merge queue " +
+			"(`erun exec gate-merge`, `erun build`, `erun review record-build`): report success once the " +
+			"recorded build succeeded, or failure the moment it did not, naming which step failed in " +
 			"--description. A required status check on the remote's branch protection has nothing to require " +
 			"until this reports it.\n\n" +
 			"COMMIT should be the review's source branch tip — the pull request's own head commit — never the " +
 			"local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check " +
 			"against a commit reachable from the open pull request, and the squash commit does not exist there " +
-			"until after the gate has already passed and pushed.\n\n" +
+			"until after the build has already succeeded and been pushed.\n\n" +
 			"--dry-run traces the request without sending it.",
 		Example: "  erun exec report-commit-status $(git rev-parse HEAD) --state failure \\\n" +
 			"    --description 'erun build failed against the prospective merge' \\\n" +
 			"    --remote-url https://github.com/org/repo.git\n" +
 			"  erun exec report-commit-status $(git rev-parse HEAD) --state success \\\n" +
-			"    --description 'gate build passed' --remote-url https://github.com/org/repo.git",
+			"    --description 'merge queue build succeeded' --remote-url https://github.com/org/repo.git",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -673,7 +556,7 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&state, "state", "", "Commit status state: success, failure, error, or pending (required)")
 	cmd.Flags().StringVar(&statusCtx, "context", "", "Status check name a required-status-checks rule names (defaults to erun/merge-gate)")
-	cmd.Flags().StringVar(&description, "description", "", "Short human-readable status, naming which gate step failed on failure (required)")
+	cmd.Flags().StringVar(&description, "description", "", "Short human-readable status, naming which step failed on failure (required)")
 	cmd.Flags().StringVar(&targetURL, "target-url", "", "URL a reader clicks through to from the status (optional)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote to report the status against (required)")
 	addDryRunFlag(cmd)
@@ -708,7 +591,7 @@ func newExecClosePRCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "close-pr BRANCH",
-		Short: "Close the GitHub pull request a merge queue gate actually shipped",
+		Short: "Close the GitHub pull request a merge queue actually shipped",
 		Long: "Close BRANCH's open pull request on GitHub and record LANDING_COMMIT on it. This runs after `erun " +
 			"review report-merged` has already succeeded: gate-merge's squash commit is never the branch head GitHub " +
 			"tracks, so GitHub never reconciles a queued merge with its pull request on its own, and the commit that " +
@@ -716,7 +599,7 @@ func newExecClosePRCmd() *cobra.Command {
 			"Safe when BRANCH has no open pull request against --target: this is a no-op, not an error, since " +
 			"queueing a plain branch with no review is legitimate.\n\n" +
 			"Refuses, loudly, when the pull request's current head does not match --gated-commit — something " +
-			"pushed to BRANCH after the gate fetched it, so the gated content is not what closing would discard.\n\n" +
+			"pushed to BRANCH after the merge queue fetched it, so the built content is not what closing would discard.\n\n" +
 			"--dry-run traces the lookup without closing or commenting on anything.",
 		Example: "  erun exec close-pr feature/add-widget --target main \\\n" +
 			"    --remote-url https://github.com/org/repo.git \\\n" +
@@ -729,7 +612,7 @@ func newExecClosePRCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&target, "target", "", "The pull request's base branch (required)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The github.com remote the pull request lives on (required)")
-	cmd.Flags().StringVar(&gatedCommit, "gated-commit", "", "BRANCH's tip when the gate actually fetched and tested it (required)")
+	cmd.Flags().StringVar(&gatedCommit, "gated-commit", "", "BRANCH's tip when the merge queue actually fetched and built it (required)")
 	cmd.Flags().StringVar(&landingCommit, "landing-commit", "", "The commit that actually landed on --target, recorded in a comment on the pull request (required)")
 	addDryRunFlag(cmd)
 	return cmd
@@ -768,15 +651,15 @@ func newExecReconcileBypassCmd(store common.CloudReadStore, deps common.CloudDep
 	)
 	cmd := &cobra.Command{
 		Use:   "reconcile-bypass",
-		Short: "Check every ruleset-bypassed push against a real passed gate run",
+		Short: "Check every ruleset-bypassed push against a real successful build",
 		Long: "Cross-reference GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for --ruleset-id on " +
-			"--target-branch against erun's gate runs: every push that bypassed --ruleset-id is reported next to " +
-			"what accounts for it. A push is RECONCILED when a PASSED gate run built one of the commits it " +
+			"--target-branch against erun's recorded builds: every push that bypassed --ruleset-id is reported next to " +
+			"what accounts for it. A push is RECONCILED when a successful build is recorded for one of the commits it " +
 			"landed, RELEASE when a tag in the repository points at one of them (a release stamps, tags and then " +
-			"pushes, so its own commits were never gated as a merge), and UNRECONCILED when nothing accounts for " +
+			"pushes, so its own commits were never built as a merge), and UNRECONCILED when nothing accounts for " +
 			"it at all.\n\n" +
 			"--expected-actor names the identities allowed to hold the bypass grant. Any other actor's bypass is " +
-			"reported UNEXPECTED_ACTOR even when the content it landed was really gated -- that is what makes " +
+			"reported UNEXPECTED_ACTOR even when the content it landed was really built -- that is what makes " +
 			"narrowing the grant to one non-human identity (`erun exec plan-ruleset-bypass`) observable rather " +
 			"than merely configured.\n\n" +
 			"Exits non-zero, after printing the full report, when any push is unaccounted for or any unnamed " +
@@ -883,7 +766,7 @@ func writeRulesetBypassPlan(ctx common.Context, result common.PlanRulesetBypassR
 	apply := "gh api --method PUT repos/" + result.Owner + "/" + result.Repo + "/rulesets/" +
 		strconv.FormatInt(result.RulesetID, 10) + " --input "
 	fmt.Fprintf(out, "\nStage 1 -- grant the queue identity bypass alongside today's actors:\n  %s%s\n", apply, result.Stage1File)
-	fmt.Fprintf(out, "Then prove the queue under the new identity: run one real gated merge as %s before stage 2.\n", result.QueueActor)
+	fmt.Fprintf(out, "Then prove the queue under the new identity: run one real queued merge as %s before stage 2.\n", result.QueueActor)
 	fmt.Fprintf(out, "\nStage 2 -- demote every other always-bypass actor to pull_request:\n  %s%s\n", apply, result.Stage2File)
 
 	read := "gh api repos/" + result.Owner + "/" + result.Repo + "/rulesets/" +
@@ -1049,12 +932,12 @@ func runExecReconcileBypassCommand(ctx common.Context, store common.CloudReadSto
 
 // reconcileBypassExitError turns the report's two distinct failures into one
 // non-zero exit, naming both rather than collapsing them: content nobody
-// gated and an identity nobody expected are different problems with different
+// built and an identity nobody expected are different problems with different
 // remedies.
 func reconcileBypassExitError(result common.ReconcileBypassResult) error {
 	var problems []string
 	if result.Unreconciled > 0 {
-		problems = append(problems, fmt.Sprintf("%d have no passed gate run and no release tag accounting for them",
+		problems = append(problems, fmt.Sprintf("%d have no successful build and no release tag accounting for them",
 			result.Unreconciled))
 	}
 	if result.UnexpectedActors > 0 {
@@ -1076,7 +959,7 @@ func writeReconcileBypassReport(ctx common.Context, result common.ReconcileBypas
 	for _, push := range result.Pushes {
 		detail := push.Reason
 		if detail == "" {
-			detail = "gate run " + push.GateRunID
+			detail = "build " + push.BuildID
 		}
 		if _, err := fmt.Fprintf(ctx.Stdout, "%-17s %s  %s  bypassed %s by %s (%s)\n",
 			push.Verdict, push.Commit, push.PushedAt, push.BypassedRule, push.Actor, detail); err != nil {

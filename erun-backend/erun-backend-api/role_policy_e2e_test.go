@@ -215,17 +215,17 @@ func TestTenantAdminCannotReachOperationsRoutesEvenInsideOperationsTenant(t *tes
 	})
 }
 
-// TestTenantAgentDrivesTheGateAndNothingElse is the machine role's mandatory
-// test: a user holding exactly TenantAgent -- the role an environment's own
-// identity holds -- is permitted every route the environment's build/gate/
-// report flow performs and refused every other registered route, driven
+// TestTenantAgentDrivesTheMergeQueueAndNothingElse is the machine role's
+// mandatory test: a user holding exactly TenantAgent -- the role an
+// environment's own identity holds -- is permitted every route the
+// environment's build/merge/report flow performs and refused every other registered route, driven
 // through the real database-backed authorizer rather than by inspecting
 // routeroles' masks. The boundaries it crosses on both sides are the ones the
 // design turns on: the environment's own unattached `erun build` self-report
 // (POST /v1/builds) is permitted while the tenant-wide build history is not,
 // and reporting the merge is permitted while promoting or overriding the
 // merge queue is not.
-func TestTenantAgentDrivesTheGateAndNothingElse(t *testing.T) {
+func TestTenantAgentDrivesTheMergeQueueAndNothingElse(t *testing.T) {
 	db := rolePolicyDatabase(t)
 	tenantID, issuer := seedTenantWithIssuer(t, db, model.TenantTypeCompany, "tenant-agent")
 	admin := bootstrapTenantFirstUser(t, db, issuer, "admin-subject")
