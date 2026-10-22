@@ -29,8 +29,6 @@ import (
 // back. audit_events and usage_events are asserted the other way: they
 // withhold DELETE pending a compliance decision, so a
 // delete that succeeds there is a silent privilege escalation.
-//
-// Ported from erun-devops/docker/erun-backend-db/retention_grants_test.sh.
 
 const (
 	retentionGrantsTenantID      = "00000000-0000-0000-0000-000000000001"

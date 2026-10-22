@@ -383,14 +383,12 @@ composition and release invariants belong to root/shared logic, not chart policy
   that still read `ok`. The same script runs by hand via `make
   test-erun-backend-api-e2e`.
 - The remaining in-scope instances are still unmigrated:
-  `erun-backend-db/migrate_test.sh`, `retention*_test.sh`, `schema_drift_test.sh`,
-  and `erun-console/nginx_test.sh` each need only a real docker daemon
-  (`migrate_test.sh` additionally needs the atlas CLI, a toolchain `COPY` away) and
-  remain the root Makefile's `test-postgres-restart`/`test-retention`/
-  `test-retention-grants`/`test-schema-drift`/`test-console-nginx` targets, run by
-  hand or via `erun exec job` before merging a change to the behavior they cover.
-  They stay runnable only that way, never in `make check` — see the venue note in
-  the root Makefile, which is a real constraint rather than an oversight.
+  `erun-backend-db/migrate_test.sh` and `erun-console/nginx_test.sh` each need
+  only a real docker daemon (`migrate_test.sh` additionally needs the atlas CLI)
+  and remain the root Makefile's `test-postgres-restart`/`test-console-nginx`
+  targets, run by hand or via `erun exec job` before merging a change to the
+  behavior they cover. The retention and schema drift checks moved into
+  erun-backend-api's Go suites, which its image test stage runs.
 
 ## Release Workflow
 

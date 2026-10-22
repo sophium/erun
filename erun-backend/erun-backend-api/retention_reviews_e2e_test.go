@@ -51,8 +51,7 @@ import (
 
 const retentionReviewsPolicy = "reviews.sql"
 
-// retentionReviewsFixtureSQL is retention_reviews_test.sh's fixture block with
-// the literal id prefix replaced by {{p}} and tenant names suffixed by {{n}}.
+// retentionReviewsFixtureSQL is the fixture block, with the literal id prefix replaced by {{p}} and tenant names suffixed by {{n}}.
 const retentionReviewsFixtureSQL = `
 INSERT INTO tenants (tenant_id, name) VALUES
   ('{{p}}000000000001', 'clean{{n}}'),
@@ -265,8 +264,8 @@ func retentionReviewsRunValue(t *testing.T, f retentionReviewsFixture, column, t
 		table, dryRun, f.startedAt)
 }
 
-// TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews ports
-// erun-devops/docker/erun-backend-db/retention_reviews_test.sh.
+// TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews sweeps
+// reviews with the real retention policy.
 func TestRetentionReviewsSweepDeletesOnlyUnreferencedAgedClosedReviews(t *testing.T) {
 	f := retentionReviewsSeed(t)
 	db := f.db

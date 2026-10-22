@@ -33,7 +33,6 @@ import (
 // and that both runs record their outcome in retention_runs (eligible_count
 // and deleted_count, tagged with dry_run).
 //
-// Ported from erun-devops/docker/erun-backend-db/retention_ai_sessions_test.sh.
 // The policy file runs through retention.sh itself in a real psql container.
 
 const retentionAISessionsPolicy = "ai_sessions.sql"

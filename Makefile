@@ -1,4 +1,4 @@
-.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-schema-drift test-console-nginx check check-gate fast-check
+.PHONY: integration-test integration-test-gate lint test-erun-common test-erun-ui test-erun-mcp test-erun-dns01-webhook test-frontend test-playwright test-erun-ui-windows-build helm-chart-tests terraform-module-tests test-postgres-restart test-console-nginx check check-gate fast-check
 
 # Go modules linted by the in-build gate: erun-common, erun-cli, erun-mcp,
 # erun-integration, erun-backend/erun-backend-api, and erun-ui. Every entry
@@ -822,18 +822,6 @@ terraform-module-tests:
 # change to postgres reset, migrate, or restart behavior.
 test-postgres-restart:
 	sh erun-devops/docker/erun-backend-db/migrate_test.sh
-
-# End-to-end proof that the declarative schema (schema/*.sql, atlas.hcl's
-# source of truth) and the migration-applied state (migrations/default/*.sql)
-# describe the same database -- a grant, trigger, or constraint that exists
-# in one and not the other is exactly #2022's bug (a grant shipped only in a
-# migration, invisible until a scheduled job hit a permission error at run
-# time) and is otherwise invisible until something exercises it. Same "needs
-# a real docker daemon and the atlas CLI" exclusion from make check as
-# test-postgres-restart above. Run this by hand, or via `erun exec job` in an agent
-# env, before merging a change to atlas.hcl, schema/, or migrations/default/.
-test-schema-drift:
-	sh erun-devops/docker/erun-backend-db/schema_drift_test.sh
 
 # End-to-end proof that the console's nginx config (default.conf.template)
 # never resolves a missing content-hashed asset or a health/version request to

@@ -24,11 +24,12 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
   schema. Update both, including grants, explicit constraint names, triggers,
   functions, and source dependency order.
 - The pinned Atlas diff requires login for this function-bearing schema. Use
-  `make test-schema-drift`: build both states in real PostgreSQL, obtain source
-  order from atlas.hcl, and compare SQL introspection ordered by object name,
+  erun-backend-api's `TestSchemaDriftDeclaredMatchesMigrations` (part of its
+  `go test ./...`): it builds both states in real PostgreSQL, obtains source
+  order from atlas.hcl, and compares SQL introspection ordered by object name,
   not physical column order.
-- Run this Docker/Atlas-dependent check before merging schema, migration, or
-  atlas.hcl changes; it is not covered by the bare `make check` environment.
+- It needs only a Docker daemon (Testcontainers); erun-backend-api's image test
+  stage runs it on every build.
 
 ### Migration Checksum Consistency Gate (#2109)
 
@@ -340,9 +341,10 @@ Do not silently change windows or exemptions while refactoring.
 
 ## Validation
 
-- Schema changes run `make test-schema-drift` and validate actual default-key,
+- Schema changes pass erun-backend-api's `go test ./...` (which includes the
+  schema drift test) and validate actual default-key,
   timestamp, RLS, and user-owned update behavior in PostgreSQL.
-- Retention changes run `make test-retention` and `make test-retention-grants`.
+- Retention changes pass erun-backend-api's `retention_*_e2e_test.go` suites.
   Assert exact surviving rows, each bound/exemption, dry/real recording, and
   concurrent-run refusal. Exercise actual INSERT/DELETE under operations and
   denied DELETE on audit/usage; catalog privileges alone are insufficient.

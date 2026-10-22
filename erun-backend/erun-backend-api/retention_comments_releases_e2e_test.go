@@ -51,7 +51,7 @@ const (
 	retentionCRPolicy            = "comments_releases.sql"
 )
 
-// retentionCRFixtures mirrors retention_test.sh's fixture block.
+// retentionCRFixtures is the shared fixture block.
 //
 // releases-age-tenant (RA): one release 200 days old (past the 180-day bound,
 // eligible), one release 10 days old (within it, survives).
@@ -104,8 +104,8 @@ SELECT '00000000-0000-0000-0000-000000000004', '00000000-0000-0000-0000-00000000
 FROM generate_series(1, 5005) AS i;
 `
 
-// TestRetentionCommentsReleasesE2E ports
-// erun-devops/docker/erun-backend-db/retention_test.sh.
+// TestRetentionCommentsReleasesE2E sweeps comments and releases with the real
+// retention policy.
 func TestRetentionCommentsReleasesE2E(t *testing.T) {
 	ctx := context.Background()
 	hostURL, db := retentionCRCloneDatabase(t, ctx)

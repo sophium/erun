@@ -19,8 +19,7 @@ import (
 // (erun-backend-db/retention/invites_invite_requests.sql) deletes exactly the
 // rows the design in erun-backend-db/AGENTS.md ("Invites And Invite
 // Requests") says it should, and nothing else -- against the real migrated
-// postgres testpg serves. Ported from
-// erun-devops/docker/erun-backend-db/retention_invites_test.sh. Locks:
+// postgres testpg serves. Locks:
 //
 //  1. invite_requests: a PENDING request is exempt regardless of age; an
 //     APPROVED/DECLINED request past the 180-day age bound (on updated_at)
@@ -148,8 +147,7 @@ func retentionInvitesCleanup(t *testing.T, db *sql.DB, t1, t2 string) {
 	}
 }
 
-// retentionInvitesSeedInvites seeds the per-case invites (retention_invites_test.sh
-// lines 107-147) and returns the guarded invite's id.
+// retentionInvitesSeedInvites seeds the per-case invites and returns the guarded invite's id.
 func retentionInvitesSeedInvites(t *testing.T, db *sql.DB, t1, u1 string) string {
 	t.Helper()
 	var guardedInviteID string
