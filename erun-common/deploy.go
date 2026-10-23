@@ -858,8 +858,7 @@ func isolateContextForParallelDeploy(ctx Context) (Context, *parallelDeployCaptu
 		loggerStdout: new(bytes.Buffer),
 		loggerStderr: new(bytes.Buffer),
 	}
-	ctx.Logger.stdout = capture.loggerStdout
-	ctx.Logger.stderr = capture.loggerStderr
+	ctx.Logger = ctx.Logger.withWriters(capture.loggerStdout, capture.loggerStderr)
 	if ctx.Stdout != nil {
 		capture.ctxStdout = new(bytes.Buffer)
 		ctx.Stdout = capture.ctxStdout

@@ -55,6 +55,20 @@ func (l Logger) withStdout(w io.Writer) Logger {
 	return l
 }
 
+// withWriters returns a copy of the logger that writes its stdout and stderr
+// lines to the given writers instead of its own.
+func (l Logger) withWriters(stdout, stderr io.Writer) Logger {
+	l.stdout = stdout
+	l.stderr = stderr
+	return l
+}
+
+// isUnconfigured reports whether the logger is the zero Logger: no verbosity
+// chosen and no writers, which a caller that was handed no logger replaces.
+func (l Logger) isUnconfigured() bool {
+	return l.verbosity == 0 && l.stdout == nil && l.stderr == nil
+}
+
 // WithTraceSink returns a copy of the logger that mirrors every loggable
 // line into w, including lines terminal verbosity would suppress. Write
 // failures are ignored so a full or rotated trace file can never break the

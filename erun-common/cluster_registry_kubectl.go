@@ -138,7 +138,7 @@ func drainPortForwardOutput(stdout io.Reader, result chan<- portForwardResult) {
 // ClusterRegistryDepsFor builds the live resolver dependencies: an in-cluster
 // build addresses the registry directly; a host build looks up the ClusterIP and
 // port-forwards through the given manager.
-func ClusterRegistryDepsFor(ctx Context, forwards *ClusterRegistryForwards) ClusterRegistryDeps {
+func ClusterRegistryDepsFor(ctx Context, forwards RegistryForwarder) ClusterRegistryDeps {
 	return ClusterRegistryDeps{
 		InCluster: RunningInCluster(),
 		LookupClusterIP: func(kubeContext, namespace, service string) (string, error) {

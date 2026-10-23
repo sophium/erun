@@ -1542,7 +1542,7 @@ func (s bootstrapRunner) withRuntimeDefaults() bootstrapRunner {
 }
 
 func (s bootstrapRunner) withLoggerDefaults() bootstrapRunner {
-	if s.Context.Logger.verbosity == 0 && s.Context.Logger.stdout == nil && s.Context.Logger.stderr == nil {
+	if s.Context.Logger.isUnconfigured() {
 		s.Context.Logger = NewLoggerWithWriters(-1, io.Discard, io.Discard)
 	}
 	return s
