@@ -286,7 +286,6 @@ type databaseRepositories struct {
 	auditEvents            *repository.AuditEventRepository
 	releases               *repository.ReleaseRepository
 	rateLimits             *repository.PlatformRateLimitRepository
-	gateRuns               *repository.GateRunRepository
 	jobs                   *repository.JobRepository
 	environmentEvents      *repository.EnvironmentEventRepository
 	environmentDefinitions *repository.EnvironmentDefinitionRepository
@@ -308,7 +307,6 @@ func newDatabaseRepositories(txManager *repository.TxManager) databaseRepositori
 		auditEvents:            repository.NewAuditEventRepository(txManager),
 		releases:               repository.NewReleaseRepository(txManager),
 		rateLimits:             repository.NewPlatformRateLimitRepository(txManager),
-		gateRuns:               repository.NewGateRunRepository(txManager),
 		jobs:                   repository.NewJobRepository(txManager),
 		environmentEvents:      repository.NewEnvironmentEventRepository(txManager),
 		environmentDefinitions: repository.NewEnvironmentDefinitionRepository(txManager),
@@ -391,9 +389,9 @@ func registerMachineIdentityRoutes(register routes.ProtectedRouteRegistrar, iden
 }
 
 // registerWorkflowRoutes wires the routes describing a change in flight:
-// reviews and their comments, the builds reported against them, the gate runs
-// that record a prospective merge attempt, the agent sessions, and the jobs
-// that record what an agent is working on before the work starts. releaseRoutes
+// reviews and their comments, the builds reported against them, the agent
+// sessions, and the jobs that record what an agent is working on before the
+// work starts. releaseRoutes
 // is threaded in rather than re-registered because reviewService triggers a
 // release directly on a verified MERGED transition.
 func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos databaseRepositories, releaseRoutes routes.ReleaseRoutes) {
@@ -402,7 +400,6 @@ func registerWorkflowRoutes(register routes.ProtectedRouteRegistrar, repos datab
 	routes.RegisterReviewRoutes(register, repos.reviews, repos.reviewReviewers, reviewService)
 	routes.RegisterBuildRoutes(register, repos.builds, repos.environments, service.NewBuildService(repos.builds, reviewService))
 	routes.RegisterCommentRoutes(register, repos.comments, service.NewCommentService(repos.comments))
-	routes.RegisterGateRunRoutes(register, repos.gateRuns, service.NewGateRunService(repos.gateRuns))
 	// The pipeline view spans both halves above -- the jobs recording planned
 	// and in-flight work, and the reviews moving through the queue -- which is
 	// why it is registered here rather than with either of them alone. It

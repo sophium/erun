@@ -11,8 +11,7 @@ export type JobsState =
 // console's counterpart to `erun job list`. Polls, because the whole point of
 // the queue is watching work in flight: a job that starts, finishes, or is
 // swept to ABANDONED has to show up without a manual refresh, and a RUNNING
-// row's elapsed time is only honest if the list behind it is current. Same
-// interval the gate-run queue polls at.
+// row's elapsed time is only honest if the list behind it is current.
 const POLL_INTERVAL_MS = 5000;
 
 export function useJobsController(token: string, filter: JobFilter): JobsState {

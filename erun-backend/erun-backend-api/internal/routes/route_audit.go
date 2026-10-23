@@ -16,11 +16,10 @@ var InternalAPIRoutes = map[string]bool{
 	// erun-backend-api/AGENTS.md's Authentication section already carves out
 	// for `/healthz`.
 	"GET /v1/platform": true,
-	// Reports a build result (RECORDED, an environment's own `erun build`, or
-	// GATE, merge-queue verification) that the environment running the build
-	// already ran on its own -- never something an operator clicks to
-	// trigger. The environment promoted to MERGE reports its own gate build
-	// through this same route as part of the merge-queue mechanics (see
+	// Reports a build result that the environment running the build already
+	// ran on its own -- never something an operator clicks to trigger. The
+	// environment promoted to MERGE reports its build of the prepared merge
+	// commit through this same route as part of the merge-queue mechanics (see
 	// erun-backend-api/AGENTS.md's "Merge Queue"); an operator's part of that
 	// flow (advancing the queue, closing a review) already has a real
 	// desktop surface, which is what actually needs one.
@@ -31,17 +30,6 @@ var InternalAPIRoutes = map[string]bool{
 	// desktop tenant dashboard's Builds tab, extended to include unattached
 	// builds alongside review builds -- see erun-ui/tenant_dashboard.go).
 	"POST /v1/builds": true,
-	// Starts (POST) or reports the outcome of (PATCH) a gate run -- the
-	// environment driving the gate reports its own attempt, never something
-	// an operator clicks, the same self-report shape as the build-result
-	// route above.
-	"POST /v1/gate-runs":                true,
-	"PATCH /v1/gate-runs/{gate_run_id}": true,
-	// GET /v1/gate-runs and GET /v1/gate-runs/{gate_run_id} used to be listed
-	// here too, as a deliberate, temporary scope decision for the CLI-first
-	// delivery of gate-run visibility. They are classified normally now that
-	// a real operator surface exists in both erun-console (src/gateRuns/)
-	// and erun-ui/frontend (the tenant dashboard's Gates tab).
 	// The environment's own AI-tool hooks report their turn-boundary status
 	// (busy/idle/awaiting-input) here -- never something an operator clicks,
 	// the same self-report shape as the build-result route above. The

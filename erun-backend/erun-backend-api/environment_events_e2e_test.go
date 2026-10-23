@@ -3,9 +3,10 @@ package backendapi
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -20,10 +21,7 @@ import (
 // itself about ordering and scoping, which is exactly what is under test.
 func environmentEventDatabase(t *testing.T) (*repository.EnvironmentEventRepository, *sql.DB) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_ENVIRONMENT_EVENTS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_ENVIRONMENT_EVENTS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

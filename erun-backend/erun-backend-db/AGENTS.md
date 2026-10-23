@@ -24,20 +24,19 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
   schema. Update both, including grants, explicit constraint names, triggers,
   functions, and source dependency order.
 - The pinned Atlas diff requires login for this function-bearing schema. Use
-  `make test-schema-drift`: build both states in real PostgreSQL, obtain source
-  order from atlas.hcl, and compare SQL introspection ordered by object name,
+  erun-backend-api's `TestSchemaDriftDeclaredMatchesMigrations` (part of its
+  `go test ./...`): it builds both states in real PostgreSQL, obtains source
+  order from atlas.hcl, and compares SQL introspection ordered by object name,
   not physical column order.
-- Run this Docker/Atlas-dependent check before merging schema, migration, or
-  atlas.hcl changes; it is not covered by the bare `make check` environment.
+- It needs only a Docker daemon (Testcontainers); erun-backend-api's image test
+  stage runs it on every build.
 
 ### Migration Checksum Consistency Gate (#2109)
 
 - **`atlas.sum` is a checksum, not just a manifest, and nothing checked that each entry actually matched its own file until #2109.** Release `v1.0.247` published `erun-backend-db` with `20260902130000_gate_runs.sql`'s `atlas.sum` entry not matching that file's real content — `atlas migrate validate`/`atlas migrate apply` refused with a checksum-mismatch error on every tenant that pinned it, aborting the deploy partway (the `-backend-db` migration Job failed; nothing else in that release's rollout ran). No data was at risk (Atlas validates before applying anything), but the published image was permanently undeployable.
 - **Root cause, confirmed against this repository's own git history, not assumed:** the migration's squash-merge commit already carried a wrong per-file hash for `20260902130000_gate_runs.sql` — the same byte content hashes correctly today, so the file was edited after `atlas migrate hash` was run for it, and the stale hash was committed as-is. It sat wrong on `main` — undetected, since nothing validated the directory — until the *next* migration's author incidentally overwrote it with a correct value as a side effect of running a fresh `atlas migrate hash` for their own unrelated change. That fix landed on `main` after `v1.0.247` was already tagged, so it could never reach the already-published release.
 - **The fix is a validation gate, not a repair to the shipped image.** `main`'s migration directory has been self-consistent since the incidental fix above (`atlas migrate validate` is clean against `main` and every release after `v1.0.247`) — there is nothing to repair in source. `v1.0.247` itself is a permanently broken artifact: no tenant should pin it, and any tenant that does should re-pin to a later version (`v1.0.246` and rolling forward is the recovery already used in practice).
-- **`atlas migrate validate --dir file://migrations/default` needs no database and no docker** — a pure content check of the migrations directory against its own `atlas.sum` — so unlike the drift check above it is cheap enough to run inside `make check` itself, not only by hand or via a job:
-  - `erun-devops/docker/erun-backend-db/atlas_validate_test.sh` (`make test-atlas-validate`, a `check-gate` prerequisite) asserts both that the real, currently-committed migrations directory validates cleanly and that a migration file edited without re-hashing is caught, reproducing the exact `v1.0.247` symptom.
-  - `erun-devops/docker/erun-backend-db/Dockerfile` also runs `atlas migrate validate` as a build-time `RUN` step against the baked `migrations/default/`, so the `erun-backend-db` image itself cannot be built — and therefore cannot be published — from an inconsistent directory, regardless of which gate ran beforehand. Verified empirically: building the image from a directory with `20260902130000_gate_runs.sql` edited post-hash reproduces the same `checksum mismatch` error; building from the clean directory succeeds.
+- **`atlas migrate validate --dir file://migrations/default` needs no database and no docker** — a pure content check of the migrations directory against its own `atlas.sum` — so the `erun-backend-db` image runs it as a build-time `RUN` step against the baked `migrations/default/` (`erun-devops/docker/erun-backend-db/Dockerfile`). The image therefore cannot be built — and so cannot be published — from an inconsistent directory. Verified empirically: building the image from a directory with `20260902130000_gate_runs.sql` edited post-hash reproduces the same `checksum mismatch` error; building from the clean directory succeeds.
 - Whenever a migration's own hash looks suspect during review, regenerate rather than hand-edit: `atlas migrate hash --dir file://migrations/default` recomputes every entry from the files actually on disk.
 
 ## Schema Layout
@@ -171,11 +170,11 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Move reviews through the queue by deleting and inserting `review_merge_queue` rows. Requeue a review by deleting any old queue row, setting the review back to `READY`, and inserting a new row so it sorts at the end.
 - `READY` reviews may appear in `review_merge_queue`. The active `MERGE` review must be removed from `review_merge_queue` when it is promoted, so the queue table contains only waiting reviews. One queue per `(repository, target_branch)` is what makes `MERGE` unambiguous: `QueuedRepositories` is what a promotion that names no repository reads before refusing an ambiguous one.
 - `CLOSED` reviews must not appear in the merge queue.
-- Build records identify a review or environment; GATE requires a review and NULL version, RECORDED requires a non-empty version. A failed GATE requires failure detail. Enforce the kind/version pairing in SQL, not only application code; keep `TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail`.
+- Build records identify a review or environment. Every new build is `RECORDED` with a non-empty version, including the merge queue's build of a prepared merge commit; `failure_detail` is an optional reason on any failed build. `GATE` is a retired kind the API refuses to write. Keep `builds.kind` and all four of its CHECKs so historical `GATE` rows (review-linked, NULL version, failure detail when failed) stay valid, and never delete or rewrite those rows: `reviews.last_merged_build_id` points at them and the next queue merge's verification anchors on that pointer. Enforce the kind/version pairing in SQL, not only application code; keep `TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid`.
 - A successful build moves an `OPEN` or `FAILED` review into its repository's target-branch merge queue as `READY`; if there is no active `MERGE` review for that repository and target branch, the next queued review may be promoted to `MERGE`.
 - A failed build for a queued or merging review moves it to `FAILED` and removes it from the merge queue.
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
-- The `gate_runs` table stores the first-class record of one attempt to gate a prospective merge — independent of whether an erun review exists for the change. Reviews are one producer (a review-driven merge reports a gate run alongside its GATE build); a repository whose changes arrive as GitHub pull requests, with no erun review at all, is the other. `status` is one of `RUNNING`, `PASSED`, `FAILED`, or `INCONCLUSIVE` — a wrapper timing out or a run interrupted by an environment fault must report `INCONCLUSIVE`, never `FAILED`, since `FAILED` asserts a real verdict was reached. A `FAILED` row must carry `failing_step` (which gate step produced the red verdict); `log_ref` is an optional pointer to where to read it. `merge_commit` is NULL only when the run failed before that commit existed at all (a squash conflict). `review_id` is nullable and, when set, foreign-keys `(tenant_id, review_id)` to `reviews`.
+- The `gate_runs` table was dropped by `20261022120000_drop_gate_runs.sql`; a merge is landed against an ordinary recorded build of the merge commit instead. Do not reintroduce it, and do not edit the committed migrations that created it.
 - Audit events are stored in PostgreSQL.
 - Every tenant-owned PostgreSQL OLTP table must include `tenant_id`, enforce tenant-scoped uniqueness with composite unique indexes, and have PostgreSQL RLS.
 - API request handling must resolve tenant from the bearer token issuer before running tenant-owned queries.
@@ -230,14 +229,14 @@ schema inventory in this guide.
 
 - Proposed: age OR count bound, initially 30 days / 2,000 rows. Key build caps by
   tenant/environment now that `builds.environment_id` exists; define handling
-  for unattached/null environments when implementing. Gate-run keying must follow
-  its actual schema. No policy file implements this proposal yet.
+  for unattached/null environments when implementing. No policy file implements
+  this proposal yet.
 - Exempt builds referenced by reviews' last-build pointers or `releases.build_id`
-  with explicit NOT EXISTS guards. MERGED reviews must retain their pinned build.
-  Do not weaken FKs to make pruning succeed.
+  with explicit NOT EXISTS guards. MERGED reviews must retain their pinned build,
+  including a historical GATE build. Do not weaken FKs to make pruning succeed.
 - Use the existing scheduled retention runner, not lazy pruning on reads.
   Explicitly filter tenant, age, and rank under the cross-tenant operations role.
-  Builds/gate_runs already permit DELETE; audit/usage do not.
+  Builds already permit DELETE; audit/usage do not.
 - Bounds are starting estimates, not measured production obligations. Tune from
   actual per-tenant counts after rollout; no speculative rollup is required.
   The policy is additive SQL under `retention/`, not a new mechanism.
@@ -302,12 +301,12 @@ Do not silently change windows or exemptions while refactoring.
 
 - CLOSED only: 90 days from updated_at OR 2,000 per tenant. Live and MERGED
   reviews are exempt; MERGED-history retention remains an operator decision.
-- Guard surviving comments, releases, builds (including unpinned builds),
-  gate_runs, and queue membership. Remove reviewer assignments only together
-  with their deleted review.
+- Guard surviving comments, releases, builds (including unpinned and
+  historical GATE builds), and queue membership. Remove reviewer assignments
+  only together with their deleted review.
 - Eligible CLOSED reviews may clear stale failed/ready pins so future build
   retention can progress. Never null a MERGED review's required build pin.
-- Until build/gate-run retention exists, referenced CLOSED reviews may remain
+- Until build retention exists, referenced CLOSED reviews may remain
   indefinitely. That limits effectiveness, not referential safety.
 - Any future MERGED policy must handle the review/pinned-build FK cycle and
   release backreferences, not assume null-then-delete can satisfy the checks.
@@ -340,9 +339,10 @@ Do not silently change windows or exemptions while refactoring.
 
 ## Validation
 
-- Schema changes run `make test-schema-drift` and validate actual default-key,
+- Schema changes pass erun-backend-api's `go test ./...` (which includes the
+  schema drift test) and validate actual default-key,
   timestamp, RLS, and user-owned update behavior in PostgreSQL.
-- Retention changes run `make test-retention` and `make test-retention-grants`.
+- Retention changes pass erun-backend-api's `retention_*_e2e_test.go` suites.
   Assert exact surviving rows, each bound/exemption, dry/real recording, and
   concurrent-run refusal. Exercise actual INSERT/DELETE under operations and
   denied DELETE on audit/usage; catalog privileges alone are insufficient.

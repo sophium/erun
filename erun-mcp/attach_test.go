@@ -286,12 +286,10 @@ func TestAttachBridgesPTYAndReportsEndedOutcome(t *testing.T) {
 }
 
 // TestAttachCreatesSessionDirectoryOnAFreshPod is the regression test for the
-// defect erun-console/playwright/tests/mcp-attach-session.spec.ts found by
+// defect the console's MCP attach-session Playwright spec found by
 // actually driving a real browser against a real emcp instance with no prior
-// CLI session: session-prune.sh's own boot-time reconciliation explicitly
-// no-ops when eruncommon.RemoteAppSessionSocketDir is absent ("nothing
-// created yet: no sessions have ever run in this container"), and nothing
-// else in the runtime image's boot path creates it either -- so a freshly
+// CLI session: eruncommon.RemoteAppSessionSocketDir is container-local and
+// nothing in the runtime image's boot path creates it -- so a freshly
 // deployed or restarted pod that has never had a CLI-driven session
 // (`erun open --ai`, a linked orchestrator) has no session directory at all
 // until this handler creates one itself. Before the fix this failed with

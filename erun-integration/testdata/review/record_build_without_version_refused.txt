@@ -1,0 +1,2 @@
+audit: erun review record-build --commit <HEX> --dry-run review-1
+version is required: record the version the build minted

@@ -198,9 +198,7 @@ func TestClaimJobRejectsAnUnknownJobType(t *testing.T) {
 
 // TestClaimJobNormalizesCallerCase: the CLI and MCP transports document
 // lowercase values ("fix", "agent"), and the route must accept what it teaches
-// rather than passing the caller's case straight into the closed vocabularies
-// -- the same normalization TestStartGateRunNormalizesLowercaseStatus pins for
-// gate runs.
+// rather than passing the caller's case straight into the closed vocabularies.
 func TestClaimJobNormalizesCallerCase(t *testing.T) {
 	svc := &stubJobService{}
 	routes := JobRoutes{service: svc}
@@ -246,7 +244,8 @@ func TestClaimJobNeverAcceptsAServerStampedTime(t *testing.T) {
 }
 
 // TestUpdateJobRejectsAnUpdateToAFinishedJob: an outcome is immutable once
-// reached, the same discipline that keeps a gate run's verdict append-only.
+// reached, the same discipline that keeps a review's recorded builds
+// append-only.
 func TestUpdateJobRejectsAnUpdateToAFinishedJob(t *testing.T) {
 	svc := &stubJobService{err: &service.JobAlreadyFinishedError{JobID: "job-1", Status: model.JobStatusSucceeded}}
 	routes := JobRoutes{service: svc}

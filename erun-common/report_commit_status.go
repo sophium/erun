@@ -11,8 +11,8 @@ import (
 )
 
 // A required GitHub status check has nothing to require until something
-// reports a status under its context. The merge queue gate (`erun exec
-// gate-merge`, `erun build`, `erun review record-build --gate`) already knows
+// reports a status under its context. The merge queue (`erun exec
+// gate-merge`, `erun build`, `erun review record-build`) already knows
 // whether the prospective merge is green or red; this is the missing last
 // step that turns that knowledge into a GitHub commit status, so branch
 // protection on the target branch can finally require it.
@@ -20,8 +20,8 @@ import (
 // The status always targets the review's source-branch tip commit, never the
 // local prospective squash-merge commit gate-merge produces: GitHub only
 // evaluates a required check against a commit reachable from the open pull
-// request, and the squash commit never exists there until after the gate has
-// already passed and pushed.
+// request, and the squash commit never exists there until after its build
+// has passed and it was pushed.
 
 // ReportCommitStatusState is a state GitHub's Statuses API accepts.
 type ReportCommitStatusState string

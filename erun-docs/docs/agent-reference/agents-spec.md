@@ -60,10 +60,10 @@ Module guidance: [`erun-skills/AGENTS.md`](https://github.com/sophium/erun/blob/
 The runtime Dockerfile vendors the tree with one line, the same shape as skills:
 
 ```dockerfile
-COPY --chmod=0644 erun-skills/agents /etc/erun/agents
+COPY --chmod=0755 erun-skills/agents /etc/erun/agents
 ```
 
-On every entrypoint run, `initialize_claude_config` runs `erun-install-agents` (baked to `/usr/local/bin/erun-install-agents`, mirroring `erun-install-skills`'s `install_or_refresh_skill` shape but over flat `<name>.md` files instead of skill directories) over every file under `/etc/erun/agents/`, installing each into `~/.claude/agents/<name>.md`.
+At every container start the runtime entrypoint (`erun runtime-init`) installs every `<name>.md` under `/etc/erun/agents/` into `~/.claude/agents/<name>.md`, with the same install-or-refresh it applies to skills, over flat files instead of skill directories; `erun install-skills` runs both installs by hand.
 
 The install both **installs an agent when absent and refreshes it when the baked copy changed**, while **preserving in-pod edits** — identical policy to skills, adapted for a single file: provenance is tracked in a sidecar marker (`~/.claude/agents/<name>.md.erun-agent-baked-sha256`) holding the baked file's hash. An installed copy whose content still matches its marker is unmodified since erun installed it and is refreshed to the baked version; one that differs was edited in-pod and is left untouched (a legacy copy with no marker is treated as unmodified and adopted on the first refresh) — see [Skills spec § Deployment mechanism](/agent-reference/skills-spec#deployment-mechanism) for the identical policy skills already ship.
 
@@ -99,7 +99,7 @@ The two agents this topology names, both shipped in the runtime image (`/etc/eru
 |---|---|
 | Role | Standing role for an environment where features get built. |
 | Watches for | Assigned work; its own reviews' comment threads. |
-| Does | Implements the assigned work in its own environment. Takes it to `READY` with [`/erun-merge`](/agent-reference/skills-spec#erun-merge) rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the gate mint the release. |
+| Does | Implements the assigned work in its own environment. Takes it to `READY` with [`/erun-merge`](/agent-reference/skills-spec#erun-merge) rather than hand-rolling the commit/push/open-review sequence. Reads its reviews' threads; for each proposal branch, fetches it, judges it on merit, and merges the ones it accepts — it is not obliged to take a proposal, and replies with why when it declines. Never resolves a thread it did not open; it replies and lets the reviewer close. Once every thread on its review is resolved, runs `erun review queue advance` and lets the merge queue build and land it; the release the accepted review enqueues mints the version that ships. |
 | Never does | Call `erun review queue override-advance` as routine — that is a deliberate, separately-authorized escape hatch, not a way to skip a slow reviewer. Resolve a thread it did not open. |
 
 ### `erun-reviewer`

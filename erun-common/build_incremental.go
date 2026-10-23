@@ -133,16 +133,8 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ignored, err := loadContextIgnoreSet(contextDir, sources)
-	if err != nil {
-		return "", err
-	}
 	hasher := sha256.New()
-	files, err := collectFingerprintFiles(contextDir, sources, ignored)
-	if err != nil {
-		return "", err
-	}
-	if err := hashFingerprintFiles(hasher, contextDir, files); err != nil {
+	if err := hashContextSourcesInto(hasher, contextDir, sources); err != nil {
 		return "", err
 	}
 	if err := hashComponentChartInto(hasher, buildInput); err != nil {
@@ -153,6 +145,21 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
+}
+
+// hashContextSourcesInto hashes every file the sources name in the context,
+// less what the context's ignore files exclude: the same input set for an
+// image and for a linux package component.
+func hashContextSourcesInto(hasher io.Writer, contextDir string, sources []string) error {
+	ignored, err := loadContextIgnoreSet(contextDir, sources)
+	if err != nil {
+		return err
+	}
+	files, err := collectFingerprintFiles(contextDir, sources, ignored)
+	if err != nil {
+		return err
+	}
+	return hashFingerprintFiles(hasher, contextDir, files)
 }
 
 // hashFingerprintFiles separates entries with a NUL byte so distinct file lists
@@ -655,22 +662,15 @@ func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec,
 // matching build promotes instead of rebuilding; in dry-run those would-be tags
 // are treated as present so the trace still reflects the promote path.
 //
-// noIncremental skips promotion, not detection. --no-incremental used to return
-// early here, which also skipped the GateTestStage marking below -- and with it
-// the `rebuilding ... because its Dockerfile's test stage runs the build's own
-// gate` line and the `test stage (...): LIVE` declaration, which is the only
-// signal an operator gets that this build does (or does not) run make check. The
-// flag left a build strictly less auditable than the default: exit 0, no guard
-// line, no stage declaration, no way to tell it from a real pass. Marking the
-// gate is also the honest description of the path -- a gate build was never
-// eligible for promotion anyway, so with promotion off nothing about it changes
-// except that it now says so.
+// A tested component is promotable like any other: an fp tag is written only
+// after a successful docker build, which ran the Dockerfile's test stage, so
+// promoting from it reuses that component's last successful result.
 func ApplyIncrementalToDockerBuilds(ctx Context, builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
 	}
 	if noIncremental {
-		return markGateTestStageBuilds(builds), nil
+		return builds, nil
 	}
 	materialized, err := materializeConfiguredFingerprints(ctx, builds)
 	if err != nil {
@@ -709,15 +709,6 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 			continue
 		}
 		out[i].Fingerprint = fingerprint
-		if dockerfileHasGateTestStage(out[i].DockerfilePath) {
-			// The fingerprint proves the inputs are unchanged, not that the gate
-			// (make check) ever ran against them, so this Dockerfile is never
-			// eligible for promotion: it always goes through a real `docker
-			// build`, which is what actually invokes its `test` stage.
-			markGateTestStage(out, i)
-			rebuildSet[strings.TrimSpace(out[i].Image.Tag)] = struct{}{}
-			continue
-		}
 		missing, err := inspectFingerprintTags(out[i], inspect)
 		if err != nil {
 			return nil, err
@@ -736,34 +727,6 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 		}
 	}
 	return out, nil
-}
-
-// markGateTestStageBuilds is the noIncremental counterpart of the GateTestStage
-// branch in applyIncrementalPromotion: it classifies which Dockerfiles run the
-// project's own gate and marks them, without inspecting anything promotion would
-// use. Promotion is off, so a gate build is rebuilt either way; what this
-// preserves is the *declaration* -- traceIncrementalDecision's rebuild trigger
-// and gateTestStageProvenanceLines' `test stage (...): LIVE` line, both of which
-// key off GateTestStage and neither of which should disappear because a caller
-// passed a caching flag.
-func markGateTestStageBuilds(builds []DockerBuildSpec) []DockerBuildSpec {
-	out := make([]DockerBuildSpec, len(builds))
-	copy(out, builds)
-	for i := range out {
-		if dockerfileHasGateTestStage(out[i].DockerfilePath) {
-			markGateTestStage(out, i)
-		}
-	}
-	return out
-}
-
-// markGateTestStage records that this build's Dockerfile runs the project's own
-// gate, and that it must therefore never be served from a cached fingerprint
-// image: a fingerprint proves the inputs are unchanged, not that make check ever
-// ran against them.
-func markGateTestStage(builds []DockerBuildSpec, i int) {
-	builds[i].GateTestStage = true
-	builds[i].Promote = false
 }
 
 func inspectFingerprintTags(build DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {

@@ -13,7 +13,7 @@
 .codex
 # .erun/config.yaml is checked into git (the repo's own project config) and
 # TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments reads
-# it inside the erun-devops test stage, so it is carved out with the same
+# it inside the erun-devops image's cli-test stage, so it is carved out with the same
 # ".erun/*" plus negation shape ProjectConfigGitIgnoreFix documents for
 # .gitignore -- a bare ".erun" exclusion cannot be un-excluded per file
 # (docker cannot re-include a file whose parent directory is excluded).
@@ -26,10 +26,9 @@
 **/.DS_Store
 
 # Same asymmetry, for the two things `terraform init` writes into the module
-# tree it initializes: the terraform-module-tests gate target runs it against
-# every module under erun-devops/terraform-erun (and the module guides tell a
-# developer to run it by hand). Root .gitignore excludes both unanchored at any
-# depth, so the fingerprint already ignores them; without these rules the real
+# tree it initializes: the module guides tell a developer to run `terraform
+# test` by hand in a module under erun-devops/terraform-erun. Root .gitignore
+# excludes both unanchored at any depth, so the fingerprint already ignores them; without these rules the real
 # build context would still carry ~105MB of provider binaries per initialized
 # module for a file the fingerprint never sees.
 **/.terraform/
@@ -54,22 +53,27 @@ __debug_bin*
 /erun-integration/coverage
 /erun-integration/bin
 
-# eslint/prettier --cache output (Makefile's test-frontend target); never
-# COPYd into a build context, mirrored here only for hygiene
+# eslint/prettier --cache output; never COPYd into a build context, mirrored
+# here only for hygiene
 /.cache/
 
 # Local packaging / release artifacts
-/packaging/apt/dist
 /erun-devops/linux/*/dist
 /erun-cli/bin
 
 # Desktop UI build outputs. /erun-ui/frontend/wailsjs is the one exception
-# to "not consumed by service Dockerfiles": the erun-devops test stage's
-# `make check` (test-frontend) regenerates it in-image via
-# erun-ui/generate-wailsjs.sh before typechecking/building erun-ui/frontend,
-# so a possibly-stale host copy must never leak into the build context.
+# to "not consumed by service Dockerfiles": the erun-ui build stage
+# regenerates it in-image with `go tool wails generate module` before
+# typechecking/building erun-ui/frontend, so a possibly-stale host copy must never leak into the build context.
 /erun-ui/bin
 /erun-ui/build/bin
+# The macOS app bundle and the darwin build tree a local desktop build leaves
+# beside the module (excluded only by a clone's own .git/info/exclude, which
+# neither docker nor the fingerprint reads): ~90MB of host binaries no Linux
+# build consumes, which would bloat every context that COPYs erun-ui and move
+# its fingerprint on every local desktop build.
+/erun-ui/ERun.app
+/erun-ui/darwin
 /erun-ui/frontend/node_modules
 /erun-ui/frontend/dist
 /erun-ui/frontend/wailsjs
@@ -82,8 +86,8 @@ __debug_bin*
 /erun-ui/.golangci-cache
 
 # Root yarn workspace (erun-kit, erun-console, erun-ui/frontend): the
-# erun-devops test stage runs `yarn install` + the kit/console gates
-# in-image, so hoisted deps and build outputs are regenerated there and must
+# erun-console and erun-ui Dockerfiles run `yarn install` in-image, so hoisted
+# deps and build outputs are regenerated there and must
 # never enter the build context — the workspace root node_modules alone is
 # hundreds of MB, and its presence would diverge the context from the
 # fingerprint the same way /erun-docs/node_modules would.
@@ -99,8 +103,10 @@ __debug_bin*
 /erun-console/playwright/node_modules
 /erun-console/playwright/test-results
 /erun-console/playwright/playwright-report
-/erun-console/playwright/.cache
-/erun-console/playwright/.e2e-oidc.env
+/erun-console/playwright/.cache*
+/erun-devops/e2e/*/node_modules
+/erun-devops/e2e/*/test-results
+/erun-devops/e2e/*/playwright-report
 
 # Docs site dependencies and build outputs. The erun-docs image runs
 # `yarn install` + `yarn build` inside its Dockerfile, so these are

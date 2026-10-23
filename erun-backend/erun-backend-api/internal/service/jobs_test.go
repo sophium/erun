@@ -426,8 +426,8 @@ func TestJobServiceUpdateRevalidatesARefreshedSummary(t *testing.T) {
 }
 
 // TestJobServiceUpdateRefusesAFinishedJob: an outcome is immutable once
-// reached, the same discipline that keeps a gate run's verdict append-only
-// (ReportOutcome refuses a non-RUNNING run).
+// reached, the same discipline that keeps a review's recorded builds
+// append-only.
 func TestJobServiceUpdateRefusesAFinishedJob(t *testing.T) {
 	svc := NewJobService(newFakeJobRepo())
 	ctx := context.Background()

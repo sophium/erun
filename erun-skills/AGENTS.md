@@ -53,8 +53,9 @@ reusable agent definitions, and their Claude Code plugin manifest.
 - Validate skill frontmatter/supporting references and both JSON manifests.
   Exercise changed instruction paths proportionally; for embedded instructions,
   test exact provisioned content and refresh behavior, not keyword presence.
-- Distribution changes run `skills-install_test.sh` and `agents-install_test.sh`
-  in the runtime image source. Image-layout changes verify every skill/agent ships;
+- Distribution changes run the install-or-refresh tests
+  (`erun-common/agent_assets_install_test.go`), which the runtime image's boot
+  and the desktop orchestrator both use. Image-layout changes verify every skill/agent ships;
   invocation changes verify actual discovery and selection in the relevant assistant.
   Do not claim a static validator proves live selection.
 - For skill changes, update the existing built-in catalogue in

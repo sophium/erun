@@ -250,7 +250,7 @@ func runtimeSchedulableNotice(status uiRuntimeResourceStatus) string {
 // that it is the node being committed rather than a ceiling on this
 // environment, what part of the node's real consumption is invisible to it, and
 // -- the reported defect -- which levers actually move it. It never offers a
-// smaller limit: the runtime limit is sized for the cold `make check-gate` an
+// smaller limit: the runtime limit is sized for the cold full build an
 // agent runs in that container, and lowering it re-creates the out-of-memory
 // kills that destroy an in-pod agent run and its unpushed work.
 func runtimeWorstCaseNotice(status uiRuntimeResourceStatus) string {

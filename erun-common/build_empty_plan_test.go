@@ -37,7 +37,7 @@ func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
 	if !buildExecutionPlansWork(BuildExecutionSpec{script: &scriptSpec{Path: "./build.sh"}}) {
 		t.Error("a project build script is work")
 	}
-	if !buildExecutionPlansWork(BuildExecutionSpec{linuxBuilds: []scriptSpec{{Path: "./build.sh"}}}) {
-		t.Error("a linux package build is work")
+	if !buildExecutionPlansWork(BuildExecutionSpec{linuxPackages: []LinuxPackageSpec{{Name: "erun-ui"}}}) {
+		t.Error("a linux package is work")
 	}
 }

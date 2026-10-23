@@ -35,6 +35,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) > 0 && args[0] == oidcBootstrapCommand {
+		return runOIDCBootstrap(context.Background(), args[1:])
+	}
 	cfg, err := resolveConfig(args)
 	if err != nil {
 		return err
@@ -138,6 +141,10 @@ func run(args []string) error {
 func resolveConfig(args []string) (apiConfig, error) {
 	cfg := configFromEnv()
 	flags := flag.NewFlagSet("eapi", flag.ContinueOnError)
+	flags.Usage = func() {
+		_, _ = fmt.Fprintf(flags.Output(), "Usage: eapi [flags]\n       eapi %s [flags]   (see eapi %s -h)\n\nServes the ERun backend API.\n\n", oidcBootstrapCommand, oidcBootstrapCommand)
+		flags.PrintDefaults()
+	}
 	flags.StringVar(&cfg.Host, "host", cfg.Host, "Host interface to bind the backend API HTTP server to")
 	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
 	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
@@ -604,24 +611,4 @@ func splitCSV(value string) []string {
 		}
 	}
 	return result
-}
-
-func envOrDefault(name string, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func intEnvOrDefault(name string, fallback int) int {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	var parsed int
-	if _, err := fmt.Sscanf(value, "%d", &parsed); err != nil || parsed <= 0 {
-		return fallback
-	}
-	return parsed
 }

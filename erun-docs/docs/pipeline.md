@@ -47,27 +47,27 @@ Each component builds for both architectures, reuses unchanged layers from the [
 
 A snapshot version while you iterate; `--release` pins a stable bare version instead. Either way, the multi-arch manifest list is assembled when the version is published by [`push`](/cli/push). Full contract: [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
 
-### How you set it up — and where tests run
+### How you set it up — and where tests run {#where-tests-run}
 
-Each component's Dockerfile is a [multi-stage build](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): a builder stage that compiles the artefact and runs the tests, then a thin runtime stage that ships only the artefact.
+Each component tests itself as part of its own build. Its Dockerfile chains [named stages](/agent-reference/dockerfile-stages): `build` compiles the component, `test` runs the component's own lint and tests on top of it, and `runtime` ships the artefacts it takes from `test` (or from a helper stage built on `test`, which stamps the version and compiles for the target architecture).
 
 <figure className="erun-hero-figure">
-  <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
+  <img src="/img/build-stages.svg" alt="One Dockerfile with three stages: a build stage that compiles the component, a test stage built FROM it that runs the lint and tests, and a runtime stage that COPYs the artefacts from the test stage, producing a tagged container image for amd64 and arm64." />
 </figure>
 
-Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`, via [`erun e2e`](#what-e2e-does) below. A test that needs a container runtime of its own (an ephemeral database, say) rather than a deployment belongs in the builder stage too — see [Tests that need a container runtime](/agent-reference/conventions-spec#tests-that-need-a-container-runtime) for today's exact status.
+Because what ships passes through `test`, a failing test fails the build and no image is tagged — so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. An unchanged component reuses its last successful build instead of rerunning its tests, and `erun build` says which happened: `test: passed`, `test: reused`, or `test: none declared`. It refuses a Dockerfile whose `test` stage nothing uses, since the build would silently skip it. Run every test that doesn't need a deployed environment there: unit tests, integration tests against in-build fixtures, and tests that start their own containers (an ephemeral database, say — see [Tests that need a container runtime](/agent-reference/dockerfile-stages#tests-that-need-a-container-runtime)). Tests that need a running deployment run after `deploy`, via [`erun e2e`](#what-e2e-does) below.
 
 See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 
 ## What `e2e` does {#what-e2e-does}
 
-`build`/`push`/`deploy` prove an image builds and installs; they cannot prove the thing it installed actually serves — a stale rollout can look identical to a fresh one from the outside. [`erun e2e`](/cli/e2e) is the step that closes that gap: it discovers a `playwright/` folder the same way `build` discovers `docker/`, then runs it once against an already-deployed environment with two values injected that the suite never declares itself — the resolved HTTPS base URL and the version the environment is actually running. The suite's first assertion is that the served surface reports that version, so a green run against a stale deployment is no longer indistinguishable from a real pass.
+`build`/`push`/`deploy` prove an image builds and installs; they cannot prove the thing it installed actually serves — a stale rollout can look identical to a fresh one from the outside. [`erun e2e`](/cli/e2e) is the step that closes that gap. Each suite is a Dockerfile under `<tenant>-devops/e2e/<component>/`, next to the component's `docker/` and `k8s/` folders, whose `e2e` stage runs the suite. `erun e2e` builds that stage against an already-deployed environment, passing in values the suite never declares itself: the HTTPS URL of each exposed service and the version the environment is actually running. The suite's first assertion is that the served surface reports that version, so a green run against a stale deployment is no longer indistinguishable from a real pass.
 
-`erun e2e` refuses before a browser starts, naming the cause, when the environment isn't deployed, the target service isn't exposed, or its certificate isn't issued yet — the three conditions that otherwise surface as an opaque connection timeout or TLS error deep inside a Playwright run. It also refuses a suite that sets `ignoreHTTPSErrors` or hardcodes its own `baseURL`, since both would silently defeat the guarantee above. A project with no `playwright/` folder makes it a clean no-op.
+`erun e2e` refuses before any suite runs, naming the cause, when the environment isn't deployed, a suite's service isn't exposed, or its certificate isn't issued yet — the conditions that otherwise surface as an opaque connection timeout or TLS error deep inside a test run. It also refuses a suite that turns off certificate checks or hardcodes its own URL, since both would silently defeat the guarantee above. A project with no `e2e/` folder makes it a clean no-op.
 
-It is a separate step with its own exit code — `erun deploy` never runs it as a side effect. `erun build --e2e` is the everyday shortcut for the branch flow: it composes build → push → deploy → e2e, the same way `build --deploy` already composes build → push → deploy.
+It is a separate step with its own exit code. `erun build`, `erun deploy`, releases and the merge queue never run it, and it gates nothing: a failing suite reports the failure — suite, target URL, deployed version, log — and exits non-zero, but blocks and rolls back nothing and files nothing. Whoever ran it, an Operator, an Agent, or a scheduled run, files the bug.
 
-See [`erun e2e`](/cli/e2e) and [Conventions spec · Playwright suite discovery](/agent-reference/conventions-spec#playwright-suite-discovery).
+See [`erun e2e`](/cli/e2e) and [Dockerfile stages · The `e2e` stage](/agent-reference/dockerfile-stages#e2e-stage).
 
 ## Two ways to ship
 

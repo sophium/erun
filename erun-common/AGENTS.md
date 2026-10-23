@@ -30,6 +30,37 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
+### Target package layers (planned, not yet in place)
+
+https://github.com/sophium/erun/issues/2741 splits this one package into layers
+so an edit recompiles only its dependents and the compiler enforces primitive
+independence. Today everything is still package `eruncommon`; new code is
+written so it would already sit in one layer:
+
+```
+erun-common/
+  base/          model/ core/ config/
+  infra/         docker/ kube/ helm/ gitx/ platformclient/ cloud/ activity/ mcpauth/ mcptools/
+  primitive/     build/ push/ deploy/ open/ release/
+  orchestration/ build --release, --deploy, --push: compositions of primitives
+  command/       mergequeue/ review/ jobs/ lifecycle/ setup/ doctor/ observe/ terraform/ e2e/ orchestrator/ podruntime/
+```
+
+| Layer | May depend on |
+|---|---|
+| `base/model` | stdlib only |
+| `base/core`, `base/config` | lower `base/*` (config → core → model) |
+| `infra/*` | `base/*`; other `infra/*` only downward |
+| `primitive/*` | `base/*`, `infra/*`; never another primitive |
+| `orchestration` | `base/*`, `infra/*`, `primitive/*` |
+| `command/*` | anything below; never another `command/*` |
+| erun-backend-api | `base/*`, `infra/mcpauth`, `infra/cloud` only |
+
+Until the split lands: a primitive's files never call another primitive (the
+composition goes in an orchestration-shaped file), types and config code never
+call build, deploy or release, and no new file mixes layers. depguard rules
+enforce the table once each step lands.
+
 ### Platform identity: one per environment, and its form says which grant
 
 - An environment carries **one** platform identity, delivered as the single
@@ -147,97 +178,84 @@ demonstrated:
 
 ## Gate execution and verdicts
 
-- Long routine validation uses `scripts/agent-gate.sh`: direct execution outside
-  agent pods, tracked detachment plus bounded await inside them. Keep inner
-  check-gate prerequisites on the underlying targets so they do not detach twice.
-  Extend by runtime needs, not target name. Release callers supervise their own
-  jobs; release is not automatically wrapped. Run `scripts/agent-gate_test.sh`
-  when changing the wrapper.
-- `scripts/parallel-gate.sh` owns quota/memory-aware fan-out sizing. Independent
-  fan-outs must budget aggregate memory, including race-enabled test overhead,
-  not each reserve the whole ceiling. Run its script tests when changing it.
 - Batch gate-merge takes ordered sources, fetches once, and composes them on one
   prospective tree. On a squash conflict, restore the batch's last committed
   state, record skipped files/reason, and continue. A conflict confined to
   atlas.sum is the exception: it is regenerated from the migration files on disk
   and the source lands rather than being skipped. Refuse an all-empty batch.
   Do not loop single-source invocations that reset away earlier work.
-- Keep one gate_run per batch and preserve ordered landed/skipped composition
-  in its log artifact. Mapping one batch build to multiple review acceptances
-  remains an API design question, not an execution shortcut.
-- `gate_run_failure_classifier.go` owns infrastructure signatures. Start/report
-  inspect failure text and bounded local log content, visibly reclassifying known
-  infrastructure failures as INCONCLUSIVE. A failed review GATE build with the
-  same signature must be refused instead of changing the review to FAILED;
-  its boolean success field cannot represent a non-verdict. Test both records.
+- Preserve a batch's ordered landed/skipped composition in its gate-merge
+  output. A batch lands as one merge commit build; mapping that build to
+  several review acceptances remains an API design question, not an execution
+  shortcut.
+- `build_failure_classifier.go` owns erun's known infrastructure failure
+  signatures (`BuildInconclusiveSignatures`: registry/network blips and a loaded
+  Docker daemon failing Testcontainers startup). `review record-build --failed`
+  refuses a failure detail matching one instead of moving the review to
+  FAILED: `builds.successful` cannot represent a non-verdict, so the remedy is
+  to re-run the build and record that result.
 - Release cadence/coalescing is an unwired design in
   `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
   Do not treat drift reporting as an automated release drainer.
-- A build's own trace states what the builder did with its Dockerfile's `test`
-  stage, not what the plan intended. `dockerfileHasGateTestStage` keeps a gate
-  image out of the *fingerprint* promotion path, but BuildKit's layer cache sits
-  underneath that guard and can serve the whole test stage on its own: the build
-  finishes in seconds at zero CPU, `make check` never executes, and the exit code
-  is 0 — the same green as a real gate run. Two mechanisms close it, and neither
-  is optional. A run that declares itself the merge queue's gate
-  (`ForceGateTestStage`, set from `--gate`) makes its own `docker build`
-  invalidate just that stage (`--no-cache-filter`, `dockerBuildGateStageArgs`), so
-  declaring a gate costs the gate and not a cold rebuild of the shared cache. A
-  wholly replayed stage is otherwise **refused by the run that declared itself
-  the merge queue's gate** (`ensureGateTestStageExecuted`): the merge queue
-  gates with `erun build --gate` (erun-merge-queue-drive § 2), and a gate's exit
-  status is the entirety of what `erun review record-build --gate` records, so a
-  memoized verdict cannot stand in for it. A plain `erun build` still **reports**
-  the replay — the `test stage (…): REPLAYED` outcome line is printed for every
-  build — but it does not fail on one: its rung (the erun-merge skill's READY
-  step, and every other plain build) claims only that the commit builds, which a
-  layer-cache hit on byte-identical inputs establishes as well as the run that
-  first executed the stage. Refusing those failed a promise no rung made, and
-  failed it wholesale — in a plan with two gate-bearing images, a diff that left
-  either one's inputs untouched replayed that one and failed the whole run
-  (#2718). Do not widen that refusal back to every build; keep it keyed on the
-  declaration.
-  `gateTestStagePlanLines` announces the
-  plan and must not use the outcome vocabulary; `gateTestStageProvenanceLines`
-  reports the outcome — LIVE, CACHED or REPLAYED — read from the builder's own
-  captured `--progress=plain` stream, which is the one report a warm cache cannot
-  fake (an in-image marker is replayed along with the layer holding it). Keep the
-  stage's `FROM` step out of that evidence: BuildKit reports it DONE even when
-  every instruction below it was CACHED, which would hide the replay
-  (`build_gate_test_stage_evidence.go`).
-- Preserve the gate wrapper's distinction between a clean pass, an exit-zero
-  process that left unsupervised work (reported with an explicit warning and job
-  ID), and a genuine failure. The orphan warning is not proof of completed work;
-  callers must inspect the job's own record. A wrapper's bounded-wait timeout is
-  also not the underlying gate verdict (`scripts/agent-gate.sh`).
-- A recorded pass is replayed only for the run that produced it: its tree, its
-  command, and the environment it executed under. The environment travels with
-  the record instead of in the job id -- the id is also what a re-invocation
-  after an expired bounded wait attaches to, so moving it with the environment
-  would find no job there and start a second gate beside the first. A recorded
-  pass from a differing environment is named loudly and run fresh, never
-  replayed: keyed on the whole environment minus the wrapper's own control
-  variables, so a knob nobody thought to enumerate still separates two runs --
-  and so does the pod, whose name the container puts in HOSTNAME, so a recorded
-  pass does not survive the pod that produced it being replaced. A run still
-  *live* under a differing environment is the one case the wrapper cannot run
-  fresh, since the exclusive claim refuses a second gate beside it: it names
-  the mismatch loudly and attaches, reporting that run's verdict as that
-  environment's and not the caller's.
-- A wait expiring is the wrapper's own deadline, never the gated job's outcome.
-  On expiry the wrapper reads the job's own record, so a job that finished is
-  reported by its actual result and 124 is reserved for one still genuinely
-  running; an unreadable record is that same non-verdict, never a failure. That
-  non-verdict path must say so plainly and name the job, since the exit status
-  alone is not readable as "not a failure" once `make` is in between: GNU Make
-  collapses any nonzero recipe exit to its generic exit 2, so a caller reading
-  only `make check`'s exit status cannot tell a bounded-wait timeout from a real
-  failure. The `check` target therefore prints INCONCLUSIVE on 124, and the
-  wrapper's own 124 survives only for a direct caller.
-- Keep the default foreground-safe (bail at the first timeout) and let a caller
-  that is not foreground-constrained opt in with `AGENT_GATE_AWAIT_VERDICT=1`,
-  which re-awaits the same job across bounded `job await` calls until it reaches
-  a real verdict. `ERUN_JOB_ID` being set does not distinguish the two callers.
+- Testing is part of building. A component's Dockerfile runs its lint and
+  tests in a `test` stage that a later stage consumes, so no image exists
+  unless they passed. An unchanged component reuses its last
+  successful result: a fingerprint tag is written only after a successful
+  `docker build`, so promoting from it (`applyIncrementalPromotion`) is reuse
+  of a tested result, and a BuildKit layer-cache hit on byte-identical inputs
+  is equally valid. Every image, tested or not, takes the same promotion path
+  (`build_test_stage_test.go`); an all-promoted plan is a successful build.
+  There is no `--gate` build and no GATE build kind for new builds: the merge
+  queue builds the composed merge commit with a plain `erun build` and records
+  it RECORDED with its version.
+- `dockerfileDeclaresTestStage` scopes the host-network entitlement to
+  Dockerfiles with a `test` stage. Keep the stage name exact (`AS test`, not a
+  `test-` prefix). A declared `test` stage must be consumed by a later stage
+  (`FROM test`, `COPY`/`ADD --from=test`, or `RUN --mount=...from=test`):
+  `checkDockerfileTestStageConsumed` (`build_order.go`) refuses one that is not
+  when the build spec resolves (`newDockerBuildSpec`), so `erun build`, `erun
+  push` and a component deploy's build all refuse it before anything builds.
+  erun does not trace which stages the final image reaches; the repository's
+  own stricter shape (runtime copies only from `test` or stages `FROM test`) is
+  pinned by `dockerfile_copy_contract_test.go`, not imposed on tenants.
+  `build_component_boundary_test.go` locks the consumer forms and the refusal.
+- After each successful real build, every component reports one outcome line,
+  `<component>: test: passed`, `test: reused (fingerprint fp-<hash>)` or
+  `test: none declared` (`dockerBuildTestOutcome`), keeping a fresh run
+  distinct from a promotion. A promote that falls back to a rebuild reports
+  `passed`; failed builds and dry runs report nothing. Never collapse those
+  outcomes into one.
+- A Linux package component keeps no image to promote, so a plain build
+  records its pass in `~/.erun/package-tests/<name>.json`, keyed by a
+  fingerprint of the stages that ran (same hashing as images) and the platform
+  the docker daemon builds for (`docker version`, asked once per build; never
+  the host's CPU, which a remote `DOCKER_HOST` need not share), and the next
+  plain build with that fingerprint reports `test: reused`
+  (`linux_package_reuse.go`). A package with only a `build` stage reports
+  `test: none declared` on every build, reused or not. An unreadable daemon
+  platform reuses and records nothing. Only a successful real build records;
+  `--release` never reuses and `--no-incremental` neither reuses nor records.
+- `checkNotE2ESuiteDockerfile` refuses a Dockerfile under `*-devops/e2e/` for
+  build and push, pointing at `erun e2e --component <suite>`; project-wide
+  discovery walks only `docker/` and never reaches it. An e2e suite must never
+  be fingerprinted, promoted or pushed.
+- `RunE2E` (`e2e.go`, discovery in `e2e_discovery.go`) runs each
+  `<tenant>-devops/e2e/<suite>/Dockerfile` as `docker build --target e2e
+  --no-cache-filter e2e --output type=cacheonly` from the project root, with
+  `ERUN_E2E_VERSION`, `ERUN_E2E_BASE_URL` and `ERUN_E2E_URL_<SERVICE>` build
+  args and the `e2e.secrets` list. Keep those secrets separate from
+  `docker.secrets`, which reach every component build. Build, deploy, release
+  and the merge gate must never call it; it reports a failure bug-ready and
+  files nothing. The contract is `erun-docs/docs/agent-reference/dockerfile-stages.md`
+  § "The `e2e` stage"; the CLI goldens under `erun-integration/testdata/e2e/`
+  lock it.
+- A component's test stage only calls the module's own commands (`go tool
+  golangci-lint run`, `go test`); it holds no test logic of its own.
+- Long validation inside an agent pod runs as a detached `erun exec job start`
+  awaited with bounded `job await` calls (root § "One Agent Job Is One Run").
+  A wait expiring is the caller's own deadline, never the job's outcome: read
+  the job's own record before reporting a verdict, and distinguish a clean
+  pass, an exit-zero run that left unsupervised work, and a genuine failure.
 
 ## Release recovery
 
@@ -453,9 +471,14 @@ yet, and should not be assumed to hold until it has.
 
 ## Validation
 
-- After Go changes run `go test -count=1 -race ./...`. The root
-  `test-erun-common` target runs it in `check-gate`; race coverage is essential
-  for leases, job supervisors, and workspace sync.
+- After Go changes run `go tool golangci-lint run` and
+  `go test -count=1 -race ./...`. The erun-devops image's `cli-test` stage runs both;
+  race coverage is essential for leases, job supervisors, and workspace sync.
+- While iterating, use plain `go build` / `go test -run` on the package you
+  touched. `-race` and the darwin/windows cross-builds each compile a separate
+  copy of this package into the Go build cache; leave them to `erun build`, whose
+  `cli-test` stage runs both. Go evicts a cache entry only after 5 days unused and
+  has no size cap, so the cache grows with every edit; `erun trim-cache` caps it.
 - Exercise binary-reachable behavior through integration scenarios; remove unit
   tests duplicating those scenarios. Keep focused tests for otherwise unreachable
   behavior and concurrency. See `erun-integration/AGENTS.md` § "Known integration

@@ -59,14 +59,14 @@ func e2eReportMergedKeepingBody(t *testing.T, baseURL, reviewID, buildID, remote
 	return code, body, review
 }
 
-// e2eMergeAndReportGate drives one review through the last two steps an
-// environment performs — merge the source onto the target for real, report the
-// GATE build, then report MERGED — and returns the merge commit it produced
+// e2eMergeAndReportMerged drives one review through the last two steps an
+// environment performs — merge the source onto the target for real, record
+// the merge commit's build, then report MERGED — and returns the merge commit it produced
 // alongside the report's own outcome.
-func e2eMergeAndReportGate(t *testing.T, baseURL string, remote mergeQueueRemote, reviewID, sourceBranch, mergeMessage string) (string, int, string, mergeReviewResponse) {
+func e2eMergeAndReportMerged(t *testing.T, baseURL string, remote mergeQueueRemote, reviewID, sourceBranch, mergeMessage string) (string, int, string, mergeReviewResponse) {
 	t.Helper()
 	mergeCommit := remote.merge(t, remote.main, sourceBranch, mergeMessage)
-	buildID := e2ePostGateBuild(t, baseURL, reviewID, mergeCommit, true, "")
+	buildID := e2ePostMergeBuild(t, baseURL, reviewID, mergeCommit)
 	code, body, review := e2eReportMergedKeepingBody(t, baseURL, reviewID, buildID, remote.url)
 	return mergeCommit, code, body, review
 }
@@ -142,7 +142,7 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 	if status := readMergeReview(t, srv.URL, reviewA).Status; status != model.ReviewStatusMerge {
 		t.Fatalf("review A status = %s, want MERGE", status)
 	}
-	mergeA, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoA, reviewA, branchA, "merge "+branchA)
+	mergeA, code, body, merged := e2eMergeAndReportMerged(t, srv.URL, repoA, reviewA, branchA, "merge "+branchA)
 	if code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("review A did not merge: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
@@ -158,7 +158,7 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 		t.Fatalf("review B status = %s, want MERGE", status)
 	}
 
-	mergeB, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoB, reviewB, branchB, "merge "+branchB)
+	mergeB, code, body, merged := e2eMergeAndReportMerged(t, srv.URL, repoB, reviewB, branchB, "merge "+branchB)
 
 	// The two repositories are genuinely disjoint: repository A's merge commit
 	// is nowhere in repository B's history. Nothing about repository B can
@@ -203,7 +203,7 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 	}
 
 	mergeCommit := repoA.merge(t, target, sourceBranch, "merge "+sourceBranch)
-	buildID := e2ePostGateBuild(t, srv.URL, reviewID, mergeCommit, true, "")
+	buildID := e2ePostMergeBuild(t, srv.URL, reviewID, mergeCommit)
 
 	// Reporting the merge against a repository this review does not belong to
 	// is refused, and refused without leaving the review somewhere else.
@@ -258,7 +258,7 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 	repoB.branch(t, branchB1, "b1.txt")
 	reviewB1 := e2eOpenReviewInRepository(t, srv.URL, "fork-b-first", repoB.url, target, branchB1)
 	e2eReportGreenBuild(t, srv.URL, reviewB1)
-	mergeB1, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoB, reviewB1, branchB1, "merge "+branchB1)
+	mergeB1, code, body, merged := e2eMergeAndReportMerged(t, srv.URL, repoB, reviewB1, branchB1, "merge "+branchB1)
 	if code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("repository B's first merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
@@ -269,7 +269,7 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 	repoA.branch(t, branchA, "a.txt")
 	reviewA := e2eOpenReviewInRepository(t, srv.URL, "fork-a", repoA.url, target, branchA)
 	e2eReportGreenBuild(t, srv.URL, reviewA)
-	if _, code, body, merged := e2eMergeAndReportGate(t, srv.URL, repoA, reviewA, branchA, "merge "+branchA); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
+	if _, code, body, merged := e2eMergeAndReportMerged(t, srv.URL, repoA, reviewA, branchA, "merge "+branchA); code != http.StatusOK || merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("repository A's merge did not land: HTTP %d status=%s: %s", code, merged.Status, body)
 	}
 
@@ -290,7 +290,7 @@ func TestReportMergedDoesNotLetAnotherRepositorysTipSatisfyTheGatedTipCheck(t *t
 		t.Fatalf("review B2 status = %s, want MERGE", status)
 	}
 
-	_, code, body, merged = e2eMergeAndReportGate(t, srv.URL, repoB, reviewB2, branchB2, "merge "+branchB2)
+	_, code, body, merged = e2eMergeAndReportMerged(t, srv.URL, repoB, reviewB2, branchB2, "merge "+branchB2)
 	if code != http.StatusConflict {
 		t.Fatalf("a merge gated against a repository-rewritten target was accepted: HTTP %d status=%s: %s; repository B's own gated tip %s is not in its history any more, and another repository's commit is not evidence that it is", code, merged.Status, body, mergeB1)
 	}

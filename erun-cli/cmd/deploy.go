@@ -37,7 +37,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			"Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a " +
 			"Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.\n\n" +
 			"A runtime deploy also hands the pod this host's own signed-in erun platform identity — the " +
-			"credential its `erun review` and `erun gate` calls act as — for an environment that records " +
+			"credential its `erun review` calls act as — for an environment that records " +
 			"none yet; pass --erun-alias to say which alias that delegates when this host has several " +
 			"configured, since erun cannot guess. An environment that already records one keeps it.",
 		Example:       "  erun deploy team prod --version 1.2.3\n  erun deploy team dev --current\n  erun deploy team dev --version 1.2.3 --runtime-image ghcr.io/sophium/erun-devops\n  erun deploy team prod --version 1.2.3 --rollout-timeout 10m\n  erun deploy team prod --version 1.2.3 --max-cpu 4 --max-memory 8Gi --max-storage 80Gi\n  erun deploy team prod --version 1.2.3 --erun-alias erun+api.acme.services.erunpaas.com@erun",

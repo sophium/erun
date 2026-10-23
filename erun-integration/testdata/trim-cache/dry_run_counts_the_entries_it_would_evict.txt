@@ -1,0 +1,2 @@
+audit: erun trim-cache --dry-run --max-bytes 5000 <TMP>
+erun: 10034 bytes of go build cache at <TMP> are over the 5000 byte cap; 12 least recently used entries would be evicted (--dry-run, nothing removed)

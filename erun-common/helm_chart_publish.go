@@ -147,10 +147,13 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
+// runHelmCommand runs helm with both of its streams on erun's stderr: what
+// helm prints here ("Successfully packaged chart …", push digests) is progress,
+// never data, and on stdout it would land ahead of `--output json` results.
 func runHelmCommand(ctx Context, spec commandSpec) error {
 	cmd := Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = ctx.Stdout
+	cmd.Stdout = ctx.Stderr
 	cmd.Stderr = ctx.Stderr
 	return cmd.Run()
 }
@@ -162,7 +165,7 @@ func runHelmCommandCapturingOutput(ctx Context, spec commandSpec) (string, error
 	capture := &commandOutputCapture{}
 	cmd := Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = teeWriter(ctx.Stdout, &capture.stdout)
+	cmd.Stdout = teeWriter(ctx.Stderr, &capture.stdout)
 	cmd.Stderr = teeWriter(ctx.Stderr, &capture.stderr)
 	err := cmd.Run()
 	return capture.combined(), err

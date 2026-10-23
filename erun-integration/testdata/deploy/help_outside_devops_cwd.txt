@@ -4,7 +4,7 @@ deploy is a pure consume operation: it installs the image and chart already publ
 
 deploy waits for the rollout to become ready — default 15m, or the env's `deploy.timeout`, or --rollout-timeout — and watches the new pods: it keeps waiting while an image is still pulling and aborts early on a real container failure (crash, config error, or a permanent image-pull rejection) instead of waiting out the timeout. The default is sized for a cold pull of the runtime image, which the rollout has to wait out with the previous pod already torn down; raise it if a genuinely cold pull of a bigger image needs longer. Pass --max-cpu/--max-memory/--max-storage together to cap the environment's namespace with a Kubernetes ResourceQuota+LimitRange for this deploy; omit to use the env's saved namespace quota, if any.
 
-A runtime deploy also hands the pod this host's own signed-in erun platform identity — the credential its `erun review` and `erun gate` calls act as — for an environment that records none yet; pass --erun-alias to say which alias that delegates when this host has several configured, since erun cannot guess. An environment that already records one keeps it.
+A runtime deploy also hands the pod this host's own signed-in erun platform identity — the credential its `erun review` calls act as — for an environment that records none yet; pass --erun-alias to say which alias that delegates when this host has several configured, since erun cannot guess. An environment that already records one keeps it.
 
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]

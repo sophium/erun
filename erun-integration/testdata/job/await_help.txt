@@ -12,8 +12,8 @@ reconcile (see `erun exec job status --help`).
 
 --timeout is capped at 10m: a wait bounded well past the length of a single
 call is the same held-connection failure mode this command exists to avoid,
-just at a larger size. A job that runs longer than 10m (the full test suite
-gate routinely does) is not a case this command refuses to cover -- call it
+just at a larger size. A job that runs longer than 10m (a full build with
+its test suite routinely does) is not a case this command refuses to cover -- call it
 again each time it reports the job still running (exit 124) rather than
 asking for a single longer wait; a timeout past the cap is refused outright,
 naming the 10m ceiling in the refusal.
@@ -38,7 +38,7 @@ Usage:
 Examples:
   erun exec job await --tenant team --environment dev --id suite --timeout 2m
 
-  # A gate that can run longer than the 10m ceiling: keep awaiting at the
+  # A build that can run longer than the 10m ceiling: keep awaiting at the
   # ceiling until it stops reporting 124.
   erun exec job await --tenant team --environment dev --id suite --timeout 10m
 

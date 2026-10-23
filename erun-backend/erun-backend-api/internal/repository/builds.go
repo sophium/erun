@@ -176,6 +176,9 @@ func ParseBuildCursor(token string) (BuildCursor, error) {
 type BuildListFilter struct {
 	EnvironmentID string
 	Kind          model.BuildKind
+	// CommitID narrows the history to builds of one commit -- how a caller
+	// finds the build recorded for a commit that landed.
+	CommitID string
 	// Successful is nil for "either", so a caller can distinguish "only
 	// failed builds" from "no opinion" the same way a bare bool could not.
 	Successful *bool
@@ -249,6 +252,10 @@ func buildListPageQuery(tenantID string, filter BuildListFilter, limit int) (str
 	if filter.Kind != "" {
 		query += ` AND b.kind = ?`
 		args = append(args, string(filter.Kind))
+	}
+	if filter.CommitID != "" {
+		query += ` AND b.commit_id = ?`
+		args = append(args, filter.CommitID)
 	}
 	if filter.Successful != nil {
 		query += ` AND b.successful = ?`

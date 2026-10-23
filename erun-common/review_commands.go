@@ -358,14 +358,11 @@ func RunReviewClose(ctx Context, store CloudReadStore, alias, reviewID string, d
 	return client.UpdateReviewStatus(context.Background(), reviewID, PlatformUpdateReviewStatusParams{Status: "CLOSED"})
 }
 
-// ReviewRecordBuildParams is the `erun review record-build` input. Gate
-// reports the merge queue's own GATE build kind instead of an ordinary
-// RECORDED build — see AGENTS.md "Merge Queue". A GATE build carries no
-// version, since the gate publishes nothing.
+// ReviewRecordBuildParams is the `erun review record-build` input. Every
+// recorded build is RECORDED and carries the version its `erun build` minted.
 type ReviewRecordBuildParams struct {
 	ReviewID      string
 	CommitID      string
-	Gate          bool
 	Version       string
 	Successful    bool
 	FailureDetail string
@@ -378,25 +375,19 @@ type ReviewRecordBuildParams struct {
 // separate "set review status" call for this, by design (a READY with no
 // build is a different thing: the missed-merge-window requeue).
 func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, params ReviewRecordBuildParams, deps CloudDependencies) (PlatformBuild, error) {
-	if err := ensureNotKnownInfrastructureGateBuildFailure(params.Gate, params.Successful, params.FailureDetail); err != nil {
+	if strings.TrimSpace(params.Version) == "" {
+		return PlatformBuild{}, fmt.Errorf("version is required: record the version the build minted")
+	}
+	if err := ensureNotKnownInfrastructureBuildFailure(params.Successful, params.FailureDetail); err != nil {
 		return PlatformBuild{}, err
 	}
 	client, provider, err := newPlatformClientForAlias(ctx, store, alias, deps)
 	if err != nil {
 		return PlatformBuild{}, err
 	}
-	kind := ""
-	if params.Gate {
-		kind = "GATE"
-	}
 	details := []string{
 		"commitId=" + params.CommitID,
-	}
-	if kind != "" {
-		details = append(details, "kind="+kind)
-	}
-	if params.Version != "" {
-		details = append(details, "version="+params.Version)
+		"version=" + params.Version,
 	}
 	details = append(details, "successful="+strconv.FormatBool(params.Successful))
 	if strings.TrimSpace(params.FailureDetail) != "" {
@@ -408,7 +399,7 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 	}
 	return client.CreateBuild(context.Background(), params.ReviewID, PlatformCreateBuildParams{
 		CommitID:      params.CommitID,
-		Kind:          kind,
+		Kind:          "RECORDED",
 		Version:       params.Version,
 		Successful:    params.Successful,
 		FailureDetail: params.FailureDetail,
@@ -419,17 +410,18 @@ func RunReviewRecordBuild(ctx Context, store CloudReadStore, alias string, param
 // platform applies is decided by where the review is sitting, not by what the
 // caller claims.
 //
-// A review holding MERGE is the merge queue's: it has been fetched,
-// gate-built and pushed by the environment the queue promoted, and buildId
-// must name the GATE build that push produced. remoteURL is the git remote
-// the platform fetches to verify that build's commit is really reachable from
-// the target branch's tip. Any of the platform's three verification
-// conditions failing refuses with MERGE_NOT_VERIFIED and leaves the review at
-// MERGE — see AGENTS.md "Merge Queue".
+// A review holding MERGE is the merge queue's: its merge commit has been
+// composed (`exec gate-merge`), built and pushed by the environment the queue
+// promoted, and buildId must name the successful build recorded for that
+// merge commit. remoteURL is the git remote the platform fetches to verify
+// that build's commit is really reachable from the target branch's tip and
+// landed something new. Any verification condition failing refuses with
+// MERGE_NOT_VERIFIED and leaves the review at MERGE — see AGENTS.md "Merge
+// Queue".
 //
 // Any other review is one whose work landed without the queue — in practice a
 // GitHub squash merge, where the branch's own commits are not ancestors of
-// the target and no GATE build exists to name, or a branch that landed by
+// the target and no merge-commit build exists to name, or a branch that landed by
 // merge commit or fast-forward, including one the target was fast-forwarded
 // onto. Omit buildID: the platform then confirms against the same remote that
 // everything the review's source branch adds is already present in the target

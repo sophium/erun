@@ -4,7 +4,7 @@ title: Install
 
 # Install ERun
 
-Install ERun through your platform's package manager. One command gives you both the **CLI** and the **desktop app**.
+Install ERun through your platform's package manager. On macOS and Windows one command gives you both the **CLI** and the **desktop app**; on Linux they are two Debian packages.
 
 ## Prerequisites
 
@@ -32,6 +32,27 @@ scoop install erun
 ```
 
 Either install puts the `erun` CLI on your `PATH` and installs the desktop application alongside it.
+
+## Linux — Debian packages
+
+Each [release](https://github.com/sophium/erun/releases) carries two `.deb` files per architecture (`amd64`, `arm64`):
+
+| Package | File | Contents |
+|---|---|---|
+| `erun` | `erun_<version>_<arch>.deb` | The `erun` CLI, with the `emcp` and `eapi` executables. |
+| `erun-desktop` | `erun-desktop_<version>_<arch>.deb` | The `erun-app` desktop application, its menu entry and icon. |
+
+Download both from the release and install them with `apt`, which pulls in the libraries the desktop app needs (GTK 3, WebKitGTK 4.1):
+
+```bash
+version=1.0.300   # the release you want
+arch=$(dpkg --print-architecture)
+curl -fsSLO "https://github.com/sophium/erun/releases/download/v${version}/erun_${version}_${arch}.deb"
+curl -fsSLO "https://github.com/sophium/erun/releases/download/v${version}/erun-desktop_${version}_${arch}.deb"
+sudo apt install "./erun_${version}_${arch}.deb" "./erun-desktop_${version}_${arch}.deb"
+```
+
+The CLI package runs on any Debian or Ubuntu release. The desktop package names its libraries as Debian 13 and Ubuntu 24.04 do, so it installs there and on later releases. Install only `erun` when you don't want the desktop app.
 
 ## Optional: install the ERun plugin in your Claude Code
 

@@ -1,2 +1,0 @@
-audit: erun e2e --dry-run
-e2e: no playwright/ suite found; nothing to run

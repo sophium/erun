@@ -1,3 +1,0 @@
-Dry run: erun gate show planned.
-audit: erun gate show --dry-run gate-run-1
-platform: GET https://api.example.test/v1/gate-runs/gate-run-1

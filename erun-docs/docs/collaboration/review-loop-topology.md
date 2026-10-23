@@ -18,7 +18,7 @@ One review moves between two environments as it goes from a proposed change to a
 | `READY`, threads open | **builder** | Reads the threads, judges each proposal on merit, merges the ones it accepts, pushes, rebuilds. It is not obliged to take a proposal, and says why when it declines, in that thread. |
 | `READY`, threads open | **reviewer** | Returns to its own threads, reads the builder's replies, and resolves the ones the builder addressed. |
 | `READY`, all resolved | **builder** | Advances the merge queue (`erun review queue advance`). |
-| `MERGE` → `MERGED` | platform | The merge queue's gate builds the prospective merge and pushes only on green — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
+| `MERGE` → `MERGED` | platform | The merge queue builds the prospective merge commit with a plain `erun build`, records it, and pushes only on green — see [Merge queue § The gate](/collaboration/merge-queue#the-gate). |
 
 ## Why two environments, not two agents in one
 

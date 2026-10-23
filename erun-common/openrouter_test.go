@@ -246,14 +246,14 @@ func TestAISessionLaunchGatewayModelAndWindow(t *testing.T) {
 	gateway := gatewayFixture()
 
 	got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, gateway, "team", "dev")
-	if strings.Count(got, "--model vendor/catalog-default") != 2 {
-		t.Fatalf("expected the catalog default model in both guard branches, got %q", got)
+	if strings.Count(got, "--model vendor/catalog-default") != 1 {
+		t.Fatalf("expected the catalog default model, got %q", got)
 	}
-	if strings.Count(got, "CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576 ") != 2 {
-		t.Fatalf("expected the context window in both guard branches, got %q", got)
+	if strings.Count(got, "CLAUDE_CODE_MAX_CONTEXT_TOKENS=1048576 ") != 1 {
+		t.Fatalf("expected the context window, got %q", got)
 	}
-	if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=vendor/catalog-default claude") != 2 {
-		t.Fatalf("expected the subagent mirror in both guard branches, got %q", got)
+	if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=vendor/catalog-default claude") != 1 {
+		t.Fatalf("expected the subagent mirror, got %q", got)
 	}
 
 	chosen := AISessionLaunchCommand("", EnvironmentClaudeConfig{DefaultModel: model("openai/gpt-6-astra")}, gateway, "team", "dev")

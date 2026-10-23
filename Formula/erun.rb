@@ -1,8 +1,8 @@
 class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
-  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.306.tar.gz"
-  sha256 "0c1c37442a283dfe566f6146fdb9816a25d874876ffbe628642e22e8380f7942"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.307.tar.gz"
+  sha256 "e6a0b17ec3867fa67c2734b42081e4a3f324a1d2fe1ba5cb4dfcdd4f288ec345"
   license "MIT"
 
   depends_on "go" => :build
@@ -38,12 +38,10 @@ class Erun < Formula
     end
 
     cd "erun-ui" do
-      wails_bin = buildpath/"bin/wails"
-      wails_version = shell_output("go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2").strip
-      mkdir_p wails_bin.dirname
-      ENV["GOBIN"] = wails_bin.dirname
-      system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"
-      system wails_bin, "generate", "module"
+      # The binding generator compiles this package, whose production assets
+      # embed frontend/dist, so the directory has to exist before the bundle.
+      mkdir_p "frontend/dist"
+      system "go", "tool", "wails", "generate", "module"
 
       cd "frontend" do
         system "yarn", "install", "--frozen-lockfile"

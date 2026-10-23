@@ -210,3 +210,28 @@ func TestRuntimeImageReleaseLine(t *testing.T) {
 		}
 	}
 }
+
+// The stock chart runs its init containers and dind sidecar on the runtime
+// image's own erun, so a stock image from an earlier release than the chart
+// cannot start under it and must be refused before the rollout tears the
+// running pod down. The same release in any of its tag forms, a newer image, a
+// tenant's own image and an unclassifiable tag all proceed.
+func TestRuntimeImageOlderThanTheStockChartIsRefused(t *testing.T) {
+	err := guardRuntimeImageNotOlderThanChart("ghcr.io/sophium/erun-devops:1.0.296", DevopsComponentName, "1.0.307")
+	if err == nil || !strings.Contains(err.Error(), "older than the erun-devops 1.0.307 chart") || !strings.Contains(err.Error(), "--runtime-chart erun-devops:1.0.296") {
+		t.Fatalf("an older stock image under the stock chart should be refused with both remedies, got %v", err)
+	}
+	for _, ok := range []struct{ image, chart, version string }{
+		{"ghcr.io/sophium/erun-devops:1.0.307", DevopsComponentName, "1.0.307-snapshot"},
+		{"ghcr.io/sophium/erun-devops:1.0.307-snapshot-20261022181909-arm64", DevopsComponentName, "1.0.307"},
+		{"ghcr.io/sophium/erun-devops:1.0.308", DevopsComponentName, "1.0.307"},
+		{"ghcr.io/sophium/frs-devops:1.0.1", DevopsComponentName, "1.0.307"},
+		{"ghcr.io/sophium/erun-devops:1.0.296", "frs-devops", "1.0.307"},
+		{"ghcr.io/sophium/erun-devops:fp-c93a0b4ddb9869f3-arm64", DevopsComponentName, "1.0.307"},
+		{"ghcr.io/sophium/erun-devops:1.0.296", DevopsComponentName, ""},
+	} {
+		if err := guardRuntimeImageNotOlderThanChart(ok.image, ok.chart, ok.version); err != nil {
+			t.Fatalf("%s under %s %s should proceed, got %v", ok.image, ok.chart, ok.version, err)
+		}
+	}
+}

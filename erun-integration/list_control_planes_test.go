@@ -252,7 +252,7 @@ func TestListControlPlanes(t *testing.T) {
 		golden.Equal(t, "list/control_planes_combined_with_tenant_errors", normalize.Apply(result.Combined))
 	})
 
-	// Every other platform-touching command (`gate list`, `platform whoami`,
+	// Every other platform-touching command (`jobs list`, `platform whoami`,
 	// ...) accepts --erun-alias to narrow its work to one configured alias,
 	// but --control-planes rejected it outright and unconditionally probed
 	// every configured erun-hosted alias instead.
@@ -940,4 +940,13 @@ func TestListControlPlanes(t *testing.T) {
 			t.Fatalf("expected no mismatch for a plane advertising the address erun reached:\n%s", result.Combined)
 		}
 	})
+}
+
+func lineContaining(text, substr string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, substr) {
+			return line
+		}
+	}
+	return ""
 }

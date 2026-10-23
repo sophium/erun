@@ -120,8 +120,8 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - The shadcn primitives, `components.json`, `lib/utils.ts`, and `styles/theme.css` live in `erun-kit`, not here — see `erun-kit/AGENTS.md`. Run shadcn commands and `yarn shadcn:check` from `erun-kit`, never from `erun-ui/frontend`.
 - Edit source files, not generated artifacts such as bindings, bundles, generated models, generated clients, or generated component output. Regenerate artifacts through the repository's generator command and inspect the generated diff instead of hand-editing the output.
 - Do not patch generated files manually, even temporarily to satisfy a compiler, type checker, import, or test. When generated output is missing or stale, first change the source contract that owns it, then run the appropriate generator.
-- If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `wails generate module` from `erun-ui`.
-- Every surface that type-checks, lints, or builds `erun-ui/frontend` regenerates `wailsjs/` first, through the one shared `./erun-ui/generate-wailsjs.sh` (`build.sh`, the root `Makefile`'s `test-frontend`, and `.githooks/pre-commit`). `wailsjs/` is gitignored, so a checkout's copy is only as current as the last surface that regenerated it, and linting against a stale one reports type-aware errors inside source the change never touched — which as a commit veto reads as a defect in a branch that is sound. A surface that cannot regenerate skips that lint visibly, never silently.
+- If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `go tool wails generate module` from `erun-ui`.
+- Every surface that type-checks, lints, or builds `erun-ui/frontend` regenerates `wailsjs/` first, with `go tool wails generate module` from `erun-ui` (the Wails CLI is a `tool` in `go.mod`, at the version the module pins; `build.sh`, `build.ps1`, the component's Dockerfile and the Homebrew/Scoop installers all call it that way). `wailsjs/` is gitignored, so a checkout's copy is only as current as the last surface that regenerated it, and linting against a stale one reports type-aware errors inside source the change never touched.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
 
 ## Frontend Code Organization
@@ -235,7 +235,8 @@ released on scroll.
 
 ## Build And Packaging
 
-- Keep the module build script as the canonical local and release-facing desktop build entrypoint.
+- `build.sh` (`build.ps1` on Windows) is the local desktop builder: it generates the bindings, installs and builds the frontend, compiles `erun-app` with the version, commit, date and skills/agents-source stamps, and on macOS assembles and signs `ERun.app`. It runs no lint or test gate — those live in the component's `test` stage, and a developer runs the same commands by hand (see "Validation").
+- erun-ui builds, tests and packages itself through `erun-devops/linux/erun-ui/Dockerfile`, a package component (see `erun-devops/AGENTS.md` § "Build Workflow"). Its stages run the module's plain commands, not `build.sh`: `build` generates the bindings, builds the bundle and compiles the Linux `bin/erun-app`; `test` runs the frontend's typecheck, lint, format:check and unit tests, `go tool golangci-lint run ./...`, `go test -race -count=1 ./...`, the Windows cross-compile, and the Playwright package's checks and full suite against that binary; `package` stamps the version and compiles `erun-app` for the target, and `dist` holds only the `erun-desktop` `.deb` (`/usr/bin/erun-app`, an `erun-app.desktop` menu entry, `build/appicon.png` as the `erun-app` icon in `/usr/share/pixmaps`, `Depends` from `dpkg-shlibdeps`). A plain `erun build` runs it through `test`; `erun build --release` publishes the `.deb` for amd64 and arm64. A new check is a new command in the `test` stage. macOS and Windows desktop binaries still ship through `build.sh` and the package managers.
 - Preserve the installed binary name `erun-app` unless the repository explicitly changes launcher and package-manager integration too. `erun app`, Homebrew, and Scoop wiring depend on that artifact name.
 - Keep macOS and Windows packaging assumptions aligned across the module build scripts and package-manager metadata.
 - When changing Darwin CGO or deployment-target behavior, align compile and link settings together so local builds, package-manager builds, and Wails builds do not drift.
@@ -249,18 +250,15 @@ released on scroll.
 
 ## Validation
 
-- Go/backend changes: `go test -count=1 ./...`. Root `test-erun-ui` and lint gate
-  this module independently; sibling-module test commands cannot reach it.
+- Go/backend changes: `go tool golangci-lint run ./...` and
+  `go test -race -count=1 ./...`; sibling-module test commands cannot reach this
+  module.
 - Frontend changes: `yarn typecheck && yarn lint && yarn format:check && yarn build &&
-  yarn test` in `frontend/`; root `test-frontend` runs the same gates.
-- `.githooks/pre-commit` changes: `sh scripts/pre-commit_test.sh`, which
-  `make fast-check` also runs.
-- Observable interaction/lifecycle changes also run `./playwright/run.sh`
-  (force `--build` after backend edits). See the coverage contract below.
+  yarn test` in `frontend/`; the component's `test` stage runs the same commands.
+- Observable interaction/lifecycle changes also rebuild with `./build.sh` and run
+  `yarn test` in `playwright/`. See the coverage contract below.
 - Packaging, Wails, CGO, or asset embedding changes run `./build.sh <target>`.
   Align compile/link deployment targets and package-manager metadata.
-- `--skip-lint` is a visible per-invocation local-iteration option, never a CI or
-  final-validation bypass and never inherited through an environment variable.
 - Guidance-only changes follow root scope; embedded instructions run provisioning tests.
 
 ## Lint, Format, Typecheck
@@ -274,15 +272,16 @@ Playwright has its own package/configs and adds its test-specific lint rules.
 - Observable frontend or backend-to-frontend changes require Playwright assertions
   in the same PR. Type checks and Go tests cannot prove rendered behavior.
   Exemptions are zero-observable-surface changes and must be stated in the PR.
-- `./playwright/run.sh` is the canonical runner; see its guide for flags, fixtures,
-  area selection, and isolation. It reuses the binary unless `--build` is passed.
+- `yarn test` in `playwright/` (plain `playwright test`) is the runner; see its
+  guide for fixtures and isolation. It runs whatever `bin/erun-app` is on disk,
+  so rebuild with `./build.sh` first.
 - Stage tenant/environment/config-shaped cases. For genuinely live-only branches,
   cover the nearest observable invariant, explain the gap in the spec, and name
   the Go test owning the inaccessible branch.
-- Root `test-playwright` is wired into `check-gate`; no manual attestation replaces
-  it. Build-selected areas are not proof that the full suite ran.
+- The component's `test` stage runs the full suite on every build of erun-ui; no
+  manual attestation replaces it.
 - Headless HTTP/SSE tests do not exercise Wails native windows, menus, WebView
-  lifecycle, or signing. Windows cross-compilation in the gate proves compile/link
+  lifecycle, or signing. Windows cross-compilation in the build proves compile/link
   only; macOS native validation requires an Apple SDK host.
 - Changes to real create → deploy → open → MCP flow also run the opt-in k3d mode
   under `playwright/AGENTS.md`; it is separate from the inert default suite.

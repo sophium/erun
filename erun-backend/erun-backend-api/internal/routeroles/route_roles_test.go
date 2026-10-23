@@ -79,7 +79,7 @@ func TestTenantAdminSupersetOfTenantUser(t *testing.T) {
 	}
 }
 
-// TestTenantAgentPermissionsAreExactlyTheGateAndSelfReportRoutes is the
+// TestTenantAgentPermissionsAreExactlyTheMergeQueueAndSelfReportRoutes is the
 // closed list of what the machine role may do, and it is deliberately closed:
 // adding a route to the machine role forces a change here, so the widening is
 // a reviewed decision rather than a side effect of a route's classification.
@@ -87,24 +87,22 @@ func TestTenantAdminSupersetOfTenantUser(t *testing.T) {
 // environment's own `erun build` self-report is granted while the tenant-wide
 // build history is not, and the reads that make up reading a review are
 // granted while writing a comment or assigning a reviewer is not.
-func TestTenantAgentPermissionsAreExactlyTheGateAndSelfReportRoutes(t *testing.T) {
+func TestTenantAgentPermissionsAreExactlyTheMergeQueueAndSelfReportRoutes(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
 		// Its own identity and capability set.
 		"GET /v1/whoami": true,
-		// Reading the reviews it is gated against, and the queue it is
+		// Reading the reviews it is merging, and the queue it is
 		// promoted from -- including the reads `erun review show` makes.
 		"GET /v1/reviews":                      true,
 		"GET /v1/reviews/merge-queue":          true,
 		"GET /v1/reviews/{review_id}":          true,
 		"GET /v1/reviews/{review_id}/comments": true,
 		"GET /v1/reviews/{review_id}/builds":   true,
-		// Reporting the GATE build, starting and reporting the gate run,
-		// reporting the merge, and the unattached build self-report.
+		// Recording the build of the prepared merge commit, reporting the
+		// merge, and the unattached build self-report.
 		"POST /v1/reviews/{review_id}/builds":  true,
 		"PATCH /v1/reviews/{review_id}/status": true,
-		"POST /v1/gate-runs":                   true,
-		"PATCH /v1/gate-runs/{gate_run_id}":    true,
 		"POST /v1/builds":                      true,
 	}
 	got := permissionSet(TenantAgentPermissions())

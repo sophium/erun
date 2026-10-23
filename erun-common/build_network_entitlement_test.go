@@ -41,7 +41,7 @@ func entitlementArgv(t *testing.T, content string) []string {
 // argv cannot tell a build that grants the entitlement from one that does not
 // until a real build runs.
 func TestDockerBuildGrantsHostNetworkEntitlement(t *testing.T) {
-	argv := entitlementArgv(t, gateDockerfileContent)
+	argv := entitlementArgv(t, consumedTestStageDockerfileContent)
 
 	if !grantsEntitlement(argv, "network.host") {
 		t.Fatalf(
@@ -73,7 +73,7 @@ func TestDockerBuildWithoutTestStageKeepsTheDefaultDeny(t *testing.T) {
 // `--allow` with nothing after it -- would still satisfy a substring check
 // while granting nothing. Pairing them is the whole assertion.
 func TestDockerBuildGrantIsPairedWithItsValue(t *testing.T) {
-	argv := entitlementArgv(t, gateDockerfileContent)
+	argv := entitlementArgv(t, consumedTestStageDockerfileContent)
 
 	for i, arg := range argv {
 		if arg != "--allow" {

@@ -20,11 +20,9 @@ import (
 // live before being committed.
 //
 // Opt-in and skipped by default (this repository's convention for a gate
-// that needs real infrastructure, e.g. ERUN_E2E_REVIEWS_DATABASE_URL). Stand
-// up a Zitadel core + Postgres exactly like
-// erun-console/playwright/zitadel/stack.sh does (that script is the
-// console's real-IdP e2e; this test only needs core, not the separate Login
-// V2 container, since it drives the Management API directly):
+// that needs real infrastructure beyond a database). Stand
+// up a Zitadel core + Postgres (core only, not the separate Login V2
+// container, since this test drives the Management API directly):
 //
 //	docker network create erun-zitadel-e2e-net
 //	docker volume create erun-zitadel-e2e-bootstrap

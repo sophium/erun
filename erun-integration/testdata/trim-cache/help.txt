@@ -1,0 +1,25 @@
+Brings the go build cache under a byte cap by deleting the cache entries that have
+gone longest unused, so the entries the next build wants stay and the build stays
+warm. Only go's own entries are removed; the cache's bookkeeping files are kept, and a
+cache already under its cap is left untouched.
+
+DIR defaults to GOCACHE, else ~/.cache/go-build. The cap defaults to
+ERUN_GO_BUILD_CACHE_MAX_BYTES, the value the runtime chart renders (0 means no bound),
+else 16 GiB. --dry-run reports how many entries would go without deleting any.
+
+Usage:
+  erun trim-cache [DIR] [flags]
+
+Examples:
+  erun trim-cache --dry-run
+  erun trim-cache --max-bytes 8589934592 ~/.cache/go-build
+
+Flags:
+      --dry-run         Resolve and trace mutating actions without executing them.
+  -h, --help            help for trim-cache
+      --max-bytes int   Cap in bytes (default: ERUN_GO_BUILD_CACHE_MAX_BYTES, else 16 GiB)
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

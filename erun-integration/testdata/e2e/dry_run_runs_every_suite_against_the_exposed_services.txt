@@ -1,0 +1,14 @@
+audit: erun e2e --dry-run
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+e2e: deployed version <VERSION>
+e2e: secrets configured as console-login (env E2E_CONSOLE_PASSWORD) (.erun/config.yaml e2e.secrets)
+e2e: suite erun-backend-api: <TMP>
+e2e: base url https://api.team-dev.invalid (resolved from the expose-erun-backend-api ingress)
+e2e: api.team-dev.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+e2e: suite erun-console: <TMP>
+e2e: base url https://console.team-dev.invalid (resolved from the expose-erun-console ingress)
+e2e: console.team-dev.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+cd <TMP> && docker build --progress=plain --target e2e --no-cache-filter e2e --output type=cacheonly --build-arg ERUN_E2E_VERSION=<VERSION> --build-arg ERUN_E2E_BASE_URL=https://api.team-dev.invalid --build-arg ERUN_E2E_URL_ERUN_BACKEND_API=https://api.team-dev.invalid --build-arg ERUN_E2E_URL_ERUN_CONSOLE=https://console.team-dev.invalid --secret 'id=console-login,env=E2E_CONSOLE_PASSWORD' -f <TMP> .
+cd <TMP> && docker build --progress=plain --target e2e --no-cache-filter e2e --output type=cacheonly --build-arg ERUN_E2E_VERSION=<VERSION> --build-arg ERUN_E2E_BASE_URL=https://console.team-dev.invalid --build-arg ERUN_E2E_URL_ERUN_BACKEND_API=https://api.team-dev.invalid --build-arg ERUN_E2E_URL_ERUN_CONSOLE=https://console.team-dev.invalid --secret 'id=console-login,env=E2E_CONSOLE_PASSWORD' -f <TMP> .

@@ -9,7 +9,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// jobs.go mirrors gate_runs.go's platform-call shape for the jobs surface:
+// jobs.go mirrors review.go's platform-call shape for the jobs surface:
 // the platform's record of work in flight, so an in-pod agent records what it
 // is doing without shelling out, and a second agent asking for the same scope
 // is told who already holds it.

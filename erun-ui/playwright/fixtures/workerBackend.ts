@@ -11,11 +11,10 @@ import {
   seedBaseline,
   setWorkerRoot,
 } from './seedRoot.js';
-import { reapStubProcesses } from './stubProcesses.js';
 
 const isWindows = process.platform === 'win32';
 
-// Shared with run.sh and playwright.config.ts so an overridden port reaches
+// Shared with playwright.config.ts so an overridden ERUN_PLAYWRIGHT_PORT reaches
 // every layer; each worker then prefers its own port above this base.
 const BASE_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
@@ -171,11 +170,11 @@ export const test = base.extend<object, WorkerFixtures>({
       await use(baseURL);
 
       await stopBackend(child);
-      // Backstop for the stub processes the last spec in this worker opened:
-      // they are not children of the backend, so stopping it leaves them parked.
-      // After stopBackend, never before — a stub killed under a live backend can
-      // be respawned by the reconnect path and end up outside this sweep.
-      reapStubProcesses();
+      // removeWorkerRoot reaps the stub processes the last spec in this worker
+      // opened: they are not children of the backend, so stopping it leaves them
+      // parked. After stopBackend, never before — a stub killed under a live
+      // backend can be respawned by the reconnect path and end up outside the
+      // sweep.
       removeWorkerRoot(root);
     },
     { scope: 'worker' },

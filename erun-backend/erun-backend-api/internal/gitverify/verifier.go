@@ -44,7 +44,7 @@ type Verifier interface {
 	// targetBranch that carries it. This is the question commit identity
 	// cannot answer once a branch lands by squash merge: the branch's own
 	// commits are deliberately not made ancestors of the target, so
-	// IsAncestor and a gate build both have nothing to point at, while the
+	// IsAncestor and a merge build both have nothing to point at, while the
 	// work itself is really there. A source tip that is already in the
 	// target's history — its own tip included — is answered by that ancestry
 	// before any change set is compared. contained is false, with no error,

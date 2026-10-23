@@ -108,7 +108,7 @@ const jobStartLongHelp = "The command keeps running after this call returns and 
 	"environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a\n" +
 	"few other names that could redirect what the job executes are refused.\n\n" +
 	"When this start itself runs from inside another job's own work (an agent\n" +
-	"job running `job start` for a gate, the common case), that other job waits\n" +
+	"job running `job start` for a full build, the common case), that other job waits\n" +
 	"for this one to reach a verdict before it reports its own outcome — its exit\n" +
 	"code alone is never trusted while work it started has not finished. Pass\n" +
 	"--handoff for work that is meant to outlive the caller on purpose (a release,\n" +
@@ -116,10 +116,10 @@ const jobStartLongHelp = "The command keeps running after this call returns and 
 	"--exclusive declares that the work needs the environment to itself. While it\n" +
 	"runs, every other job start here is refused and told which job holds the\n" +
 	"environment, rather than being queued or quietly allowed to contend. That\n" +
-	"includes plain jobs, not only other --exclusive ones: a gate needs protecting\n" +
-	"less from another gate than from everything else scheduled beside it. Reach\n" +
+	"includes plain jobs, not only other --exclusive ones: a full build needs\n" +
+	"protecting less from another one than from everything else beside it. Reach\n" +
 	"for it whenever the work saturates the environment and a neighbour would make\n" +
-	"its result meaningless -- a full gate run measured 7 minutes alone and 17\n" +
+	"its result meaningless -- a full check run measured 7 minutes alone and 17\n" +
 	"minutes with a second batch beside it, going red on two tests that pass\n" +
 	"standalone. The claim is a lease, not a lock: it expires without renewal and\n" +
 	"is reclaimed once its holder's process is gone, so a crashed job cannot pin\n" +
@@ -153,8 +153,8 @@ func newJobStartCmd(resolveOpen OpenResolver) *cobra.Command {
 			"    --env CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000 -- 'rewrite the module'\n\n" +
 			"  # Kick off a release that is meant to keep running past this run's own turn.\n" +
 			"  erun exec job start --tenant team --environment dev --name release --handoff -- erun release\n\n" +
-			"  # Run a gate that must not share the environment with anything else.\n" +
-			"  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate",
+			"  # Run a full build that must not share the environment with anything else.\n" +
+			"  erun exec job start --tenant team --environment dev --name build --exclusive -- erun build",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			envMap, err := parseJobEnvFlags(env)
@@ -679,8 +679,8 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"reconcile (see `erun exec job status --help`).\n\n" +
 			"--timeout is capped at 10m: a wait bounded well past the length of a single\n" +
 			"call is the same held-connection failure mode this command exists to avoid,\n" +
-			"just at a larger size. A job that runs longer than 10m (the full test suite\n" +
-			"gate routinely does) is not a case this command refuses to cover -- call it\n" +
+			"just at a larger size. A job that runs longer than 10m (a full build with\n" +
+			"its test suite routinely does) is not a case this command refuses to cover -- call it\n" +
 			"again each time it reports the job still running (exit 124) rather than\n" +
 			"asking for a single longer wait; a timeout past the cap is refused outright,\n" +
 			"naming the 10m ceiling in the refusal.\n\n" +
@@ -697,7 +697,7 @@ func newJobAwaitCmd(resolveOpen OpenResolver) *cobra.Command {
 			"the underlying tool's transcript ending as the answer, since nothing wakes\n" +
 			"a one-shot run back up to report one.",
 		Example: "  erun exec job await --tenant team --environment dev --id suite --timeout 2m\n\n" +
-			"  # A gate that can run longer than the 10m ceiling: keep awaiting at the\n" +
+			"  # A build that can run longer than the 10m ceiling: keep awaiting at the\n" +
 			"  # ceiling until it stops reporting 124.\n" +
 			"  erun exec job await --tenant team --environment dev --id suite --timeout 10m",
 		Args: cobra.NoArgs,

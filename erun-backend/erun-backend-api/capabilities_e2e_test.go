@@ -6,9 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -23,10 +24,7 @@ import (
 // thing, so the agreement is re-proved against actual responses.
 func capabilityAPIDatabase(t *testing.T) (*sql.DB, string, string) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_PERMISSIONS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_PERMISSIONS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

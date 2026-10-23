@@ -61,8 +61,8 @@ const (
 
 // Job is the platform's record of work in flight: what is being done, by
 // whom, and — when the work claims a scope — what it claims, so a second
-// actor asking for the same scope is told who already holds it. Builds and
-// gate runs record outcomes after the fact; a job is recorded before the
+// actor asking for the same scope is told who already holds it. Builds
+// record outcomes after the fact; a job is recorded before the
 // work starts, which is the half that lets two agents stop duplicating each
 // other.
 type Job struct {
@@ -77,8 +77,7 @@ type Job struct {
 	// empty when the work is not issue-driven.
 	IssueRef string `json:"issueRef,omitempty" bun:"issue_ref,nullzero"`
 	// Summary is prose describing what is being done, never a command line —
-	// the design deliberately rejects a summary that is only a shell command,
-	// the same way a FAILED gate run must name its failing step.
+	// the design deliberately rejects a summary that is only a shell command.
 	Summary   string    `json:"summary" bun:"summary"`
 	Status    JobStatus `json:"status" bun:"status"`
 	ActorKind ActorKind `json:"actorKind" bun:"actor_kind"`

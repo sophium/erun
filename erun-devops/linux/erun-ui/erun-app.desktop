@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ERun
+Comment=Multi-tenant multi-environment deployment and management
+Exec=erun-app
+Icon=erun-app
+Terminal=false
+Categories=Development;
+StartupWMClass=erun-app

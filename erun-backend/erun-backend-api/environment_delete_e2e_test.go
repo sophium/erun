@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -23,10 +24,7 @@ import (
 // releaseQueueDatabase's shape (release_queue_sql_e2e_test.go).
 func environmentDeleteDatabase(t *testing.T) (*repository.EnvironmentRepository, context.Context, *sql.DB) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_ENVIRONMENT_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_ENVIRONMENT_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

@@ -191,11 +191,11 @@ Make the change. Hold these rules in mind (lifted from root
 
 The validation set depends on what you touched. As a floor:
 
-- `cd "${clone_dir}" && go test ./...` for any Go change.
-- `cd "${clone_dir}" && make integration-test` if you touched
-  `erun-cli`, `erun-common`, the runtime entrypoint, or chart deploy
-  plumbing. The integration suite includes a coverage gate; it must not
-  regress below the configured threshold.
+- `go tool golangci-lint run ./... && go test ./...` in each Go module you
+  changed (`erun-devops/dns01-webhook` runs the linter its Dockerfile pins
+  with `go run`).
+- The same in `erun-integration` if you touched `erun-cli`, `erun-common`,
+  the runtime entrypoint, or chart deploy plumbing.
 - `cd "${clone_dir}/erun-docs" && yarn install && yarn build` if you
   touched any docs page (`onBrokenLinks: 'throw'` will fail on broken
   links).

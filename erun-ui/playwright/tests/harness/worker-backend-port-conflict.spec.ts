@@ -143,7 +143,7 @@ test('a worker backend survives a competing holder of the port it was asked for'
   test.setTimeout(60_000);
   expect(
     fs.existsSync(BIN_PATH),
-    `${BIN_PATH} is missing — build the desktop first (./run.sh --build)`,
+    `${BIN_PATH} is missing — build the desktop first (../build.sh)`,
   ).toBe(true);
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'erun-playwright-home.port-conflict-'));

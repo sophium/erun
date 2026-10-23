@@ -49,7 +49,6 @@ const sidebars: SidebarsConfig = {
         'cli/context',
         'cli/platform',
         'cli/review',
-        'cli/gate',
         'cli/jobs',
         'cli/sshd',
         'cli/list',
@@ -179,6 +178,7 @@ const sidebars: SidebarsConfig = {
           link: { type: 'generated-index' },
           items: [
             'agent-reference/conventions-spec',
+            'agent-reference/dockerfile-stages',
             'agent-reference/idle-policy',
             'agent-reference/cli-flags',
             'agent-reference/dry-run-redaction',

@@ -1,0 +1,5 @@
+audit: erun runtime-init --dry-run sh -c exit 3
+runtime-init: ssh permissions: restore private modes under <TMP>
+runtime-init: outputs directory: create <TMP>
+runtime-init: git safe directory: mark <TMP> as a git safe.directory
+runtime-init: run sh -c 'exit 3' as the supervised foreground process and exit with its code

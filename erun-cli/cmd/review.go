@@ -394,7 +394,6 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
 	var (
 		commitID      string
-		gate          bool
 		version       string
 		failed        bool
 		failureDetail string
@@ -415,20 +414,18 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			"pushed branch with `erun build` and recording what it mints is the ordinary path, and the artifact " +
 			"that ships is cut after merge by the release the accepted review enqueues. A release here publishes " +
 			"a two-architecture `-pr.<sha>` image set per pull request that nothing consumes.\n\n" +
-			"--gate records the merge queue's own GATE build kind instead of an ordinary build: the environment " +
-			"a review's merge queue promotes to MERGE runs `erun build` (never --release) against the " +
-			"prospective merge and reports the result this way. A GATE build carries no version, since the gate " +
-			"publishes nothing — omit --version when --gate is set. Only a successful GATE build can later be " +
-			"reported MERGED with `erun review report-merged`.\n\n" +
-			"A --gate --failed whose --failure-detail names a known erun infrastructure failure (a registry or " +
-			"the network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright: builds.successful " +
-			"has no INCONCLUSIVE, so recording it FAILED would move the review out of the merge queue for a " +
-			"network blip rather than a real defect. Report the gate run INCONCLUSIVE instead (`erun exec " +
-			"gate-run report`) and re-drive the review once the signature clears.\n\n" +
+			"The merge queue records its build the same way: the environment a review's merge queue promotes " +
+			"to MERGE runs a plain `erun build` (never --release) of the prospective merge commit `erun exec " +
+			"gate-merge` prepared and records it here with the version it minted. Only a successful build of " +
+			"the merge commit that landed can later be reported MERGED with `erun review report-merged`.\n\n" +
+			"A --failed whose --failure-detail names a known erun infrastructure failure (a registry or the " +
+			"network giving up, e.g. a ghcr.io TLS handshake timeout) is refused outright: a build has no " +
+			"INCONCLUSIVE result, so recording it FAILED would move the review out of the merge queue for a " +
+			"network blip rather than a real defect. Re-run the build once the signature clears and record " +
+			"that result instead.\n\n" +
 			"A real, immediate write. --dry-run traces the call without making it.",
 		Example: "  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'\n" +
-			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --gate",
+			"  erun review record-build 018f... --commit $(git rev-parse HEAD) --version 1.2.3 --failed --failure-detail 'image build failed'",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -436,7 +433,6 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 			build, err := common.RunReviewRecordBuild(ctx, store, *alias, common.ReviewRecordBuildParams{
 				ReviewID:      args[0],
 				CommitID:      commitID,
-				Gate:          gate,
 				Version:       version,
 				Successful:    !failed,
 				FailureDetail: failureDetail,
@@ -457,8 +453,7 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 		},
 	}
 	cmd.Flags().StringVar(&commitID, "commit", "", "Full commit hash the build ran against")
-	cmd.Flags().BoolVar(&gate, "gate", false, "Record the merge queue's own GATE build kind instead of an ordinary build")
-	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --output json, or --dry-run --output json when it failed); omit with --gate")
+	cmd.Flags().StringVar(&version, "version", "", "Version the build minted (from erun build --output json, or --dry-run --output json when it failed) (required)")
 	cmd.Flags().BoolVar(&failed, "failed", false, "Record the build as failed instead of successful")
 	cmd.Flags().StringVar(&failureDetail, "failure-detail", "", "Why the build failed (only meaningful with --failed)")
 	addDryRunFlag(cmd)
@@ -476,14 +471,14 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 		Long: "Report a review MERGED. Which verification the platform applies depends on where the review is " +
 			"sitting, not on what this command claims.\n\n" +
 			"A review at MERGE is the merge queue's: this is for the environment the queue promoted to MERGE, " +
-			"once it has fetched the review's target and source, gate-built the prospective squash merge with " +
-			"`erun review record-build --gate`, and pushed the result — never before the push actually landed. " +
-			"--build-id must name that GATE build, and the platform fetches --remote-url to confirm the build's " +
-			"commit is really reachable from the target branch's tip with the parent this review was gated " +
-			"against. Any of those checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at " +
-			"MERGE.\n\n" +
+			"once it has fetched the review's target and source, built the prospective squash merge, recorded " +
+			"that build with `erun review record-build`, and pushed the result — never before the push actually " +
+			"landed. --build-id must name that successful recorded build of the merge commit, and the platform " +
+			"fetches --remote-url to confirm the build's commit is really reachable from the target branch's tip " +
+			"and descends from, without being, the target tip this review was queued against. Any of those " +
+			"checks failing refuses with 409 MERGE_NOT_VERIFIED and leaves the review at MERGE.\n\n" +
 			"Any other review is one whose work landed without the queue — in practice a GitHub squash merge, " +
-			"where the branch's own commits are not ancestors of the target and no GATE build exists to name, " +
+			"where the branch's own commits are not ancestors of the target and no merge-commit build exists to name, " +
 			"or a branch that landed by merge commit or fast-forward, including one the target was fast-forwarded " +
 			"onto: that ancestry is confirmed directly. " +
 			"Omit --build-id: the platform confirms against the same remote that everything the review's source " +
@@ -517,7 +512,7 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 			return ctx.WriteResult(review)
 		},
 	}
-	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful GATE build's id (omit for work that landed without the queue)")
+	cmd.Flags().StringVar(&buildID, "build-id", "", "The successful recorded build of the merge commit that landed (omit for work that landed without the queue)")
 	cmd.Flags().StringVar(&remoteURL, "remote-url", "", "The git remote the platform fetches to verify the merge; any form git accepts, an SSH remote being read over its host's HTTPS without credentials")
 	addDryRunFlag(cmd)
 	return cmd
@@ -529,7 +524,7 @@ func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common
 		Short: "Move a review stuck at MERGE back to READY",
 		Long: "Move a review stuck at MERGE back to READY, freeing its target branch's merge-queue slot so a " +
 			"different review can be promoted (only one review may be at MERGE per target branch).\n\n" +
-			"This is for a review whose gate never reaches a terminal state, or one left at MERGE by a batched " +
+			"This is for a review whose queued build never finishes, or one left at MERGE by a batched " +
 			"`erun exec gate-merge` whose other members landed but were never promoted (erun#2241). The requeued " +
 			"review rejoins the queue at the tail, not the head — it is not promoted again immediately. Refuses, " +
 			"naming the review's actual status, when it is not at MERGE.\n\n" +
@@ -738,10 +733,10 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 		Use:   "advance",
 		Short: "Advance a repository's merge queue head to MERGE",
 		Long: "Advance the next review waiting to merge into a target branch to MERGE, which starts " +
-			"that review's merge-gate build.\n\n" +
+			"that review's merge-queue build.\n\n" +
 			"A queue belongs to a repository, not to a target branch alone: --repository names it, " +
 			"defaulting to the current checkout's origin, which is the repository this caller would " +
-			"gate. Advancing without one promotes across every repository your tenant serves.\n\n" +
+			"build. Advancing without one promotes across every repository your tenant serves.\n\n" +
 			"A real, immediate mutation of shared control-plane state: it fails if the queue is " +
 			"empty or its head is not READY, and refuses with the unresolved comment thread count " +
 			"when the head still has open threads — resolve them first, or use " +

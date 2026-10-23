@@ -3,10 +3,11 @@ package backendapi
 import (
 	"context"
 	"database/sql"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -20,10 +21,7 @@ import (
 // fake that would just agree with itself about which rows a tenant may see.
 func auditEventDatabase(t *testing.T) (*repository.AuditEventRepository, *sql.DB) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_AUDIT_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_AUDIT_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

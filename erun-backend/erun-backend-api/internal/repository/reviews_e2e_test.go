@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 
@@ -22,10 +23,7 @@ import (
 // rather than a fake that agrees with itself.
 func reviewsDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_REVIEWS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_REVIEWS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
@@ -352,62 +350,101 @@ func openReview(t *testing.T, reviews *ReviewRepository, ctx context.Context, na
 	return review
 }
 
-// TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail is the
-// database contract #1196 needs `builds.kind` for: a GATE build (the merge
-// queue's own prospective-merge build) mints no version, so it must be
-// insertable without one; a RECORDED build (a client-reported build, or a
-// release's own) still requires one; and a failed GATE build must carry
-// failure_detail in the gate's own words.
-func TestGateBuildContractAllowsNoVersionAndRequiresFailureDetail(t *testing.T) {
+// TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid is the
+// database half of the builds.kind contract: every build written today is
+// RECORDED and must carry a version, with failure_detail an optional reason on
+// any failed build; the retired GATE kind stays insertable exactly as its
+// historical rows were (review-linked, no version, a failure detail when
+// failed), because MERGED reviews' last_merged_build_id still points at those
+// rows and the CHECKs keep them valid.
+func TestBuildKindContractRequiresAVersionAndKeepsLegacyGateRowsValid(t *testing.T) {
 	db, tenantID := reviewsDatabase(t)
 	author := seedReviewsUser(t, db, tenantID, "author")
 	ctx := reviewsContext(tenantID, author)
 	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
 	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
 
-	review := openReview(t, reviews, ctx, "gate build contract review", "feature/gate-contract")
-
-	successful, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-ok",
-	})
-	mustNoErr(t, err, "create a successful GATE build with no version")
-	if successful.Version != "" {
-		t.Fatalf("version = %q, want empty for a GATE build", successful.Version)
-	}
+	review := openReview(t, reviews, ctx, "build kind contract review", "feature/build-kind-contract")
 
 	if _, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: false, CommitID: "merge-sha-bad",
-	}); err == nil {
-		t.Fatal("a failed GATE build with no failure_detail was accepted, want the CHECK constraint to refuse it")
-	}
-
-	failed, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: false, CommitID: "merge-sha-bad",
-		FailureDetail: "erun build failed: go vet found 3 issues",
-	})
-	mustNoErr(t, err, "create a failed GATE build with failure_detail")
-	if failed.FailureDetail == "" {
-		t.Fatal("failureDetail was not persisted for a failed GATE build")
-	}
-
-	if _, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "source-sha",
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha",
 	}); err == nil {
 		t.Fatal("a RECORDED build with no version was accepted, want the CHECK constraint to require one")
 	}
 
 	recorded, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "source-sha", Version: "1.0.0",
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha", Version: "1.0.0",
 	})
 	mustNoErr(t, err, "create a RECORDED build with a version")
 	if recorded.Version != "1.0.0" {
 		t.Fatalf("version = %q, want 1.0.0", recorded.Version)
 	}
 
+	failed, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "merge-sha-bad", Version: "1.0.1",
+		FailureDetail: "erun build failed: go vet found 3 issues",
+	})
+	mustNoErr(t, err, "create a failed RECORDED build with a failure detail")
+	if failed.FailureDetail == "" {
+		t.Fatal("failureDetail was not persisted for a failed RECORDED build")
+	}
+	_, err = builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "merge-sha-bad", Version: "1.0.2",
+	})
+	mustNoErr(t, err, "create a failed RECORDED build with no failure detail")
+
+	legacy, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "legacy-merge-sha",
+	})
+	mustNoErr(t, err, "insert a historical-shape GATE row with no version")
+	read, err := builds.Get(ctx, tenantID, legacy.BuildID)
+	mustNoErr(t, err, "read the historical GATE row back")
+	if read.Kind != model.BuildKindGate || read.Version != "" {
+		t.Fatalf("historical GATE row read back as kind %q version %q, want GATE with no version", read.Kind, read.Version)
+	}
 	if _, err := builds.Create(ctx, model.Build{
-		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-versioned", Version: "1.0.0",
+		ReviewID: review.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "legacy-merge-sha", Version: "1.0.0",
 	}); err == nil {
-		t.Fatal("a GATE build with a version was accepted, want the CHECK constraint to refuse it: the gate publishes nothing and mints no version")
+		t.Fatal("a GATE row with a version was accepted, want the CHECK constraint to keep the historical shape")
+	}
+}
+
+// TestBuildListPageFiltersByCommit: GET /v1/builds' commit filter narrows the
+// tenant-wide history to the builds of one commit, alongside the successful
+// filter, which is how a caller finds the successful build recorded for a
+// commit that landed.
+func TestBuildListPageFiltersByCommit(t *testing.T) {
+	db, tenantID := reviewsDatabase(t)
+	author := seedReviewsUser(t, db, tenantID, "author")
+	ctx := reviewsContext(tenantID, author)
+	reviews := NewReviewRepository(NewTxManager(db, DialectPostgres))
+	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
+	review := openReview(t, reviews, ctx, "commit filter review", "feature/commit-filter")
+
+	landed, err := builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "landed-sha", Version: "1.0.0",
+	})
+	mustNoErr(t, err, "create the landed commit's successful build")
+	_, err = builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: false, CommitID: "landed-sha", Version: "1.0.1",
+	})
+	mustNoErr(t, err, "create the landed commit's failed build")
+	_, err = builds.Create(ctx, model.Build{
+		ReviewID: review.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "other-sha", Version: "1.0.2",
+	})
+	mustNoErr(t, err, "create another commit's build")
+
+	successful := true
+	page, err := builds.ListPage(ctx, BuildListFilter{CommitID: "landed-sha", Successful: &successful})
+	mustNoErr(t, err, "list the landed commit's successful builds")
+	if len(page.Builds) != 1 || page.Builds[0].BuildID != landed.BuildID {
+		t.Fatalf("ListPage(commit=landed-sha, successful) = %+v, want exactly build %s", page.Builds, landed.BuildID)
+	}
+
+	page, err = builds.ListPage(ctx, BuildListFilter{CommitID: "landed-sha"})
+	mustNoErr(t, err, "list every build of the landed commit")
+	if len(page.Builds) != 2 {
+		t.Fatalf("ListPage(commit=landed-sha) returned %d builds, want both of that commit's builds and not the other commit's", len(page.Builds))
 	}
 }
 
@@ -466,8 +503,7 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 }
 
 // TestBuildTenantIsolation proves a caller from one tenant cannot see or fetch
-// another tenant's builds, including a GATE build the merge queue produced —
-// the same RLS boundary every tenant-owned table must hold.
+// another tenant's builds — the same RLS boundary every tenant-owned table must hold.
 func TestBuildTenantIsolation(t *testing.T) {
 	db, tenantA := reviewsDatabase(t)
 	authorA := seedReviewsUser(t, db, tenantA, "tenant-a-author")
@@ -477,7 +513,7 @@ func TestBuildTenantIsolation(t *testing.T) {
 
 	reviewA := openReview(t, reviews, ctxA, "tenant a build review", "feature/tenant-a-build")
 	buildA, err := builds.Create(ctxA, model.Build{
-		ReviewID: reviewA.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-tenant-a",
+		ReviewID: reviewA.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-tenant-a", Version: "1.0.0",
 	})
 	mustNoErr(t, err, "create tenant A's build")
 
@@ -589,7 +625,7 @@ func TestBuildListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	builds := NewBuildRepository(NewTxManager(db, DialectPostgres))
 	strangerReview := openReview(t, reviews, strangerCtx, "stranger build review", "feature/stranger-build")
 	_, err := builds.Create(strangerCtx, model.Build{
-		ReviewID: strangerReview.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-stranger",
+		ReviewID: strangerReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-stranger", Version: "1.0.0",
 	})
 	mustNoErr(t, err, "create stranger build")
 
@@ -599,7 +635,7 @@ func TestBuildListScopesToTheOperationsCallersOwnTenant(t *testing.T) {
 	opsCtx := reviewsContextOfType(opsTenantID, opsAuthor, "OPERATIONS")
 	opsReview := openReview(t, reviews, opsCtx, "ops build review", "feature/ops-build")
 	opsBuild, err := builds.Create(opsCtx, model.Build{
-		ReviewID: opsReview.ReviewID, Kind: model.BuildKindGate, Successful: true, CommitID: "merge-sha-ops",
+		ReviewID: opsReview.ReviewID, Kind: model.BuildKindRecorded, Successful: true, CommitID: "merge-sha-ops", Version: "1.0.0",
 	})
 	mustNoErr(t, err, "create ops build")
 

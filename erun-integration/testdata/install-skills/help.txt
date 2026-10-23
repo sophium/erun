@@ -1,0 +1,23 @@
+Installs every skill under --skills-dir into ~/.claude/skills and ~/.codex/skills, and
+every agent under --agents-dir into ~/.claude/agents. A missing skill or agent is
+installed, one erun installed earlier is refreshed when its source changed, and one
+edited in place is preserved: a marker beside each install records the source it was
+copied from. The defaults are the copies the runtime image bakes.
+
+Usage:
+  erun install-skills [flags]
+
+Examples:
+  erun install-skills
+  erun install-skills --skills-dir erun-skills/skills --agents-dir erun-skills/agents --dry-run
+
+Flags:
+      --agents-dir string   Directory holding one <name>.md per agent (default "/etc/erun/agents")
+      --dry-run             Resolve and trace mutating actions without executing them.
+  -h, --help                help for install-skills
+      --skills-dir string   Directory holding one subdirectory per skill (default "/etc/erun/skills")
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

@@ -15,9 +15,8 @@ import (
 // real `docker build` has its BuildKit output captured rather than streamed (see
 // runDockerBuildOnce), so the only lines a run emits are the decision traces
 // that precede each image. That is fine while images promote from a fingerprint
-// cache in milliseconds, but one Dockerfile in every project is never promoted
-// — the one whose test stage runs the project's own gate, which must run for
-// real — and it is minutes of no output at all. A working build and a wedged
+// cache in milliseconds, but a component whose inputs changed rebuilds, and one
+// whose Dockerfile runs a long test stage is minutes of no output at all. A working build and a wedged
 // one then look exactly alike, and the reader has nothing to measure the
 // difference with.
 //

@@ -91,7 +91,6 @@ const (
 	tenantDashboardTabUsers        = "users"
 	tenantDashboardTabReviews      = "reviews"
 	tenantDashboardTabQueue        = "queue"
-	tenantDashboardTabGates        = "gates"
 	tenantDashboardTabPipeline     = "pipeline"
 	tenantDashboardTabBuilds       = "builds"
 	tenantDashboardTabAudit        = "audit"
@@ -106,7 +105,6 @@ const (
 	tenantDashboardReadReviews        = "GET /v1/reviews"
 	tenantDashboardReadReview         = "GET /v1/reviews/{review_id}"
 	tenantDashboardReadMergeQueue     = "GET /v1/reviews/merge-queue"
-	tenantDashboardReadGateRuns       = "GET /v1/gate-runs"
 	tenantDashboardReadPipeline       = "GET /v1/pipeline"
 	tenantDashboardReadBuilds         = "GET /v1/reviews/{review_id}/builds"
 	tenantDashboardReadAllBuilds      = "GET /v1/builds"
@@ -177,7 +175,6 @@ func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformCli
 	}
 	reviewsOutcome := loadTenantDashboardReviews(ctx, client, capabilities, dashboard, reviewFilter, usernames)
 	loadTenantDashboardMergeQueue(ctx, client, capabilities, dashboard, usernames)
-	loadTenantDashboardGateRuns(ctx, client, capabilities, dashboard)
 	loadTenantDashboardPipeline(ctx, client, capabilities, dashboard)
 	loadTenantDashboardBuilds(ctx, client, capabilities, dashboard, reviewsOutcome)
 	loadTenantDashboardReviewThreadCounts(ctx, client, capabilities, dashboard, reviewsOutcome)

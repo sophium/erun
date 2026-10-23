@@ -29,14 +29,12 @@ func tenantDashboardAPI(t *testing.T, capabilities string, forbidden map[string]
 // tenantDashboardAPIFixtures is tenantDashboardAPIResponse's fixture body for
 // every path except /v1/whoami (handled separately, since its body carries
 // the caller-supplied capabilities), keyed by path rather than a switch — a
-// switch here once tripped golangci-lint's cyclomatic-complexity cap the
-// moment a gate-run case joined the rest.
+// switch here once tripped golangci-lint's cyclomatic-complexity cap.
 var tenantDashboardAPIFixtures = map[string]string{
 	"/v1/reviews":                 `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 	"/v1/reviews/merge-queue":     `[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`,
 	"/v1/reviews/review-1/builds": `[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`,
 	"/v1/builds":                  `{"builds":[]}`,
-	"/v1/gate-runs":               `[{"gateRunId":"gate-1","tenantId":"tenant-1","sourceBranch":"feature","targetBranch":"main","sourceCommit":"abc","mergeCommit":"def","status":"PASSED","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]`,
 	"/v1/pipeline":                `[{"issueKey":"sophium/erun#2683","items":[{"issueKey":"sophium/erun#2683","issueRef":"sophium/erun#2683","issueRefSource":"DECLARED","rung":"PLANNED","job":{"jobId":"job-1","jobType":"triage","issueRef":"sophium/erun#2683","summary":"plan the pipeline view","status":"PLANNED","actorKind":"orchestrator","actorId":"erun/ideas","startedAt":"2026-01-01T00:00:00Z"}}]}]`,
 	"/v1/audit-events":            `{"events":[{"type":"API","externalUserId":"subject-1","apiMethod":"GET","apiPath":"/v1/audit-events","createdAt":"2026-01-01T00:00:00Z"}]}`,
 	"/v1/users":                   `[]`,
@@ -177,9 +175,6 @@ func TestTenantDashboardPanelsResolveIndependently(t *testing.T) {
 	if len(dashboard.MergeQueue) != 1 {
 		t.Fatalf("expected the merge queue panel to still resolve, got %+v", dashboard.MergeQueue)
 	}
-	if len(dashboard.GateRuns) != 1 {
-		t.Fatalf("expected the gate runs panel to still resolve, got %+v", dashboard.GateRuns)
-	}
 	if builds := panelFor(t, dashboard, tenantDashboardTabBuilds); !strings.Contains(builds.Error, "403") {
 		t.Fatalf("expected the builds panel to carry its own failure, got %+v", builds)
 	}
@@ -205,10 +200,6 @@ func TestTenantDashboardSkipsReadsTheCallerMayNotMake(t *testing.T) {
 	queue := panelFor(t, dashboard, tenantDashboardTabQueue)
 	if queue.Restricted != tenantDashboardReadMergeQueue {
 		t.Fatalf("expected the merge queue panel to name the missing read, got %+v", queue)
-	}
-	gates := panelFor(t, dashboard, tenantDashboardTabGates)
-	if gates.Restricted != tenantDashboardReadGateRuns {
-		t.Fatalf("expected the gates panel to name the missing read, got %+v", gates)
 	}
 	builds := panelFor(t, dashboard, tenantDashboardTabBuilds)
 	if builds.Restricted != tenantDashboardReadReviews {
@@ -239,7 +230,7 @@ func TestTenantDashboardRestrictsEveryPanelForAPermissionlessCaller(t *testing.T
 	if got := strings.Join(requests, ","); got != "/v1/whoami,/v1/invite-requests/mine,/v1/config" {
 		t.Fatalf("expected no read beyond identity (plus the identity-scoped invite-request/config reads, which need no capability), got %q", got)
 	}
-	for _, tab := range []string{tenantDashboardTabQueue, tenantDashboardTabGates, tenantDashboardTabPipeline, tenantDashboardTabBuilds, tenantDashboardTabAudit} {
+	for _, tab := range []string{tenantDashboardTabQueue, tenantDashboardTabPipeline, tenantDashboardTabBuilds, tenantDashboardTabAudit} {
 		if panel := panelFor(t, dashboard, tab); panel.Restricted == "" {
 			t.Fatalf("expected the %s panel to be reported as restricted, got %+v", tab, panel)
 		}
@@ -256,7 +247,7 @@ func TestTenantDashboardAttemptsEveryReadWhenCapabilitiesAreUnknown(t *testing.T
 
 	dashboard := loadTenantDashboardFrom(t, tenantDashboardApp(t, server.URL))
 
-	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/gate-runs,/v1/pipeline,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
+	want := "/v1/whoami,/v1/users,/v1/reviews,/v1/reviews/merge-queue,/v1/pipeline,/v1/reviews/review-1/builds,/v1/builds,/v1/reviews/review-1/comments,/v1/reviews,/v1/reviews,/v1/audit-events,/v1/contexts,/v1/environments,/v1/invite-requests,/v1/invite-requests/mine,/v1/config"
 	if got := strings.Join(requests, ","); got != want {
 		t.Fatalf("expected every read to be attempted, got %q, want %q", got, want)
 	}

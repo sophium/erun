@@ -29,69 +29,14 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 }
 
 // ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
-// images, no linux package builds, no project build script, no charts, no
-// release. Nothing about such a plan is a pass -- running it builds nothing and
-// tests nothing -- so both the resolution and execution boundaries refuse it
-// rather than letting the caller's exit code read as a green gate.
+// images, no linux packages, no project build script, no charts, no
+// release. Nothing about such a plan is a result -- running it builds nothing
+// and tests nothing -- so both the resolution and execution boundaries refuse it
+// rather than letting the caller's exit code read as a successful build.
 var ErrBuildPlanEmpty = errors.New("build resolved nothing to build")
 
 func newEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
-}
-
-// ErrGateBuildNotRun reports a gate build whose plan would execute nothing: no
-// script, no linux package build, and every docker image promoted from the
-// fingerprint cache. The fingerprint proves the inputs are unchanged; it does
-// not prove anything ran against them, so such a run has the same exit code as
-// a real gate and none of its evidence. `review record-build --gate` reads only
-// that exit code, so the refusal has to happen here, in the build itself.
-var ErrGateBuildNotRun = errors.New("gate build resolved nothing to run")
-
-func newGateBuildNotRunError(promotedTags []string) error {
-	return fmt.Errorf(
-		"%w: every image would be promoted from the fingerprint cache (%s) and no script or linux package build is planned, "+
-			"so this run would build and test nothing; re-run with --no-incremental to gate a real build, or drop --gate if this is an ordinary incremental build",
-		ErrGateBuildNotRun, strings.Join(promotedTags, ", "))
-}
-
-// ErrGateTestStageReplayed reports a build whose Dockerfile's test stage BuildKit
-// served entirely from its own layer cache -- so `make check` did not execute in
-// this run, whatever the caller intended to do with the exit code.
-//
-// It is deliberately a different error from ErrGateBuildNotRun, and a different
-// mechanism from the guard that produces it. That one is judged from the resolved
-// plan and reports erun's own fingerprint cache promoting every image, so nothing
-// reaches a docker build at all. This one is judged from what the build itself
-// reported and reports the cache *underneath* that one: the plan named real work
-// for every image, docker was genuinely invoked, and BuildKit found every step's
-// inputs byte-identical to a previous build and replayed them. A run that executed
-// no test stage exits zero exactly like one that spent minutes gating the tree,
-// and `review record-build --gate` reads only that exit code, so the two are
-// indistinguishable to the queue that consumes it.
-//
-// It is refused by the run that declared itself the merge queue's gate,
-// `erun build --gate`, and by no other run on a current erun: a gate's exit
-// status is the entirety of what `review record-build --gate` records, so a
-// memoized verdict cannot stand in for it. A plain `erun build` -- the erun-merge
-// skill's READY rung, and every other one -- reports the replay in its trace and
-// builds the commit, which is all its rung claims (see traceBuildUmbrella).
-//
-// The remedy follows from which cache is at fault. --no-incremental is the right
-// answer to ErrGateBuildNotRun and the wrong one here: it bypasses erun's
-// fingerprint cache and never touches BuildKit's layer cache, so a replayed stage
-// replays again. The cheap one is --gate, which invalidates that one stage's layers
-// (`--no-cache-filter`) and so re-runs make check without discarding the shared
-// layer cache; the message names it, and pruning or changing the tree, rather than
-// reusing the flag its sibling names.
-var ErrGateTestStageReplayed = errors.New("build replayed its Dockerfile's test stage from the layer cache")
-
-func newGateTestStageReplayedError(replayedTags []string) error {
-	return fmt.Errorf(
-		"%w (%s): this run did invoke docker build, but BuildKit served every instruction step of the test stage from its layer cache, "+
-			"so make check did not execute in this run; that cache sits below erun's fingerprint cache, so --no-incremental will not clear it -- "+
-			"re-run with --gate, which invalidates just this stage and runs make check for real, or prune the builder's cache (docker builder prune) "+
-			"or change the tree",
-		ErrGateTestStageReplayed, strings.Join(replayedTags, ", "))
 }
 
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
@@ -110,10 +55,10 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 	}
 	if script != nil {
 		script.Env = buildScriptEnv(target.VersionOverride)
-		return BuildExecutionSpec{release: releaseSpec, script: script, gate: target.Gate}, nil
+		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
 	}
 
-	linuxBuilds, hadLinuxBuilds, err := resolveLinuxBuildsForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
+	linuxPackages, err := resolveLinuxPackagesForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
@@ -123,11 +68,11 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return BuildExecutionSpec{}, err
 	}
 
-	if buildExecutionHasNoBuilds(linuxBuilds, builds, releaseSpec) {
-		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target, hadLinuxBuilds)
+	if buildExecutionHasNoBuilds(linuxPackages, builds, releaseSpec) {
+		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target)
 	}
 
-	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0, gate: target.Gate}
+	execution := BuildExecutionSpec{linuxPackages: linuxPackages, dockerBuilds: builds}
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
@@ -140,7 +85,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 func buildExecutionPlansWork(execution BuildExecutionSpec) bool {
 	return execution.release != nil ||
 		execution.script != nil ||
-		len(execution.linuxBuilds) > 0 ||
+		len(execution.linuxPackages) > 0 ||
 		len(execution.dockerBuilds) > 0 ||
 		len(execution.dockerPushes) > 0 ||
 		len(execution.componentCharts) > 0
@@ -153,19 +98,6 @@ func finalizeBuildExecution(ctx Context, execution BuildExecutionSpec, noIncreme
 	execution, err := ApplyIncrementalToBuildExecution(ctx, execution, noIncremental)
 	if err != nil {
 		return BuildExecutionSpec{}, err
-	}
-	// A declared gate must execute its own test stage, not read a memoized verdict
-	// on byte-identical content: `review record-build --gate` turns this run's exit
-	// code into the queue's verdict on a tree, and "a previous build of the same
-	// content passed make check" is a different claim from "this run gated this
-	// tree". Set after ApplyIncrementalToBuildExecution because that is what
-	// classifies the gate Dockerfiles (see GateTestStage).
-	if execution.gate {
-		for i := range execution.dockerBuilds {
-			if execution.dockerBuilds[i].GateTestStage {
-				execution.dockerBuilds[i].ForceGateTestStage = true
-			}
-		}
 	}
 	charts, err := resolveComponentChartSpecs(execution.dockerBuilds)
 	if err != nil {
@@ -274,33 +206,41 @@ func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, tar
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxBuilds []scriptSpec, builds []DockerBuildSpec, releaseSpec *ReleaseSpec) bool {
-	return len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil
+func buildExecutionHasNoBuilds(linuxPackages []LinuxPackageSpec, builds []DockerBuildSpec, releaseSpec *ReleaseSpec) bool {
+	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
-func resolveLinuxBuildsForExecution(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, releaseSpec *ReleaseSpec) ([]scriptSpec, bool, error) {
+// resolveLinuxPackagesForExecution resolves the linux packages a plain build
+// tests, and which of them reuse a recorded pass (none with --no-incremental,
+// which also records none). A release resolves its own from the release root instead (see
+// discoverReleaseLinuxPackages), because it exports them rather than testing
+// them.
+func resolveLinuxPackagesForExecution(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, releaseSpec *ReleaseSpec) ([]LinuxPackageSpec, error) {
 	if releaseSpec != nil {
-		return nil, false, nil
+		return nil, nil
 	}
-	linuxBuilds, err := ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
-	if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
-		return nil, false, err
+	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	if errors.Is(err, ErrLinuxPackageBuildNotFound) {
+		return nil, nil
 	}
-	hadLinuxBuilds := len(linuxBuilds) > 0
-	if hadLinuxBuilds && !LinuxPackageBuildsSupported() {
-		return nil, true, nil
+	if err != nil {
+		return nil, err
 	}
-	return linuxBuilds, hadLinuxBuilds, nil
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	packages := newLinuxPackageSpecs(projectRoot, contexts)
+	if err := checkLinuxPackagesBuildable(packages); err != nil {
+		return nil, err
+	}
+	if target.NoIncremental {
+		return packages, nil
+	}
+	return applyLinuxPackageReuse(packages), nil
 }
 
-func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget, hadLinuxBuilds bool) (BuildExecutionSpec, error) {
-	if hadLinuxBuilds {
-		// The project does have linux package builds, but this host cannot run
-		// them and nothing else resolved either. Exiting zero here is the same
-		// false green as an empty image plan: the host was asked to build and
-		// built nothing. Name the cause instead of reporting success.
-		return BuildExecutionSpec{}, newEmptyBuildPlanError("this project's linux package builds need a Linux host with dpkg-deb, and no docker images resolved")
-	}
+func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err

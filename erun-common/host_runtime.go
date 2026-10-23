@@ -2,7 +2,6 @@ package eruncommon
 
 import (
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
 )
@@ -26,7 +25,6 @@ var (
 	currentGOOS     = func() string { return runtime.GOOS }
 	currentGOARCH   = func() string { return runtime.GOARCH }
 	hostUserHomeDir = os.UserHomeDir
-	hostLookPath    = exec.LookPath
 	hostOSOverEnv   = func() string { return os.Getenv("ERUN_HOST_OS_OVERRIDE") }
 )
 

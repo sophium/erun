@@ -294,7 +294,7 @@ image tag, re-create the image manifest before deploying. Two rules learned the 
 way: an empty-stub secret is worse than no secret (an empty `DATABASE_URL`
 breaks a driver's connect at import time, so prefer an explicitly empty
 `env.secret: []` plus a real value), and a build gate inside the Dockerfile
-(a test suite in the builder stage) is the repo team's to fix, not something to
+(a test suite in the Dockerfile's `test` stage) is the repo team's to fix, not something to
 bypass silently — report it and stop.
 
 ## Step 5 — Expose with a valid certificate
@@ -407,7 +407,7 @@ cover the hostname actually being used.
 | Ingress exists, nothing answers | `ingress.className` names a controller the cluster does not run. |
 | `curl` exits 60 despite a good chain | Schannel curl ignores `--cacert`. Verify with `openssl s_client -CAfile`. |
 | Pod CrashLoopBackOff on first deploy | Almost always the production values from Step 3.5. Apply the non-prod override. |
-| Builder-stage test gate fails | The repo team's fix. Report it; do not bypass the gate to get a green deploy. |
+| The Dockerfile's `test` stage fails | The repo team's fix. Report it; do not bypass the gate to get a green deploy. |
 | `erun expose` resolves but the Ingress 503s | The Service name is repo-native, not `<tenant>-<service>`. Add an Ingress to the repo's chart instead of renaming the Service. |
 | Certificate never becomes Ready | Walk `Certificate → CertificateRequest → Order → Challenge` for the real reason; the usual causes are an unpullable webhook shim, a token that cannot write the subzone, or a hostname outside the issued zone. |
 | `ssl_verify_result` non-zero | The chain is not publicly trusted — a staging ACME certificate, or a local CA. Say so plainly rather than reporting "HTTPS works". |

@@ -174,11 +174,15 @@ func (f *fakeReviewAudit) LogAuditEvent(_ context.Context, event model.AuditEven
 // (or error) for whatever commit/branch acceptMerged asks about, so a test
 // can drive each of the three verification conditions independently.
 type fakeMergeVerifier struct {
-	onBranch      bool
-	parent        string
-	err           error
-	isAncestor    bool
-	isAncestorErr error
+	onBranch bool
+	// onBranchCommits, when set, answers Contains per commit instead of
+	// onBranch, so a test can tell the landed merge commit from a source tip
+	// that never landed.
+	onBranchCommits map[string]bool
+	parent          string
+	err             error
+	isAncestor      bool
+	isAncestorErr   error
 	// contained and landingCommit answer reconcileMerged's own question, the
 	// one a review that landed without the queue is asked instead.
 	contained     bool
@@ -186,7 +190,10 @@ type fakeMergeVerifier struct {
 	changesErr    error
 }
 
-func (f fakeMergeVerifier) Contains(_ context.Context, _, _, _ string) (bool, string, error) {
+func (f fakeMergeVerifier) Contains(_ context.Context, _, _, commit string) (bool, string, error) {
+	if f.onBranchCommits != nil {
+		return f.onBranchCommits[commit], f.parent, f.err
+	}
 	return f.onBranch, f.parent, f.err
 }
 
@@ -338,16 +345,17 @@ func TestReconcileMergedRefusesAClosedReview(t *testing.T) {
 // exercise a merge inside one repository rather than across two.
 const testRepository = "file:///remote"
 
-// mergingReviewWithGateBuild sets up a review sitting at MERGE with a
-// successful GATE build already recorded against it — the state every
+// mergingReviewWithMergeBuild sets up a review sitting at MERGE with a
+// successful build of the prepared merge commit already recorded against it
+// — the state every
 // acceptMerged test starts from, so each one only has to vary the one
 // condition it means to exercise. The review records no repository, the
 // legacy-row shape the adoption tests need; tests about the gated tip add a
 // prior merge that does record one (mergingReviewGatedAgainst).
-func mergingReviewWithGateBuild(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
+func mergingReviewWithMergeBuild(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	builds := &fakeReviewBuilds{builds: map[string]model.Build{
-		"gate-1": {BuildID: "gate-1", ReviewID: "review-1", Kind: model.BuildKindGate, Successful: true, CommitID: commit},
+		"merge-1": {BuildID: "merge-1", ReviewID: "review-1", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: true, CommitID: commit},
 	}}
 	return reviews, builds
 }
@@ -357,11 +365,11 @@ func mergingReviewWithGateBuild(commit string) (*fakeReviewRepo, *fakeReviewBuil
 // origin/<targetBranch> at all must never become MERGED, however the caller
 // asserts it.
 func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: false}, nil)
 
-	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 
 	var notVerified *MergeNotVerifiedError
 	if !errors.As(err, &notVerified) {
@@ -375,15 +383,17 @@ func TestAcceptMergedRefusesWhenCommitIsNotOnTheTargetBranch(t *testing.T) {
 	}
 }
 
-// mergingReviewGatedAgainst wires up mergingReviewWithGateBuild plus a prior
+// mergingReviewGatedAgainst wires up mergingReviewWithMergeBuild plus a prior
 // MERGED review on the same branch of the repository these tests report
-// against, at commit "real-tip" — the target tip this review's gate build has
-// to descend from. What makes it *this* review's gated tip rather than a
+// against, at commit "real-tip" — the target tip this review's merge build has
+// to descend from. The prior merge's build is a historical GATE row, which is
+// what last_merged_build_id points at on every review merged before builds
+// were all RECORDED, so the anchor has to keep reading it. What makes it *this* review's gated tip rather than a
 // stranger's is the repository it records: the review under test records none,
 // so it is anchored on the repository its report adopts (testRepository), and
 // a prior merge belonging to any other repository must not answer for it.
 func mergingReviewGatedAgainst(commit string) (*fakeReviewRepo, *fakeReviewBuilds) {
-	reviews, builds := mergingReviewWithGateBuild(commit)
+	reviews, builds := mergingReviewWithMergeBuild(commit)
 	priorMerge := model.Review{ReviewID: "review-0", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-0", Repository: testRepository}
 	reviews.reviews["review-0"] = &priorMerge
 	builds.builds["gate-0"] = model.Build{BuildID: "gate-0", ReviewID: "review-0", Kind: model.BuildKindGate, Successful: true, CommitID: "real-tip"}
@@ -401,7 +411,7 @@ func TestAcceptMergedRefusesWhenGatedTipIsNotAnAncestorOfTheReportedCommit(t *te
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "wrong-parent", isAncestor: false}, nil)
 
-	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 
 	var notVerified *MergeNotVerifiedError
 	if !errors.As(err, &notVerified) {
@@ -420,7 +430,7 @@ func TestAcceptMergedSucceedsWhenParentIsTheGatedTip(t *testing.T) {
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
 
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
@@ -441,7 +451,7 @@ func TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "release-prepare-commit", isAncestor: true}, release)
 
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
@@ -453,20 +463,20 @@ func TestAcceptMergedSucceedsWhenUnrelatedCommitsLandedBetweenGatingAndReporting
 	}
 }
 
-// TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded is refusal
+// TestAcceptMergedRefusesWithNoSuccessfulMergeBuildRecorded is refusal
 // condition 3: even a commit that really is on the target branch with the
-// right parent must not become MERGED unless a successful GATE build is
-// actually recorded for it — a buildId pointing at a failed build is not a
-// gate that passed.
-func TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded(t *testing.T) {
+// right parent must not become MERGED unless a successful build is actually
+// recorded for it — a buildId pointing at a failed build is not a build that
+// passed.
+func TestAcceptMergedRefusesWithNoSuccessfulMergeBuildRecorded(t *testing.T) {
 	reviews := newFakeReviewRepo(model.Review{ReviewID: "review-1", TargetBranch: "main", Status: model.ReviewStatusMerge})
 	builds := &fakeReviewBuilds{builds: map[string]model.Build{
-		"gate-1": {BuildID: "gate-1", ReviewID: "review-1", Kind: model.BuildKindGate, Successful: false, CommitID: "merge-commit"},
+		"merge-1": {BuildID: "merge-1", ReviewID: "review-1", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: false, CommitID: "merge-commit"},
 	}}
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true}, nil)
 
-	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 
 	var notVerified *MergeNotVerifiedError
 	if !errors.As(err, &notVerified) {
@@ -477,20 +487,144 @@ func TestAcceptMergedRefusesWithNoSuccessfulGateBuildRecorded(t *testing.T) {
 	}
 }
 
+// TestAcceptMergedRefusesTheReadyBuildOfAnUnlandedSourceTip: the build that
+// took the review to READY is a build of the source branch's tip, not of the
+// merge commit that lands it. Reporting it for MERGED names a commit that is
+// not on the target branch, so it is refused and the review stays at MERGE.
+func TestAcceptMergedRefusesTheReadyBuildOfAnUnlandedSourceTip(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
+	reviews.reviews["review-1"].LastReadyBuildID = "ready-1"
+	builds.builds["ready-1"] = model.Build{BuildID: "ready-1", ReviewID: "review-1", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: true, CommitID: "source-tip"}
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranchCommits: map[string]bool{"merge-commit": true, "real-tip": true}, isAncestor: true}, release)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "ready-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) with the READY build error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !strings.Contains(err.Error(), "source-tip") {
+		t.Fatalf("error = %q, want it to name the commit that is not on the target branch", err.Error())
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE", got)
+	}
+	if len(release.requests) != 0 {
+		t.Fatalf("release requests = %+v, want none for a refused merge", release.requests)
+	}
+}
+
+// TestAcceptMergedRefusesTheReadyBuildOfALandedSourceTip: a branch that
+// reached the target by fast-forward puts its READY build's commit on the
+// target, descended from the gated tip, yet the merge itself was never built.
+func TestAcceptMergedRefusesTheReadyBuildOfALandedSourceTip(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("source-tip")
+	reviews.reviews["review-1"].LastReadyBuildID = "ready-1"
+	builds.builds["ready-1"] = model.Build{BuildID: "ready-1", ReviewID: "review-1", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: true, CommitID: "source-tip"}
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, isAncestor: true}, release)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "ready-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) with the READY build error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !strings.Contains(err.Error(), "READY build") {
+		t.Fatalf("error = %q, want it to name the READY build", err.Error())
+	}
+	if len(release.requests) != 0 {
+		t.Fatalf("release requests = %+v, want none for a refused merge", release.requests)
+	}
+}
+
+// TestAcceptMergedRefusesABuildOfTheGatedTip: a commit is its own ancestor,
+// so a build of the very tip this review was gated against is on the target
+// branch and "descends" from it, yet names a merge in which nothing landed.
+// It is refused.
+func TestAcceptMergedRefusesABuildOfTheGatedTip(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("real-tip")
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, isAncestor: true}, release)
+
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
+
+	var notVerified *MergeNotVerifiedError
+	if !errors.As(err, &notVerified) {
+		t.Fatalf("UpdateStatus(MERGED) with a build of the gated tip error = %v, want *MergeNotVerifiedError", err)
+	}
+	if !strings.Contains(err.Error(), "gated against") {
+		t.Fatalf("error = %q, want it to say the commit is the gated tip", err.Error())
+	}
+	if got := reviews.reviews["review-1"].Status; got != model.ReviewStatusMerge {
+		t.Fatalf("status = %s, want the review left at MERGE", got)
+	}
+	if len(release.requests) != 0 {
+		t.Fatalf("release requests = %+v, want none for a refused merge", release.requests)
+	}
+}
+
+// TestAcceptMergedAcceptsARecordedBuildOfTheLandedMergeCommit: the build of
+// the merge commit is an ordinary RECORDED build with a version, recorded on
+// the review. Once its commit is on the target branch and descends from the
+// gated tip, the review is MERGED against that build and the release is
+// triggered for that commit.
+func TestAcceptMergedAcceptsARecordedBuildOfTheLandedMergeCommit(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
+	reviews.reviews["review-1"].LastReadyBuildID = "ready-1"
+	builds.builds["ready-1"] = model.Build{BuildID: "ready-1", ReviewID: "review-1", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: true, CommitID: "source-tip"}
+	release := &fakeReleaseTrigger{}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranchCommits: map[string]bool{"merge-commit": true, "real-tip": true}, isAncestor: true}, release)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED): %v", err)
+	}
+	if updated.Status != model.ReviewStatusMerged || updated.LastMergedBuildID != "merge-1" {
+		t.Fatalf("updated = %+v, want MERGED with lastMergedBuildId=merge-1", updated)
+	}
+	if len(release.requests) != 1 || release.requests[0].CommitID != "merge-commit" {
+		t.Fatalf("release requests = %+v, want one for merge-commit", release.requests)
+	}
+}
+
+// TestAcceptMergedStillAcceptsAHistoricalGateBuild: a review already at MERGE
+// when the API stopped writing GATE builds may hold one as its merge build.
+// The build's kind is not what verification asks, so it still lands.
+func TestAcceptMergedStillAcceptsAHistoricalGateBuild(t *testing.T) {
+	reviews, builds := mergingReviewGatedAgainst("merge-commit")
+	builds.builds["merge-1"] = model.Build{BuildID: "merge-1", ReviewID: "review-1", Kind: model.BuildKindGate, Successful: true, CommitID: "merge-commit"}
+	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
+		fakeMergeVerifier{onBranch: true, isAncestor: true}, nil)
+
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
+	if err != nil {
+		t.Fatalf("UpdateStatus(MERGED) with a historical GATE build: %v", err)
+	}
+	if updated.Status != model.ReviewStatusMerged {
+		t.Fatalf("status = %s, want MERGED", updated.Status)
+	}
+}
+
 // TestAcceptMergedSucceedsWhenAllThreeConditionsHold proves the checks above
 // are not just refusing everything: a genuinely verified merge does become
 // MERGED and does trigger the release it earned.
 func TestAcceptMergedSucceedsWhenAllThreeConditionsHold(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	release := &fakeReleaseTrigger{}
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: ""}, release)
 
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
-	if updated.Status != model.ReviewStatusMerged || updated.LastMergedBuildID != "gate-1" {
+	if updated.Status != model.ReviewStatusMerged || updated.LastMergedBuildID != "merge-1" {
 		t.Fatalf("updated = %+v, want MERGED with lastMergedBuildId=gate-1", updated)
 	}
 	if len(release.requests) != 1 || release.requests[0].CommitID != "merge-commit" {
@@ -1023,12 +1157,12 @@ func TestAdvanceMergeQueueNamesTheRowsItCannotAttribute(t *testing.T) {
 // canonicalized one — an SSH remote verifies against the HTTPS identity the
 // review recorded.
 func TestAcceptMergedRefusesARemoteForADifferentRepository(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	reviews.reviews["review-1"].Repository = "https://github.com/sophium/erun"
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
 
-	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "https://github.com/sophium/other")
+	_, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "https://github.com/sophium/other")
 
 	var notVerified *MergeNotVerifiedError
 	if !errors.As(err, &notVerified) {
@@ -1046,12 +1180,12 @@ func TestAcceptMergedRefusesARemoteForADifferentRepository(t *testing.T) {
 // recorded over HTTPS, or every merge reported from an SSH clone would be
 // refused for naming a repository it is not.
 func TestAcceptMergedAcceptsAnSSHSpellingOfTheReviewsOwnRepository(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	reviews.reviews["review-1"].Repository = "https://github.com/sophium/erun"
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
 
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "git@github.com:sophium/erun.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "git@github.com:sophium/erun.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
@@ -1064,11 +1198,11 @@ func TestAcceptMergedAcceptsAnSSHSpellingOfTheReviewsOwnRepository(t *testing.T)
 // compare a reported remote against, so the report is what records it — the
 // only moment the platform ever holds it.
 func TestAcceptMergedRecordsTheRepositoryAnUnrecordedReviewWasReportedUnder(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: true}, nil)
 
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "git@github.com:sophium/erun.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "git@github.com:sophium/erun.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED): %v", err)
 	}
@@ -1085,18 +1219,18 @@ func TestAcceptMergedRecordsTheRepositoryAnUnrecordedReviewWasReportedUnder(t *t
 // verifier reports that stranger's tip is not an ancestor, which is exactly
 // the refusal such an anchor produces.
 func TestAcceptMergedDoesNotAnchorAnUnrecordedReviewOnAnotherRepositorysMerge(t *testing.T) {
-	reviews, builds := mergingReviewWithGateBuild("merge-commit")
+	reviews, builds := mergingReviewWithMergeBuild("merge-commit")
 	// The only prior merge on this branch belongs to a different repository,
 	// and is the target tip this review was never gated against.
-	otherRepoMerge := model.Review{ReviewID: "review-other", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "gate-other", Repository: "file:///other"}
+	otherRepoMerge := model.Review{ReviewID: "review-other", TargetBranch: "main", Status: model.ReviewStatusMerged, LastMergedBuildID: "merge-other", Repository: "file:///other"}
 	reviews.reviews["review-other"] = &otherRepoMerge
-	builds.builds["gate-other"] = model.Build{BuildID: "gate-other", ReviewID: "review-other", Kind: model.BuildKindGate, Successful: true, CommitID: "other-repository-tip"}
+	builds.builds["merge-other"] = model.Build{BuildID: "merge-other", ReviewID: "review-other", Kind: model.BuildKindRecorded, Version: "1.0.0", Successful: true, CommitID: "other-repository-tip"}
 	svc := NewReviewService(reviews, builds, &fakeReviewComments{byReview: map[string][]model.Comment{}}, &fakeReviewAudit{},
 		fakeMergeVerifier{onBranch: true, parent: "real-tip", isAncestor: false}, nil)
 
 	// The report names file:///remote, whose queue has never merged onto this
 	// branch, so there is nothing to descend from and the merge is accepted.
-	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "gate-1", "file:///remote.git")
+	updated, err := svc.UpdateStatus(context.Background(), "review-1", model.ReviewStatusMerged, "merge-1", "file:///remote.git")
 	if err != nil {
 		t.Fatalf("UpdateStatus(MERGED) error = %v, want the merge accepted: the other repository's tip is not this review's gated base", err)
 	}

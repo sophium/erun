@@ -146,8 +146,8 @@ const (
 	// environmentJobIDEnvVar is the env var a job's own supervisor sets on the
 	// work's process, naming the job the work is running as. Anything the work
 	// spawns inherits it the same way it inherits any other environment
-	// variable, so a nested `job start` run from inside it (agent-gate.sh's
-	// detach-and-await, or an agent's own Bash tool) reads it back and records
+	// variable, so a nested `job start` run from inside it (an agent detaching
+	// a gate from its own Bash tool) reads it back and records
 	// StartedByJobID without either side threading it through explicitly.
 	environmentJobIDEnvVar = "ERUN_JOB_ID"
 
@@ -267,7 +267,7 @@ func resolveEnvironmentJobDurationOverride(envVar string, fallback time.Duration
 // CurrentEnvironmentJobID returns this process's own job id -- the job whose
 // supervisor set ERUN_JOB_ID on it -- or "" outside any job. registerEnvironmentJob
 // reads this same env var directly for a job started as a plain nested
-// subprocess (agent-gate.sh, an agent's own Bash tool), where the inheritance
+// subprocess (an agent's own Bash tool), where the inheritance
 // happens for free. It is exported for a caller that cannot rely on that
 // inheritance: forwarding a job-start request through the MCP edge crosses
 // into that server's own long-lived process, which was never itself started as
@@ -782,9 +782,9 @@ func environmentJobRunningChildren(dir, parentID string, now time.Time) []Enviro
 // turns out not to have succeeded — a clean exit code from the parent's own
 // process is not the same claim as a clean outcome from work it waited for.
 //
-// The supersede rule matters because a name is not a one-shot id: agent-gate.sh
-// folds the tree and command into --id, so an agent that fixes what a gate
-// found and reruns it gets a fresh id under the same --name, and the earlier
+// The supersede rule matters because a name is not a one-shot id: a caller
+// that folds the tree and command into --id gives an agent that fixes what a
+// gate found and reruns it a fresh id under the same --name, and the earlier
 // failing attempt's record is never replaced (reserveEnvironmentJobID only
 // replaces an id that is reused outright). Without this, a parent would name
 // that stale failure forever — including once a later attempt under the same

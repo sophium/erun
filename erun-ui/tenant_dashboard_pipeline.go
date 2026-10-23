@@ -12,7 +12,7 @@ import (
 // desktop counterpart to the console's Pipeline section, reading the same
 // GET /v1/pipeline.
 //
-// It spans the Reviews and Gates tabs rather than repeating them. A piece of
+// It spans the Reviews tab rather than repeating it. A piece of
 // planned work exists only here: it has a recorded issue and no branch at
 // all, so neither the reviews list nor the merge queue can show it. The merge
 // queue keeps its single meaning -- the ordered set of READY reviews one gate

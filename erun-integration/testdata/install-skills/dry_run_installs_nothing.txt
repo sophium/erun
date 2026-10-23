@@ -1,0 +1,4 @@
+audit: erun install-skills --agents-dir <TMP> --dry-run --skills-dir <TMP>
+install-or-refresh <TMP> <TMP>
+install-or-refresh <TMP> <TMP>
+install-or-refresh <TMP> <TMP>

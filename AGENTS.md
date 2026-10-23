@@ -36,8 +36,9 @@ operators may interact directly with in-pod agents without an orchestrator.
 - `erun-backend` — API and database modules. See `erun-backend/AGENTS.md`,
   `erun-backend/erun-backend-api/AGENTS.md`, and
   `erun-backend/erun-backend-db/AGENTS.md`.
-- `erun-devops` — images, packaging, and Kubernetes assets. See
-  `erun-devops/AGENTS.md`.
+- `erun-devops` — images, Linux packages, Kubernetes assets, and
+  deployed-environment e2e suites. See `erun-devops/AGENTS.md` and
+  `erun-devops/e2e/console/AGENTS.md`.
 - `erun-kit` — shared frontend foundation. See `erun-kit/AGENTS.md`.
 - `erun-ui` — Wails desktop app. See `erun-ui/AGENTS.md` and
   `erun-ui/playwright/AGENTS.md`.
@@ -59,8 +60,9 @@ operators may interact directly with in-pod agents without an orchestrator.
   and body to match the final scope; one PR may close multiple issues.
 - Put `Closes #<issue-number>` in the PR body for each issue the merge should
   close. A branch push or open PR alone does not close an issue.
-- Enable the repository's `.githooks` pre-commit hooks in each clone; keep the
-  comment-reference and formatting checks active rather than bypassing them.
+- Enable the repository's `.githooks` pre-commit hook in each clone
+  (`git config core.hooksPath .githooks`); it formats staged Go and frontend
+  files. Do not bypass it.
 - After merge, return the local checkout to the PR's target branch, usually
   `main`. Never push to a merged branch again; trailing work needs a fresh branch
   from updated `main`. Before pushing an existing branch, verify its PR/review
@@ -175,10 +177,10 @@ operators may interact directly with in-pod agents without an orchestrator.
   caused by me", "out of scope", and "pre-existing" are never reasons to skip,
   ignore, suppress, defer, or bypass it -- no `--no-verify`, no `//nolint`, no
   `t.Skip`, no `test.fixme`, no commenting-out, no threshold bump, and no
-  reclassifying it as someone else's problem. The pre-commit hook lints the whole
-  module, so touching any file in a module makes every pre-existing finding in
-  that module yours to resolve. Fix it in the same PR: that is the default and
-  the expectation, not a fallback.
+  reclassifying it as someone else's problem. A component's build lints and
+  tests the whole component, so touching any file in it makes every
+  pre-existing finding there yours to resolve. Fix it in the same PR: that is
+  the default and the expectation, not a fallback.
 - **A flaky test is a failing test.** One that passes only sometimes is not
   evidence of anything, and "pre-existing flakiness" is never a reason to wave it
   through. Make it deterministic -- wait on observable conditions, never
@@ -267,7 +269,7 @@ controls: its own final turn.
 
 The defect this rule exists to prevent is not "a fix with no tests". It is narrower, and it is what an audit of ~80 closed issues actually found, three times over in three unrelated subsystems (desktop dashboard, desktop dialog, release pipeline): **the fix is correct, the neighbouring states all get tests, and the one state the report described gets none.** In each case a refactor away, the operator-visible bug comes straight back with a green suite beside it.
 
-- `#1932`'s gates tab got tests for "renders returned runs", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for `ListGateRuns` **failing**, which is the state the live platform is actually in.
+- `#1932`'s dashboard tab got tests for "renders returned rows", "renders `INCONCLUSIVE`", and "shows the empty state" — but none for its list read **failing**, which is the state the live platform is actually in.
 - `#1934`'s title is literally "one failed read blanks the other's already-resolved panel", and all nine of its tests stub both reads to the *same* class of outcome. None crosses them.
 - `#1921`'s docker stub is all-or-nothing on `image inspect`, so no scenario has the local answer *present* while the registry answers *missing* — precisely the disagreement that produced the reported `unknown blob`.
 
@@ -286,7 +288,7 @@ Reproduces: <the state, the input, and the wrong behaviour the report described>
 Regression-Test: <path/to/file_test.go>::<name of the case>
 ```
 
-`Regression-Test` is repeatable. The named path must be a real test file that **this change adds or modifies**, and the named case string must really be in it — pointing at a pre-existing test somewhere else in the repo is not a reproduction of a defect you just fixed.
+`Regression-Test` is repeatable. The named path must be a test file (`*_test.go`, `*.test.ts|tsx|mjs`, `*.spec.ts|tsx|mjs`, `*_test.sh`, `*.tftest.hcl`) that **this change adds or modifies**, and the named case string must really be in it — pointing at a pre-existing test somewhere else in the repo is not a reproduction of a defect you just fixed.
 
 When a fix genuinely cannot carry one — and there are real cases — say so explicitly, with a kind from the closed set below and a reason a reviewer can weigh:
 
@@ -297,24 +299,18 @@ Regression-Test-Exemption: <kind>: <why>
 
 | Kind | Meaning | Checked mechanically? |
 | --- | --- | --- |
-| `docs-only` | prose and images only, nothing executable | yes — the diff must contain no non-documentation file |
+| `docs-only` | prose and images only, nothing executable | yes — every staged file must be `.md`, `.mdx`, or an image |
 | `revert` | reverts a commit whose own coverage still stands | yes — a commit in the range must carry `This reverts commit <sha>` |
-| `covered-by-existing` | an existing test already reproduces it | partly — also needs `Regression-Test-Existing: <path>::<case>`, which must resolve |
-| `no-reproducible-failure` | no test this repo can run reproduces it (hardware, a third-party outage, human perception) | no — a claim a reviewer accepts or rejects |
+| `covered-by-existing` | an existing test already reproduces it | partly — also needs `Regression-Test-Existing: <path>::<case>`, which must resolve in the tree |
+| `no-reproducible-failure` | no test this repo can run reproduces it (hardware, a third-party outage, human perception) | no — a claim a reviewer accepts or rejects; the reason must be at least 30 characters |
 
 **Silence is never how a change opts out.** That is the same discipline `InternalAPIRoutes` and `cliOnlyAgentFacingCommands` already enforce elsewhere, applied to the thing that actually kept regressing.
 
-### What the gate can and cannot decide
+### Enforced at merge time
 
-`scripts/check-regression-coverage.mjs` enforces this, run by `make fast-check` (see below) and by the `erun-merge` skill before it pushes. It **cannot** decide whether the named test genuinely reproduces the reported failure — no static analysis can read an issue report and judge that, and pretending otherwise would produce a check that is wrong most of the time. What it does decide is that the claim is named, specific, resolvable, and impossible to make by silence, so a reviewer answers one bounded question instead of having to notice an absence. A wrong named claim is a review finding; an absence is what shipped three times.
+`erun exec gate-merge` enforces this on every source it squashes (`evaluateMergeRegressionPolicy` in `erun-common/merge_regression_policy.go`). Scope: a `Defect-Fix: yes|true` trailer puts a source in scope and `Defect-Fix: no|false` takes it out; without one, a `bug/…` branch is a defect fix and anything else is not. An in-scope source needs a `Reproduces:` line and a declaration that resolves against what its squash actually staged. A source that fails is backed out (`git reset --hard HEAD`, as after a conflict) and reported skipped with a `regression-test policy: …` reason naming every failure; the rest of the batch still gates. Amend the declaration onto a commit in the branch, push, and re-drive the review.
 
-A resolved declaration is not yet one that ran. `erun-backend-api`'s opt-in end-to-end suites read an `ERUN_E2E_*` variable and skip when it is unset, and no gate target sets one — and `go test ./...` prints no `SKIP` line without `-v`, so `make check-gate` reports a clean `ok` for a package whose entire database contract went unexercised. The gate therefore also names, as a `NOT RUN:` caveat rendered set apart from ordinary notes, any declared `Regression-Test:` or `Regression-Test-Existing:` whose case it can see is gated on a variable no gate target sets. It is a caveat and never a failure: these suites are opt-in on purpose, requiring a database to run them is not this gate's decision, and how a gate selects its suites is the separate open question in § "Regression-suite gating strategy for `erun build`". The caveat is decided statically — a same-file call closure from the named case down to a `t.Skip(...)` — so a gate it cannot see through stays silent rather than becoming a wrong accusation.
-
-It also cannot run inside `check-gate`: it reads git history, and `check-gate` runs inside the `erun-devops` image test stage's Docker build context, which has no `.git`. Its classifier — and, through an injected git, the ref the scope signal is read from — is unit-tested in `scripts/check-regression-coverage.test.mjs`, which `test-frontend` **does** run inside `check-gate`, so the enforcement logic is gated even though the git-dependent invocation is not.
-
-`--audit` mode answers only the diff-derived half ("does this change carry any test at all?") for commits that predate the convention, and is not gated on scope. Run it over history, not over your branch — on a branch it would let exactly the three shapes above through.
-
-Scope is a convention rather than a declaration: a range is a defect fix when the ref being graded is a `bug/…` branch or a commit in it says `Defect-Fix: yes`. It is read from that ref and never from whatever is checked out, and a range scoped by branch name alone has had no trailer read at all — so it prints `UNCHECKED: …` and says the range was not examined. It still exits 0, because an ordinary change on a `feature/…` branch is legitimately out of scope and most of `main`'s history carries no trailer; a missing declaration cannot be made an error without reddening work that is not a defect fix. The residual hole is a defect fix squashed onto a non-`bug/` branch with its source branch's message replaced: the gate cannot tell that from an ordinary change, and says so rather than passing it silently.
+The gate cannot decide whether the named test genuinely reproduces the reported failure — no static check can read an issue report and judge that. It decides that the claim is named, specific, resolvable in the change, and impossible to make by silence, so a reviewer answers one bounded question instead of having to notice an absence. A wrong named claim is a review finding. `gate-merge` carries `Defect-Fix:` with the other declarations onto the landed commit, so the scope decision survives the squash. A defect fix on a non-`bug/` branch that declares no `Defect-Fix: yes` is indistinguishable from an ordinary change and is not checked.
 
 ## Integration Test Gate
 
@@ -323,41 +319,69 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
   `erun-mcp`, including each module's tests and configured lint checks. Include
   `erun-ui` when desktop wiring, consumed shared code, package-manager integration,
   or launcher integration changes.
-- Run `make fast-check` before every push. It does not replace the full gate.
-- Keep `make integration-test` green for changes affecting CLI/common behavior,
+- Each component tests itself as part of its build. Its Dockerfile chains
+  `build` -> `test` (`FROM build`) -> optional helpers built `FROM test`
+  (version stamping, target-arch compile) -> `runtime`, the last stage, which
+  copies what it ships from `test` or a helper, never from `build`. `test` runs
+  only the component's own plain commands (`go tool golangci-lint run`,
+  `go test ./...`, `yarn test`, ...); because what ships passes through it,
+  BuildKit cannot skip it, and `erun build` refuses a `test` stage nothing
+  uses. A Dockerfile with several parts prefixes their stages (`cli-build`,
+  `cli-test`) and joins them in the one stage named `test` (`erun-devops`,
+  which also builds and tests `erun` and `emcp`; there is no `erun-cli`
+  image). A package component under `erun-devops/linux/<name>/` ends in a
+  `FROM scratch` `dist` holding only its `.deb` (`erun-ui` ships
+  `erun-desktop`, `erun-cli` ships `erun`); `erun build` runs it through
+  `test` and `--release` publishes its `.deb`s. The standard is
+  `erun-docs/docs/agent-reference/dockerfile-stages.md`; how this repository
+  applies it is in `erun-devops/AGENTS.md` § "Build Workflow". There is no repository-wide Makefile or gate script. Before
+  pushing, run the same commands in each module you changed; see its
+  `AGENTS.md`.
+- Tests that need a deployed environment are e2e suites under
+  `erun-devops/e2e/<service>/`, run only by `erun e2e` after a deploy. `erun
+  e2e` is never part of `erun build`, a release, or the merge gate; a failing
+  suite exits non-zero and changes nothing, and whoever ran it files the bug
+  (`erun-file-issue`).
+- `erun build` is the gate a review and the merge queue record. An unchanged
+  component reuses its last successful build instead of re-running its tests,
+  which is a valid result. This repository uses its own build and merge queue;
+  do not add GitHub Actions for build or test gating.
+- Keep `erun-integration` green for changes affecting CLI/common behavior,
   runtime entrypoints, chart deployment, or integration goldens. Never skip a
   scenario, and preserve complete `--dry-run` traces.
-- `make integration-test` must be green on `main` at all times. Do not merge a
-  PR that leaves any scenario red, including scenarios that were already failing
+- `erun-integration` must be green on `main` at all times. Do not merge a PR
+  that leaves any scenario red, including scenarios that were already failing
   before your branch: if you find a pre-existing red, fix it in the same PR, or
   file a tracking issue and land that fix before merging anything else that
   touches the suite. "Some tests were already broken" is not a licence to add
   more.
-- Run the full `make check` gate before merging. This repository uses its own
-  build and merge queue; do not add GitHub Actions for build or test gating.
-- **"The suite" in a gate conversation means the area-scoped selection, not the
-  full run.** `erun build` resolves it per change
-  (`erun-ui/playwright/AGENTS.md` § "Area-scoped gate selection"), not
-  unconditionally the full run for every build — that section's classification
-  rule decides which coverage a given change actually earns, and its own history
-  records a correctness gap the classification once had (a desktop
-  application-code change that touched no spec file selected smoke-only, so a
-  green gate did not mean the specs covering that change had run) and the fix
-  that closed it.
 - Structural tests that read sibling modules, directory trees, or generated
   artifacts outside their compiled inputs must run uncached (`go test -count=1`)
-  in their module's gate. Add that wiring with the test; a cached pass cannot
+  in their component's test stage. Add that wiring with the test; a cached pass cannot
   establish that changed external inputs were checked.
 - Guidance-only changes require consistency, ownership, reference, and formatting
   checks. They do not require deploying or rebuilding unchanged app behavior;
   changes to embedded instruction templates also run their provisioning tests.
 
-### Regression-suite gating strategy for `erun build` (#2086 — under discussion, do not implement)
+### Regression-suite gating strategy for `erun build` (#2086 — scoping and tiers under discussion, do not implement)
 
-- **This is not a decision.** #2086 proposes change-scoped suites on the merge gate and the unconditional full suite (including `test-playwright`) on the release gate only. Its own author commented fourteen minutes after filing it: the design was still being worked through with the operator, "the trigger model, the stage vocabulary, and where each suite belongs are all open," and no implementation should start until the operator confirms the plan. Read every "Recommendation" and "Rejected" line in #2086 as a position in an open discussion, not settled guidance. Do not wire a path→suite map, split `test-playwright` off the merge gate, or otherwise implement from that issue without first checking whether the operator has since confirmed a plan.
-- **The specific rationale #2086 gives against running everything unconditionally ("Option A" in its own vocabulary) was already stale the day it was filed.** #2086 rejects Option A because it "puts four known flakes on every merge" (#1786, #1772, #1945, #2045). All four are closed (#1786, #1772: 2026-08-31; #1945, #2045: 2026-09-03), and separately — not as a response to #2086 — `check-gate` gained `test-playwright` unconditionally the same day #2086 was filed (`c446e9fc`, merged 2026-09-04T06:13Z, ~2 hours after the issue). That landing was not casual: #2021's own review thread measured the suite honestly before merging it (2/5 clean → 4/5 after four specs were fixed with real root causes → the residual filed as #2045 rather than papered over → #2045 turned out to be a genuine application bug, not a test problem → 5/5, then re-measured 3/3 at 517/517 against the actual tree it would gate). So Option A is not a hypothetical being weighed against the issue's proposed C/D; it is what `check-gate` runs today, on the strength of a measured, not assumed, stability record. That does not retroactively decide #2086 — the ~15 extra minutes `test-playwright` adds to the gate (§ "Integration Test Gate" above; ~7m gate alone vs. ~21-22m with the suite) is a real, separate cost change-scoping or a release-only tier would still reduce — but whoever resumes this discussion should argue from latency, not from a flake count that has since been fixed.
+- **The stage vocabulary is decided; nothing else in #2086 is.** The operator
+  confirmed the component stage standard (`build` -> `test` -> helpers ->
+  `runtime`, plus deployed-environment `e2e` suites run only by `erun e2e`; see
+  § "Integration Test Gate") and that `erun e2e` is never part of the merge or
+  release gate. The rest of #2086 is still open: the trigger model, change-scoped
+  suites on the merge gate, a release-only tier, and where each suite belongs.
+  Its author commented fourteen minutes after filing it that the design was
+  still being worked through with the operator and no implementation should
+  start until the operator confirms the plan. Read every "Recommendation" and
+  "Rejected" line in #2086 about scoping or tiers as a position in an open
+  discussion, not settled guidance. Do not wire a path→suite map, split the
+  Playwright suite off the merge gate, or otherwise implement scoping or tiers
+  from that issue without first checking whether the operator has since
+  confirmed a plan.
+- **The specific rationale #2086 gives against running everything unconditionally ("Option A" in its own vocabulary) was already stale the day it was filed.** #2086 rejects Option A because it "puts four known flakes on every merge" (#1786, #1772, #1945, #2045). All four are closed (#1786, #1772: 2026-08-31; #1945, #2045: 2026-09-03), and separately — not as a response to #2086 — the then-current gate gained the Playwright suite unconditionally the same day #2086 was filed (`c446e9fc`, merged 2026-09-04T06:13Z, ~2 hours after the issue). That landing was not casual: #2021's own review thread measured the suite honestly before merging it (2/5 clean → 4/5 after four specs were fixed with real root causes → the residual filed as #2045 rather than papered over → #2045 turned out to be a genuine application bug, not a test problem → 5/5, then re-measured 3/3 at 517/517 against the actual tree it would gate). So Option A is not a hypothetical being weighed against the issue's proposed C/D; it is what `erun build` runs today (the `erun-ui` test stage runs the full suite), on the strength of a measured, not assumed, stability record. That does not retroactively decide #2086 — the time the full Playwright suite adds to every build that changes `erun-ui` is a real, separate cost change-scoping or a release-only tier would still reduce — but whoever resumes this discussion should argue from latency, not from a flake count that has since been fixed.
 - **Two constraints bind whatever the operator eventually decides, because they come from measured failure modes, not preference:**
-  - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg is closed at the source: `applyIncrementalPromotion` never promotes a Dockerfile matching the test-stage-gate convention, so the gate always goes through a real `docker build` — `dockerfileHasGateTestStage`, `build_gate_test_stage_test.go`; the scoping leg is unaffected by that closure and still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
+  - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg: a fingerprint promotion now reuses the component's last successful build, whose test stage ran, so it is a valid result — but the trace must still name it a promotion rather than a fresh run; the scoping leg still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
   - Change-scoping decides *which* suites run for a diff, not the venue or concurrency they run under. This repository's venue- and concurrency-dependent bugs this week (#2076 — auth-failure-retry scenarios failing only inside `erun build`; #2151 — a Playwright spec flaking only under repeated same-worker runs) were found by running suites in their real venue at real concurrency, not by running everything on every diff. A change-scoped gate only misses them if its path→suite map fails to route the diffs that trigger them to the suite that contains them — a mapping-completeness risk, not a scoping-in-principle risk — and only if the suites it does select run somewhere other than the real build environment. Neither #2076 nor #2151 is an argument against scoping; both are arguments for keeping "which suites run" and "where and how they run" as separate questions, and for erring toward running when a mapping is uncertain.
 - This section exists so a future reader checking AGENTS.md before touching the gate — human or agent — finds the hold on #2086 here too, not only in the issue's own comment thread.
 
@@ -386,9 +410,10 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
   own. A `--release` at that step instead publishes a two-architecture
   `-pr.<sha>` image and chart set per pull request that nothing consumes, and
   it discards the environment's `docker.platforms` pin, which a release never
-  consults. The merge queue's own gate build is `erun build --gate` — not a
-  release either, and `--gate` is what makes it execute the Dockerfile's test
-  stage rather than accept BuildKit's replay of it (see `erun-common/AGENTS.md`
+  consults. The merge queue builds its merge commit the same way, with a plain
+  `erun build` recorded with the version it minted — not a release either. Every
+  build runs each component's lint and tests, and an unchanged component reusing
+  its last successful result is a valid result (see `erun-common/AGENTS.md`
   § "Gate execution and verdicts").
 - That pre-merge build reads `docker.platforms` from the **checked-out
   branch's** `.erun/config.yaml`, so a branch cut before the pin landed still
@@ -426,6 +451,12 @@ Scope is a convention rather than a declaration: a range is a defect fix when th
 - Preserve dependency direction: shared logic may move into `erun-common`;
   transport-specific logic must not. Keep moved symbols package-private unless
   an existing external caller requires them to be exported.
+- The layered split of `erun-common`, `erun-cli` and `erun-mcp` in
+  https://github.com/sophium/erun/issues/2741 is the declared intended design
+  for those package boundaries (layer map in `erun-common/AGENTS.md`). Until it
+  lands, add no new upward coupling: orchestration goes in orchestration-shaped
+  files, never in a primitive's files, and types/config code never calls into
+  build, deploy or release.
 - Reuse matching shared interfaces from `erun-common` directly rather than
   duplicating them locally. Move meaningful coverage to the module that now owns
   the behavior and remove test-only production shims where possible.

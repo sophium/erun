@@ -1,5 +1,5 @@
 {
-  "version": "1.0.306",
+  "version": "1.0.307",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
@@ -9,9 +9,9 @@
     "nodejs",
     "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.306.zip",
-  "hash": "e159c19fdec5a94fc25e5add8dfa1ede2797c855d8634524f9bc375cdd168379",
-  "extract_dir": "erun-1.0.306",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.307.zip",
+  "hash": "828ed1e044d4cbff9d2d5cb5b0e1af3741332445e842489a769fcfb7441e48bc",
+  "extract_dir": "erun-1.0.307",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
@@ -34,15 +34,8 @@
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
       "$appLdflags = \"-s -w -H windowsgui -X main.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-ui\"",
-      "$wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2",
-      "if ($LASTEXITCODE -ne 0) { throw 'failed to resolve Wails version' }",
-      "$wailsBin = Join-Path $dir 'wails-bin'",
-      "New-Item -ItemType Directory -Force -Path $wailsBin | Out-Null",
-      "$env:GOBIN = $wailsBin",
-      "go install \"github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion\"",
-      "if ($LASTEXITCODE -ne 0) { throw 'failed to install Wails generator' }",
-      "Remove-Item Env:GOBIN -ErrorAction SilentlyContinue",
-      "\u0026 (Join-Path $wailsBin 'wails.exe') generate module",
+      "New-Item -ItemType Directory -Force -Path 'frontend\\dist' | Out-Null",
+      "go tool wails generate module",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to generate erun-app frontend bindings' }",
       "Push-Location \"frontend\"",
       "yarn install --frozen-lockfile",

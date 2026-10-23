@@ -1,17 +1,17 @@
 package eruncommon
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-// realDockerfilePaths returns every Dockerfile erun actually builds from —
-// erun-devops/docker/<component>/Dockerfile — excluding the erun-skills
+// realDockerfilePaths returns every image Dockerfile erun actually builds
+// from — erun-devops/docker/<component>/Dockerfile — excluding the erun-skills
 // scaffolding templates, which use __PLACEHOLDER__ tokens instead of real
 // paths and are never fed to computeBuildFingerprint.
 func realDockerfilePaths(t *testing.T) []string {
@@ -28,6 +28,29 @@ func realDockerfilePaths(t *testing.T) []string {
 	return matches
 }
 
+// linuxPackageDockerfilePaths returns every package component's Dockerfile,
+// erun-devops/linux/<package>/Dockerfile, which builds a .deb, never an image.
+func linuxPackageDockerfilePaths(t *testing.T) []string {
+	t.Helper()
+	root := repoRootForDockerignoreTest(t)
+	matches, err := filepath.Glob(filepath.Join(root, "erun-devops", "linux", "*", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("glob package Dockerfiles: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("no Dockerfiles found under erun-devops/linux")
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+// allDockerfilePaths is every Dockerfile of this repository, images and
+// packages alike, for the rules that hold for any Dockerfile.
+func allDockerfilePaths(t *testing.T) []string {
+	t.Helper()
+	return append(realDockerfilePaths(t), linuxPackageDockerfilePaths(t)...)
+}
+
 var dockerfileAddPattern = regexp.MustCompile(`(?im)^\s*ADD\s+`)
 
 // TestDockerfilesNeverUseAddForLocalContent locks the fact that no Dockerfile
@@ -41,7 +64,7 @@ var dockerfileAddPattern = regexp.MustCompile(`(?im)^\s*ADD\s+`)
 // list. Introducing ADD is a deliberate decision that must first teach
 // dockerfileCopySources to parse it, not a silent gap this test lets slide.
 func TestDockerfilesNeverUseAddForLocalContent(t *testing.T) {
-	for _, path := range realDockerfilePaths(t) {
+	for _, path := range allDockerfilePaths(t) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -62,7 +85,7 @@ func TestDockerfilesNeverUseAddForLocalContent(t *testing.T) {
 // the fingerprint that decides whether it rebuilds.
 func TestDockerfileCopySourcesContainNoGlobs(t *testing.T) {
 	root := repoRootForDockerignoreTest(t)
-	for _, path := range realDockerfilePaths(t) {
+	for _, path := range allDockerfilePaths(t) {
 		sources, err := dockerfileCopySources(path, root)
 		if err != nil {
 			t.Fatalf("parse COPY sources for %s: %v", path, err)
@@ -90,7 +113,7 @@ var (
 // an unfingerprinted build input with no cascade to catch it (dockerfileLocalBaseImageDeps
 // only walks FROM lines, never COPY --from).
 func TestDockerfileCopyFromReferencesOnlyLocalStages(t *testing.T) {
-	for _, path := range realDockerfilePaths(t) {
+	for _, path := range allDockerfilePaths(t) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -142,7 +165,7 @@ var dockerfileFromRefPattern = regexp.MustCompile(`(?im)^\s*FROM\s+(?:--platform
 // mitigation is pinned-tag discipline (root AGENTS.md "Release Rules"), and
 // this test is what keeps that discipline from regressing silently.
 func TestDockerfileBaseImagesUseExplicitPinnedTags(t *testing.T) {
-	for _, path := range realDockerfilePaths(t) {
+	for _, path := range allDockerfilePaths(t) {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -187,22 +210,19 @@ func dockerfileFromRefIsPinned(ref string, stages map[string]struct{}) bool {
 	return tag != "" && tag != "latest"
 }
 
-// The erun-backend-api component's opt-in suites -- every case gated on an
-// ERUN_E2E_* variable -- are inert without a venue that sets one: they report
-// SKIP under a package line that still reads `ok`, which is the fail-open shape
-// this whole file exists to catch, one layer up from the build fingerprints.
-// The venue is that component's own `test` stage, and the two halves below are
-// what make it one: the stage has to run the component's E2E gate script, and
-// the builder has to depend on it through the `COPY --from=test` marker
-// dockerfileHasGateTestStage reads, so no image is produced when the suite
-// failed. Drop either half and every one of those cases returns to SKIP with
-// `make check` still green.
+// The erun-backend-api component's tests -- its database suites included, which
+// start PostgreSQL themselves -- run as part of building that image, and the two
+// halves below are what make them so: the `test` stage has to run the module's
+// own `go test`, and a later stage has to consume it (`FROM test` or
+// `COPY --from=test`, which dockerfileHasConsumedTestStage reads), so no image
+// is produced when the suite failed. Drop either half and the image builds and
+// publishes with its tests never run.
 //
 // Naming the component rather than iterating every Dockerfile is deliberate.
 // A guard phrased "any Dockerfile that ships a test stage must consume it" goes
 // quiet in exactly the event it exists to catch, because deleting the stage
 // leaves nothing to iterate over.
-const optInE2EGateScript = "erun-devops/docker/erun-backend-api/e2e_gate_test.sh"
+const componentTestCommand = "go test -count=1 ./..."
 
 // testStageInstructionLines returns the instructions of the stage declared
 // `FROM ... AS test`, or nothing when the file declares no such stage. The
@@ -240,141 +260,17 @@ func TestErunBackendAPIOptInE2ESuitesStayInAConsumedTestStage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, optInE2EGateScript) {
-		t.Errorf("%s declares no `test` stage running %s — the component's ERUN_E2E_* suites are gated on a database URL, and with no venue setting one every database-backed case in them reports SKIP under a package line that still reads `ok`", venue, optInE2EGateScript)
+	if !dockerfileStageRuns(dockerfileStage{lines: testStageInstructionLines(string(data))}, componentTestCommand) {
+		t.Errorf("%s declares no `test` stage running %s — the component's tests, its database suites included, would never run before its image is built", venue, componentTestCommand)
 	}
-	if !dockerfileHasGateTestStage(path) {
-		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and the `COPY --from=test` that depends on it the image builds and publishes with the E2E gate absent, and erun's incremental promotion is free to serve a cached fingerprint image instead of running it, so the same green build reports either way", venue)
-	}
-}
-
-var (
-	makefileRulePattern       = regexp.MustCompile(`^([A-Za-z0-9_.-]+)\s*::?\s*(.*)$`)
-	makefileShellScriptToken  = regexp.MustCompile(`(?:^|\s)(\S+\.sh)(?:\s|$)`)
-	scriptRelativeRootPattern = regexp.MustCompile(`\$\{?script_dir\}?/(?:\.\./)+([A-Za-z0-9_][A-Za-z0-9_./-]*)`)
-)
-
-type makefileRule struct {
-	prereqs []string
-	recipe  []string
-}
-
-// makefileRules reads the Makefile into one entry per target, keeping its
-// prerequisites and its tab-indented recipe lines apart -- the recipe is what
-// names the shell scripts a target actually runs.
-func makefileRules(t *testing.T, root string) map[string]makefileRule {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, "Makefile"))
-	if err != nil {
-		t.Fatalf("read Makefile: %v", err)
-	}
-	rules := make(map[string]makefileRule)
-	current := ""
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "\t") {
-			if current != "" {
-				rule := rules[current]
-				rule.recipe = append(rule.recipe, line)
-				rules[current] = rule
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
-			continue
-		}
-		match := makefileRulePattern.FindStringSubmatch(line)
-		if match == nil {
-			current = ""
-			continue
-		}
-		current = match[1]
-		rule := rules[current]
-		rule.prereqs = append(rule.prereqs, strings.Fields(match[2])...)
-		rules[current] = rule
-	}
-	return rules
-}
-
-// checkGateShellScripts returns every shell script the Makefile's check-gate
-// prerequisite targets name and that really exists in the repository, in a
-// stable order. A token that resolves to no file is skipped rather than
-// reported: a recipe also writes `./run.sh` after a `cd` into another
-// directory, and `erun-devops/k8s/*_test.sh` as a shell glob, neither of which
-// is a repository-root path — and a script that is genuinely missing fails the
-// gate loudly on its own, without this test's help.
-func checkGateShellScripts(t *testing.T, root string) []string {
-	t.Helper()
-	rules := makefileRules(t, root)
-	gate, ok := rules["check-gate"]
-	if !ok {
-		t.Fatal("Makefile declares no check-gate target")
-	}
-	seen := make(map[string]struct{})
-	var scripts []string
-	for _, prereq := range gate.prereqs {
-		for _, line := range rules[prereq].recipe {
-			for _, match := range makefileShellScriptToken.FindAllStringSubmatch(line, -1) {
-				script := strings.TrimPrefix(strings.TrimSpace(match[1]), "./")
-				if _, dup := seen[script]; dup {
-					continue
-				}
-				if info, err := os.Stat(filepath.Join(root, script)); err != nil || info.IsDir() {
-					continue
-				}
-				seen[script] = struct{}{}
-				scripts = append(scripts, script)
-			}
-		}
-	}
-	sort.Strings(scripts)
-	return scripts
-}
-
-// devopsGateStageCommand is the command the erun-devops image runs the
-// repository gate with, and the anchor the COPY model below is scoped to.
-//
-// The scope is the stage that runs it, not the file. A COPY in any other stage
-// places nothing in the filesystem `make check` sees, so reading the whole file
-// unions stages that the gate never builds: this Dockerfile's `builder` stage
-// COPYs erun-devops/VERSION, the `test` stage that runs the gate does not, and a
-// fatal gate test reading that path therefore passed this guard while the
-// release venue — the same image, building the same stage — was red. That is one
-// defect, not two: reading more of the file than the gate builds is the same
-// fail-open shape as reading less of the tree than the gate reads.
-const devopsGateStageCommand = "make check"
-
-// dockerfileGateStage returns the one stage that runs the repository gate -- the
-// stage whose own instructions name devopsGateStageCommand -- using the same
-// FROM split the apt-package contract reads. The stage is found by what it runs
-// rather than named here, so a rename keeps the model on the real stage; zero
-// candidates and several are each an error rather than a silent pick, because
-// either one means the model cannot tell which stage's COPYs the gate sees.
-func dockerfileGateStage(data string) (dockerfileStage, error) {
-	var found []dockerfileStage
-	for _, stage := range dockerfileStages(data) {
-		if dockerfileStageRuns(stage, devopsGateStageCommand) {
-			found = append(found, stage)
-		}
-	}
-	switch len(found) {
-	case 1:
-		return found[0], nil
-	case 0:
-		return dockerfileStage{}, fmt.Errorf("declares no stage running %q: this guard models the COPYs of the stage "+
-			"that runs the repository gate, and with no such stage it cannot tell which stage's COPYs the gate sees "+
-			"— restore the stage, or update devopsGateStageCommand to whatever now runs it", devopsGateStageCommand)
-	default:
-		return dockerfileStage{}, fmt.Errorf("declares %d stages running %q: this guard models the COPYs of the one "+
-			"stage the gate runs in, and with several candidates it cannot tell which stage's COPYs the gate sees "+
-			"— name the gate command in exactly one stage", len(found), devopsGateStageCommand)
+	if !dockerfileHasConsumedTestStage(path) {
+		t.Errorf("%s no longer declares a `test` stage a later stage consumes — without the `AS test` stage and a later stage built or copying from it the image builds and publishes with its tests never run, and a fingerprint written after that build would let later builds reuse an untested result", venue)
 	}
 }
 
 // dockerfileStageRuns reports whether a stage runs a command, reading only its
-// instructions. Comment lines are skipped: this Dockerfile's builder stage has a
-// comment explaining that a `make check` elsewhere runs golangci-lint for it,
-// and a prose mention is not a stage running the gate — matching raw text would
-// make that stage a second candidate and leave the model unable to pick one.
+// instructions. Comment lines are skipped: a prose mention of a command is not
+// a stage running it.
 func dockerfileStageRuns(stage dockerfileStage, command string) bool {
 	for _, line := range stage.lines {
 		trimmed := strings.TrimSpace(line)
@@ -388,279 +284,530 @@ func dockerfileStageRuns(stage dockerfileStage, command string) bool {
 	return false
 }
 
-// dockerfileGateStageLines returns the lines of that stage, failing the test
-// when the Dockerfile does not declare exactly one.
-func dockerfileGateStageLines(t *testing.T, path string) []string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
-	stage, err := dockerfileGateStage(string(data))
-	if err != nil {
-		t.Fatalf("%s %v", path, err)
-	}
-	return stage.lines
+// componentDockerfiles are the Dockerfiles under erun-devops/docker that build
+// and test their own content, as opposed to the single-stage wrappers that pass
+// an upstream image through. Named rather than discovered for the reason given
+// above: a rule phrased over "every multi-stage Dockerfile" goes quiet when a
+// component collapses to one stage.
+var componentDockerfiles = []string{
+	"erun-backend-api",
+	"erun-backend-db",
+	"erun-console",
+	"erun-devops",
+	"erun-dns01-webhook",
+	"erun-docs",
 }
 
-// erunDevopsProvidedSrcPaths returns every container path under /src that the
-// gate stage's COPY instructions provide. A destination that is a directory
-// lands each source under it by name, so `COPY package.json yarn.lock /src/`
-// provides /src/package.json and /src/yarn.lock and not the bare workdir;
-// /src itself is never returned, because "the image provides /src" would
-// satisfy every path either half of this guard asks about and make both
-// vacuous.
-//
-// contextRoot is the build context the Dockerfile's relative sources resolve
-// against — the repository root for the real image, the fixture root for a
-// fixture tree — and is what lets a directory source be told from a file one.
-//
-// COPY --from=<stage> lines are skipped: their sources are another stage's
-// filesystem rather than this build context, so they place nothing the
-// checkout supplied. computeBuildFingerprint drops them for the same reason.
-func erunDevopsProvidedSrcPaths(t *testing.T, contextRoot, path string) []string {
-	t.Helper()
-	var provided []string
-	for _, line := range dockerfileGateStageLines(t, path) {
-		provided = append(provided, dockerfileCopyProvidedSrcPaths(contextRoot, line)...)
-	}
-	var underSrc []string
-	for _, candidate := range provided {
-		if strings.HasPrefix(candidate, "/src/") && candidate != "/src" {
-			underSrc = append(underSrc, candidate)
-		}
-	}
-	return underSrc
+// linuxPackageDockerfiles are the package components under erun-devops/linux,
+// each mapped to whether it tests itself. erun-cli does not: the CLI and the
+// MCP server are tested in the erun-devops image's cli-test, so its package
+// only compiles and packs them.
+var linuxPackageDockerfiles = map[string]bool{
+	"erun-cli": false,
+	"erun-ui":  true,
 }
 
-// dockerfileCopyArgs splits one Dockerfile line into a COPY instruction's
-// sources and its destination. It reports ok=false for anything else --
-// another instruction, a copy from another stage (--from=), or a line with no
-// destination to speak of.
-func dockerfileCopyArgs(line string) (sources []string, dest string, ok bool) {
-	trimmed := strings.TrimSpace(line)
-	if len(trimmed) < len("COPY ") || !strings.EqualFold(trimmed[:len("COPY ")], "COPY ") {
-		return nil, "", false
-	}
-	var tokens []string
-	for _, field := range strings.Fields(trimmed)[1:] {
-		if strings.HasPrefix(field, "--from=") {
-			return nil, "", false
-		}
-		if strings.HasPrefix(field, "--") {
-			continue // --chmod= and friends are not paths
-		}
-		tokens = append(tokens, field)
-	}
-	if len(tokens) < 2 {
-		return nil, "", false
-	}
-	return tokens[:len(tokens)-1], tokens[len(tokens)-1], true
+var (
+	dockerfileStageHeaderPattern  = regexp.MustCompile(`(?i)^\s*FROM\s+(--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$`)
+	dockerfileStageReferenceArg   = regexp.MustCompile(`(?i)(?:^|[\s,])(?:--)?from=([^\s,]+)`)
+	dockerfileStampOrTargetArgDef = regexp.MustCompile(`(?i)^\s*ARG\s+(TARGET\w*|ERUN_VERSION)\b`)
+)
+
+type componentStage struct {
+	name     string
+	base     string
+	platform string
+	lines    []string
 }
 
-// dockerfileCopyProvidedSrcPaths returns the container paths one COPY
-// instruction provides, following what a real docker build does with each
-// source rather than a single rule for both kinds.
-//
-// The basename level is a *file* source's rule: `COPY package.json yarn.lock
-// /src/` provides /src/package.json and /src/yarn.lock, and `COPY a.txt
-// /src/one/` provides /src/one/a.txt. A *directory* source contributes its
-// contents at the destination instead, with no extra level: `COPY some-dir
-// /src/some-dir/` lands /src/some-dir/<contents>, not /src/some-dir/some-dir,
-// and `COPY a.txt dir /src/three/` puts a.txt at /src/three/a.txt and dir's
-// contents directly under /src/three. Verified against a real docker build.
-//
-// Treating a directory source as a file is not a conservative mistake: it
-// reports a path the image really does provide as absent, so the guard reds a
-// change that is correct. Both directions are defects, and this one is cheaper
-// to hit -- the destination form `COPY <dir> /src/<dir>/` is ordinary.
-func dockerfileCopyProvidedSrcPaths(contextRoot, line string) []string {
-	sources, dest, ok := dockerfileCopyArgs(line)
-	if !ok {
-		return nil
-	}
-	if !strings.HasSuffix(dest, "/") && len(sources) == 1 && !dockerfileSourceIsDirectory(contextRoot, sources[0]) {
-		return []string{dest}
-	}
-	dir := strings.TrimSuffix(dest, "/")
-	var provided []string
-	for _, source := range sources {
-		if dockerfileSourceIsDirectory(contextRoot, source) {
-			provided = append(provided, dir)
+func componentStagesOf(text string) []componentStage {
+	var stages []componentStage
+	for _, raw := range strings.Split(text, "\n") {
+		if m := dockerfileStageHeaderPattern.FindStringSubmatch(raw); m != nil {
+			stages = append(stages, componentStage{name: strings.ToLower(m[3]), base: strings.ToLower(m[2]), platform: strings.TrimSpace(m[1])})
 			continue
 		}
-		provided = append(provided, dir+"/"+filepath.Base(strings.TrimSuffix(source, "/")))
+		if len(stages) == 0 {
+			continue
+		}
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		stages[len(stages)-1].lines = append(stages[len(stages)-1].lines, raw)
 	}
-	return provided
+	return stages
 }
 
-// dockerfileSourceIsDirectory reports whether a COPY source names a directory in
-// the build context. A source this checkout does not contain is treated as a
-// file, which is the destination rule that places it under the destination by
-// name: every source of the real Dockerfile exists here, and a fixture tree
-// names sources it deliberately never writes.
-func dockerfileSourceIsDirectory(contextRoot, source string) bool {
-	if contextRoot == "" {
-		return false
+// stageReferences returns the stages a stage's instructions read from
+// (`COPY --from=<stage>`, `RUN --mount=...,from=<stage>`).
+func (s componentStage) stageReferences() []string {
+	var refs []string
+	for _, line := range s.lines {
+		for _, m := range dockerfileStageReferenceArg.FindAllStringSubmatch(line, -1) {
+			refs = append(refs, strings.ToLower(m[1]))
+		}
 	}
-	info, err := os.Stat(filepath.Join(contextRoot, filepath.FromSlash(source)))
-	return err == nil && info.IsDir()
+	return refs
 }
 
-// providedSrcPathExists reports whether the image provides wanted itself or
-// anything beneath it. A script only has to `cd` into the directory, and
-// copying a deeper path creates every parent on the way down.
-func providedSrcPathExists(provided []string, wanted string) bool {
-	for _, path := range provided {
-		if path == wanted || strings.HasPrefix(path, wanted+"/") {
+// componentStageConventionProblems checks a component Dockerfile against the
+// repository's stage convention, build -> test -> helpers -> runtime, and
+// returns one line per violation:
+//
+//   - a build stage (`build`, or `<part>-build` in a Dockerfile with several
+//     parts) holds the toolchain, dependencies, source and a native compile,
+//     pinned to BUILDPLATFORM, with no version stamping and no TARGET* args,
+//     so the tests built on it run once per source change rather than once
+//     per version or architecture;
+//   - its test stage (`test`, or `<part>-test`) is FROM it, stamps no version
+//     either, and is the only stage that reads it, so nothing can take an
+//     artifact around the tests;
+//   - the stage named `test` is the one erun detects: every `<part>-test`
+//     feeds it, and every helper built from a stage of this file descends
+//     from it;
+//   - the last stage is `runtime` and reaches `test`, which keeps the tests in
+//     the graph BuildKit walks for the image.
+//
+// A stage FROM an external image that reads no other stage is a toolchain
+// source (a target-arch toolchain, a pinned node) and is allowed as is.
+func componentStageConventionProblems(text string) []string {
+	return stageConventionProblems(text, "runtime", true)
+}
+
+// packageStageConventionProblems checks a package component's Dockerfile: the
+// same chain, ending in `dist` instead of `runtime`, FROM scratch so a local
+// output export writes the package files and nothing else. A package tested
+// elsewhere declares no test stage; its build stages still stamp nothing.
+func packageStageConventionProblems(text string, tested bool) []string {
+	problems := stageConventionProblems(text, "dist", tested)
+	stages := componentStagesOf(text)
+	if len(stages) > 0 && stages[len(stages)-1].base != "scratch" {
+		problems = append(problems, "the last stage is FROM "+stages[len(stages)-1].base+", want FROM scratch so the exported output holds only the package")
+	}
+	return problems
+}
+
+func stageConventionProblems(text, lastStage string, requireTest bool) []string {
+	stages := componentStagesOf(text)
+	if len(stages) == 0 {
+		return []string{"no FROM instruction"}
+	}
+	graph := newComponentStageGraph(stages)
+	if _, hasTest := graph.byName["test"]; !hasTest {
+		if requireTest {
+			return []string{"no stage named `test`"}
+		}
+		return graph.untestedProblems(lastStage)
+	}
+	var problems []string
+	for _, stage := range stages {
+		problems = append(problems, graph.stageProblems(stage)...)
+	}
+	return append(problems, graph.lastStageProblems(lastStage)...)
+}
+
+// untestedProblems checks a Dockerfile with no test stage: its build stages
+// stay free of version stamps and target-arch args, and its last stage is
+// named for what it ships.
+func (g componentStageGraph) untestedProblems(lastStage string) []string {
+	var problems []string
+	for _, stage := range g.stages {
+		if part, role := stageRole(stage.name); role == "build" {
+			problems = append(problems, g.buildStageProblems(stage, part)...)
+		}
+	}
+	return append(problems, g.lastStageNameProblems(lastStage)...)
+}
+
+type componentStageGraph struct {
+	stages []componentStage
+	byName map[string]componentStage
+}
+
+func newComponentStageGraph(stages []componentStage) componentStageGraph {
+	byName := make(map[string]componentStage)
+	for _, stage := range stages {
+		if stage.name != "" {
+			byName[stage.name] = stage
+		}
+	}
+	return componentStageGraph{stages: stages, byName: byName}
+}
+
+// stageRole splits a build or test stage name into its part and role:
+// `build` is ("", "build"), `cli-test` is ("cli", "test"). Any other stage
+// has no role.
+func stageRole(name string) (part, role string) {
+	for _, r := range []string{"build", "test"} {
+		if name == r {
+			return "", r
+		}
+		if prefix, ok := strings.CutSuffix(name, "-"+r); ok && prefix != "" {
+			return prefix, r
+		}
+	}
+	return "", ""
+}
+
+func partStageName(part, role string) string {
+	if part == "" {
+		return role
+	}
+	return part + "-" + role
+}
+
+// reads returns the stages of this file a stage builds on or reads from.
+func (g componentStageGraph) reads(stage componentStage) []string {
+	var local []string
+	for _, name := range append([]string{stage.base}, stage.stageReferences()...) {
+		if _, ok := g.byName[name]; ok {
+			local = append(local, name)
+		}
+	}
+	return local
+}
+
+// reaches reports whether a stage depends, directly or through other stages of
+// this file, on the named one.
+func (g componentStageGraph) reaches(from componentStage, target string) bool {
+	seen := map[string]bool{}
+	pending := g.reads(from)
+	for len(pending) > 0 {
+		name := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if name == target {
 			return true
 		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		pending = append(pending, g.reads(g.byName[name])...)
 	}
 	return false
 }
 
-// providedSrcPathCovers reports whether the image ends up holding path -- the
-// file-read direction, the mirror of providedSrcPathExists above. A read needs
-// path itself or any directory above it: copying a directory puts everything
-// under it in the image.
-func providedSrcPathCovers(provided []string, path string) bool {
-	for _, candidate := range provided {
-		if candidate == path || strings.HasPrefix(path, candidate+"/") {
+// descendsFromTest reports whether the named stage is `test` or built, through
+// stages of this file, FROM it.
+func (g componentStageGraph) descendsFromTest(name string) bool {
+	for range g.stages {
+		if name == "test" {
 			return true
 		}
-	}
-	return false
-}
-
-// providedSrcPathCoversRead answers the same question for a read whose path may
-// run through a glob (`erun-devops/docker/*/Dockerfile`). What such a read
-// needs is the directory the glob expands inside -- the part of the path before
-// its first glob-bearing component -- and the guard reports a path that globs
-// from its very first component rather than passing it.
-func providedSrcPathCoversRead(provided []string, path string) bool {
-	components := strings.Split(path, "/")
-	for i, component := range components {
-		if !strings.ContainsAny(component, "*?[") {
-			continue
-		}
-		if i == 0 {
+		stage, ok := g.byName[name]
+		if !ok {
 			return false
 		}
-		return providedSrcPathCovers(provided, strings.Join(components[:i], "/"))
+		name = stage.base
 	}
-	return providedSrcPathCovers(provided, path)
+	return name == "test"
 }
 
-// TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides extends the
-// COPY-or-`cd`-fails rule the Makefile states for LINT_MODULES to the shell
-// scripts check-gate runs, in both directions: the script file the recipe
-// invokes by path, and the repository-root directory each script resolves from
-// its own script_dir (`cd "${script_dir}/../../../<path>"`).
-//
-// Both are directories this stage has to provide for the same reason a linted
-// module does -- and unlike a missing module, which fails lint loudly, a missing
-// script or directory fails only that one target, inside the image, while the
-// identical command passes in a full checkout.
-//
-// That is exactly how test-atlas-validate shipped: the target, its script and
-// the module's own Dockerfile all landed together, but the erun-devops image --
-// whose test stage is what runs `make check` -- was never taught to COPY the
-// module the new script cd's into. The result was a gate that passed for every
-// contributor and on every PR, and a `make check` that could not succeed inside
-// any erun-devops image build, which is every release build. Nothing here is
-// release-specific: this test reads the Makefile and the Dockerfile, so it
-// fails in the same run that introduces the next one.
-// TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides is the
-// Go-test half of the same contract. A gate test reads repo-root state through
-// a runtime.Caller-derived helper rather than through a shell script's
-// script_dir, so the shell-script half above cannot see it: that guard's scan
-// set is Makefile-named `.sh` files, and the path a Go test resolves never
-// appears in one.
-//
-// That gap is exactly how a release came to be blocked by an absent COPY:
-// erun-integration/gitignore_clean_checkout_test.go read the checkout's
-// .gitignore through repoRoot, which resolves to this stage's /src, and the
-// read is fatal rather than a skip. `make check` aborted at
-// integration-test-gate inside the Docker venue while the identical tree passed
-// in a pod checkout where the file is simply present -- and the shell-script
-// half of this guard passed on that same tree, because it never looked at a Go
-// test.
-//
-// The failure direction is closed, deliberately: a read this scan can resolve
-// must be something the test stage COPYs, and a read it cannot resolve is
-// reported rather than skipped, so a site that escapes the scan can never be
-// counted as satisfied. The cost is registration -- every unresolvable read,
-// and every resolved one the image genuinely does not provide, needs an entry
-// in goTestRepoRootReadExemptions with the reason for it, and an entry that
-// matches no site fails this test.
-//
-// Three limits are worth stating rather than leaving to be discovered, and all
-// three are the same class this test closes for the ordinary case.
-//
-// The widest is a path that arrives as a function *parameter*. Nothing here
-// traces a helper back to its callers, so a read performed inside a helper stays
-// outside this check however the read is written -- and that is not a corner of
-// the codebase: `func readX(t testing.TB, path string) string` is one of the
-// commonest helper shapes in these modules, and the very read this scan was
-// extended for (erun-ui/buildstamp_test.go's Formula/bucket pair) is passed
-// through exactly such a helper and opened inside it. What the CWD-relative
-// resolution makes visible is the path *expression* at the site that names it;
-// the read itself is still inside a function this scan never binds an argument
-// into. The same applies to a helper taking the repository root and building
-// paths under it, which is the shape this file's own fixture pins as uncovered.
-//
-// The second is path construction that never goes through filepath.Join: a
-// fmt.Sprintf, a string concatenation, a struct field or slice element holding a
-// path, an os.ReadFile of something assembled elsewhere. The scan keys on
-// filepath.Join, so none of those is even a candidate.
-//
-// The third is a Join the scan declines to resolve: a non-".."-leading literal
-// first argument, an absolute one, or one that climbs past the checkout. Those
-// are excluded because they cannot reach repository-root state, not because they
-// were examined and found safe.
-//
-// None of the three is silent. The first two are named here and pinned by
-// TestScanLeavesParameterRootedAndNonJoinReadsUnseen, so a change that makes
-// them visible reconciles this text instead of contradicting it; the third is
-// stated at gateGoTestCwdRelativeRead. What the test does not do is fail on any
-// of them.
-func TestCheckGateGoTestsReadOnlyRepoRootPathsTheDevopsImageProvides(t *testing.T) {
-	root := repoRootForDockerignoreTest(t)
-	findings, scan := gateGoTestCopyContractFindings(t, root, filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"), gateGoTestModuleDirs, goTestRepoRootReadExemptions)
-	for _, finding := range findings {
-		t.Error(finding)
-	}
-	for _, helper := range gateGoTestRepoRootHelperNames {
-		if !scan.repoRootHelpers[helper] {
-			t.Errorf("%s is not recognized as resolving the repository root -- either it was renamed or its return "+
-				"shape changed, and the scan that finds reads through it is now looking for something that is no "+
-				"longer there; update this list and the detection together", helper)
+func stampOrTargetArgProblems(stage componentStage, consequence string) []string {
+	var problems []string
+	for _, line := range stage.lines {
+		if dockerfileStampOrTargetArgDef.MatchString(line) {
+			problems = append(problems, "stage `"+stage.name+"` declares "+strings.TrimSpace(line)+consequence)
 		}
 	}
+	return problems
 }
 
-func TestCheckGateScriptsResolveOnlyDirectoriesTheDevopsImageProvides(t *testing.T) {
-	root := repoRootForDockerignoreTest(t)
-	provided := erunDevopsProvidedSrcPaths(t, root, filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"))
-	for _, script := range checkGateShellScripts(t, root) {
-		// The script file itself first: the Makefile invokes it by path, so a
-		// stage that copies the directory a script cd's into but not the script
-		// is a gate that cannot start. Only the cd targets were checked before,
-		// which left a script under a path this stage does not COPY passing a
-		// guard whose stated job was to check the image provides it.
-		if !providedSrcPathCovers(provided, "/src/"+script) {
-			t.Errorf("%s is run by the Makefile's check-gate targets, but the erun-devops image test stage COPYs nothing that provides /src/%s — `make check` passes in a full checkout and fails inside every image build, so no release can be produced", script, script)
+func (g componentStageGraph) stageProblems(stage componentStage) []string {
+	problems := g.buildReadProblems(stage)
+	part, role := stageRole(stage.name)
+	switch role {
+	case "build":
+		return append(problems, g.buildStageProblems(stage, part)...)
+	case "test":
+		return append(problems, g.testStageProblems(stage, part)...)
+	}
+	if _, local := g.byName[stage.base]; local && !g.descendsFromTest(stage.base) {
+		problems = append(problems, "stage "+strconv.Quote(stage.name)+" is FROM "+stage.base+", which does not descend from `test`; helpers are FROM test")
+	}
+	return problems
+}
+
+// buildReadProblems reports a stage that reads a build stage it is not the
+// test stage of, which would let an artifact reach the image around the tests.
+func (g componentStageGraph) buildReadProblems(stage componentStage) []string {
+	var problems []string
+	for _, name := range g.reads(stage) {
+		part, role := stageRole(name)
+		if role != "build" || stage.name == partStageName(part, "test") {
+			continue
 		}
-		data, err := os.ReadFile(filepath.Join(root, script))
+		problems = append(problems, "stage "+strconv.Quote(stage.name)+" reads from `"+name+"`; only `"+partStageName(part, "test")+"` builds on it, so take the artifact from `test` or a helper FROM test, or BuildKit can skip the tests")
+	}
+	return problems
+}
+
+func (g componentStageGraph) buildStageProblems(stage componentStage, part string) []string {
+	var problems []string
+	if stage.platform != "--platform=$BUILDPLATFORM" {
+		problems = append(problems, "stage `"+stage.name+"` is not pinned with --platform=$BUILDPLATFORM")
+	}
+	_, tested := g.byName["test"]
+	if _, ok := g.byName[partStageName(part, "test")]; tested && !ok {
+		problems = append(problems, "stage `"+stage.name+"` has no `"+partStageName(part, "test")+"` built on it")
+	}
+	return append(problems, stampOrTargetArgProblems(stage, ": version stamping and target-arch compiles belong in a helper stage FROM test, or the tests rerun per version and per architecture")...)
+}
+
+func (g componentStageGraph) testStageProblems(stage componentStage, part string) []string {
+	var problems []string
+	build := partStageName(part, "build")
+	if _, ok := g.byName[build]; ok && stage.base != build {
+		problems = append(problems, "stage `"+stage.name+"` is FROM "+stage.base+", want FROM "+build)
+	}
+	if part != "" && !g.reaches(g.byName["test"], stage.name) {
+		problems = append(problems, "stage `"+stage.name+"` does not feed `test`, so BuildKit prunes it from the image's graph")
+	}
+	return append(problems, stampOrTargetArgProblems(stage, ", which would rerun the tests per version or per architecture")...)
+}
+
+func (g componentStageGraph) lastStageNameProblems(want string) []string {
+	if last := g.stages[len(g.stages)-1]; last.name != want {
+		return []string{"the last stage is named " + strconv.Quote(last.name) + ", want `" + want + "`"}
+	}
+	return nil
+}
+
+func (g componentStageGraph) lastStageProblems(want string) []string {
+	problems := g.lastStageNameProblems(want)
+	if !g.reaches(g.stages[len(g.stages)-1], "test") {
+		problems = append(problems, "the last stage takes nothing from `test` or a helper FROM test, so BuildKit prunes the tests from what it ships")
+	}
+	return problems
+}
+
+// TestComponentDockerfilesFollowTheStageConvention pins the repository's
+// component stage convention on every component Dockerfile. Reads a sibling
+// module, so it must run uncached (go test -count=1).
+func TestComponentDockerfilesFollowTheStageConvention(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	for _, component := range componentDockerfiles {
+		path := filepath.Join(root, "erun-devops", "docker", component, "Dockerfile")
+		data, err := os.ReadFile(path)
 		if err != nil {
-			t.Fatalf("read %s: %v", script, err)
+			t.Errorf("read %s: %v", path, err)
+			continue
 		}
-		for _, match := range scriptRelativeRootPattern.FindAllStringSubmatch(string(data), -1) {
-			wanted := "/src/" + filepath.ToSlash(filepath.Clean(match[1]))
-			if providedSrcPathExists(provided, wanted) {
-				continue
+		for _, problem := range componentStageConventionProblems(string(data)) {
+			t.Errorf("erun-devops/docker/%s/Dockerfile: %s", component, problem)
+		}
+	}
+}
+
+// TestLinuxPackageDockerfilesFollowTheStageConvention pins the same convention
+// on every package component, which ends in `dist` rather than `runtime`.
+// Reads a sibling module, so it must run uncached (go test -count=1).
+func TestLinuxPackageDockerfilesFollowTheStageConvention(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	for _, path := range linuxPackageDockerfilePaths(t) {
+		name := filepath.Base(filepath.Dir(path))
+		if _, ok := linuxPackageDockerfiles[name]; !ok {
+			t.Errorf("erun-devops/linux/%s/Dockerfile is not in linuxPackageDockerfiles, so the stage convention does not check it", name)
+		}
+	}
+	for name, tested := range linuxPackageDockerfiles {
+		path := filepath.Join(root, "erun-devops", "linux", name, "Dockerfile")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		for _, problem := range packageStageConventionProblems(string(data), tested) {
+			t.Errorf("erun-devops/linux/%s/Dockerfile: %s", name, problem)
+		}
+	}
+}
+
+// Every Dockerfile under erun-devops/docker is either a named component or a
+// single-stage wrapper; a new multi-stage image has to join the list above so
+// the convention covers it.
+func TestEveryMultiStageDockerfileIsANamedComponent(t *testing.T) {
+	named := make(map[string]struct{}, len(componentDockerfiles))
+	for _, component := range componentDockerfiles {
+		named[component] = struct{}{}
+	}
+	for _, path := range realDockerfilePaths(t) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		component := filepath.Base(filepath.Dir(path))
+		if _, ok := named[component]; ok {
+			continue
+		}
+		if stages := componentStagesOf(string(data)); len(stages) > 1 {
+			t.Errorf("%s has %d stages but is not in componentDockerfiles, so the stage convention does not check it", path, len(stages))
+		}
+	}
+}
+
+// multiPartStageDockerfileContent has two parts tested side by side, joined
+// by `test`.
+const multiPartStageDockerfileContent = "" +
+	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS cli-build\n" +
+	"RUN go build -o /out/app ./...\n" +
+	"\n" +
+	"FROM cli-build AS cli-test\n" +
+	"RUN go test ./...\n" +
+	"\n" +
+	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS scripts-test\n" +
+	"RUN go test ./scripts/...\n" +
+	"\n" +
+	"FROM cli-test AS test\n" +
+	"COPY --from=scripts-test /src/scripts /src/scripts\n" +
+	"\n" +
+	"FROM test AS dist\n" +
+	"ARG TARGETARCH\n" +
+	"RUN GOARCH=$TARGETARCH go build -o /dist/app ./...\n" +
+	"\n" +
+	"FROM ubuntu:24.04 AS runtime\n" +
+	"COPY --from=dist /dist/app /app\n" +
+	"COPY --from=test /src/scripts /scripts\n"
+
+// testedPackageDockerfileContent is a package component that tests itself:
+// build -> test -> package -> dist, the last FROM scratch.
+const testedPackageDockerfileContent = "" +
+	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
+	"RUN go build -o /out/app ./...\n" +
+	"\n" +
+	"FROM build AS test\n" +
+	"RUN go test ./...\n" +
+	"\n" +
+	"FROM test AS package\n" +
+	"ARG TARGETARCH\n" +
+	"RUN GOARCH=$TARGETARCH go build -o /pkg/app ./... && dpkg-deb --build /pkg /out/app.deb\n" +
+	"\n" +
+	"FROM scratch AS dist\n" +
+	"COPY --from=package /out/ /\n"
+
+// untestedPackageDockerfileContent is a package component tested elsewhere.
+const untestedPackageDockerfileContent = "" +
+	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
+	"RUN go build -o /out/app ./...\n" +
+	"\n" +
+	"FROM build AS package\n" +
+	"ARG TARGETARCH\n" +
+	"RUN GOARCH=$TARGETARCH go build -o /pkg/app ./... && dpkg-deb --build /pkg /out/app.deb\n" +
+	"\n" +
+	"FROM scratch AS dist\n" +
+	"COPY --from=package /out/ /\n"
+
+func TestComponentStageConventionProblemsReportsEachBreak(t *testing.T) {
+	conforming := consumedTestStageDockerfileContent
+	multi := multiPartStageDockerfileContent
+	cases := []struct {
+		name    string
+		text    string
+		problem string
+	}{
+		{"conforming", conforming, ""},
+		{"runtime copies from test directly", strings.Replace(conforming, "COPY --from=dist /dist/app", "COPY --from=test /out/app", 1), ""},
+		{"standalone test without build", "FROM golang:1.26.0 AS test\nRUN go test ./...\n\nFROM scratch AS runtime\nCOPY --from=test /src/app /app\n", ""},
+		{"toolchain source stage", strings.Replace(conforming, "FROM scratch AS runtime\n", "FROM alpine:3.20 AS fetcher\nRUN true\n\nFROM scratch AS runtime\nCOPY --from=fetcher /bin/tool /tool\n", 1), ""},
+		{"ends at test", strings.Split(conforming, "\nFROM test AS dist")[0], "the last stage is named \"test\", want `runtime`"},
+		{"multi-part", multi, ""},
+		{"test not from build", strings.Replace(conforming, "FROM build AS test", "FROM golang:1.26.0 AS test", 1), "want FROM build"},
+		{"last stage not runtime", strings.Replace(conforming, "AS runtime", "AS final", 1), "want `runtime`"},
+		{"helper from build", strings.Replace(conforming, "FROM test AS dist", "FROM build AS dist", 1), "stage \"dist\" reads from `build`"},
+		{"runtime copies from build", strings.Replace(conforming, "COPY --from=dist", "COPY --from=build", 1), "stage \"runtime\" reads from `build`"},
+		{"runtime mounts from build", conforming + "RUN --mount=type=bind,from=build,target=/b true\n", "reads from `build`"},
+		{"runtime never reaches test", strings.Replace(conforming, "COPY --from=dist /dist/app /app", "COPY app /app", 1), "takes nothing from `test`"},
+		{"helper not from test", strings.Replace(conforming, "FROM scratch AS runtime\n", "FROM scratch AS assets\nCOPY --from=test /out/app /app\n\nFROM assets AS packed\nRUN true\n\nFROM scratch AS runtime\nCOPY --from=packed /app /app\n", 1), "stage \"packed\" is FROM assets, which does not descend from `test`"},
+		{"version stamped in build", strings.Replace(conforming, "RUN go build -o /out/app", "ARG ERUN_VERSION\nRUN go build -o /out/app", 1), "stage `build` declares ARG ERUN_VERSION"},
+		{"target arch in build", strings.Replace(conforming, "RUN go build -o /out/app", "ARG TARGETARCH\nRUN go build -o /out/app", 1), "stage `build` declares ARG TARGETARCH"},
+		{"version stamped in test", strings.Replace(conforming, "RUN go test", "ARG ERUN_VERSION\nRUN go test", 1), "stage `test` declares ARG ERUN_VERSION"},
+		{"build not pinned", strings.Replace(conforming, "--platform=$BUILDPLATFORM ", "", 1), "not pinned"},
+		{"no test stage", "FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\nRUN go build ./...\n\nFROM scratch AS runtime\n", "no stage named `test`"},
+		{"test stage not named test", strings.Replace(conforming, "AS test", "AS check", 1), "no stage named `test`"},
+		{"part test not from its build", strings.Replace(multi, "FROM cli-build AS cli-test", "FROM golang:1.26.0 AS cli-test", 1), "stage `cli-test` is FROM golang:1.26.0, want FROM cli-build"},
+		{"part build not pinned", strings.Replace(multi, "FROM --platform=$BUILDPLATFORM golang:1.26.0 AS cli-build", "FROM golang:1.26.0 AS cli-build", 1), "stage `cli-build` is not pinned"},
+		{"part build without its test", strings.Replace(multi, "FROM --platform=$BUILDPLATFORM golang:1.26.0 AS scripts-test", "FROM --platform=$BUILDPLATFORM golang:1.26.0 AS docs-build\nRUN true\n\nFROM --platform=$BUILDPLATFORM golang:1.26.0 AS scripts-test", 1), "stage `docs-build` has no `docs-test`"},
+		{"part build read around its test", strings.Replace(multi, "COPY --from=dist /dist/app /app", "COPY --from=cli-build /out/app /app", 1), "stage \"runtime\" reads from `cli-build`; only `cli-test` builds on it"},
+		{"part test not joined into test", strings.Replace(multi, "COPY --from=scripts-test /src/scripts /src/scripts\n", "", 1), "stage `scripts-test` does not feed `test`"},
+		{"runtime copies around test from a part test", strings.Replace(strings.Replace(multi, "COPY --from=scripts-test /src/scripts /src/scripts\n", "", 1), "COPY --from=test /src/scripts", "COPY --from=scripts-test /src/scripts", 1), "stage `scripts-test` does not feed `test`"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := componentStageConventionProblems(tc.text)
+			if tc.problem == "" {
+				if len(problems) != 0 {
+					t.Fatalf("want no problems, got %q", problems)
+				}
+				return
 			}
-			t.Errorf("%s resolves %q relative to its own location, but the erun-devops image test stage COPYs nothing under %s — `make check` passes in a full checkout and fails inside every image build, so no release can be produced", script, match[1], wanted)
+			if !strings.Contains(strings.Join(problems, "\n"), tc.problem) {
+				t.Fatalf("want a problem containing %q, got %q", tc.problem, problems)
+			}
+		})
+	}
+}
+
+func TestPackageStageConventionProblemsReportsEachBreak(t *testing.T) {
+	tested := testedPackageDockerfileContent
+	untested := untestedPackageDockerfileContent
+	cases := []struct {
+		name    string
+		text    string
+		tested  bool
+		problem string
+	}{
+		{"tested package", tested, true, ""},
+		{"untested package", untested, false, ""},
+		{"tested package without its test stage", untested, true, "no stage named `test`"},
+		{"last stage not dist", strings.Replace(tested, "AS dist", "AS runtime", 1), true, "want `dist`"},
+		{"untested last stage not dist", strings.Replace(untested, "AS dist", "AS out", 1), false, "want `dist`"},
+		{"dist not from scratch", strings.Replace(tested, "FROM scratch AS dist", "FROM debian:13 AS dist", 1), true, "want FROM scratch"},
+		{"package from build around test", strings.Replace(tested, "FROM test AS package", "FROM build AS package", 1), true, "stage \"package\" reads from `build`"},
+		{"dist never reaches test", strings.Replace(tested, "COPY --from=package /out/ /", "COPY app.deb /", 1), true, "takes nothing from `test`"},
+		{"untested build stamps the version", strings.Replace(untested, "RUN go build -o /out/app", "ARG ERUN_VERSION\nRUN go build -o /out/app", 1), false, "stage `build` declares ARG ERUN_VERSION"},
+		{"untested build not pinned", strings.Replace(untested, "--platform=$BUILDPLATFORM ", "", 1), false, "not pinned"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			problems := packageStageConventionProblems(tc.text, tc.tested)
+			if tc.problem == "" {
+				if len(problems) != 0 {
+					t.Fatalf("want no problems, got %q", problems)
+				}
+				return
+			}
+			if !strings.Contains(strings.Join(problems, "\n"), tc.problem) {
+				t.Fatalf("want a problem containing %q, got %q", tc.problem, problems)
+			}
+		})
+	}
+}
+
+// The cli-test stage of the erun-devops Dockerfile copies erun-devops/docker
+// one image directory at a time, so a change to a script the runtime image
+// bakes does not rerun the Go suites, and erun-devops/linux whole. A directory
+// left off would vanish from the suites' view inside the build -- the
+// Dockerfile contract tests above would silently stop checking it -- while
+// every host run still sees it, so the list is checked from here.
+func TestCLITestStageCopiesEveryDockerDirectory(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	data, err := os.ReadFile(filepath.Join(root, "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read the erun-devops Dockerfile: %v", err)
+	}
+	text := string(data)
+	for _, path := range realDockerfilePaths(t) {
+		image := filepath.Base(filepath.Dir(path))
+		if image == "erun-devops" {
+			continue
 		}
+		copyLine := "COPY erun-devops/docker/" + image + " /src/erun-devops/docker/" + image + "\n"
+		if !strings.Contains(text, copyLine) {
+			t.Errorf("erun-devops/docker/erun-devops/Dockerfile: the cli-test stage lacks %q, so the suites it runs never see that image's Dockerfile", strings.TrimSpace(copyLine))
+		}
+	}
+	if packageLine := "COPY erun-devops/linux /src/erun-devops/linux\n"; !strings.Contains(text, packageLine) {
+		t.Errorf("erun-devops/docker/erun-devops/Dockerfile: the cli-test stage lacks %q, so the suites it runs never see the package Dockerfiles", strings.TrimSpace(packageLine))
 	}
 }

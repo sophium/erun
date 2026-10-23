@@ -1,0 +1,34 @@
+{
+  "baseUrl": "https://console.production.invalid",
+  "version": "<VERSION>",
+  "suites": [
+    {
+      "component": "erun-console",
+      "dockerfile": "<TMP>",
+      "baseUrl": "https://console.production.invalid",
+      "passed": false,
+      "logPath": "<TMP>",
+      "failure": "docker build --target e2e failed: exit status 1"
+    }
+  ]
+}
+audit: erun e2e --base-url https://console.production.invalid --component erun-console --version <VERSION>
+e2e: --base-url and --version name the target; no environment is read (deployment, exposure and version checks skipped)
+e2e: expected version <VERSION> (from --version; deployed-version lookup skipped)
+e2e: suite erun-console: <TMP>
+e2e: base url https://console.production.invalid (from --base-url; exposure and certificate checks skipped)
+e2e: console.production.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+e2e: running erun-console against https://console.production.invalid
+#9 12.41   1 failed
+e2e: FAILED erun-console
+  suite:     <TMP>
+  component: erun-console
+  target:    https://console.production.invalid
+  version:   <VERSION> (expected, from --version)
+  step:      docker build --target e2e failed: exit status 1
+  log:       <TMP>
+  last lines of the log:
+    #9 12.41   1 failed
+e2e: 1 of 1 suites failed. erun e2e is not a release gate: nothing was blocked or rolled back, and nothing was filed. File each failure above as a bug against version <VERSION>.
+erun e2e: 1 of 1 suites failed against https://console.production.invalid at version <VERSION>: erun-console

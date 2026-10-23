@@ -34,6 +34,10 @@ func ResolveCurrentDockerBuildContexts(findProjectRoot ProjectFinderFunc, resolv
 	if err != nil {
 		return nil, err
 	}
+	if isLinuxPackageDockerfile(buildContext.DockerfilePath) {
+		// A linux package directory has a Dockerfile but no image to build.
+		return nil, ErrDockerBuildContextNotFound
+	}
 	if strings.TrimSpace(buildContext.DockerfilePath) != "" {
 		return []DockerBuildContext{buildContext}, nil
 	}

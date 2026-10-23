@@ -117,7 +117,7 @@ func describeDockerBuildSecrets(secrets []DockerBuildSecret) string {
 // /run/secrets/<id> ]` guard — or a mount left at its default
 // `required=false` — degrades to skipping precisely the work the secret exists
 // to enable. The build then reports success having verified less than the
-// project asked it to, which is the one outcome a gate must never have. An
+// project asked it to, which is the one outcome a build must never have. An
 // error here names the config key, the id, and the missing variable or path
 // instead, and the remedy is a one-line config or environment change.
 func applyDockerSecrets(ctx Context, projectRoot, environment string, build *DockerBuildSpec) error {

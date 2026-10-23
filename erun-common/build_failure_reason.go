@@ -7,7 +7,7 @@ import (
 
 // A failed `docker build` returns nothing but "exit status 1". That is enough
 // when a human is watching the stream it also printed, and useless in the case
-// erun actually needs it for: a gate running detached in a merge queue, whose
+// erun actually needs it for: a build running detached in a merge queue, whose
 // durable timing record is read long after the stream is gone. Every failure
 // therefore carries a reason extracted from BuildKit's own output, so
 // ~/.erun/timing/build-*.json says what went wrong rather than that something

@@ -47,8 +47,7 @@ func (r *JobRepository) Create(ctx context.Context, job model.Job) (model.Job, e
 }
 
 // classifyJobError maps jobs' foreign key and CHECK constraints onto the
-// repository's sentinel errors, mirroring classifyGateRunError: an
-// environmentId the caller's tenant cannot see fails the same foreign key
+// repository's sentinel errors: an environmentId the caller's tenant cannot see fails the same foreign key
 // check whether it genuinely doesn't exist or just isn't this tenant's.
 func classifyJobError(err error) error {
 	code, ok := pgErrorCode(err)

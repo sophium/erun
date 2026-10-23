@@ -31,8 +31,10 @@ Module-area guidance for `erun-backend`. Follow the repository root `AGENTS.md` 
   domain and an organization cannot claim a domain it does not control. Left
   at Zitadel's own default of false, every tenant's users compete for one
   global namespace, and two tenants wanting the same name is an unavoidable
-  collision rather than a policy choice. Covered by
-  `erun-devops/k8s/erun-zitadel-chart_test.sh`.
+  collision rather than a policy choice. Set as the
+  `ZITADEL_DEFAULTINSTANCE_DOMAINPOLICY_*` environment of the core container in
+  `erun-devops/k8s/erun-zitadel/templates/zitadel.yaml`; no render test pins
+  it, so a change there needs a deliberate review.
 - Zitadel reads those settings when core initialises the **first** instance.
   They shape a freshly provisioned instance and do not rewrite one that
   already exists, so enabling them on a live instance is deliberate operator

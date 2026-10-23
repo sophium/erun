@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const testStageDockerfile = "FROM golang:1.26.0 AS test\nRUN --network=host go test ./...\n\nFROM golang:1.26.0 AS builder\nCOPY --from=test /test-ok /tmp/test-ok\n"
+const testStageDockerfile = "FROM golang:1.26.0 AS test\nRUN --network=host go test ./...\n\nFROM scratch AS runtime\nCOPY --from=test /out/app /app\n"
 
 func stubBuildDaemon(t *testing.T, answers bool, running string) *[]string {
 	t.Helper()

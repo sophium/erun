@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// TestAISessionLaunchCommand pins which AI-tab launches wrap in the cwd guard
-// (bare or claude) versus launch verbatim (other tools, or claude with explicit
+// TestAISessionLaunchCommand pins which AI-tab launches compose claude with the
+// environment's flags (bare or claude; the runtime image's claude link resumes)
+// versus launch verbatim (other tools, or claude with explicit
 // flags). Remote Control naming is pinned separately by TestAISessionLaunchRemoteControl.
 func TestAISessionLaunchCommand(t *testing.T) {
 	effort := func(level string) EnvironmentClaudeConfig {
@@ -15,13 +16,13 @@ func TestAISessionLaunchCommand(t *testing.T) {
 		return EnvironmentClaudeConfig{Effort: &l}
 	}
 
-	t.Run("default claude wraps in the cwd guard at the env effort", func(t *testing.T) {
+	t.Run("default claude launches at the env effort", func(t *testing.T) {
 		assertDefaultClaudeGuardAtEffort(t, effort("high"))
 	})
 
-	t.Run("explicit claude tool also uses the guard", func(t *testing.T) {
-		if got := AISessionLaunchCommand("claude", effort("low"), nil, "team", "dev"); !strings.Contains(got, "claude --continue --effort low") {
-			t.Fatalf("explicit claude must use the guard, got %q", got)
+	t.Run("explicit claude tool composes the same flags", func(t *testing.T) {
+		if got := AISessionLaunchCommand("claude", effort("low"), nil, "team", "dev"); !strings.Contains(got, "claude --effort low") || strings.Contains(got, "--continue") {
+			t.Fatalf("explicit claude must compose the env flags without --continue, got %q", got)
 		}
 	})
 
@@ -43,7 +44,7 @@ func TestAISessionLaunchCommand(t *testing.T) {
 
 	// ultracode is not a `claude --effort` value; it launches through the
 	// --settings mechanism instead.
-	t.Run("ultracode launches via --settings in both guard branches", func(t *testing.T) {
+	t.Run("ultracode launches via --settings", func(t *testing.T) {
 		assertUltracodeInBothBranches(t, effort("ultracode"))
 	})
 
@@ -58,15 +59,10 @@ func TestAISessionLaunchCommand(t *testing.T) {
 func assertDefaultClaudeGuardAtEffort(t *testing.T, config EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", config, nil, "team", "dev")
-	if strings.Count(got, "--effort high --model opus") != 2 {
-		t.Fatalf("expected --effort high --model opus in both guard branches, got %q", got)
-	}
-	if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=opus claude") != 2 {
-		t.Fatalf("expected the opus subagent-model prefix in both guard branches, got %q", got)
-	}
-	if !strings.Contains(got, "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --effort high --model opus") ||
-		!strings.Contains(got, "else CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus") {
-		t.Fatalf("guard missing the resume/fresh branches: %q", got)
+	// One plain launch: the runtime image's claude link decides whether to
+	// resume, so the AI tab carries no shell guard of its own.
+	if want := "CLAUDE_CODE_SUBAGENT_MODEL=opus claude --effort high --model opus --remote-control team/dev"; got != want {
+		t.Fatalf("launch = %q, want %q", got, want)
 	}
 }
 
@@ -87,36 +83,33 @@ func assertEffortResolvesToUltracode(t *testing.T, effort func(string) Environme
 func assertUltracodeInBothBranches(t *testing.T, config EnvironmentClaudeConfig) {
 	t.Helper()
 	got := AISessionLaunchCommand("", config, nil, "team", "dev")
-	if strings.Count(got, `--settings '{"ultracode":true}'`) != 2 || strings.Contains(got, "--effort") {
-		t.Fatalf("ultracode must inject --settings (never --effort) in both branches, got %q", got)
+	if strings.Count(got, `--settings '{"ultracode":true}'`) != 1 || strings.Contains(got, "--effort") {
+		t.Fatalf("ultracode must inject --settings (never --effort), got %q", got)
 	}
-	if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}'`) {
-		t.Fatalf("--settings must compose after --continue in the resume branch, got %q", got)
+	if !strings.Contains(got, `claude --settings '{"ultracode":true}'`) {
+		t.Fatalf("--settings must follow claude, got %q", got)
 	}
 }
 
 // TestAISessionLaunchCommandModelAndDebugFlags pins that the per-env default
 // model and verbose+debug launch flags each inject independently of the other.
 func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
-	t.Run("default model and verbose debug inject into both guard branches", func(t *testing.T) {
+	t.Run("default model and verbose debug inject into the launch", func(t *testing.T) {
 		model := "fable"
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{
 			Models:       []string{"opus", "fable"},
 			DefaultModel: &model,
 			VerboseDebug: true,
 		}, nil, "team", "dev")
-		if strings.Count(got, "--model fable --verbose --debug") != 2 {
-			t.Fatalf("expected --model and --verbose --debug in both guard branches, got %q", got)
-		}
-		if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}' --model fable --verbose --debug`) {
-			t.Fatalf("flags must compose after the effort flags in the resume branch, got %q", got)
+		if !strings.Contains(got, `claude --settings '{"ultracode":true}' --model fable --verbose --debug`) {
+			t.Fatalf("flags must compose after the effort flags, got %q", got)
 		}
 	})
 
 	t.Run("verbose debug composes with the resolved default model", func(t *testing.T) {
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true}, nil, "team", "dev")
-		if strings.Count(got, "--model opus --verbose --debug") != 2 {
-			t.Fatalf("expected --model opus --verbose --debug in both branches, got %q", got)
+		if !strings.Contains(got, "--model opus --verbose --debug") {
+			t.Fatalf("expected --model opus --verbose --debug, got %q", got)
 		}
 	})
 }
@@ -127,15 +120,12 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 	model := func(v string) *string { return &v }
 
-	t.Run("prefix mirrors the resolved model on both guard branches and composes with ultracode", func(t *testing.T) {
+	t.Run("prefix mirrors the resolved model and composes with ultracode", func(t *testing.T) {
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{
 			Models:       []string{"fable"},
 			DefaultModel: model("fable"),
 		}, nil, "team", "dev")
-		if strings.Count(got, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude") != 2 {
-			t.Fatalf("expected the subagent-model prefix on both guard branches, got %q", got)
-		}
-		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue --settings '{"ultracode":true}' --model fable`) {
+		if !strings.Contains(got, `CLAUDE_CODE_SUBAGENT_MODEL=fable claude --settings '{"ultracode":true}' --model fable`) {
 			t.Fatalf("prefix must precede claude and compose with --settings/--model, got %q", got)
 		}
 	})
@@ -204,10 +194,10 @@ func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 func TestAISessionLaunchRemoteControl(t *testing.T) {
 	yes := func() *bool { b := true; return &b }
 
-	t.Run("named <tenant>/<env> by default in both guard branches", func(t *testing.T) {
+	t.Run("named <tenant>/<env> by default", func(t *testing.T) {
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, nil, "team", "dev")
-		if strings.Count(got, "--remote-control team/dev") != 2 {
-			t.Fatalf("expected --remote-control team/dev in both guard branches, got %q", got)
+		if strings.Count(got, "--remote-control team/dev") != 1 {
+			t.Fatalf("expected --remote-control team/dev, got %q", got)
 		}
 	})
 
@@ -227,8 +217,8 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 
 	t.Run("an unsafe tenant/env falls back to the unnamed flag", func(t *testing.T) {
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, nil, "a b; rm", "dev")
-		if strings.Count(got, "--remote-control") != 2 || strings.Contains(got, "--remote-control ") {
-			t.Fatalf("unsafe tenant must yield the unnamed flag in both branches, got %q", got)
+		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
+			t.Fatalf("unsafe tenant must yield the unnamed flag, got %q", got)
 		}
 	})
 
@@ -236,7 +226,7 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 		// Shell-safe, but Claude Code's own arg parser would read a
 		// "-"-leading name as an option flag, so it is treated as unsafe.
 		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}, nil, "-rm", "dev")
-		if strings.Count(got, "--remote-control") != 2 || strings.Contains(got, "--remote-control ") {
+		if strings.Count(got, "--remote-control") != 1 || strings.Contains(got, "--remote-control ") {
 			t.Fatalf("leading-dash tenant must yield the unnamed flag, got %q", got)
 		}
 	})
@@ -319,11 +309,11 @@ func TestResolveClaudeEffort(t *testing.T) {
 // assertions own the contract; the launcher's composition into the dtach script
 // is locked by the open --ai dry-run goldens.
 func TestAISessionLaunchLines(t *testing.T) {
-	t.Run("claude guard wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
+	t.Run("claude launch wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
 		script := strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
 		for _, want := range []string{
 			"ai_status=0",
-			"fi || ai_status=$?",
+			"--remote-control team/dev || ai_status=$?",
 			`[ "$ai_status" = 137 ]`,
 			"likely out of memory; consider raising Memory in the environment Runtime settings",
 			"Claude exited (exit %s)",

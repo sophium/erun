@@ -8,55 +8,15 @@ import (
 	"strings"
 )
 
-// ResolveCurrentLinuxBuildScripts resolves linux package build scripts only when the
-// operator is explicitly working in a packaging directory. The .deb is consumed only by
-// the release flow, so this skips project-root auto-discovery to avoid rebuilding it
-// needlessly on every build/deploy; release publishing has its own resolver.
-func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
-	contexts, err := resolveExplicitLinuxPackageContexts(resolveBuildContext)
-	if err != nil {
-		return nil, err
-	}
+// A linux package component is <tenant>-devops/linux/<name>/Dockerfile. It is
+// never an image: a plain build runs it through its `test` stage to a
+// cache-only output, and only `erun build --release` exports its `dist` stage
+// and uploads the .deb files it holds (linux_package_build.go).
 
-	scripts := make([]scriptSpec, 0, len(contexts))
-	for _, context := range contexts {
-		if strings.TrimSpace(context.BuildScriptPath) == "" {
-			continue
-		}
-		scripts = append(scripts, newScriptSpec(context.Dir, "./build.sh", version))
-	}
-	if len(scripts) == 0 {
-		return nil, ErrLinuxPackageBuildNotFound
-	}
-	return scripts, nil
-}
-
-func resolveExplicitLinuxPackageContexts(resolveBuildContext BuildContextResolverFunc) ([]LinuxPackageContext, error) {
-	if resolveBuildContext == nil {
-		resolveBuildContext = ResolveDockerBuildContext
-	}
-
-	buildContext, err := resolveBuildContext()
-	if err != nil {
-		return nil, err
-	}
-
-	if context, ok, err := LinuxPackageContextAtDir(buildContext.Dir); err != nil {
-		return nil, err
-	} else if ok {
-		return []LinuxPackageContext{context}, nil
-	}
-
-	contexts, err := ResolveLinuxPackageContextsAtDir(buildContext.Dir)
-	if err != nil {
-		if errors.Is(err, ErrLinuxPackageBuildNotFound) {
-			return nil, ErrLinuxPackageBuildNotFound
-		}
-		return nil, err
-	}
-	return contexts, nil
-}
-
+// ResolveCurrentLinuxPackageContexts resolves the linux package components the
+// current directory scopes a build to: the package directory itself, every
+// package under a linux/ directory, or every package of the project's
+// <tenant>-devops/linux module from the devops directory or the project root.
 func ResolveCurrentLinuxPackageContexts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) ([]LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = ResolveDockerBuildContext
@@ -90,32 +50,26 @@ func ResolveCurrentLinuxPackageContexts(findProjectRoot ProjectFinderFunc, resol
 	return nil, ErrLinuxPackageBuildNotFound
 }
 
+// LinuxPackageContextAtDir reports the linux package component at dir: a
+// Dockerfile in a directory whose parent is named linux.
 func LinuxPackageContextAtDir(dir string) (LinuxPackageContext, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
-	if dir == "" {
-		return LinuxPackageContext{}, false, nil
-	}
-	if filepath.Base(filepath.Dir(dir)) != "linux" {
+	if dir == "" || filepath.Base(filepath.Dir(dir)) != "linux" {
 		return LinuxPackageContext{}, false, nil
 	}
 
-	buildScriptPath, buildFound, err := linuxPackageScriptPath(dir, "build.sh")
+	dockerfilePath := filepath.Join(dir, "Dockerfile")
+	info, err := os.Stat(dockerfilePath)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return LinuxPackageContext{}, false, nil
+		}
 		return LinuxPackageContext{}, false, err
 	}
-	releaseScriptPath, releaseFound, err := linuxPackageScriptPath(dir, "release.sh")
-	if err != nil {
-		return LinuxPackageContext{}, false, err
-	}
-	if !buildFound && !releaseFound {
+	if info.IsDir() {
 		return LinuxPackageContext{}, false, nil
 	}
-
-	return LinuxPackageContext{
-		Dir:               dir,
-		BuildScriptPath:   buildScriptPath,
-		ReleaseScriptPath: releaseScriptPath,
-	}, true, nil
+	return LinuxPackageContext{Dir: dir, DockerfilePath: dockerfilePath}, true, nil
 }
 
 func ResolveLinuxPackageContextsAtDir(dir string) ([]LinuxPackageContext, error) {
@@ -150,6 +104,27 @@ func ResolveLinuxPackageContextsAtDir(dir string) ([]LinuxPackageContext, error)
 		return nil, ErrLinuxPackageBuildNotFound
 	}
 	return contexts, nil
+}
+
+// isLinuxPackageDockerfile reports whether a Dockerfile is a linux package
+// component's, which no image path may build, tag or push.
+func isLinuxPackageDockerfile(dockerfilePath string) bool {
+	dockerfilePath = strings.TrimSpace(dockerfilePath)
+	if dockerfilePath == "" {
+		return false
+	}
+	_, ok, err := LinuxPackageContextAtDir(filepath.Dir(filepath.Clean(dockerfilePath)))
+	return err == nil && ok
+}
+
+// checkNotLinuxPackageDockerfile refuses to resolve a linux package component
+// as an image. Discovery never offers one -- it walks docker/ directories --
+// so this guards the explicit-context paths that hand a Dockerfile in directly.
+func checkNotLinuxPackageDockerfile(dockerfilePath string) error {
+	if !isLinuxPackageDockerfile(dockerfilePath) {
+		return nil
+	}
+	return fmt.Errorf("%s is a linux package, not an image: `erun build` runs its test stage and `erun build --release` publishes its .deb files to the GitHub release; it is never tagged or pushed", dockerfilePath)
 }
 
 func resolveCurrentDevopsLinuxDir(findProjectRoot ProjectFinderFunc, dir string, target DockerCommandTarget) (string, bool, error) {
@@ -248,27 +223,4 @@ func isLinuxPackageModuleDir(dir string) (bool, error) {
 		return false, err
 	}
 	return len(contexts) > 0, nil
-}
-
-func linuxPackageScriptPath(dir, name string) (string, bool, error) {
-	path := filepath.Join(dir, name)
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", false, nil
-		}
-		return "", false, err
-	}
-	if info.IsDir() {
-		return "", false, nil
-	}
-	return path, true, nil
-}
-
-func newScriptSpec(dir, path, version string) scriptSpec {
-	return scriptSpec{
-		Dir:  dir,
-		Path: path,
-		Env:  buildScriptEnv(version),
-	}
 }

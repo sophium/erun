@@ -3,99 +3,40 @@
 set -eu
 
 ORIGINAL_DIR=$(pwd)
-# -P so a checkout reached through a symlink resolves to the one spelling the
-# lint gate below caches its findings against.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd -P)
-WAILS_BIN="${WAILS_BIN:-$(go env GOPATH)/bin/wails}"
 TARGET_GOOS="${GOOS:-$(go env GOOS)}"
-YARN_BIN="${YARN_BIN:-}"
-NODE_BIN_DIR="${NODE_BIN_DIR:-}"
-SKIP_LINT=0
-TARGET=""
 
-while [ $# -gt 0 ]; do
-	case "$1" in
-		--skip-lint)
-			SKIP_LINT=1
-			shift
-			;;
-		*)
-			if [ -n "$TARGET" ]; then
-				printf 'build.sh: unexpected extra argument %s\n' "$1" >&2
-				exit 2
-			fi
-			TARGET="$1"
-			shift
-			;;
-	esac
-done
-TARGET=${TARGET:-"$SCRIPT_DIR/bin/erun-app"}
+case "${1:-}" in
+-*)
+	printf 'build.sh: unknown flag %s; usage: build.sh [target]\n' "$1" >&2
+	exit 2
+	;;
+esac
+if [ $# -gt 1 ]; then
+	printf 'usage: build.sh [target]\n' >&2
+	exit 2
+fi
+TARGET=${1:-"$SCRIPT_DIR/bin/erun-app"}
 VERSION_FILE="$SCRIPT_DIR/../erun-devops/VERSION"
 
 cd "$SCRIPT_DIR"
 
 mkdir -p "$(dirname "$TARGET")"
 
-if [ -z "$YARN_BIN" ]; then
-	YARN_BIN=$(command -v yarn)
-fi
-if [ -z "$NODE_BIN_DIR" ]; then
-	if [ -x /opt/homebrew/opt/node@24/bin/node ]; then
-		NODE_BIN_DIR=/opt/homebrew/opt/node@24/bin
-	else
-		NODE_BIN_DIR=$(dirname "$(command -v node)")
-	fi
-fi
-export PATH="$NODE_BIN_DIR:$(dirname "$YARN_BIN"):$PATH"
+# Builds only: the lint and test gates live in the component's test stage
+# (erun-devops/linux/erun-ui/Dockerfile), and a developer runs them by hand.
+# The binding generator compiles this package, whose production assets embed
+# frontend/dist, so the directory has to exist before the bundle does.
+mkdir -p frontend/dist
+go tool wails generate module
 
-if [ -d frontend ]; then
-	mkdir -p frontend/dist
-fi
-
-# Pass the skip-when-unchanged cache dir through when the caller set one, so
-# this call (reached inside test-playwright's headless erun-app build) hits the
-# generation test-frontend already did instead of re-running `wails generate
-# module`. Inherited, never hardcoded here: unset means unconditional
-# generation, exactly as a bare ./generate-wailsjs.sh run.
-ERUN_WAILSJS_CACHE_DIR="${ERUN_WAILSJS_CACHE_DIR:-}" WAILS_BIN="$WAILS_BIN" "$SCRIPT_DIR/generate-wailsjs.sh"
-
-if [ -d frontend ]; then
-	# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
-	# erun-ui/frontend is a Yarn workspace member, and a plain `cd frontend &&
-	# yarn install` resolves against frontend's own stale, pre-workspaces
-	# lockfile instead, silently dropping deps the root lockfile hoists
-	# (e.g. radix-ui) from node_modules.
-	(cd "$SCRIPT_DIR/.." && "$YARN_BIN" install --frozen-lockfile --prefer-offline --network-timeout 600000)
-	cd frontend
-	# Gate the bundle on the same checks CI would run. `--skip-lint` escapes
-	# the gates for one invocation when iterating locally; CI never passes it.
-	if [ "$SKIP_LINT" -eq 1 ]; then
-		printf '>> SKIPPING typecheck/lint/format:check/test (--skip-lint)\n' >&2
-	else
-		"$YARN_BIN" typecheck
-		"$YARN_BIN" lint
-		"$YARN_BIN" format:check
-		# The frontend unit tests cover pure logic the Playwright suite
-		# cannot isolate (stream parsing, row-state derivation). They were
-		# runnable but ungated, which is the same as absent.
-		"$YARN_BIN" test
-		# Go-side lint gate, kept here too (redundant with `make check`'s own
-		# LINT_MODULES entry for erun-ui) as a fast local signal for anyone
-		# iterating on the desktop build directly without running the full
-		# repo gate.
-		#
-		# The cache is scoped to this checkout because golangci-lint keys it by
-		# module, not by working tree: a second checkout of erun-ui would
-		# otherwise replay the first one's results against a tree that never
-		# produced them. Correctness does not rest on that alone — a replayed
-		# finding still renders the path of the run that cached it, so
-		# .golangci.yml matches excluded paths by segment instead of anchoring
-		# them to a working tree.
-		(cd "$SCRIPT_DIR" && GOLANGCI_LINT_CACHE="${GOLANGCI_LINT_CACHE:-$SCRIPT_DIR/.golangci-cache}" golangci-lint run ./...)
-	fi
-	"$YARN_BIN" build
-	cd "$SCRIPT_DIR"
-fi
+# Installed from the repo-root workspace lockfile, not frontend/yarn.lock:
+# erun-ui/frontend is a Yarn workspace member, and a plain `cd frontend &&
+# yarn install` resolves against frontend's own stale, pre-workspaces
+# lockfile instead, silently dropping deps the root lockfile hoists
+# (e.g. radix-ui) from node_modules.
+(cd "$SCRIPT_DIR/.." && yarn install --frozen-lockfile --prefer-offline --network-timeout 600000)
+(cd "$SCRIPT_DIR/frontend" && yarn build)
 
 BUILD_VERSION=dev
 if [ -f "$VERSION_FILE" ]; then

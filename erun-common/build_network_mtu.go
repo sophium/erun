@@ -46,7 +46,7 @@ var warnOnceAboutBridgeMTU sync.Once
 // A warning rather than a refusal, deliberately: the mismatch makes failure
 // likely, not certain -- a CNI that clamps MSS masks it, and a fully-cached
 // build never touches the network at all. Refusing here would fail builds that
-// would have succeeded, which for a required merge gate is the same disease as
+// would have succeeded, which for a merge queue build is the same disease as
 // the bug it is warning about. The refusal-grade certainty only exists once a
 // step has actually stalled, which is where dockerBuildNetworkDiagnosis speaks.
 func warnAboutBridgeMTUMismatch(stderr io.Writer) {
@@ -172,7 +172,7 @@ func dockerDefaultBridgeMTU() (int, bool) {
 
 // localEgressMTU reports the MTU of the interface carrying this process's
 // default route, and its name. Reads procfs/sysfs directly so it needs no
-// iproute2 and no privileges, matching what the dind entrypoint wrapper does
+// iproute2 and no privileges, matching what `erun dind-entrypoint` does
 // from the other side of the same namespace.
 func localEgressMTU() (int, string, bool) {
 	return egressMTUUnder(procRootForMTU(), sysRootForMTU())

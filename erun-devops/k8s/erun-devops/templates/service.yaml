@@ -67,6 +67,17 @@ it while the adoption reads it. Both volumes are therefore staged outside
   {{- $legacyWorktreePath = printf "%s/git/%s" $homeStagePath $worktreeRepoName -}}
 {{- end -}}
 {{- /*
+The stock docker:dind image carries no erun, so prepare-volumes copies the
+runtime image's own binary into an emptyDir the erun-dind sidecar runs its
+entrypoint (`erun dind-entrypoint`) from. Same pod, same image version: the
+sidecar's entrypoint can never drift from the erun that runs the builds. The
+runtime image must therefore be at least as new as this chart; `erun deploy`
+refuses a stock image older than it before the rollout tears the running pod
+down (guardRuntimeImageNotOlderThanChart).
+*/ -}}
+{{- $erunBinStagePath := "/mnt/erun-bin" -}}
+{{- $erunBinPath := "/opt/erun/bin" -}}
+{{- /*
 envType is the canonical environment type written into the in-pod erun config
 (EnvConfig.Type). It is the inverse of the worktreeStorage→type mapping that
 erun-common/deploy.go:resolveWorktreeStorage applies, so the pod records the
@@ -145,9 +156,9 @@ emitted; type is the single source of truth.
 {{- $runtimeLimits := default dict $runtimeResources.limits -}}
 {{- $runtimeRequests := default dict $runtimeResources.requests -}}
 {{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}
-{{- /* Sized for the `make check-gate` an agent runs inside this container, not
-       for a serving app: it is the same ten-target gate the dind sidecar runs
-       during an image build, which is why that sidecar's own default is 20Gi.
+{{- /* Sized for the builds and tests an agent runs inside this container, not
+       for a serving app: the same component builds the dind sidecar runs,
+       which is why that sidecar's own default is 20Gi.
        Defaults mirror eruncommon.DefaultRuntimePodCPU/Memory in
        erun-common/runtime_resources.go — keep the two in sync; that constant's
        own comment records the measurement this number comes from. */ -}}
@@ -198,8 +209,8 @@ emitted; type is the single source of truth.
        shipped and was never run. Kept as a value so the two can be reconciled
        in one place, and so an env can pin a different sidecar without
        overriding the whole image reference. This default is not left to
-       memory: k8s/image-version_test.sh fails the render gate when it and
-       erun-devops/docker/erun-dind/VERSION disagree. */ -}}
+       memory: erun-common's TestChartImageTagsMatchTheirVersionPins fails the
+       build when it and erun-devops/docker/erun-dind/VERSION disagree. */ -}}
 {{- $dindImageTag := default "28.1.1-5" .Values.dindImageTag -}}
 {{- $dindImage := default (printf "%s/erun-dind:%s" $containerRegistry $dindImageTag) (index $imageOverrides "erun-dind") -}}
 {{- /* The gid of the `docker` group baked into the docker:<ver>-dind base, which
@@ -576,7 +587,8 @@ spec:
                volume on every pod start would trade this bug for a slow one.
                Runs first so the adoption below sees a writable claim. A host
                worktree is the operator's own directory on the node and is
-               never touched. */}}
+               never touched. With the dind sidecar it also hands that sidecar
+               this image's erun binary to start from. */}}
         - image: {{ $devopsImage }}
           name: prepare-volumes
           imagePullPolicy: IfNotPresent
@@ -599,6 +611,10 @@ spec:
               {{- if eq $worktreeStorage "pvc" }}
               chown 1000:1000 {{ $worktreeStagePath | quote }}
               {{- end }}
+              {{- if $dindEnabled }}
+              cp /usr/local/bin/erun {{ printf "%s/erun" $erunBinStagePath | quote }}
+              chmod 0755 {{ printf "%s/erun" $erunBinStagePath | quote }}
+              {{- end }}
           volumeMounts:
             - name: erun-home
               mountPath: {{ $homeStagePath | quote }}
@@ -606,15 +622,19 @@ spec:
             - name: repo-worktree
               mountPath: {{ $worktreeStagePath | quote }}
             {{- end }}
+            {{- if $dindEnabled }}
+            - name: erun-bin
+              mountPath: {{ $erunBinStagePath | quote }}
+            {{- end }}
         {{- if eq $worktreeStorage "pvc" }}
         # Adopt before mounting: a deploy that introduces the worktree claim to
         # an environment whose checkout still lives on the home volume would
         # otherwise mount an empty volume straight over that checkout, leaving it
         # unreachable through erun and letting the one-way workspace sync
         # propagate the empty tree over the operator's only other copy. Runs the
-        # runtime image so no new image dependency is introduced; falls back to
-        # refusing the rollout when an older image carries no adoption helper,
-        # because starting is exactly what loses the tree.
+        # runtime image's own erun so no new image dependency is introduced. An
+        # image whose erun has no adopt-worktree fails this container, which
+        # refuses the rollout: starting is exactly what loses the tree.
         - image: {{ $devopsImage }}
           name: adopt-worktree
           imagePullPolicy: IfNotPresent
@@ -629,18 +649,10 @@ spec:
               cpu: {{ $initContainerRequestCPU | quote }}
               memory: {{ $initContainerRequestMemory | quote }}
           command:
-            - sh
-            - -c
-            - |
-              set -eu
-              if [ -x /usr/local/bin/erun-adopt-worktree ]; then
-                exec /usr/local/bin/erun-adopt-worktree {{ $legacyWorktreePath | quote }} {{ $worktreeStagePath | quote }}
-              fi
-              if [ -e {{ printf "%s/.git" $legacyWorktreePath | quote }} ]; then
-                echo "worktree-adopt: this runtime image has no adoption helper; refusing to mount an empty worktree volume over the repository at {{ $worktreePath }}" >&2
-                exit 1
-              fi
-              echo "worktree-adopt: this runtime image has no adoption helper; nothing to adopt at {{ $worktreePath }}"
+            - erun
+            - adopt-worktree
+            - {{ $legacyWorktreePath | quote }}
+            - {{ $worktreeStagePath | quote }}
           volumeMounts:
             - name: erun-home
               mountPath: {{ $homeStagePath | quote }}
@@ -988,9 +1000,11 @@ spec:
             requests:
               cpu: {{ $dindRequestCPU | quote }}
               memory: {{ $dindRequestMemory | quote }}
-          {{- /* Wraps the stock docker:dind entrypoint to pin the daemon's
-                 bridge MTU to the pod network's own, which the sidecar can read
-                 because it shares that namespace.
+          {{- /* `erun dind-entrypoint` (erun-common/dind_entrypoint.go) wraps
+                 the stock docker:dind entrypoint. It pins the daemon's bridge
+                 MTU to the pod network's own, which the sidecar can read
+                 because it shares that namespace, and mirrors the sidecar's
+                 own cpu.max into the per-pod cgroup in-pod builds nest under.
 
                  Why this is not cosmetic: docker bridges containers at 1500,
                  but a CNI that encapsulates gives the pod less (a VXLAN overlay
@@ -1005,15 +1019,14 @@ spec:
                  as an unrelated-looking curl error against whichever
                  third-party host that build reached first.
 
-                 The trailing element is $0 for `sh -c`, so the args below still
-                 arrive as $1.. exactly as they did when they were the
+                 The binary is the runtime image's own, copied into erun-bin by
+                 prepare-volumes. The trailing `--` hands the args below to
+                 dockerd untouched, exactly as when they were the stock
                  entrypoint's own. */}}
           command:
-            - sh
-            - -c
-            - |
-{{ .Files.Get "files/dind-entrypoint.sh" | indent 14 }}
-            - erun-dind
+            - {{ printf "%s/erun" $erunBinPath | quote }}
+            - dind-entrypoint
+            - --
           {{- /* A context-resolved local cluster registry is plain HTTP at a
                  non-loopback ClusterIP; the docker:dind entrypoint forwards these
                  args to dockerd so an in-pod build can push to it. Empty for
@@ -1068,6 +1081,9 @@ spec:
               mountPath: /var/run
             - name: docker-state
               mountPath: /var/lib/docker
+            - name: erun-bin
+              mountPath: {{ $erunBinPath | quote }}
+              readOnly: true
         {{- end }}
         {{- with .Values.extraContainers }}
         {{- toYaml . | nindent 8 }}
@@ -1088,6 +1104,8 @@ spec:
         {{- end }}
         {{- if $dindEnabled }}
         - name: docker-socket
+          emptyDir: {}
+        - name: erun-bin
           emptyDir: {}
         {{- end }}
         {{- if $mcpAuthSecretName }}

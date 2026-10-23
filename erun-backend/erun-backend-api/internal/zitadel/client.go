@@ -230,7 +230,7 @@ func (c *Client) newRequest(ctx context.Context, method string, path string, bod
 	}
 	// Zitadel resolves which instance a Management API call targets from the
 	// Host header, not from the address the call is actually addressed to
-	// (see erun-zitadel chart header and oidc-bootstrap.sh); req.Host is what
+	// (see erun-zitadel chart header and internal/oidcbootstrap); req.Host is what
 	// net/http actually sends as the wire Host, a plain header set is ignored.
 	req.Host = c.externalDomain
 	req.Header.Set("Authorization", "Bearer "+c.pat)

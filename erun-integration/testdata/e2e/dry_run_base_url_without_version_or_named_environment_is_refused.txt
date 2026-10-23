@@ -1,0 +1,2 @@
+audit: erun e2e --base-url https://console.production.invalid --component erun-console --dry-run
+erun e2e: --base-url https://console.production.invalid needs the version it serves: without --tenant/--environment the expected version would come from the current environment team/dev, which need not be what that URL serves. Pass --version <the version it serves>, or name the environment it serves with --tenant/--environment

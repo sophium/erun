@@ -138,7 +138,8 @@ Record in the PR (or small-change commit body):
 yarn test && yarn shadcn:check` from this module.
 - `yarn build` produces the review harness, not a package apps must build/import.
   Preview with `yarn dev`; check light/dark and affected widget states.
-- Root `test-frontend` gates the first five commands; shadcn drift is a separate
+- The erun-console image's test stage runs `typecheck`, `lint`, `format:check`
+  and `test`; shadcn drift is a separate
   local check. Validate affected consumers with their five frontend commands and
   their required browser tests.
 - Guidance-only changes follow root validation scope.

@@ -1,4 +1,5 @@
 import { test, expect } from '../../../fixtures/erunApp.js';
+import { isolatedRoot } from '../../../fixtures/seedRoot.js';
 import { isProcessAlive, liveStubProcesses } from '../../../fixtures/stubProcesses.js';
 
 // The harness's long-lived stubs park for the life of the session they stand in
@@ -31,7 +32,7 @@ test.describe('the stub processes a spec opens do not outlive it', () => {
     // Opening a session costs the backend, not this assertion, so the whole-test
     // clock is raised the way the other session-opening specs raise it.
     test.setTimeout(60_000);
-    const before = liveStubProcesses();
+    const before = liveStubProcesses(isolatedRoot());
 
     // A spec-local environment: the seeded baseline's own rows are opened for it
     // during boot, so counting those would measure the boot rather than this
@@ -39,11 +40,13 @@ test.describe('the stub processes a spec opens do not outlive it', () => {
     await app.sidebar.openEnvironment(seededEnv.tenant, seededEnv.environment);
 
     await expect
-      .poll(() => liveStubProcesses().filter((pid) => !before.includes(pid)).length, {
+      .poll(() => liveStubProcesses(isolatedRoot()).filter((pid) => !before.includes(pid)).length, {
         timeout: 25_000,
       })
       .toBeGreaterThan(0);
-    stubsTheOpenLeftParked = liveStubProcesses().filter((pid) => !before.includes(pid));
+    stubsTheOpenLeftParked = liveStubProcesses(isolatedRoot()).filter(
+      (pid) => !before.includes(pid),
+    );
   });
 
   test('none of those stub processes is still alive once that spec has ended', async () => {

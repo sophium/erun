@@ -8,6 +8,12 @@ in `erun-common/AGENTS.md`.
 - Own the `erun` binary and Cobra tree. CLI-private code belongs in `internal`;
   shared planning/execution belongs in common.
 - The `mcp` command launches `emcp`; it must not embed its server.
+- Planned (https://github.com/sophium/erun/issues/2741, see
+  `erun-common/AGENTS.md` § "Target package layers"): one package per command
+  under `cmd/<command>/`, importing its matching `erun-common` package, `base/*`
+  and a thin `cmd/shared` (flag/output/root helpers only), never another command
+  package; `main.go` registers them. Until then keep each command's code in its
+  own files, and put nothing command-specific in shared files.
 
 ## Command Wiring
 
@@ -38,9 +44,9 @@ This is the shared quality bar for CLI help and MCP descriptions.
   CLI and MCP descriptions must agree semantically, while fitting their surfaces.
 - Review literal rendered help for accuracy and usefulness, not length. Quote
   user-visible wording when reporting quality; cite source when identifying edits.
-- The integration CLI-help gate checks registered example/prose flags and gate-run
-  status vocabulary. It does not establish useful prose, truthful defaults, or
-  complete descriptions; those still require review.
+- The integration CLI-help gate checks registered example/prose flags. It does
+  not establish useful prose, truthful defaults, or complete descriptions; those
+  still require review.
 
 ## Exit-Code Contract: Reporting Commands Vs Gating Checks
 

@@ -1,0 +1,24 @@
+Moves an environment's existing repository onto its dedicated worktree volume before
+the pod mounts that volume over it. The runtime chart's init container runs it with
+both volumes staged side by side under /mnt, where the claim cannot shadow the tree.
+
+The tree is copied into the claim first and the original is set aside at
+LEGACY_DIR.pre-worktree-volume only once the copy holds .git; it is never deleted.
+A populated claim, a missing or symlinked LEGACY_DIR, or one that is not a
+repository is left untouched, so every later boot is a no-op.
+
+Usage:
+  erun adopt-worktree LEGACY_DIR CLAIM_DIR [flags]
+
+Examples:
+  erun adopt-worktree /mnt/erun-home/git/petios /mnt/erun-worktree
+  erun adopt-worktree --dry-run /mnt/erun-home/git/petios /mnt/erun-worktree
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for adopt-worktree
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

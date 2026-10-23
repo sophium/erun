@@ -10,9 +10,9 @@ package integration
 // closed its own follow-up audit item unperformed. This is the check that
 // closes the gap: it fails the build the next time one of these bare
 // phrases reappears in non-test Go source anywhere in the repo. It runs as
-// an ordinary `go test` in this module, so it is part of
-// `make integration-test`/`make check` with no extra wiring — the same
-// precedent as desktop_surface_test.go.
+// an ordinary `go test` in this module, so it is part of the erun-devops
+// image's cli-test stage with no extra wiring — the same precedent as
+// desktop_surface_test.go.
 //
 // erun-mcp's exec_agent shipped uncallable because its target-resolution
 // failure used a THIRD phrasing, "tenant and environment are required" —

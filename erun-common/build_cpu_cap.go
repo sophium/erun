@@ -13,7 +13,7 @@ import (
 // driver has no CPU-limiting flag of its own, and `docker build --cpuset-cpus`
 // is silently ignored — verified against docker 28.1.1/buildx 0.18). It is a
 // pure, dry-run-safe computation: the cgroup itself is created and sized from
-// the sidecar's own live cpu.max by dind-entrypoint.sh at container startup,
+// the sidecar's own live cpu.max by `erun dind-entrypoint` at sidecar startup,
 // not by this function or by any docker call this build makes.
 //
 // Applies only inside an injected runtime pod (a real dind sidecar exists to

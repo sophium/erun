@@ -163,10 +163,6 @@ var tenantScopeClassification = map[string]tenantScopeEntry{
 		kind:   scopedExplicitly,
 		reason: "reads TenantID off the security context and filters WHERE b.tenant_id = ?, same as List",
 	},
-	"GateRunRepository.List": {
-		kind:   scopedExplicitly,
-		reason: "reads TenantID off the security context and filters WHERE g.tenant_id = ?",
-	},
 	"CommentRepository.List": {
 		kind:   scopedExplicitly,
 		reason: "reads TenantID off the security context and filters WHERE tenant_id = ?",

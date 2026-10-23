@@ -54,6 +54,8 @@ type stubBuildRepository struct {
 	// gotTenantID records the tenant the route named, so a test can hold the
 	// handler to passing the caller's own rather than merely passing one.
 	gotTenantID string
+	// gotListFilter records the filter the tenant-wide list was asked for.
+	gotListFilter apirepository.BuildListFilter
 }
 
 func (s *stubBuildRepository) Get(_ context.Context, tenantID, _ string) (model.Build, error) {
@@ -65,21 +67,49 @@ func (s *stubBuildRepository) List(context.Context, apirepository.BuildFilter) (
 	return nil, s.err
 }
 
-func (s *stubBuildRepository) ListPage(context.Context, apirepository.BuildListFilter) (apirepository.BuildPage, error) {
+func (s *stubBuildRepository) ListPage(_ context.Context, filter apirepository.BuildListFilter) (apirepository.BuildPage, error) {
+	s.gotListFilter = filter
 	if s.err != nil {
 		return apirepository.BuildPage{}, s.err
 	}
 	return apirepository.BuildPage{Builds: []model.Build{s.build}}, nil
 }
 
-// TestCreateBuildAcceptsAReportedGateKind: an environment now reports its own
-// merge-queue gate result, so kind=GATE is no longer forced to
-// RECORDED the way a client-supplied authorUserId is ignored.
-func TestCreateBuildAcceptsAReportedGateKind(t *testing.T) {
+// TestCreateBuildRefusesTheRetiredGateKind: a merge-queue build is recorded
+// as an ordinary RECORDED build, so an older client still sending GATE is
+// refused before anything is written and told what to send instead.
+func TestCreateBuildRefusesTheRetiredGateKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
 	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
-		bytes.NewBufferString(`{"successful":true,"commitId":"abc123","kind":"GATE"}`))
+		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","kind":"GATE"}`))
+	req.SetPathValue("review_id", "review-1")
+	rec := httptest.NewRecorder()
+
+	routes.createBuild(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"code":"INVALID_BODY"`) || !strings.Contains(body, `"field":"kind"`) {
+		t.Fatalf("body = %q, want INVALID_BODY naming field kind", body)
+	}
+	if !strings.Contains(body, "RECORDED") || !strings.Contains(body, "version") {
+		t.Fatalf("body = %q, want the remedy: record it as RECORDED with its version", body)
+	}
+	if service.created.CommitID != "" {
+		t.Fatalf("the service was called anyway: %+v", service.created)
+	}
+}
+
+// TestCreateBuildDefaultsAnOmittedKindToRecorded: kind is optional on the
+// wire and always lands as RECORDED.
+func TestCreateBuildDefaultsAnOmittedKindToRecorded(t *testing.T) {
+	service := &stubBuildService{}
+	routes := BuildRoutes{service: service}
+	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
+		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","version":"1.0.0"}`))
 	req.SetPathValue("review_id", "review-1")
 	rec := httptest.NewRecorder()
 
@@ -88,13 +118,13 @@ func TestCreateBuildAcceptsAReportedGateKind(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
 	}
-	if service.created.Kind != model.BuildKindGate {
-		t.Fatalf("kind persisted = %q, want %q", service.created.Kind, model.BuildKindGate)
+	if service.created.Kind != model.BuildKindRecorded {
+		t.Fatalf("kind persisted = %q, want %q", service.created.Kind, model.BuildKindRecorded)
 	}
 }
 
-// TestCreateBuildRejectsAnUnknownKind: kind is one of two known values, not
-// an open string.
+// TestCreateBuildRejectsAnUnknownKind: kind is a closed value, not an open
+// string.
 func TestCreateBuildRejectsAnUnknownKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service}
@@ -151,7 +181,7 @@ func TestCreateBuildInvalidVersionReportsItsCode(t *testing.T) {
 }
 
 func TestGetBuildReturnsTheRepositoryResult(t *testing.T) {
-	builds := &stubBuildRepository{build: model.Build{BuildID: "build-1", Kind: model.BuildKindGate}}
+	builds := &stubBuildRepository{build: model.Build{BuildID: "build-1", Kind: model.BuildKindRecorded}}
 	routes := BuildRoutes{builds: builds}
 	req := httptest.NewRequest(http.MethodGet, "/v1/reviews/review-1/builds/build-1", nil)
 	req.SetPathValue("build_id", "build-1")
@@ -194,9 +224,9 @@ func TestCreateUnattachedBuildClearsAnyCallerSuppliedReviewID(t *testing.T) {
 	}
 }
 
-// TestCreateUnattachedBuildRejectsGateKind: a GATE build always gates a
-// specific review's merge, so it has no unattached form.
-func TestCreateUnattachedBuildRejectsGateKind(t *testing.T) {
+// TestCreateUnattachedBuildRejectsTheRetiredGateKind: GATE is refused on the
+// unattached route too.
+func TestCreateUnattachedBuildRejectsTheRetiredGateKind(t *testing.T) {
 	service := &stubBuildService{}
 	routes := BuildRoutes{service: service, environments: ownEnvironmentGetter("env-1")}
 	req := httptest.NewRequest(http.MethodPost, "/v1/builds",
@@ -207,27 +237,6 @@ func TestCreateUnattachedBuildRejectsGateKind(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestCreateUnattachedBuildReportsGateBuildRequiresReviewCode: a service
-// refusal for a GATE build with no review surfaces its own machine code
-// rather than a generic one.
-func TestCreateUnattachedBuildReportsGateBuildRequiresReviewCode(t *testing.T) {
-	service := &stubBuildService{err: &service.GateBuildRequiresReviewError{}}
-	routes := BuildRoutes{service: service}
-	req := httptest.NewRequest(http.MethodPost, "/v1/reviews/review-1/builds",
-		bytes.NewBufferString(`{"successful":true,"commitId":"abcdef0123456789abcdef0123456789abcdef01","kind":"GATE"}`))
-	req.SetPathValue("review_id", "review-1")
-	rec := httptest.NewRecorder()
-
-	routes.createBuild(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"code":"INVALID_BODY"`) {
-		t.Fatalf("body = %q, want code INVALID_BODY", rec.Body.String())
 	}
 }
 
@@ -265,6 +274,28 @@ func TestListAllBuildsReturnsAPagedEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"builds":[`) {
 		t.Fatalf("body = %q, want a builds envelope", rec.Body.String())
+	}
+}
+
+// TestListAllBuildsFiltersByCommit: `?commit=` narrows the history to the
+// builds of one commit, which is how a caller finds the build recorded for a
+// commit that landed.
+func TestListAllBuildsFiltersByCommit(t *testing.T) {
+	builds := &stubBuildRepository{build: model.Build{BuildID: "build-1"}}
+	routes := BuildRoutes{builds: builds}
+	req := httptest.NewRequest(http.MethodGet, "/v1/builds?commit=abcdef0123456789abcdef0123456789abcdef01&successful=true", nil)
+	rec := httptest.NewRecorder()
+
+	routes.listAllBuilds(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if builds.gotListFilter.CommitID != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Fatalf("filter commit = %q, want the queried commit", builds.gotListFilter.CommitID)
+	}
+	if builds.gotListFilter.Successful == nil || !*builds.gotListFilter.Successful {
+		t.Fatalf("filter successful = %v, want true alongside the commit", builds.gotListFilter.Successful)
 	}
 }
 

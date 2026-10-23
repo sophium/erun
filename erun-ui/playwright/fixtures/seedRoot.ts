@@ -3,6 +3,12 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import {
+  STUB_REGISTRY_FILENAME,
+  STUBS_DIRNAME,
+  reapStubProcessesBeneath,
+} from './stubProcesses.js';
+
 // Windows CreateProcess cannot exec a "#!/bin/sh" file or a .cmd/.bat batch
 // file, so the backend (and every erun/shell child it spawns) needs real PE
 // stubs on PATH. On win32 the stubs are <name>.exe built from fixtures/winstub;
@@ -86,10 +92,10 @@ export function setWorkerRoot(root: string): void {
 }
 
 // isolatedRoot resolves the suite-owned root. A worker-scoped override (set by
-// fixtures/workerBackend.ts) wins first. Otherwise, when run.sh has not
-// exported ERUN_PLAYWRIGHT_HOME (a direct `playwright test`, or the opt-in
-// e2e-k3d mode's single shared backend), the fresh temp root is cached back
-// into the env so the whole process agrees on one root.
+// fixtures/workerBackend.ts) wins first. Otherwise, unless the caller exported
+// ERUN_PLAYWRIGHT_HOME, playwright.config.ts mints a fresh temp root at config
+// load and caches it back into the env, so the workers it forks and the opt-in
+// e2e-k3d mode's single shared backend all agree on one root.
 export function isolatedRoot(): string {
   if (workerRootOverride) {
     return workerRootOverride;
@@ -108,7 +114,7 @@ export function isolatedHomeDir(): string {
 }
 
 export function stubsDir(): string {
-  return path.join(isolatedRoot(), 'stubs');
+  return path.join(isolatedRoot(), STUBS_DIRNAME);
 }
 
 // stubRegistryPath is the file every long-lived stub appends its own pid to
@@ -116,7 +122,7 @@ export function stubsDir(): string {
 // it) and is what makes the stub population observable and reapable —
 // fixtures/stubProcesses.ts owns reading and reaping it.
 export function stubRegistryPath(): string {
-  return path.join(isolatedRoot(), 'stub-pids');
+  return path.join(isolatedRoot(), STUB_REGISTRY_FILENAME);
 }
 
 // tabSetupHoldsDir is where a spec parks a tab's setup phase: while
@@ -259,7 +265,7 @@ function erunConfigDir(): string {
 
 // e2eK3dEnabled gates every real-cluster branch below; when false the suite is
 // the default inert/offline harness. Enable it only on a Docker + k3d + binfmt
-// host — never in the default `run.sh` or `make integration-test`.
+// host — never in the default suite or the component's test stage.
 export function e2eK3dEnabled(): boolean {
   return process.env.ERUN_E2E_K3D === '1';
 }
@@ -1311,9 +1317,10 @@ export function setOpenRouterCatalog(catalog: {
   };
 }
 
-// removeIsolatedRoot deletes the whole suite-owned root. Only roots the
-// suite recognizably created are removed, so a caller-provided custom path
-// is never destroyed by accident.
+// removeIsolatedRoot deletes the whole suite-owned root, after reaping every
+// stub still parked under it (see removeRootDir). Only roots the suite
+// recognizably created are removed, so a caller-provided custom path is never
+// destroyed by accident.
 export function removeIsolatedRoot(): void {
   const root = process.env.ERUN_PLAYWRIGHT_HOME?.trim();
   if (!root || !path.basename(root).startsWith('erun-playwright-home')) {
@@ -1330,7 +1337,19 @@ export function removeWorkerRoot(root: string): void {
   removeRootDir(root);
 }
 
+// removeRootDir ends the long-lived stubs a root still parks before deleting
+// it. The desktop spawns them, not this process, so stopping a backend leaves
+// them running, and a root deleted under them takes their registry with it:
+// nothing could find them again and they would sleep on after the run. This is
+// the teardown backstop for a worker's last spec and for a worker that died
+// without running its own teardown (fixtures/stubProcesses.ts).
 function removeRootDir(root: string): void {
+  const survivors = reapStubProcessesBeneath(root);
+  if (survivors.length > 0) {
+    console.warn(
+      `removeRootDir: stub processes ${survivors.join(', ')} under ${root} survived SIGKILL`,
+    );
+  }
   if (isWindows) {
     // A ConPTY stub/shell child spawned with its cwd inside the root (or a
     // still-blocking erun.exe stub from a session the app has not torn down yet)
@@ -1357,9 +1376,9 @@ function removeRootDir(root: string): void {
     // handle is released (Windows).
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   } catch (err) {
-    // The root is a throwaway dir under the OS temp dir; run.sh's EXIT trap and
-    // OS temp reclamation are the backstops. A cleanup that loses a race with a
-    // not-yet-torn-down session must not fail an otherwise-green run.
+    // The root is a throwaway dir under the OS temp dir; OS temp reclamation is
+    // the backstop. A cleanup that loses a race with a not-yet-torn-down session
+    // must not fail an otherwise-green run.
     console.warn(`removeIsolatedRoot: could not fully remove ${root}: ${(err as Error).message}`);
   }
 }
