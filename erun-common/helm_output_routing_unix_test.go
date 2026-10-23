@@ -1,0 +1,50 @@
+//go:build unix
+
+package eruncommon
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// Helm's "Successfully packaged chart …" is progress, not data: on erun's
+// stdout it lands ahead of `erun build --output json` and the result no longer
+// parses, which is what erun-merge reads the minted version from.
+func TestHelmProgressStaysOffStdout(t *testing.T) {
+	binDir := t.TempDir()
+	script := "#!/bin/sh\necho \"Successfully packaged chart and saved it to: x.tgz\"\necho \"helm stderr\" >&2\n"
+	if err := os.WriteFile(filepath.Join(binDir, "helm"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake helm: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	for name, run := range map[string]func(Context, commandSpec) error{
+		"runHelmCommand": runHelmCommand,
+		"runHelmCommandCapturingOutput": func(ctx Context, spec commandSpec) error {
+			out, err := runHelmCommandCapturingOutput(ctx, spec)
+			if !strings.Contains(out, "Successfully packaged chart") {
+				t.Errorf("captured output lost helm's stdout: %q", out)
+			}
+			return err
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			// helm's two streams are copied by separate goroutines onto one
+			// writer, so the stderr side must be safe for concurrent writes.
+			var stdout syncBuffer
+			var stderr syncBuffer
+			ctx := Context{Stdout: &stdout, Stderr: &stderr}
+			if err := run(ctx, commandSpec{Name: "helm", Args: []string{"package", "chart"}}); err != nil {
+				t.Fatalf("helm: %v", err)
+			}
+			if out := stdout.snapshot(); out != "" {
+				t.Fatalf("helm progress reached stdout: %q", out)
+			}
+			if errOut := stderr.snapshot(); !strings.Contains(errOut, "Successfully packaged chart") || !strings.Contains(errOut, "helm stderr") {
+				t.Fatalf("helm output missing from stderr: %q", errOut)
+			}
+		})
+	}
+}

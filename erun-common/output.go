@@ -49,13 +49,16 @@ type BuildResultChart struct {
 // Scripts names the project build scripts the execution ran instead of images.
 // A caller reads the plan from this result rather than the trace: an empty
 // Version beside a non-empty Scripts is a script-only build, which mints no
-// image version and tests nothing an image gate would have tested.
+// image version and tests nothing an image's build/test stage would have tested.
 type BuildResult struct {
 	Version     string             `json:"version"`
 	BaseVersion string             `json:"baseVersion,omitempty"`
 	Images      []BuildResultImage `json:"images,omitempty"`
 	Charts      []BuildResultChart `json:"charts,omitempty"`
 	Scripts     []string           `json:"scripts,omitempty"`
+	// Packages names the linux package components the build tested; like
+	// Scripts they mint no image version.
+	Packages []string `json:"packages,omitempty"`
 }
 
 // NewBuildResult extracts the structured result from a resolved build execution.
@@ -80,23 +83,14 @@ func NewBuildResult(execution BuildExecutionSpec) BuildResult {
 			Version: strings.TrimSpace(chart.Version),
 		})
 	}
-	for _, script := range buildExecutionScripts(execution) {
-		result.Scripts = append(result.Scripts, filepath.Join(script.Dir, script.Path))
+	if execution.script != nil {
+		result.Scripts = append(result.Scripts, filepath.Join(execution.script.Dir, execution.script.Path))
+	}
+	for _, pkg := range execution.linuxPackages {
+		result.Packages = append(result.Packages, pkg.Name)
 	}
 	if result.BaseVersion == result.Version {
 		result.BaseVersion = ""
 	}
 	return result
-}
-
-// buildExecutionScripts names every script the execution runs: the project
-// build script stand-in for an image plan, and the linux package builds. Both
-// leave Version empty, so naming them is what lets a caller tell a script-only
-// build from an image build that minted nothing.
-func buildExecutionScripts(execution BuildExecutionSpec) []scriptSpec {
-	scripts := make([]scriptSpec, 0, 1+len(execution.linuxBuilds))
-	if execution.script != nil {
-		scripts = append(scripts, *execution.script)
-	}
-	return append(scripts, execution.linuxBuilds...)
 }

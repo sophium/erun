@@ -1,6 +1,6 @@
 <svg viewBox="0 0 880 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="buildStagesTitle"
      font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="buildStagesTitle">A multi-stage Docker build inside one Dockerfile: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only the artefact, producing a tagged multi-arch container image.</title>
+  <title id="buildStagesTitle">One Dockerfile with three stages: a build stage that compiles the component, a test stage built on it that runs the component's own lint and tests, and a runtime stage that copies the artefacts from the test stage, producing a tagged multi-arch container image only when the tests passed.</title>
 
   <defs>
     <linearGradient id="charcoal" x1="0" y1="0" x2="0" y2="1">
@@ -13,31 +13,43 @@
   </defs>
 
   <!-- multi-stage Dockerfile card -->
-  <rect x="20" y="28" width="560" height="158" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="300" y="52" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" opacity="0.65">one Dockerfile, two stages</text>
+  <rect x="20" y="28" width="584" height="158" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+  <text x="312" y="52" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" opacity="0.65">one Dockerfile, three stages</text>
 
-  <!-- builder stage -->
-  <rect x="48" y="74" width="232" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-  <text x="164" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">builder stage</text>
-  <text x="164" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">compile + run tests</text>
+  <!-- build stage -->
+  <rect x="44" y="74" width="140" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="114" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">build</text>
+  <text x="114" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">compile</text>
+
+  <!-- test stage -->
+  <rect x="244" y="74" width="140" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="314" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">test</text>
+  <text x="314" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">lint + tests</text>
 
   <!-- runtime stage -->
-  <rect x="340" y="74" width="232" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-  <text x="456" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">runtime stage</text>
-  <text x="456" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">ship artefact only</text>
+  <rect x="444" y="74" width="140" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="514" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">runtime</text>
+  <text x="514" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">ship artefacts</text>
 
-  <!-- builder to runtime -->
-  <line x1="280" y1="117" x2="340" y2="117" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <!-- build to test -->
+  <line x1="184" y1="117" x2="244" y2="117" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
   <g>
-    <rect x="288" y="95" width="44" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
-    <text x="310" y="109" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500">COPY</text>
+    <rect x="190" y="95" width="48" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="214" y="109" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500">FROM</text>
+  </g>
+
+  <!-- test to runtime -->
+  <line x1="384" y1="117" x2="444" y2="117" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <g>
+    <rect x="390" y="95" width="48" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="414" y="109" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500">COPY</text>
   </g>
 
   <!-- runtime to image -->
-  <line x1="574" y1="117" x2="648" y2="117" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <line x1="586" y1="117" x2="666" y2="117" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
 
   <!-- container image endpoint -->
-  <rect x="650" y="90" width="200" height="56" rx="14" fill="url(#charcoal)"/>
-  <text x="750" y="114" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">container image</text>
-  <text x="750" y="134" text-anchor="middle" fill="#ffffff" font-size="12" opacity="0.85">amd64 + arm64</text>
+  <rect x="668" y="90" width="192" height="56" rx="14" fill="url(#charcoal)"/>
+  <text x="764" y="114" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">container image</text>
+  <text x="764" y="134" text-anchor="middle" fill="#ffffff" font-size="12" opacity="0.85">amd64 + arm64</text>
 </svg>

@@ -119,7 +119,7 @@ export function readK3dCluster(): K3dCluster {
 }
 
 // deleteK3dCluster tears down the cluster + registry. Best-effort: a failure to
-// delete must not fail the run (the EXIT trap in run.sh is the backstop).
+// delete must not fail the run.
 export function deleteK3dCluster(): void {
   // Never tear down a developer's real, pre-existing cluster (erun-k3s).
   if (e2eRealClusterContext() !== '') {

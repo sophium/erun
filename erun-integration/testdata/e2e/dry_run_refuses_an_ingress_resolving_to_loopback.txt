@@ -1,0 +1,6 @@
+audit: erun e2e --dry-run
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+e2e: deployed version <VERSION>
+e2e: suite erun-console: <TMP>
+e2e: base url https://localhost (resolved from the expose-erun-console ingress)
+erun e2e: localhost resolves to a loopback address (a local cluster's ingress), which an e2e suite cannot reach: each suite runs in a docker build without host networking, where loopback is the build container itself. Run erun e2e against an environment whose ingress has a routable address, or pass --base-url with an address a docker build can reach

@@ -97,6 +97,9 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 		"erun-kit/.vite",
 		"erun-console/.vite",
 		"erun-console/playwright/.cache",
+		"erun-devops/e2e/console/node_modules",
+		"erun-devops/e2e/console/test-results",
+		"erun-devops/e2e/console/playwright-report",
 	}
 	for _, dir := range excludedDirs {
 		if !set.matches(dir, true) {
@@ -107,7 +110,6 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 	excludedFiles := []string{
 		"erun-ui/frontend/tsconfig.tsbuildinfo",
 		"erun-ui/frontend/package.json.md5",
-		"erun-console/playwright/.e2e-oidc.env",
 		".DS_Store",
 		"erun-kit/src/.DS_Store",
 		"erun-kit/.env.local",
@@ -127,10 +129,62 @@ func TestRootDockerignoreMirrorsNestedGitignoresUnderCopiedModules(t *testing.T)
 		"erun-kit/src/index.ts",
 		"erun-console/src/App.tsx",
 		"erun-console/playwright/tests/example.spec.ts",
+		"erun-devops/e2e/console/tests/console.spec.ts",
 	}
 	for _, path := range kept {
 		if set.matches(path, false) {
 			t.Errorf("root .dockerignore must NOT exclude %q (the erun-devops Dockerfile copies it)", path)
 		}
+	}
+}
+
+// TestRootDockerignoreExcludesDesktopMacOSBuildOutputs: a local macOS desktop
+// build leaves erun-ui/ERun.app and erun-ui/darwin beside the module, excluded
+// from git only by the clone's own .git/info/exclude, which neither docker nor
+// computeBuildFingerprint reads. Every Dockerfile that COPYs erun-ui (the
+// erun-ui linux package's test stage among them) would ship ~90MB of host
+// binaries in its context and move its fingerprint on every desktop build,
+// rerunning an unchanged package's whole suite.
+func TestRootDockerignoreExcludesDesktopMacOSBuildOutputs(t *testing.T) {
+	root := repoRootForDockerignoreTest(t)
+	data, err := os.ReadFile(filepath.Join(root, ".dockerignore"))
+	if err != nil {
+		t.Fatalf("read root .dockerignore: %v", err)
+	}
+	set := parseIgnoreData(data, "")
+	for _, dir := range []string{"erun-ui/ERun.app", "erun-ui/darwin"} {
+		if !set.matches(dir, true) {
+			t.Errorf("root .dockerignore must exclude %q from the build context", dir)
+		}
+	}
+	for _, path := range []string{"erun-ui/main.go", "erun-ui/darwin_cgo_flags.go", "erun-ui/app_activation_darwin.go"} {
+		if set.matches(path, false) {
+			t.Errorf("root .dockerignore must NOT exclude %q (the erun-ui package builds it)", path)
+		}
+	}
+	assertFingerprintSkipsDesktopMacOSBuildOutputs(t, data)
+}
+
+// The fingerprint reads the same file, so the excluded trees cannot move it.
+func assertFingerprintSkipsDesktopMacOSBuildOutputs(t *testing.T, dockerignore []byte) {
+	t.Helper()
+	data := dockerignore
+	context := t.TempDir()
+	if err := os.WriteFile(filepath.Join(context, ".dockerignore"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeComponentTreeFile(t, context, "erun-ui/main.go", "package main\n")
+	writeComponentTreeFile(t, context, "erun-ui/ERun.app/Contents/MacOS/erun-app", "binary")
+	writeComponentTreeFile(t, context, "erun-ui/darwin/erun-app", "binary")
+	ignored, err := loadContextIgnoreSet(context, []string{"erun-ui"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := collectFingerprintFiles(context, []string{"erun-ui"}, ignored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || filepath.Base(files[0]) != "main.go" {
+		t.Fatalf("the fingerprint must hash only erun-ui/main.go, got %v", files)
 	}
 }

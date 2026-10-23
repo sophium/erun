@@ -278,9 +278,10 @@ func runtimeProcessGroupsFromProbe(output string) ([]uiRuntimeProcessGroup, int6
 // operator's attention are grouped; the pod's own supervision (sh, ps, sshd,
 // the entrypoint's sleep) is dropped so the panel is a list of things that
 // could be reclaimed rather than a process table.
-// Matched on a comm prefix, not an exact name: the image wraps the AI tools, so
-// the process that actually holds the memory is `claude-real`, not `claude`, and
-// an exact match reported the agent as consuming nothing.
+// Matched on a comm prefix, not an exact name: the process that actually holds
+// the memory can carry a suffixed name (Claude Code's native `claude.exe` when it
+// is started by its package path), and an exact match reported the agent as
+// consuming nothing.
 var runtimeProcessGroupByCommPrefix = map[string]string{
 	"buildkit": runtimeProcessGroupDocker,
 	"claude":   runtimeProcessGroupOther,

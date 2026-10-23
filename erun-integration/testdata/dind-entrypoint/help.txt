@@ -1,0 +1,26 @@
+Prepares the erun-dind sidecar and then replaces itself with the stock
+dockerd-entrypoint.sh, passing DOCKERD_ARGS through.
+
+It reads the MTU of the interface carrying the pod's default route and leads the
+daemon's args with --mtu, so builds behind an encapsulating CNI do not stall on
+full-size packets. It mirrors the sidecar's own cpu.max into the per-pod cgroup
+docker/erun-build-cpu-cap-<pod> that in-pod builds nest under with --cgroup-parent.
+Neither step is fatal: when one cannot apply it says so and dockerd starts on its
+defaults. Runs only on Linux, inside the sidecar; --dry-run reports both steps and
+the dockerd command without writing a cgroup or starting the daemon.
+
+Usage:
+  erun dind-entrypoint [-- DOCKERD_ARGS...] [flags]
+
+Examples:
+  erun dind-entrypoint -- --insecure-registry registry.cluster.local:5000
+  erun dind-entrypoint --dry-run
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for dind-entrypoint
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

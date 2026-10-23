@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routeroles"
@@ -21,10 +22,7 @@ import (
 // with itself.
 func rolesDatabase(t *testing.T) (*sql.DB, string) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_ROLES_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_ROLES_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

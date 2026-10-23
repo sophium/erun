@@ -269,3 +269,21 @@ func assertNothingApplied(t *testing.T, capturePath string) {
 		t.Fatalf("nothing should have been applied:\n%s", data)
 	}
 }
+
+// TestProvisionMachineIdentitySecretFallsBackOnAnAmbiguousHost: a host with
+// several erun aliases and none named has nothing to ask the platform with.
+// That is a fallback to the delegated path, which reports the ambiguity, not
+// an error that fails `erun init` (which has no alias flag to lift it).
+func TestProvisionMachineIdentitySecretFallsBackOnAnAmbiguousHost(t *testing.T) {
+	captured := installCapturingKubectl(t)
+	store := ambiguousHostStore(t)
+
+	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), store, "team", "team-dev", "team-dev", "", DefaultCloudDependencies())
+	if err != nil {
+		t.Fatalf("an ambiguous host is a fallback for machine identity, not an error: %v", err)
+	}
+	if ok {
+		t.Fatal("expected no machine identity from a host with no unambiguous alias")
+	}
+	assertNothingApplied(t, captured.path)
+}

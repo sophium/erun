@@ -12,7 +12,7 @@ import (
 )
 
 // buildCgroupSysFSRoot is where cgroup v2 is mounted inside the erun-dind
-// sidecar -- the container dind-entrypoint.sh actually wrote the cap cgroup
+// sidecar -- the container `erun dind-entrypoint` actually wrote the cap cgroup
 // into (see build_cpu_cap.go).
 const buildCgroupSysFSRoot = "/sys/fs/cgroup"
 

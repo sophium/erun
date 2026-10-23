@@ -1,2 +1,0 @@
-audit: erun exec gate-run report --dry-run --status inconclusive
-gate run id is required

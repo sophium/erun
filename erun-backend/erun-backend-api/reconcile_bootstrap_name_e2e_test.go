@@ -7,9 +7,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -25,10 +26,7 @@ import (
 // database back directly.
 func reconcileBootstrapNameDatabase(t *testing.T) *sql.DB {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_TENANTS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_TENANTS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

@@ -3,9 +3,10 @@ package backendapi
 import (
 	"context"
 	"database/sql"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -22,10 +23,7 @@ import (
 // shape (environment_delete_e2e_test.go).
 func aiSessionsDatabase(t *testing.T) (*repository.AISessionRepository, *repository.EnvironmentRepository, context.Context, string) {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_AI_SESSIONS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_AI_SESSIONS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })
@@ -96,7 +94,7 @@ func TestAISessionRepositoryListScopesToTheOperationsCallersOwnTenant(t *testing
 	_, err = strangerSessions.Record(strangerCtx, model.AISessionEvent{EnvironmentID: strangerEnv.EnvironmentID, SessionID: "ai", Event: "turn-start"})
 	mustNoErr(t, err, "record stranger session event")
 
-	databaseURL := os.Getenv("ERUN_E2E_AI_SESSIONS_DATABASE_URL")
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

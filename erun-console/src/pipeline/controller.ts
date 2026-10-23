@@ -11,7 +11,7 @@ export type PipelineState =
 // unioned on the issue each belongs to. Polls, for the same reason the job
 // queue does: the view exists to answer "what is going on" while things are
 // going on, and a rung that moved is only worth watching if the panel behind
-// it is current. Same interval as the job and gate-run queues.
+// it is current. Same interval as the job queue.
 const POLL_INTERVAL_MS = 5000;
 
 export function usePipelineController(token: string): PipelineState {

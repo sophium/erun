@@ -15,7 +15,6 @@ export type TenantDashboardTab =
   | 'Users'
   | 'Reviews'
   | 'Merge queue'
-  | 'Gates'
   | 'Pipeline'
   | 'Builds'
   | 'Audit log'
@@ -165,18 +164,6 @@ export class TenantDashboard {
 
   usersEmptyState(): Locator {
     return this.activePanel().getByText('No signed-in user', { exact: true });
-  }
-
-  gatesTable(): Locator {
-    return this.activePanel().getByRole('table');
-  }
-
-  gatesRows(): Locator {
-    return this.gatesTable().locator('tbody tr');
-  }
-
-  gatesEmptyState(): Locator {
-    return this.activePanel().getByText('No gate runs yet', { exact: true });
   }
 
   // Pipeline tab: the one view that spans planned work and the review

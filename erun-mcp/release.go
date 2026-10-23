@@ -32,7 +32,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 					return errors.New("release: the resolved plan is not a release")
 				}
 				spec = resolved
-				return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner, runtime.BuildScriptRunner)
+				return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner)
 			})
 			output.Spec = &spec
 			return output, err

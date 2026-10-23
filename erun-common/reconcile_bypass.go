@@ -18,16 +18,16 @@ import (
 // resolves, but a bypass is structurally unavoidable for the pull_request
 // rule as long as the queue pushes raw commits instead of merging through
 // the GitHub API. So every bypassed push should be checkable after the fact
-// against a real gate run, rather than trusted because of who pushed it --
+// against a real successful build, rather than trusted because of who pushed it --
 // and once one identity is supposed to be the only one holding the grant,
 // checkable against that too.
 //
 // GitHub's rule-suites API (`GET .../rulesets/rule-suites`) is the ledger of
 // every push GitHub evaluated against a ruleset, including which ones used a
-// bypass; gate_runs is erun's own record of what actually gated
-// green. This cross-references the two: a bypassed push whose landed commit
-// (after_sha) matches no PASSED gate run's mergeCommit for the same target
-// branch is reported unreconciled, loudly.
+// bypass; the platform's build history is erun's own record of what actually
+// built green. This cross-references the two: a bypassed push none of whose
+// landed commits has a successful build recorded is reported unreconciled,
+// loudly.
 
 // ReconcileBypassParams is the `erun exec reconcile-bypass` input.
 type ReconcileBypassParams struct {
@@ -50,12 +50,12 @@ type ReconcileBypassParams struct {
 	ExpectedActors []string
 }
 
-// Verdicts a bypassed push can carry. A push is accounted for when a gate run
-// gated exactly what landed, or when a release published it; anything else is
-// loud.
+// Verdicts a bypassed push can carry. A push is accounted for when a
+// successful build exists of exactly what landed, or when a release published
+// it; anything else is loud.
 const (
-	// BypassVerdictReconciled means a PASSED gate run's merge commit is one
-	// of the commits this push put on the branch.
+	// BypassVerdictReconciled means one of the commits this push put on the
+	// branch has a successful build recorded.
 	BypassVerdictReconciled = "RECONCILED"
 	// BypassVerdictRelease means a tag in the repository points at one of
 	// the commits this push carried, so a release -- which stamps, tags and
@@ -90,8 +90,10 @@ type BypassedPush struct {
 	// Verdict is one of the BypassVerdict* values.
 	Verdict string `json:"verdict"`
 	// Reason says why, whenever the verdict is not RECONCILED.
-	Reason    string `json:"reason,omitempty"`
-	GateRunID string `json:"gateRunId,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// BuildID names the successful build that accounts for a RECONCILED
+	// verdict.
+	BuildID string `json:"buildId,omitempty"`
 	// ReleaseTag names the tag that accounts for a RELEASE verdict.
 	ReleaseTag string `json:"releaseTag,omitempty"`
 }
@@ -108,7 +110,7 @@ type ReconcileBypassResult struct {
 	Unreconciled int `json:"unreconciled"`
 	// UnexpectedActors counts pushes an unnamed identity bypassed. Separate
 	// from Unreconciled because they are different failures: one says the
-	// content was never gated, the other says the wrong identity can push
+	// content was never built, the other says the wrong identity can push
 	// at all.
 	UnexpectedActors int `json:"unexpectedActors"`
 }
@@ -164,7 +166,7 @@ func resolveReconcileBypassInputs(ctx Context, params ReconcileBypassParams) (re
 	if len(expected) > 0 {
 		ctx.Trace("reconcile-bypass: expected bypass actors = " + strings.Join(expected, ", "))
 	} else {
-		ctx.Trace("reconcile-bypass: no expected bypass actors named; reporting on gate-run and release evidence alone")
+		ctx.Trace("reconcile-bypass: no expected bypass actors named; reporting on build and release evidence alone")
 	}
 	return reconcileBypassInputs{
 		owner: owner, repo: repo, targetBranch: target,
@@ -221,8 +223,9 @@ func trimmedNonEmpty(values []string) []string {
 }
 
 // ReconcileBypass cross-references GitHub's own bypass ledger for
-// params.RulesetID/params.TargetBranch against gate_runs, and reports every
-// bypassed push next to whether a PASSED gate run's mergeCommit covers it.
+// params.RulesetID/params.TargetBranch against the platform's build history,
+// and reports every bypassed push next to whether a successful build of a
+// commit it landed covers it.
 func ReconcileBypass(ctx Context, store CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
 	inputs, err := resolveReconcileBypassInputs(ctx, params)
 	if err != nil {
@@ -238,9 +241,7 @@ func ReconcileBypass(ctx Context, store CloudReadStore, alias string, params Rec
 	if err != nil {
 		return ReconcileBypassResult{}, err
 	}
-	filter := PlatformGateRunFilter{TargetBranch: inputs.targetBranch, Status: "PASSED"}
-	tracePlatformCall(ctx, provider, "GET", "/v1/gate-runs", gateRunFilterTraceDetails(filter)...)
-	traceReconcileBypassFollowUpCalls(ctx, inputs)
+	traceReconcileBypassFollowUpCalls(ctx, provider, inputs)
 	if ctx.DryRun {
 		return result, nil
 	}
@@ -252,17 +253,18 @@ func ReconcileBypass(ctx Context, store CloudReadStore, alias string, params Rec
 		return ReconcileBypassResult{}, fmt.Errorf(
 			"no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN")
 	}
-	return finishReconcileBypass(ctx, client, deps.Client, token, listURL, inputs, filter, result)
+	return finishReconcileBypass(ctx, client, deps.Client, token, listURL, inputs, result)
 }
 
 // traceReconcileBypassFollowUpCalls names the conditional GitHub reads the
 // reconciliation makes once it knows which pushes the tip commit alone did
 // not account for, so a dry run shows every call a real run can make rather
-// than only the two it always makes.
-func traceReconcileBypassFollowUpCalls(ctx Context, inputs reconcileBypassInputs) {
+// than only the one it always makes.
+func traceReconcileBypassFollowUpCalls(ctx Context, provider CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
 		githubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
-	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/compare/{beforeSha}...{afterSha} per push no passed gate run's merge commit matched, to account for every commit the push added",
+	tracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
+	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/compare/{beforeSha}...{afterSha} per push whose tip has no successful build, to account for every commit the push added",
 		githubAPIBaseURL, inputs.owner, inputs.repo))
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/tags?per_page=100 (once, up to %d pages) to tell a release's own push from an ungated one",
 		githubAPIBaseURL, inputs.owner, inputs.repo, maxReleaseTagPages))
@@ -271,7 +273,7 @@ func traceReconcileBypassFollowUpCalls(ctx Context, inputs reconcileBypassInputs
 // finishReconcileBypass runs the networked half of ReconcileBypass, isolated
 // so the validation and dry-run branching above it don't inflate that
 // function's complexity -- the same split ClosePullRequest uses.
-func finishReconcileBypass(ctx Context, client *PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, filter PlatformGateRunFilter, result ReconcileBypassResult) (ReconcileBypassResult, error) {
+func finishReconcileBypass(ctx Context, client *PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
 	suites, truncated, err := listBypassedRuleSuites(context.Background(), httpClient, token, listURL)
 	if err != nil {
 		return ReconcileBypassResult{}, err
@@ -284,12 +286,12 @@ func finishReconcileBypass(ctx Context, client *PlatformClient, httpClient *http
 		return ReconcileBypassResult{}, err
 	}
 
-	passed, err := client.ListGateRuns(context.Background(), filter)
+	builds := newSuccessfulBuildIndex(context.Background(), client)
+	result.Unreconciled, result.UnexpectedActors, err = accountForBypassedPushes(
+		context.Background(), httpClient, token, inputs, pushes, builds)
 	if err != nil {
-		return ReconcileBypassResult{}, fmt.Errorf("list passed gate runs: %w", err)
+		return ReconcileBypassResult{}, err
 	}
-	result.Unreconciled, result.UnexpectedActors = accountForBypassedPushes(
-		context.Background(), httpClient, token, inputs, pushes, passed)
 	result.Pushes = pushes
 	return result, nil
 }
@@ -498,77 +500,127 @@ func getGitHubRuleSuiteDetail(ctx context.Context, client *http.Client, token, o
 // accountForBypassedPushes decides each push's verdict and returns how many
 // went unaccounted for and how many an unnamed identity made.
 //
-// Two things a queue legitimately does are not one thing. A gated merge lands
-// exactly the commit a PASSED gate run built, so its tip matches directly. A
+// Two things a queue legitimately does are not one thing. A merge lands
+// exactly the commit the queue built, so its tip has a successful build. A
 // release lands three commits at once (the tagged release commit, the
 // packaging-checksum sync, the next version's stamp) and its tip is the last
-// of them, which no gate run ever built -- reconciling only the tip would
-// report every release this repository has ever cut as unaccounted for, and a
-// report that is permanently red is a report nobody reads.
-func accountForBypassedPushes(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, pushes []BypassedPush, passed []PlatformGateRun) (unreconciled, unexpectedActors int) {
-	byCommit := make(map[string]string, len(passed))
-	for _, run := range passed {
-		if run.MergeCommit != "" {
-			byCommit[run.MergeCommit] = run.GateRunID
-		}
-	}
+// of them, which nothing built -- reconciling only the tip would report every
+// release this repository has ever cut as unaccounted for, and a report that
+// is permanently red is a report nobody reads.
+func accountForBypassedPushes(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, pushes []BypassedPush, builds *successfulBuildIndex) (unreconciled, unexpectedActors int, err error) {
 	tags := newReleaseTagIndex(ctx, client, token, inputs.owner, inputs.repo)
 	for i := range pushes {
 		push := &pushes[i]
-		accountForOneBypassedPush(ctx, client, token, inputs, push, byCommit, tags)
+		if err := accountForOneBypassedPush(ctx, client, token, inputs, push, builds, tags); err != nil {
+			return 0, 0, err
+		}
 		if !actorIsExpected(inputs.expectedActors, push.Actor) {
 			unexpectedActors++
 		}
-		if push.GateRunID == "" && push.ReleaseTag == "" {
+		if push.BuildID == "" && push.ReleaseTag == "" {
 			unreconciled++
 		}
 	}
-	return unreconciled, unexpectedActors
+	return unreconciled, unexpectedActors, nil
 }
 
 // accountForOneBypassedPush resolves one push's evidence, then lets an
-// unexpected actor override the verdict: content that was really gated is
+// unexpected actor override the verdict: content that was really built is
 // still a finding when the wrong identity was able to push it at all.
-func accountForOneBypassedPush(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, gateRunsByCommit map[string]string, tags *releaseTagIndex) {
-	push.Verdict, push.Reason = resolveBypassedPushEvidence(ctx, client, token, inputs, push, gateRunsByCommit, tags)
+func accountForOneBypassedPush(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) error {
+	verdict, reason, err := resolveBypassedPushEvidence(ctx, client, token, inputs, push, builds, tags)
+	if err != nil {
+		return err
+	}
+	push.Verdict, push.Reason = verdict, reason
 	if actorIsExpected(inputs.expectedActors, push.Actor) {
-		return
+		return nil
 	}
 	push.Verdict = BypassVerdictUnexpectedActor
 	push.Reason = fmt.Sprintf("%s is not one of the expected bypass identities (%s)",
 		push.Actor, strings.Join(inputs.expectedActors, ", "))
-	if push.GateRunID != "" {
-		push.Reason += "; the content itself is covered by gate run " + push.GateRunID
+	if push.BuildID != "" {
+		push.Reason += "; the content itself is covered by build " + push.BuildID
 	}
 	if push.ReleaseTag != "" {
 		push.Reason += "; the content itself was published by release tag " + push.ReleaseTag
 	}
+	return nil
 }
 
-func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, gateRunsByCommit map[string]string, tags *releaseTagIndex) (verdict, reason string) {
-	if gateRunID, ok := gateRunsByCommit[push.Commit]; ok {
-		push.GateRunID = gateRunID
-		return BypassVerdictReconciled, ""
+// resolveBypassedPushEvidence returns an error only when the platform's build
+// history could not be read: that is not a fact about the push, and reporting
+// it as UNRECONCILED would blame every push for an outage.
+func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) (verdict, reason string, err error) {
+	buildID, err := builds.buildOf(push.Commit)
+	if err != nil {
+		return "", "", err
+	}
+	if buildID != "" {
+		push.BuildID = buildID
+		return BypassVerdictReconciled, "", nil
 	}
 	commits, err := listGitHubCompareCommits(ctx, client, token, inputs.owner, inputs.repo, push.BeforeCommit, push.Commit)
 	if err != nil {
-		return BypassVerdictUnreconciled, "could not read the commits this push added: " + err.Error()
+		return BypassVerdictUnreconciled, "could not read the commits this push added: " + err.Error(), nil
 	}
 	for _, commit := range commits {
-		if gateRunID, ok := gateRunsByCommit[commit]; ok {
-			push.GateRunID = gateRunID
-			return BypassVerdictReconciled, ""
+		buildID, err := builds.buildOf(commit)
+		if err != nil {
+			return "", "", err
+		}
+		if buildID != "" {
+			push.BuildID = buildID
+			return BypassVerdictReconciled, "", nil
 		}
 	}
 	tag, err := tags.tagPointingAt(commits)
 	if err != nil {
-		return BypassVerdictUnreconciled, "could not read this repository's tags: " + err.Error()
+		return BypassVerdictUnreconciled, "could not read this repository's tags: " + err.Error(), nil
 	}
 	if tag != "" {
 		push.ReleaseTag = tag
-		return BypassVerdictRelease, "published by release tag " + tag + ", not gated as a merge"
+		return BypassVerdictRelease, "published by release tag " + tag + ", not built as a merge", nil
 	}
-	return BypassVerdictUnreconciled, fmt.Sprintf("no passed gate run's merge commit and no tag account for the %d commit(s) this push added", len(commits))
+	return BypassVerdictUnreconciled, fmt.Sprintf("no successful build and no tag account for the %d commit(s) this push added", len(commits)), nil
+}
+
+// successfulBuildIndex answers "which successful build, if any, built exactly
+// this commit", asking the platform at most once per commit: a release push
+// and a batched merge share commits with nothing else, but the tip of one push
+// is often the before-commit of the next.
+type successfulBuildIndex struct {
+	ctx      context.Context
+	client   *PlatformClient
+	byCommit map[string]string
+}
+
+func newSuccessfulBuildIndex(ctx context.Context, client *PlatformClient) *successfulBuildIndex {
+	return &successfulBuildIndex{ctx: ctx, client: client, byCommit: map[string]string{}}
+}
+
+func (index *successfulBuildIndex) buildOf(commit string) (string, error) {
+	commit = strings.TrimSpace(commit)
+	if commit == "" {
+		return "", nil
+	}
+	if buildID, ok := index.byCommit[commit]; ok {
+		return buildID, nil
+	}
+	successful := true
+	page, err := index.client.ListAllBuilds(index.ctx, PlatformBuildListFilter{CommitID: commit, Successful: &successful, Limit: 1})
+	if err != nil {
+		return "", fmt.Errorf("list successful builds of %s: %w", commit, err)
+	}
+	buildID := ""
+	for _, build := range page.Builds {
+		if build.Successful && build.CommitID == commit {
+			buildID = build.BuildID
+			break
+		}
+	}
+	index.byCommit[commit] = buildID
+	return buildID, nil
 }
 
 // actorIsExpected treats an empty expectation as "any actor": naming the
@@ -592,8 +644,8 @@ func actorIsExpected(expected []string, actor string) bool {
 const maxReleaseTagPages = 5
 
 // releaseTagIndex reads the repository's tags at most once, and only when a
-// push actually needs them -- the common case (a gated merge whose tip is the
-// gate run's own merge commit) never fetches them at all.
+// push actually needs them -- the common case (a merge whose tip is the
+// commit the queue built) never fetches them at all.
 type releaseTagIndex struct {
 	ctx    context.Context
 	client *http.Client

@@ -120,6 +120,12 @@ func machineIdentityPlatformClient(ctx Context, store CloudReadStore, deps Cloud
 	// nothing to ask with" is decided in the one place that already decides it,
 	// and without a second network-free resolution to keep in step.
 	provider, _, ok, err := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	if err != nil && !hostAliasSelected(ctx.PlatformAlias) && isPlatformAliasAmbiguity(err) {
+		// Several aliases and none named: nothing to ask with, so fall back.
+		// The delegated path declines on the same ambiguity and reports it,
+		// which is what keeps init from failing on such a host.
+		return nil, CloudProviderConfig{}, false, nil
+	}
 	if err != nil {
 		return nil, CloudProviderConfig{}, false, err
 	}

@@ -1,7 +1,9 @@
 # AGENTS.md
 
 Hosted-console guidance. Follow root `AGENTS.md` and shared frontend/UX guidance
-in `erun-kit/AGENTS.md`. Real-infrastructure tests also read `playwright/AGENTS.md`.
+in `erun-kit/AGENTS.md`. The real-browser layout suite also reads
+`playwright/AGENTS.md`; the deployed-environment suite reads
+`erun-devops/e2e/console/AGENTS.md`.
 
 ## Module role
 
@@ -17,13 +19,14 @@ in `erun-kit/AGENTS.md`. Real-infrastructure tests also read `playwright/AGENTS.
 
 Keep verification claims tied to actual test boundaries:
 
-| Surface                        | Evidence                                             | Remaining boundary                                                 |
-| ------------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------ |
-| Config and app panels          | Vitest component tests with mocked fetch             | Mock success alone is not live API proof                           |
-| OIDC Authorization Code + PKCE | Auth unit tests and real-Zitadel browser sign-in     | Dev bearer-token mode is not OIDC verification                     |
-| MCP operate scope              | Real cross-origin browser + emcp as TenantUser       | Public services-zone ingress is not exercised by the local edge    |
-| WebSocket attach               | Real browser + TLS front + dtach/PTY on a fresh edge | Full terminal emulation is not implemented; the view is line-based |
-| Alias/context/tenant writes    | Real REST suite                                      | Context registration is tested, not terminal cloud provisioning    |
+| Surface                        | Evidence                                                                          | Remaining boundary                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Config and app panels          | Vitest component tests with mocked fetch                                          | Mock success alone is not live API proof                           |
+| Landing layout                 | Real-engine suite against the built bundle, in the image build                    | No backend: the signed-out page only                               |
+| OIDC Authorization Code + PKCE | Auth unit tests and the deployed suite's sign-in via its IdP                      | Dev bearer-token mode is not OIDC verification                     |
+| MCP operate scope              | Go tests: token mint scope (API), tool registration/refusal and CORS (`erun-mcp`) | No browser drives operate controls against a real emcp             |
+| WebSocket attach               | Deployed suite: real browser, exposed edge's TLS, dtach/PTY                       | Full terminal emulation is not implemented; the view is line-based |
+| Alias/context/tenant writes    | API route tests in `erun-backend-api`; Vitest panel tests with mocked fetch       | No browser round trip: TS/wire drift on these panels is unchecked  |
 
 - Preserve hostname discovery from `exposedHostname`, editable override, and a
   labelled manual fallback when not exposed.
@@ -102,11 +105,18 @@ suite for auth, MCP, or live API boundaries; neither silently substitutes for th
 ## Validation
 
 - Code changes: `yarn install`, then `yarn typecheck && yarn lint &&
-yarn format:check && yarn build && yarn test` here.
+yarn format:check && yarn build && yarn test` here. The console image's `test`
+  stage runs these, the kit's, and the `playwright/` package's checks plus its
+  landing-layout spec against the built bundle;
+  `docker build -f erun-devops/docker/erun-console/Dockerfile --target test .`
+  from the repository root runs the same gate.
 - Vitest collects `src/`, not the independent Playwright package. Test setup
   supplies jsdom's missing ResizeObserver/matchMedia behavior.
-- Auth lifecycle changes run the real-Zitadel browser suite. Changes crossing an
-  MCP or REST boundary run the corresponding suite under `playwright/AGENTS.md`.
+- Auth lifecycle and WebSocket attach changes are proven after deploy, by
+  `erun e2e --component console` against an environment running the change.
+  Changes crossing the MCP operate or REST write boundary run the owning Go
+  suites (`erun-backend-api` routes, `erun-mcp` capabilities and CORS); no local
+  browser suite stands up an API.
 - Guidance-only changes follow root validation scope.
 
 ## Running against a real erun-backend-api (dev)

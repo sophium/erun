@@ -197,11 +197,14 @@ func TestBuild(t *testing.T) {
 		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "api", "Dockerfile"),
-			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS test\n"+
-				"RUN --network=host true && touch /test-ok\n"+
+			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS build\n"+
+				"RUN mkdir /out\n"+
 				"\n"+
-				"FROM alpine:3.22 AS builder\n"+
-				"COPY --from=test /test-ok /tmp/erun-test-ok\n")
+				"FROM build AS test\n"+
+				"RUN --network=host true\n"+
+				"\n"+
+				"FROM alpine:3.22 AS runtime\n"+
+				"COPY --from=test /out /out\n")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
@@ -210,37 +213,51 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_dockerfile_test_stage_grants_host_network_entitlement", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_gate_invalidates_only_the_test_stage_layers", func(t *testing.T) {
-		// A build that declares itself the merge queue's gate must execute the
-		// Dockerfile's test stage rather than read a memoized verdict on
-		// byte-identical content. BuildKit's layer cache is the second door into
-		// that stage — erun's own fingerprint cache is the first, and the
-		// promotion guard already closes it — and `--no-cache-filter <stage>` is
-		// the narrow way to close it: only this stage is rebuilt, so a gate costs
-		// the gate and not the shared cache underneath the other stages.
-		//
-		// The plain `build --dry-run` golden beside this one is the contrast and
-		// is deliberately unchanged: an ordinary incremental build replaying a
-		// cached stage is a cache working as designed, and charging every
-		// developer the project's whole `make check` for it would be a different
-		// change than the one this scenario pins.
+	t.Run("dry_run_unconsumed_test_stage_is_refused", func(t *testing.T) {
+		// A `test` stage no later stage consumes would be pruned by BuildKit, so
+		// the image would build without its tests ever running. The build spec
+		// refuses it before anything is fingerprinted or built, naming the two
+		// ways to consume it.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		fixture.SeedProjectPathsConfig(t, setup, "build/docker", "", "", "", "build/VERSION")
 		fixture.SeedDockerComponentAt(t, filepath.Join(setup.Cwd, "build", "docker"), "api")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "docker", "api", "Dockerfile"),
-			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS test\n"+
-				"RUN --network=host true && touch /test-ok\n"+
+			"FROM --platform=$BUILDPLATFORM alpine:3.22 AS build\n"+
+				"RUN mkdir /out\n"+
 				"\n"+
-				"FROM alpine:3.22 AS builder\n"+
-				"COPY --from=test /test-ok /tmp/erun-test-ok\n")
+				"FROM build AS test\n"+
+				"RUN true\n"+
+				"\n"+
+				"FROM alpine:3.22 AS runtime\n"+
+				"COPY --from=build /out /out\n")
 		mustWriteFile(t, filepath.Join(setup.Cwd, "build", "VERSION"), "2.3.4\n")
-		result := erun.Run(t, []string{"build", "--dry-run", "--gate"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected an unconsumed test stage to be refused, got exit 0: %s", result.Combined)
 		}
-		golden.Equal(t, "build/dry_run_gate_invalidates_only_the_test_stage_layers", normalize.Apply(result.Combined))
+		golden.Equal(t, "build/dry_run_unconsumed_test_stage_is_refused", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_from_an_e2e_suite_directory_is_refused", func(t *testing.T) {
+		// An e2e suite's Dockerfile sits beside docker/ and k8s/ in the devops
+		// module, so a build run from its directory would otherwise take it as
+		// the current component and fingerprint, promote and push it. It is
+		// refused with the command that does run it.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		suiteDir := filepath.Join(setup.Cwd, "erun-devops", "e2e", "console")
+		mustWriteFile(t, filepath.Join(suiteDir, "Dockerfile"),
+			"FROM alpine:3.22 AS deps\n"+
+				"\n"+
+				"FROM deps AS e2e\n"+
+				"RUN true\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: suiteDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a build from an e2e suite directory to be refused, got exit 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_from_an_e2e_suite_directory_is_refused", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_component_flag_selects_entry", func(t *testing.T) {
@@ -1017,9 +1034,9 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("real_run_default_verbosity_surfaces_docker_builds_own_output_on_failure", func(t *testing.T) {
-		// The release path builds quietly, so when the in-build `make
-		// check` test stage failed, all that survived was
-		// `process "/bin/sh -c make check ..." did not complete successfully:
+		// The release path builds quietly, so when an in-build test stage
+		// failed, all that survived was
+		// `process "/bin/sh -c ..." did not complete successfully:
 		// exit code: 2` — no lint finding, no failing test name. docker build's
 		// own output (what BuildKit's plain progress captured, including a
 		// failing RUN step's stdout/stderr) must now reach the user even at
@@ -1052,9 +1069,8 @@ func TestBuild(t *testing.T) {
 		// per-platform timing row used to be the finest granularity available --
 		// it could say a build was slow, never which part. BuildKit's own
 		// --progress=plain output (already captured for the two scenarios above)
-		// carries a per-Dockerfile-step DONE line, and the Makefile's own
-		// `>> <phase>` markers ride inside the `RUN make check` step's own output
-		// lines. Both must now surface as their own rows in the step timing table
+		// carries a per-Dockerfile-step DONE line, and a step's own
+		// `>> <phase>` markers ride inside that step's output lines. Both must now surface as their own rows in the step timing table
 		// instead of collapsing into the platform's one duration.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
@@ -1367,6 +1383,65 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/real_run_with_existing_fingerprint_promotes_via_tag", normalize.Apply(result.Combined))
 	})
 
+	// A component whose Dockerfile declares a consumed `test` stage reports
+	// each build's test outcome after it: `passed` when docker build ran the
+	// graph, `reused (fingerprint ...)` when the fingerprint image was promoted
+	// without a build. A component with no test stage says so instead. The
+	// docker stub answers the test-stage daemon forwarder's inspect calls with
+	// a stopped leftover (replaced) and then a running forwarder, so the real
+	// run reaches the build without a daemon on the machine.
+	for _, tc := range []struct {
+		name         string
+		imageInspect string
+		runtime      string
+	}{
+		{name: "real_run_test_stage_reports_passed_after_building", imageInspect: "exit 1", runtime: "\nFROM alpine:3.22 AS runtime\nCOPY --from=test /out /out\n"},
+		{name: "real_run_test_stage_reports_reused_when_promoted", imageInspect: "exit 0", runtime: "\nFROM alpine:3.22 AS runtime\nCOPY --from=test /out /out\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setup := env.New(t)
+			fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+			mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile"),
+				"FROM --platform=$BUILDPLATFORM alpine:3.22 AS build\n"+
+					"RUN mkdir /out\n"+
+					"\n"+
+					"FROM build AS test\n"+
+					"RUN true\n"+
+					tc.runtime)
+			stubs := setup.Cwd + "/stubs"
+			fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+				`case "$1" in`,
+				`  image)`,
+				`    case "$2" in`,
+				`      inspect) ` + tc.imageInspect + ` ;;`,
+				`      *) exit 0 ;;`,
+				`    esac`,
+				`    ;;`,
+				`  inspect)`,
+				`    case "$3" in`,
+				`      *Labels*) echo "0 false" ;;`,
+				`      *) echo true ;;`,
+				`    esac`,
+				`    ;;`,
+				`  buildx)`,
+				`    case "$2" in`,
+				`      inspect) echo "Platforms: linux/arm64*, linux/amd64" ;;`,
+				`      *) exit 0 ;;`,
+				`    esac`,
+				`    ;;`,
+				`  *) exit 0 ;;`,
+				`esac`,
+			}, "\n"))
+			envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+			envVars = append(envVars, stubHelmSilent(t, setup)...)
+			result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+			if result.ExitCode != 0 {
+				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+			}
+			golden.Equal(t, "build/"+tc.name, normalize.Apply(result.Combined))
+		})
+	}
+
 	t.Run("real_run_release_pushes_multi_platform_manifest", func(t *testing.T) {
 		// Real-run release mode pushes the multi-platform manifest: release-tagged
 		// images run the per-platform push and the manifest create+push.
@@ -1530,13 +1605,13 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_dockerfile_cgroup_parent_applies_inside_injected_runtime_pod", func(t *testing.T) {
-		// erun#2255: DIND_CPU_LIMIT (erun#2081, above) only fixes derivations
-		// *inside* the image -- the RUN-instruction containers themselves still
-		// escape the sidecar's kubelet-declared CPU limit as sibling cgroups.
-		// Inside an injected runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT set, the
-		// same marker inInjectedRuntimePod already uses elsewhere), every docker
-		// build must carry --cgroup-parent so its RUN containers nest under the
-		// cgroup dind-entrypoint.sh mirrors this sidecar's own live cpu.max into.
+		// DIND_CPU_LIMIT (above) only fixes derivations *inside* the image --
+		// the RUN-instruction containers themselves still escape the sidecar's
+		// kubelet-declared CPU limit as sibling cgroups. Inside an injected
+		// runtime pod (ERUN_TENANT/ERUN_ENVIRONMENT set, the same marker
+		// inInjectedRuntimePod already uses elsewhere), every docker build must
+		// carry --cgroup-parent so its RUN containers nest under the cgroup
+		// `erun dind-entrypoint` mirrors this sidecar's own live cpu.max into.
 		// Applies regardless of whether the Dockerfile declares DIND_CPU_LIMIT at
 		// all, since the OS-level escape is not specific to that ARG.
 		setup := env.New(t)
@@ -1581,89 +1656,173 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
-		// From inside linux/<component>, `erun build` resolves the dir's build.sh
-		// and dry-run traces its invocation with the version. ERUN_HOST_OS_OVERRIDE
-		// pins the host to linux and a dpkg-deb stub satisfies the linux-package
-		// support check, so the golden is identical on mac/CI hosts.
+		// A linux package is a Dockerfile under <tenant>-devops/linux/<name>/,
+		// never an image: from its directory `erun build` resolves no image and
+		// runs only the package's test stage to a cache-only output, from the
+		// project root it takes as its context. Nothing about the host matters,
+		// because the package builds inside docker.
 		setup := env.New(t)
-		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-host")
-		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", pkgDir, err)
-		}
-		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatalf("write build.sh: %v", err)
-		}
-		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
-		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: envVars})
+		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
+		mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), testedLinuxPackageDockerfile)
+		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: append(setup.Env(), stubDockerArm64Daemon(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_linux_package_from_component_dir", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_linux_package_cgroup_parent_applies_inside_injected_runtime_pod", func(t *testing.T) {
+		// A package's test stage is as heavy as any image's (erun-ui runs its
+		// whole suite there), so inside an injected runtime pod it nests its RUN
+		// containers under the same CPU cap cgroup every image build uses,
+		// rather than escaping the dind sidecar's limit.
+		setup := env.New(t)
+		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
+		mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), testedLinuxPackageDockerfile)
+		envVars := append(setup.Env(), "ERUN_TENANT=team", "ERUN_ENVIRONMENT=dev")
+		envVars = append(envVars, stubDockerArm64Daemon(t, setup)...)
+		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "--cgroup-parent /docker/erun-build-cpu-cap-") {
+			t.Errorf("expected the package build to carry --cgroup-parent for this pod:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_linux_package_cgroup_parent_applies_inside_injected_runtime_pod", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_linux_packages_from_linux_dir", func(t *testing.T) {
-		// From the linux/ parent dir every component's build.sh runs for real with
-		// ERUN_BUILD_VERSION set. The scripts record their invocation to marker
-		// files (a side effect outside the captured streams). Host pinned to linux
-		// with a dpkg-deb stub, as in the dry-run scenario.
+		// From the linux/ parent dir every package builds for real: one with a
+		// test stage runs it and reports `passed`, one without runs its build
+		// stage and reports `none declared`. The docker stub records its argv
+		// (a side effect outside the captured streams) to prove each build
+		// exports nothing: no tag, no image, no push.
 		setup := env.New(t)
 		linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
-		pkgDir := filepath.Join(linuxDir, "erun-host")
-		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", pkgDir, err)
-		}
-		marker := filepath.Join(setup.Cwd, "build-ran")
-		script := "#!/bin/sh\nprintf '%s' \"$ERUN_BUILD_VERSION\" > '" + marker + "'\nexit 0\n"
-		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte(script), 0o755); err != nil {
-			t.Fatalf("write build.sh: %v", err)
-		}
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-ui", "Dockerfile"), testedLinuxPackageDockerfile)
+		calls := filepath.Join(setup.Cwd, "docker-calls")
 		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
-		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
+		fixture.StubBinaryWithScript(t, stubs, "docker", dockerStubRecordingTo(calls))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/real_run_linux_packages_from_linux_dir", normalize.Apply(result.Combined))
-		ran, err := os.ReadFile(marker)
+		recorded, err := os.ReadFile(calls)
 		if err != nil {
-			t.Fatalf("expected build.sh to run and write its marker: %v", err)
+			t.Fatalf("expected the package builds to run docker: %v", err)
 		}
-		if string(ran) != "1.0.0" {
-			t.Errorf("expected build.sh to receive ERUN_BUILD_VERSION, got %q", ran)
+		builds := 0
+		for _, line := range strings.Split(strings.TrimSpace(string(recorded)), "\n") {
+			if !strings.HasPrefix(line, "build ") {
+				continue
+			}
+			builds++
+			if !strings.Contains(line, "--output type=cacheonly") || strings.Contains(line, " -t ") || strings.Contains(line, "--push") {
+				t.Errorf("a package build must export nothing, got %q", line)
+			}
+		}
+		if builds != 2 {
+			t.Errorf("expected one docker build per package, got:\n%s", recorded)
+		}
+	})
+
+	t.Run("real_run_linux_packages_reuse_a_recorded_pass", func(t *testing.T) {
+		// A package's pass is recorded locally against its fingerprint, so the
+		// next plain build with the same inputs reports `test: reused` and runs
+		// no docker build at all, rather than relying on BuildKit's layer cache
+		// (which GC evicts). Changing a source its test stage copies runs it
+		// again. The docker stub records its argv to count the builds.
+		setup := env.New(t)
+		linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-ui", "Dockerfile"), "FROM golang:1.26.0 AS build\nCOPY app /src/app\n\nFROM build AS test\nRUN go test ./...\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "app", "main.go"), "package main\n")
+		calls := filepath.Join(setup.Cwd, "docker-calls")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", dockerStubRecordingTo(calls))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		builds := func() int {
+			recorded, _ := os.ReadFile(calls)
+			return strings.Count(string(recorded), "build --progress=plain")
+		}
+		run := func() erun.Result {
+			result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
+			if result.ExitCode != 0 {
+				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+			}
+			return result
+		}
+		run()
+		if got := builds(); got != 1 {
+			t.Fatalf("the first build must run the test stage once, got %d builds", got)
+		}
+		golden.Equal(t, "build/real_run_linux_packages_reuse_a_recorded_pass", normalize.Apply(run().Combined))
+		if got := builds(); got != 1 {
+			t.Fatalf("an unchanged package must not run docker again, got %d builds", got)
+		}
+		mustWriteFile(t, filepath.Join(setup.Cwd, "app", "main.go"), "package main\n\nfunc main() {}\n")
+		run()
+		if got := builds(); got != 2 {
+			t.Fatalf("a changed copy source must run the test stage again, got %d builds", got)
+		}
+	})
+
+	t.Run("real_run_linux_package_without_test_stage_reports_none_declared_when_reused", func(t *testing.T) {
+		// A package with only a `build` stage has no tests, so a build that
+		// reuses its recorded pass still reports `none declared`, never
+		// `reused`, which would claim an earlier run's tests passed.
+		setup := env.New(t)
+		linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
+		calls := filepath.Join(setup.Cwd, "docker-calls")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", dockerStubRecordingTo(calls))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		run := func() erun.Result {
+			result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
+			if result.ExitCode != 0 {
+				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+			}
+			return result
+		}
+		run()
+		golden.Equal(t, "build/real_run_linux_package_without_test_stage_reports_none_declared_when_reused", normalize.Apply(run().Combined))
+		recorded, _ := os.ReadFile(calls)
+		if got := strings.Count(string(recorded), "build --progress=plain"); got != 1 {
+			t.Fatalf("the second build must reuse the build stage's pass, got %d builds", got)
 		}
 	})
 
 	t.Run("dry_run_project_root_walks_devops_linux_dir", func(t *testing.T) {
-		// From the project root the linux module is discovered during command
-		// registration, but the build stays scoped to the docker contexts —
-		// explicit linux builds only fire inside linux/ dirs.
+		// From the project root every build tests the linux packages beside the
+		// images, so a merge gate's plain `erun build` runs them too.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-host")
-		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", pkgDir, err)
-		}
-		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatalf("write build.sh: %v", err)
-		}
-		stubs := setup.Cwd + "/stubs"
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
-		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
-		envVars = append(envVars, "PATH="+stubs+string(os.PathListSeparator)+setup.PathDir)
+		mustWriteFile(t, filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui", "Dockerfile"), testedLinuxPackageDockerfile)
+		envVars := append(setup.Env(), stubDockerArm64Daemon(t, setup)...)
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_project_root_walks_devops_linux_dir", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_linux_package_without_test_or_build_stage_is_refused", func(t *testing.T) {
+		// A package a build cannot run anything of is refused by name rather
+		// than skipped, which would read as a tested package.
+		setup := env.New(t)
+		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-ui")
+		mustWriteFile(t, filepath.Join(pkgDir, "Dockerfile"), "FROM debian:bookworm-slim AS dist\nRUN true\n")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a package with nothing to run to be refused, got exit 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_linux_package_without_test_or_build_stage_is_refused", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_build_deploy_default_tenant_breaks_project_tie", func(t *testing.T) {
@@ -2237,41 +2396,18 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
-	t.Run("dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", func(t *testing.T) {
-		// --e2e implies --deploy (no separate --deploy needed), and composes
-		// the e2e step after the deploy trace; a project with no playwright/
-		// folder makes that step a clean no-op rather than an error.
+	t.Run("e2e_is_not_a_build_flag", func(t *testing.T) {
+		// e2e suites run only through `erun e2e`, never as part of a build:
+		// --e2e is refused as an unknown flag rather than silently ignored.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fixture.SeedGitRepo(t, setup.Cwd)
-		result := erun.Run(t, []string{"build", "--e2e", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "e2e: no playwright/ suite found; nothing to run") {
-			t.Fatalf("expected --e2e to report a clean no-op with no playwright/ folder, got:\n%s", result.Combined)
-		}
-		golden.Equal(t, "build/dry_run_e2e_implies_deploy_and_no_playwright_folder_is_a_clean_no_op", normalize.Apply(result.Combined))
-	})
-
-	t.Run("e2e_with_project_build_script_errors", func(t *testing.T) {
-		// --e2e implies --deploy, which cannot compose with a project build
-		// script; it must fail with the same clear message --deploy alone
-		// produces, rather than a confusing e2e-specific error.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-			t.Fatalf("write build.sh: %v", err)
-		}
-		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
 		result := erun.Run(t, []string{"build", "--e2e", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for --e2e with a build script, got 0:\n%s", result.Combined)
+			t.Fatalf("expected --e2e to be refused as an unknown build flag, got 0:\n%s", result.Combined)
 		}
-		golden.Equal(t, "build/e2e_with_project_build_script_errors", normalize.Apply(result.Combined))
+		golden.Equal(t, "build/e2e_is_not_a_build_flag", normalize.Apply(result.Combined))
 	})
 }
 
@@ -2293,6 +2429,23 @@ func stubDockerNoLocalImages(t *testing.T, setup env.Setup) []string {
 	return fixture.StubEnv(stubs, "docker")
 }
 
+// stubDockerArm64Daemon is a docker stub with no local images whose daemon
+// answers `docker version` as linux/arm64, the platform a linux package's
+// recorded pass is keyed by.
+func stubDockerArm64Daemon(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := filepath.Join(setup.Cwd, "stubs")
+	fixture.StubBinaryWithScript(t, stubs, "docker", `if [ "$1" = version ]; then echo linux/arm64; exit 0; fi`+"\nexit 1")
+	return fixture.StubEnv(stubs, "docker")
+}
+
+// dockerStubRecordingTo is a docker stub that appends its argv to calls and
+// answers `docker version` as a linux/arm64 daemon, the platform a package's
+// recorded pass is keyed by.
+func dockerStubRecordingTo(calls string) string {
+	return `echo "$*" >> '` + calls + `'` + "\n" + `if [ "$1" = version ]; then echo linux/arm64; fi`
+}
+
 // stubHelmSilent adds a no-op helm stub so a real-run build that packages the
 // repo's k8s/* charts does not shell out to a real helm; returns the
 // ERUN_HELM_BIN env pair to append to the scenario's env.
@@ -2302,3 +2455,31 @@ func stubHelmSilent(t *testing.T, setup env.Setup) []string {
 	fixture.StubBinary(t, stubs, "helm", "")
 	return fixture.StubEnv(stubs, "helm")
 }
+
+// Linux package fixtures: one with a test stage, one without. Both export the
+// .deb files at the root of a scratch `dist` stage, the shape a release uploads.
+const (
+	testedLinuxPackageDockerfile = "" +
+		"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
+		"RUN go build -o /out/erun-app ./...\n" +
+		"\n" +
+		"FROM build AS test\n" +
+		"RUN go test ./...\n" +
+		"\n" +
+		"FROM test AS package\n" +
+		"ARG ERUN_VERSION\n" +
+		"RUN dpkg-deb --build /pkg /erun-desktop_${ERUN_VERSION}.deb\n" +
+		"\n" +
+		"FROM scratch AS dist\n" +
+		"COPY --from=package /*.deb /\n"
+	untestedLinuxPackageDockerfile = "" +
+		"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
+		"RUN go build -o /out/erun ./...\n" +
+		"\n" +
+		"FROM build AS package\n" +
+		"ARG ERUN_VERSION\n" +
+		"RUN dpkg-deb --build /pkg /erun_${ERUN_VERSION}.deb\n" +
+		"\n" +
+		"FROM scratch AS dist\n" +
+		"COPY --from=package /*.deb /\n"
+)

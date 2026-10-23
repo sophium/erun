@@ -643,7 +643,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 	}
 	deployInput.PersistRuntimeImage = persistImage
 	explicitLineChange := runtimeImageExplicit || strings.TrimSpace(runtimeChartOverride) != ""
-	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
+	if err := guardRuntimeCoordinate(ctx, target, chart, runtimeChartOverride, deployInput, explicitLineChange); err != nil {
 		return DeploySpec{}, err
 	}
 	// A runtime env that opted into a mutable source worktree clones this repo

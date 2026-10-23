@@ -163,72 +163,43 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_main_without_develop_pushes_only_main", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_includes_linux_release_scripts", func(t *testing.T) {
-		// Linux release scripts run only where package builds are supported,
-		// which erun reads as a linux host that has dpkg-deb. Both halves are
-		// declared here — ERUN_HOST_OS_OVERRIDE for the host, a dpkg-deb stub on
-		// PATH for the tool — so the golden is the same on every host instead of
-		// describing whichever machine recorded it. The build-only second
-		// component (build.sh, no release.sh) is a valid linux context that
-		// contributes no release script, exercising the skip-component branch.
+	t.Run("dry_run_build_release_exports_and_uploads_linux_packages", func(t *testing.T) {
+		// A release builds every linux package's `dist` stage for both release
+		// platforms inside the publish, before anything is public, and attaches
+		// the exported .deb files to the GitHub release only after the tag push.
+		// The host is pinned to darwin: packages build inside docker, so a
+		// release no longer needs a Linux host with dpkg-deb.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
-		if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-			t.Fatalf("mkdir linux component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatalf("write release.sh: %v", err)
-		}
-		buildOnlyComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-app")
-		if err := os.MkdirAll(buildOnlyComponentDir, 0o755); err != nil {
-			t.Fatalf("mkdir build-only linux component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(buildOnlyComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatalf("write build.sh: %v", err)
-		}
+		linuxDir := filepath.Join(setup.Cwd, "erun-devops", "linux")
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
+		mustWriteFile(t, filepath.Join(linuxDir, "erun-ui", "Dockerfile"), testedLinuxPackageDockerfile)
 		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux release script")
-
-		stubs := filepath.Join(setup.Cwd, "stubs")
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(releaseEnv(t, setup),
-			"ERUN_HOST_OS_OVERRIDE=linux",
-			// The support check resolves dpkg-deb through exec.LookPath, so the
-			// stub has to be reachable on PATH rather than via ERUN_..._BIN.
-			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
-		)
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if result.ExitCode != 0 {
-			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		golden.Equal(t, "release/dry_run_includes_linux_release_scripts", normalize.Apply(result.Combined))
-	})
-
-	t.Run("dry_run_darwin_host_skips_linux_release_scripts", func(t *testing.T) {
-		// On a host that cannot build linux packages, release must trace the
-		// skip decision rather than silently omit the scripts.
-		// ERUN_HOST_OS_OVERRIDE=darwin pins the unsupported branch so the
-		// golden is deterministic on every host, including the Linux build gate
-		// where the support check would otherwise pass.
-		setup := env.New(t)
-		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
-		if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-			t.Fatalf("mkdir linux component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-			t.Fatalf("write release.sh: %v", err)
-		}
-		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux release script")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux packages")
 
 		envVars := append(releaseEnv(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
-		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "release/dry_run_darwin_host_skips_linux_release_scripts", normalize.Apply(result.Combined))
+		golden.Equal(t, "release/dry_run_build_release_exports_and_uploads_linux_packages", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_linux_package_without_dist_stage_is_refused", func(t *testing.T) {
+		// A release refuses a package with no `dist` stage while resolving, so
+		// it fails before any stamp, tag or build.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-ui", "Dockerfile"),
+			"FROM golang:1.26.0 AS build\nRUN true\n\nFROM build AS test\nRUN true\n")
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add linux package")
+
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: releaseEnv(t, setup)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected a package without a dist stage to be refused, got exit 0: %s", result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_linux_package_without_dist_stage_is_refused", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_main_with_marketplace_emits_sha_sync", func(t *testing.T) {
@@ -878,20 +849,13 @@ exit 0
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		origin := seedBareOrigin(t, setup)
 
-		// The linux release script is where the GitHub release entry is created,
-		// and it runs after the push. A marker proves a rejected push no longer
-		// strands it.
-		releaseScriptRan := filepath.Join(setup.Home, "github-release-created")
-		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
-		if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-			t.Fatalf("mkdir linux component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"),
-			[]byte("#!/bin/sh\n: > '"+filepath.ToSlash(releaseScriptRan)+"'\n"), 0o755); err != nil {
-			t.Fatalf("write release.sh: %v", err)
-		}
+		// The GitHub release entry is created when the linux packages are
+		// attached, after the push. The gh stub's marker proves a rejected push
+		// no longer strands it.
+		githubReleaseCreated := filepath.Join(setup.Home, "github-release-created")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli", "Dockerfile"), untestedLinuxPackageDockerfile)
 		fixture.RunGit(t, setup.Cwd, "add", ".")
-		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add linux release script")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add linux package")
 		fixture.RunGit(t, setup.Cwd, "push", "-q", "origin", "main")
 
 		// The checkout that stands in for the pull request, cloned once origin is
@@ -906,13 +870,15 @@ exit 0
 		stubs := filepath.Join(setup.Cwd, "stubs")
 		stubDockerWithManifestTracking(t, stubs)
 		fixture.StubBinaryMergingIntoRemoteOnce(t, stubs, "helm", merging, "main", "a merged pull request")
-		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm")...)
+		// The release does not exist yet, so gh views nothing and creates it.
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "release view") exit 1 ;;`,
+			`  "release create") : > '` + filepath.ToSlash(githubReleaseCreated) + `' ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "helm", "gh")...)
 		envVars = append(envVars,
-			// Linux package builds are what carry the GitHub release step, so the
-			// host and the tool are both declared rather than left to the runner.
-			"ERUN_HOST_OS_OVERRIDE=linux",
-			"PATH="+stubs+string(os.PathListSeparator)+setup.PathDir,
 			// #1201: give the registry-credential preflight a resolvable credential
 			// so this scenario still reaches the moved-branch-absorption it is about.
 			"GH_TOKEN=integration-test-token",
@@ -945,8 +911,8 @@ exit 0
 			t.Fatalf("release tag did not reach origin after the absorbed push:\n%s", tags)
 		}
 		assertVersionFile(t, setup, "1.4.3\n")
-		if _, err := os.Stat(releaseScriptRan); err != nil {
-			t.Fatalf("the linux release script never ran, so the GitHub release entry was stranded: %v", err)
+		if _, err := os.Stat(githubReleaseCreated); err != nil {
+			t.Fatalf("the linux packages were never attached, so the GitHub release entry was stranded: %v", err)
 		}
 	})
 
@@ -1119,8 +1085,14 @@ func stubDockerWithManifestTracking(t *testing.T, stubs string) {
 		`    touch "$marker"`,
 		`    exit 0`,
 		`    ;;`,
-		`  *) exit 0 ;;`,
 		`esac`,
+		// A linux package's release export writes one .deb into its destination.
+		`for arg in "$@"; do`,
+		`  case "$arg" in`,
+		`    type=local,dest=*) dest="${arg#type=local,dest=}"; mkdir -p "$dest"; : > "$dest/package.deb" ;;`,
+		`  esac`,
+		`done`,
+		`exit 0`,
 	}, "\n"))
 }
 

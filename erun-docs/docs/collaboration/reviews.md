@@ -38,7 +38,7 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 | `GET` | `/v1/reviews` | List reviews. Optional filters, all composable: `?repository=<remote>`, `?targetBranch=<name>`, `?sourceBranch=<name>`, `?status=<OPEN\|CLOSED\|FAILED\|READY\|MERGE\|MERGED>`, `?authorUserId=<id>`, `?reviewerUserId=<id>`. `repository` is canonicalized exactly as it is on create, so an SSH remote and its HTTPS form both name the one repository the rows were recorded under; a value that names none is refused with `400`/`INVALID_REPOSITORY` rather than matched literally, which would answer a silent subset of the repository the caller meant. |
 | `POST` | `/v1/reviews` | Create a review. Body: `repository`, `name`, `sourceBranch`, `targetBranch`, optional `issueRef` (the issue the work belongs to, as `owner/repo#number` or a bare number joined to the recorded repository; refused with `400`/`INVALID_ISSUE_REF` for anything else). `repository` is canonicalized (an SSH remote and its HTTPS form are one repository); an absent one is recorded as none. Refused with `400`/`INVALID_REPOSITORY` for a value that names no repository — an empty value, a bare host, or a bare `owner/repo` shorthand, which names a repository on whichever forge the caller had in mind; SSH/HTTPS spellings of one remote are the accepted forms — and with `409 Conflict` if another review in the same repository already holds the name (unless it is `CLOSED`) or already proposes the same `sourceBranch` onto the same `targetBranch` while non-`MERGED`/`CLOSED`. |
 | `GET` | `/v1/reviews/{reviewId}` | Fetch one review. |
-| `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the merge was pushed to, fetched to verify the report against the real repository. `buildId` is required for a review at `MERGE` and for `READY`/`FAILED`; a `MERGED` report for a review at any other status omits it, since there is no gate build for work that landed without the queue. |
+| `PATCH` | `/v1/reviews/{reviewId}/status` | Update review status. Body: `status`, `buildId`, and (only for `status: "MERGED"`) `remoteUrl` — the git remote the merge was pushed to, fetched to verify the report against the real repository. `buildId` is required for a review at `MERGE` and for `READY`/`FAILED`; a `MERGED` report for a review at any other status omits it, since there is no merge-commit build for work that landed without the queue. |
 | `GET` | `/v1/reviews/merge-queue` | List reviews *waiting* to merge into a target branch (status `READY`, not yet promoted). Optional `?repository=<remote>`, `?targetBranch=<name>`; an absent `repository` lists every repository's queue, which is what a target branch alone has always meant. |
 | `POST` | `/v1/reviews/merge-queue/advance` | Promote the next waiting review to `MERGE`. Body: `repository`, `targetBranch`. Refuses with `409 Conflict` when the head still has unresolved comment threads, and with `409`/`MERGE_QUEUE_AMBIGUOUS` when no repository was named and the queue holds more than one repository's reviews — see [Merge queue](#merge-queue). The promoted review is expected to build and push its own merge and report the outcome; this call does not itself produce `MERGED`. |
 | `POST` | `/v1/reviews/merge-queue/override-advance` | Bypass the unresolved-thread refusal and advance anyway. Body: `repository`, `targetBranch`, `reason`. A distinct, separately-authorized route — see [Overriding the gate](#overriding-the-gate). |
@@ -129,8 +129,8 @@ stateDiagram-v2
     OPEN --> READY: successful build
     FAILED --> READY: fix + build
     READY --> MERGE: merge-queue/advance
-    MERGE --> MERGED: gate build passes
-    MERGE --> FAILED: gate build fails
+    MERGE --> MERGED: merge-commit build passes
+    MERGE --> FAILED: merge-commit build fails
     MERGE --> READY: missed merge window
     OPEN --> MERGED: reconciles against the target
     READY --> MERGED: reconciles against the target
@@ -147,7 +147,7 @@ stateDiagram-v2
 
 The status transitions are enforced server-side: `MERGE` is reached only by promoting a review through `merge-queue/advance` (or its `override-advance` counterpart) — a caller's `PATCH .../status` asserting `MERGE` directly is always refused. `MERGED` is different: it is accepted from `PATCH .../status` from *any* caller — an Agent's own environment reports it, having done the fetch/merge/build/push itself — but only once the platform can verify it against the real repository. `MERGED` means the fact checks out, not that a particular caller asserted it.
 
-Which verification applies is decided by the review's own status, not by the caller: a review at `MERGE` is checked against its recorded `GATE` build — see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for those three conditions — while a review at `OPEN`, `READY` or `FAILED` is checked against the target branch's own history, for work that landed without the queue. See [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere).
+Which verification applies is decided by the review's own status, not by the caller: a review at `MERGE` is checked against its recorded build of the merge commit — see [Merge queue § The gate](/collaboration/merge-queue#the-gate) for those three conditions — while a review at `OPEN`, `READY` or `FAILED` is checked against the target branch's own history, for work that landed without the queue. See [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere).
 
 ## Status meanings
 
@@ -156,8 +156,8 @@ Which verification applies is decided by the review's own status, not by the cal
 | `OPEN` | Review exists, no successful build yet, no decision either way. |
 | `FAILED` | The latest build for this review failed. The corresponding build id is stored in `lastFailedBuildId`. |
 | `READY` | The latest build succeeded; the review is mergeable. |
-| `MERGE` | Promoted to the head of its target branch's queue; whoever promoted it is expected to build the prospective merge, gate it with a build, and push. |
-| `MERGED` | A verified merge landed on the target branch. Terminal. `lastMergedBuildId` records the gate build (kind `GATE`; it publishes nothing, so it carries no version — see [Builds](/collaboration/builds)). It is absent for a merge that landed without the queue, which has no gate build to record; see [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere). |
+| `MERGE` | Promoted to the head of its target branch's queue; whoever promoted it is expected to build the prospective merge commit, record that build, and push. |
+| `MERGED` | A verified merge landed on the target branch. Terminal. `lastMergedBuildId` records the successful build of the merge commit, with its version — see [Builds](/collaboration/builds); a review merged before the queue built its merge commit as an ordinary build points at a historical `GATE` build with no version instead. It is absent for a merge that landed without the queue, which has no merge-commit build to record; see [Merge queue § Reconciling a review that landed elsewhere](/collaboration/merge-queue#landed-elsewhere). |
 | `CLOSED` | Closed without merge (abandoned). Terminal. |
 
 ## Merge queue

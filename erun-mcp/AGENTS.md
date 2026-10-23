@@ -11,6 +11,11 @@ MCP transport guidance. Follow root `AGENTS.md` and shared Go conventions in
   push/deploy version or rely on interactive prompts.
 - Findings are structured results, not tool-call failures. Fail calls when the
   check could not run; see CLI "Exit-Code Contract: Reporting Commands Vs Gating Checks".
+- Planned (https://github.com/sophium/erun/issues/2741, see
+  `erun-common/AGENTS.md` § "Target package layers"): one package per tool group
+  under `tools/<group>/`, importing its matching `erun-common` package, `base/*`
+  and a thin shared helper package, never another tool group; `server.go`
+  registers them. Until then keep each tool group's handlers in its own files.
 
 ## The WebSocket Attach Edge Is Not An MCP Tool
 

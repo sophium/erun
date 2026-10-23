@@ -119,6 +119,10 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "stub browser openers: %v\n", err)
 		os.Exit(1)
 	}
+	if err := disableGitMaintenanceForSuite(); err != nil {
+		fmt.Fprintf(os.Stderr, "turn off git maintenance: %v\n", err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if timingTempDir != "" {
 		_ = os.RemoveAll(timingTempDir)

@@ -1,0 +1,11 @@
+{
+  "dir": "<TMP>",
+  "maxBytes": 5000,
+  "beforeBytes": 10034,
+  "afterBytes": 4016,
+  "evicted": 12,
+  "passes": 1,
+  "dryRun": false
+}
+audit: erun trim-cache
+erun: trimmed the go build cache at <TMP> from 10034 to 4016 bytes, evicting 12 least recently used entries against a 5000 byte cap

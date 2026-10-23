@@ -9,7 +9,7 @@ import (
 // job_report.go lets an agent or orchestrator record the work it is doing to
 // the erun platform, so the queue shows what is in flight before it finishes
 // and a second actor can see it rather than duplicating it. Every other
-// platform command in this module (review_commands.go, gate_run_commands.go)
+// platform command in this module (review_commands.go, job_commands.go)
 // treats a missing or broken alias as a hard, propagated error, because a
 // human asked for that specific call. This is the opposite contract on
 // purpose, and it is ReportBuildOutcome's (build_report.go) exactly: job

@@ -71,11 +71,12 @@ Ask once, then proceed. Do not invent these.
    path. If no source exists yet, ask whether to point at
    `erun-blueprint-api` (or another service-authoring skill) first, or
    whether the operator will fill in the Dockerfile's build stage by hand.
-4. **Language/toolchain** — to pick the Dockerfile builder stage's base
-   image and build/test commands. The shipped template defaults to Go; note
-   in the plan that the operator swaps the builder stage for their toolchain
-   if it's something else (the runtime stage's shape — thin base, non-root
-   user, `ENTRYPOINT` — stays the same regardless of language).
+4. **Language/toolchain** — to pick the Dockerfile's toolchain base image
+   and its build/test commands. The shipped template defaults to Go; note
+   in the plan that the operator swaps the toolchain commands for their own
+   if it's something else (the `build` → `test` → `runtime` chain and the
+   runtime stage's shape — thin base, non-root user, `ENTRYPOINT` — stay the
+   same regardless of language).
 5. **Container port** and **health-check path** (default `8080` /
    `/healthz`) — used for the Service port and the Deployment's
    readiness/liveness probes.
@@ -119,7 +120,7 @@ find "<repo-root>" -type f -path '*/k8s/*/Chart.yaml' \
 └── <tenant>-devops/
     ├── docker/
     │   └── <component>/
-    │       ├── Dockerfile              # multi-stage: builder -> thin runtime
+    │       ├── Dockerfile              # build -> test -> dist -> thin runtime
     │       └── Dockerfile.dockerignore # this component build context
     └── k8s/
         └── <component>/
@@ -172,12 +173,13 @@ them *before* copying source, so an ordinary source edit reuses the dependency
 layer instead of re-resolving it. Measured on the template: a source-only edit
 rebuilds in **3 s against 58 s cold**, with `go mod download` cached.
 
-**Declare `ARG` as late as it is used.** An `ARG` invalidates the layers below
-it that use it. This matters more than it looks: `erun build` runs one
-`docker build --platform ...` per target architecture, sharing one build
-cache. Keep the test step *above* `ARG TARGETARCH` and it is
-architecture-independent, so the second per-arch invocation reuses the cached
-test layer; move it below and the suite runs again for every architecture.
+**Read version and target-arch `ARG`s only after `test`.** An `ARG`
+invalidates the layers below it that use it, and `erun build` runs one
+`docker build --platform ...` per target architecture. The template pins
+`build` and `test` to `$BUILDPLATFORM` and reads `TARGETARCH` (and any
+version stamp) only in `dist`, which is built `FROM test`, so a version bump
+reruns `dist` and finds the tested layers cached. Read either one in `build`
+or `test` and the suite reruns on every version change.
 
 **Cache-mount every package manager.** A `--mount=type=cache` survives the
 cache-busting source change that invalidates the layer around it:
@@ -194,8 +196,9 @@ change on your side and no way to tell from the diff.
 
 **Let independent stages stay independent.** BuildKit runs stages with no
 dependency between them concurrently, so a runtime stage needing only the
-builder’s final artefact provisions itself while the build is still running.
-Folding unrelated work into a single stage serialises it for nothing.
+final artefact provisions its base and packages while the build and tests are
+still running. Folding unrelated work into a single stage serialises it for
+nothing.
 
 **Cache mounts grow without bound** and are not reclaimed by
 `docker image prune`. On a long-lived builder, reclaim with
@@ -205,9 +208,9 @@ is actually short.
 ## The deploy contract (binding)
 
 This mirrors `erun-docs/docs/agent-reference/conventions-spec.md` §
-"Component naming" and § "Multi-stage Dockerfile expectation" exactly —
-those are the resolution algorithms `erun build`/`erun deploy` run against
-these paths.
+"Component naming" and § "Multi-stage Dockerfile expectation", and
+`dockerfile-stages.md`, exactly — those are the resolution algorithms and
+the stage contract `erun build`/`erun deploy` apply to these paths.
 
 - **The component name is the single key.** It appears identically as the
   Docker build-context directory name, the Helm chart directory name, the
@@ -226,12 +229,19 @@ these paths.
   `<tenant>-<service>` shape `erun expose` targets (see "Making it reachable"
   below). Skipping the prefix breaks the second property, not the first —
   the chart still deploys, but exposing it later needs a rename.
-- **Multi-stage Dockerfile.** A builder stage provisions the toolchain, runs
-  the tests (`RUN go test ./...` or the toolchain's equivalent — a failing
-  test fails the build, so no image is produced from red tests), and
-  produces the artefact; a thin runtime stage ships only that artefact,
-  non-root. `templates/Dockerfile` is the Go-flavoured skeleton; swap the
-  builder stage's base image and commands for another toolchain.
+- **Stage chain.** `build` provisions the toolchain and compiles for the
+  build platform; `test` is `FROM build` and runs the component's own lint
+  and tests (`go vet ./... && go test ./...` or the toolchain's equivalent);
+  `dist` is `FROM test` and compiles the shipped artefact for the target
+  architecture; `runtime` is thin and non-root and copies the artefact from
+  `dist`. The runtime stage must take what it ships from `test` or a stage
+  built `FROM test`, never from `build`: otherwise BuildKit skips `test` and
+  the image ships untested, and `erun build` refuses a `test` stage nothing
+  uses. A component with nothing to cross-compile drops `dist` and copies
+  straight from `test`. The full contract is
+  `erun-docs/docs/agent-reference/dockerfile-stages.md`.
+  `templates/Dockerfile` is the Go-flavoured skeleton; swap the base image
+  and commands for another toolchain and keep the chain.
 - **`values.<env>.yaml` is required per env, no fallback.** `erun deploy
   <tenant> <env>` reads it from this chart directory with no base
   `values.yaml` fallback and no config-dir overlay. Missing one fails the
@@ -288,9 +298,9 @@ Copy `templates/Dockerfile` to
 `<tenant>-devops/docker/<component>/Dockerfile`, substituting
 `__COMPONENT__`, `__PORT__`, and `__SOURCE_DIR__` (the source location from
 input 3, written relative to the repo root - that is the build context).
-Adapt the builder stage to the actual toolchain if it isn't Go — keep the
-test-then-build shape, the thin non-root runtime stage, and the layer order,
-which is load-bearing for build time (see "Build speed").
+Adapt the toolchain commands if it isn't Go — keep the `build` → `test` →
+`dist` → `runtime` chain, the thin non-root runtime stage, and the layer
+order, which is load-bearing for build time (see "Build speed").
 
 Also copy `templates/dockerignore` to
 `<tenant>-devops/docker/<component>/Dockerfile.dockerignore`, substituting
@@ -336,16 +346,18 @@ This skill owns the artifacts for their whole life, not just day one. If
 `<tenant>-devops/k8s/<component>/Chart.yaml` already exists, do **not**
 stop — enter maintenance mode. Idempotent and in-place: safe to re-run, show
 the diff/plan before writing, and touch only the deploy-wiring gap or drift —
-never the service's own source, the Dockerfile's builder-stage toolchain
-layers, or a hand-added chart template.
+never the service's own source, the Dockerfile's toolchain commands, or a
+hand-added chart template.
 
 - **Detect.** Either artifact present at the conventional path means
   maintain, not scaffold.
 - **Repair.** Fill gaps against this skill's contract: a missing
   `values.<env>.yaml` (especially `values.local.yaml`), a `Deployment`/
   `Service` that isn't literally named `<component>`, a missing readiness/
-  liveness probe, or a runtime stage that isn't thin/non-root. Repair
-  without touching the Dockerfile's builder-stage toolchain commands or any
+  liveness probe, a runtime stage that isn't thin/non-root, or one that
+  copies from `build` instead of `test` (or a stage built `FROM test`), so
+  its tests would be skipped. Repair without touching the Dockerfile's
+  toolchain commands or any
   chart template this skill didn't generate.
 - **Upgrade.** This is the component's **own** release line, independent of
   the erun version — there is no erun-version coupling to re-pin (unlike
@@ -389,7 +401,8 @@ layers, or a hand-added chart template.
 - Do not skip the ambiguous-match check. A second same-named chart elsewhere
   in the tree is a silent time bomb — it deploys fine today and breaks
   `erun deploy <component>` the next time someone runs it.
-- Keep the Dockerfile multi-stage (builder → thin runtime), even when
-  adapting it to a different toolchain than the Go example. Single-stage
-  Dockerfiles aren't rejected by erun, but lose the cache/size/security
-  benefits the convention exists for.
+- Keep the stage chain (`build` → `test` → `dist` → thin `runtime`), even
+  when adapting it to a different toolchain than the Go example. A
+  single-stage Dockerfile isn't rejected by erun, but it runs no tests in
+  the build and loses the cache/size/security benefits the convention
+  exists for.

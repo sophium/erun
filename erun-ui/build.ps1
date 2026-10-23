@@ -1,13 +1,14 @@
 <#
 build.ps1 - Windows counterpart of erun-ui/build.sh.
 
-Builds the ERun desktop binary (erun-app.exe): installs the go.mod-pinned Wails
-CLI, generates frontend bindings, builds the React/Vite frontend with Yarn, then
-compiles the Go desktop app with the desktop,production tags and -H windowsgui.
+Builds the ERun desktop binary (erun-app.exe): generates frontend bindings with
+the go.mod-pinned Wails CLI (`go tool wails`), builds the React/Vite frontend
+with Yarn, then compiles the Go desktop app with the desktop,production tags
+and -H windowsgui.
 
-Unlike build.sh this skips the lint/typecheck/format gates for a fast "produce
-the binary" build (run those via the pre-commit hook or `yarn` directly). The
-Wails Windows build uses CGO, so a C compiler (MinGW gcc) must be on PATH.
+Like build.sh it runs no lint/typecheck/format gates (the component's test
+stage does; run them via the pre-commit hook or `yarn` directly). The Wails
+Windows build uses CGO, so a C compiler (MinGW gcc) must be on PATH.
 
   .\build.ps1                         # -> erun-ui\bin\erun-app.exe
   .\build.ps1 -Target C:\path\app.exe # explicit output (run.ps1 uses erun-cli\bin)
@@ -53,23 +54,12 @@ if (git -C $ScriptDir rev-parse --is-inside-work-tree 2>$null) {
 
 Push-Location $ScriptDir
 try {
-    # --- Wails CLI (pinned to go.mod), cached in bin\.wails-bin -------------
-    $wailsVersion = (go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
-    if ($LASTEXITCODE -ne 0) { throw "failed to resolve Wails version" }
-    $wailsBin = Join-Path $ScriptDir "bin\.wails-bin"
-    $wailsExe = Join-Path $wailsBin "wails.exe"
-    if (-not (Test-Path $wailsExe)) {
-        Write-Host ">> installing pinned Wails CLI ($wailsVersion) ..."
-        New-Item -ItemType Directory -Force -Path $wailsBin | Out-Null
-        $env:GOBIN = $wailsBin
-        try {
-            go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"
-            if ($LASTEXITCODE -ne 0) { throw "failed to install Wails CLI" }
-        } finally { Remove-Item Env:GOBIN -ErrorAction SilentlyContinue }
-    }
-
+    # --- frontend bindings (Wails CLI is a go.mod tool) --------------------
     Write-Host ">> generating frontend bindings ..."
-    & $wailsExe generate module
+    # The generator compiles this package, whose production assets embed
+    # frontend\dist, so the directory has to exist before the bundle does.
+    New-Item -ItemType Directory -Force -Path (Join-Path $ScriptDir "frontend\dist") | Out-Null
+    go tool wails generate module
     if ($LASTEXITCODE -ne 0) { throw "failed to generate frontend bindings" }
 
     # --- frontend ----------------------------------------------------------

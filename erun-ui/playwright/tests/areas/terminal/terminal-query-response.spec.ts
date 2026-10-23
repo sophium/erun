@@ -220,12 +220,19 @@ test.describe('terminal query responses (#347)', () => {
     // 1. A live DEC query is answered once; its bytes now sit in the saved
     //    buffer, which sets up the replay below.
     await emitTerminalOutput(page, extraId, CPR_QUERY);
-    await expect.poll(() => cprRepliesTo(invokes, extraId).length).toBe(1);
+    await expect.poll(() => cprRepliesTo(invokes, extraId).length, withTestBudget()).toBe(1);
 
     // 2. Switch away and back: this replays the saved buffer — stale query
     //    included — into xterm, which is what could wrongly re-answer it.
+    //    Converge on the switch back landing in the store before the drain
+    //    below: output for a session the store is not on is buffered and
+    //    replayed on its next activation, and a replayed query is never
+    //    answered, so a drain emitted while the click is still in flight is
+    //    swallowed by design and the spec waits for a reply that cannot come.
+    //    The tab's aria-selected is rendered from that same store field.
     await localTab.click();
     await extraTab.click();
+    await expect(extraTab).toHaveAttribute('aria-selected', 'true', withTestBudget());
 
     // 3. Drain with a plain CSI query (`ESC [ 6 n`), split across two events so
     //    the per-chunk display strip cannot eat it. Its reply lacks the `?`, so
@@ -235,7 +242,10 @@ test.describe('terminal query responses (#347)', () => {
     await emitTerminalOutput(page, extraId, '\x1b[');
     await emitTerminalOutput(page, extraId, '6n');
     await expect
-      .poll(() => cprRepliesTo(invokes, extraId).filter((r) => !r.startsWith('\x1b[?')).length)
+      .poll(
+        () => cprRepliesTo(invokes, extraId).filter((r) => !r.startsWith('\x1b[?')).length,
+        withTestBudget(),
+      )
       .toBe(1);
 
     // The replay parse is provably complete and must have contributed

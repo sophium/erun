@@ -153,7 +153,9 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 		if ctx.DryRun {
 			return nil
 		}
-		if ensureErr := internal.EnsureGlobalAgentInstructions(); ensureErr != nil {
+		if homeDir, ensureErr := os.UserHomeDir(); ensureErr != nil {
+			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
+		} else if ensureErr := common.EnsureGlobalAgentInstructions(homeDir); ensureErr != nil {
 			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
 		}
 		if ensureErr := internal.EnsureClaudeSettings(); ensureErr != nil {

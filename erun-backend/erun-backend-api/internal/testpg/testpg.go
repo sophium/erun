@@ -1,0 +1,267 @@
+// Package testpg gives a test package a real, migrated PostgreSQL.
+//
+// The database suites run whenever `go test` runs: there is no opt-in
+// variable to forget, and no Docker is a failure, not a skip. The first test
+// in a package to ask starts postgres through Testcontainers -- whatever
+// daemon DOCKER_HOST names -- and applies erun-backend-db's migrations with
+// the Atlas release that image ships, so the suites run against the schema a
+// deployed API serves. Testcontainers removes the containers when the test
+// process exits.
+package testpg
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	neturl "net/url"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/testcontainers/testcontainers-go/network"
+)
+
+const (
+	postgresImage = "postgres:18.3"
+	atlasImage    = "arigaio/atlas:1.2.0-alpine"
+	user          = "erun"
+	password      = "testpass"
+	database      = "erun"
+	// pristineDatabase is a migrated copy no test writes to, which FreshURL
+	// clones.
+	pristineDatabase = "erun_pristine"
+	// postgresAlias is how the Atlas container reaches postgres on their
+	// shared network.
+	postgresAlias = "postgres"
+	// baselineVersion is the migration erun-backend-db's own migrate.sh marks
+	// applied when it meets a database that is not clean.
+	baselineVersion = "20260503143000"
+)
+
+// ExternalURLEnv points the suites at an existing migrated database instead.
+const ExternalURLEnv = "ERUN_TEST_DATABASE_URL"
+
+var (
+	once     sync.Once
+	url      string
+	startErr error
+)
+
+// URL returns this package's migrated database.
+func URL(t testing.TB) string {
+	t.Helper()
+	if external := strings.TrimSpace(os.Getenv(ExternalURLEnv)); external != "" {
+		return external
+	}
+	once.Do(func() { url, startErr = startWithRetry(context.Background(), start, startupRetryBackoff) })
+	if startErr != nil {
+		t.Fatalf("testpg: %v", startErr)
+	}
+	return url
+}
+
+// startupRetryBackoff is how long a failed Docker startup waits before its one
+// fresh attempt.
+const startupRetryBackoff = 3 * time.Second
+
+// dockerStartupError marks a failure to bring up the Docker side of the
+// database -- the network, Testcontainers' reaper, the postgres container --
+// before any migration ran. A loaded daemon produces these on its own (the
+// reaper left in status "created", a network create refused), so they say
+// nothing about the code under test.
+type dockerStartupError struct{ err error }
+
+func (e dockerStartupError) Error() string { return e.err.Error() }
+func (e dockerStartupError) Unwrap() error { return e.err }
+
+// startWithRetry runs attempt, and runs it once more after backoff when the
+// first failure is a Docker startup error. A migration or any other error is
+// returned as is: retrying it would only hide a real defect.
+func startWithRetry(ctx context.Context, attempt func(context.Context) (string, error), backoff time.Duration) (string, error) {
+	url, err := attempt(ctx)
+	var startup dockerStartupError
+	if err == nil || !errors.As(err, &startup) {
+		return url, err
+	}
+	if ctx.Err() != nil {
+		return "", errors.Join(err, ctx.Err())
+	}
+	select {
+	case <-ctx.Done():
+		return "", errors.Join(err, ctx.Err())
+	case <-time.After(backoff):
+	}
+	url, retryErr := attempt(ctx)
+	if retryErr != nil {
+		return "", fmt.Errorf("%w (a first attempt failed too: %v)", retryErr, err)
+	}
+	return url, nil
+}
+
+func start(ctx context.Context) (string, error) {
+	// Every image here is public. Testcontainers otherwise resolves a
+	// credential for each registry in ~/.docker/config.json before a pull, and
+	// a credential helper can block indefinitely -- a macOS keychain lookup
+	// from a process with no UI waits on a prompt nobody sees.
+	if _, set := os.LookupEnv("DOCKER_AUTH_CONFIG"); !set {
+		_ = os.Setenv("DOCKER_AUTH_CONFIG", `{"auths":{}}`)
+	}
+	net, err := network.New(ctx)
+	if err != nil {
+		return "", dockerStartupError{fmt.Errorf("create a Docker network (the database suites need a Docker daemon): %w", err)}
+	}
+	pg, err := postgres.Run(ctx, postgresImage,
+		postgres.WithDatabase(database), postgres.WithUsername(user), postgres.WithPassword(password),
+		postgres.BasicWaitStrategies(),
+		network.WithNetwork([]string{postgresAlias}, net),
+	)
+	if err != nil {
+		return "", dockerStartupError{fmt.Errorf("start %s: %w", postgresImage, err)}
+	}
+	url, err := pg.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		return "", err
+	}
+	internal := fmt.Sprintf("postgres://%s:%s@%s:5432/%s?sslmode=disable", user, password, postgresAlias, database)
+	if err := migrate(ctx, net, internal); err != nil {
+		return "", err
+	}
+	if err := adminExec(ctx, url, fmt.Sprintf(`CREATE DATABASE %q TEMPLATE %q`, pristineDatabase, database)); err != nil {
+		return "", fmt.Errorf("keep a pristine migrated copy: %w", err)
+	}
+	return url, nil
+}
+
+// FreshURL returns a migrated database of the test's own, cloned from a copy
+// no test writes to and dropped when the test ends. URL's database is shared
+// by the package's tests; a test whose assertions span every tenant needs this
+// one instead.
+func FreshURL(t testing.TB) string {
+	t.Helper()
+	base := URL(t)
+	ctx := context.Background()
+	name := fmt.Sprintf("erun_fresh_%d", time.Now().UnixNano())
+	create := fmt.Sprintf(`CREATE DATABASE %q TEMPLATE %q`, name, pristineDatabase)
+	var err error
+	// Two clones of one template at the same instant collide (55006).
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		if err = adminExec(ctx, base, create); err == nil || !strings.Contains(err.Error(), "55006") || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("testpg: create a fresh database: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := adminExec(ctx, base, fmt.Sprintf(`DROP DATABASE IF EXISTS %q WITH (FORCE)`, name)); err != nil {
+			t.Logf("testpg: drop %s: %v", name, err)
+		}
+	})
+	parsed, err := neturl.Parse(base)
+	if err != nil {
+		t.Fatalf("testpg: %v", err)
+	}
+	parsed.Path = "/" + name
+	return parsed.String()
+}
+
+// adminExec runs one statement against the server's maintenance database.
+func adminExec(ctx context.Context, databaseURL, statement string) error {
+	parsed, err := neturl.Parse(databaseURL)
+	if err != nil {
+		return err
+	}
+	parsed.Path = "/postgres"
+	db, err := sql.Open("pgx", parsed.String())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	_, err = db.ExecContext(ctx, statement)
+	return err
+}
+
+// migrate applies erun-backend-db's migrations with Atlas, baselining a
+// database that is not clean the way erun-backend-db's migrator does. One Atlas
+// container serves every command: it idles, erun-backend-db is copied in, and
+// each command runs in it.
+func migrate(ctx context.Context, net *testcontainers.DockerNetwork, url string) error {
+	run, err := testcontainers.Run(ctx, atlasImage,
+		testcontainers.WithEntrypoint("sleep", "infinity"),
+		network.WithNetwork(nil, net),
+	)
+	if err != nil {
+		return fmt.Errorf("start %s: %w", atlasImage, err)
+	}
+	defer func() { _ = testcontainers.TerminateContainer(run) }()
+	if err := copyAtlasInputs(ctx, run); err != nil {
+		return err
+	}
+	atlas := func(args ...string) (string, error) { return execAtlas(ctx, run, args...) }
+	out, err := atlas("migrate", "apply", "--env", "default", "--url", url)
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(out, "connected database is not clean") {
+		return fmt.Errorf("apply erun-backend-db migrations: %w\n%s", err, out)
+	}
+	if out, err := atlas("migrate", "set", baselineVersion, "--env", "default", "--url", url); err != nil {
+		return fmt.Errorf("baseline erun-backend-db migrations: %w\n%s", err, out)
+	}
+	if out, err := atlas("migrate", "apply", "--env", "default", "--url", url); err != nil {
+		return fmt.Errorf("apply erun-backend-db migrations: %w\n%s", err, out)
+	}
+	return nil
+}
+
+// copyAtlasInputs copies only what Atlas reads: the module also carries agent
+// guidance (a symlinked CLAUDE.md) that has no business in a migration run.
+func copyAtlasInputs(ctx context.Context, run testcontainers.Container) error {
+	if code, _, err := run.Exec(ctx, []string{"mkdir", "-p", "/work"}); err != nil || code != 0 {
+		return fmt.Errorf("prepare /work in %s: exit %d: %v", atlasImage, code, err)
+	}
+	if err := run.CopyFileToContainer(ctx, filepath.Join(dbModuleDir(), "atlas.hcl"), "/work/atlas.hcl", 0o644); err != nil {
+		return fmt.Errorf("copy atlas.hcl into %s: %w", atlasImage, err)
+	}
+	for _, dir := range []string{"migrations", "schema"} {
+		if err := run.CopyDirToContainer(ctx, filepath.Join(dbModuleDir(), dir), "/work/"+dir, 0o755); err != nil {
+			return fmt.Errorf("copy %s into %s: %w", dir, atlasImage, err)
+		}
+	}
+	return nil
+}
+
+// execAtlas runs one Atlas command in the migration container and returns its
+// combined output.
+func execAtlas(ctx context.Context, run testcontainers.Container, args ...string) (string, error) {
+	cmd := append([]string{"sh", "-c", `cd /work && exec atlas "$@"`, "atlas"}, args...)
+	code, reader, err := run.Exec(ctx, cmd, tcexec.Multiplexed())
+	var out string
+	if reader != nil {
+		data, _ := io.ReadAll(reader)
+		out = string(data)
+	}
+	if err != nil {
+		return out, err
+	}
+	if code != 0 {
+		return out, fmt.Errorf("atlas exited %d", code)
+	}
+	return out, nil
+}
+
+func dbModuleDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..", "..", "erun-backend-db")
+}

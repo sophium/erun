@@ -33,7 +33,7 @@ environment, so this is not where secrets belong; PATH, LD_PRELOAD, and a
 few other names that could redirect what the job executes are refused.
 
 When this start itself runs from inside another job's own work (an agent
-job running `job start` for a gate, the common case), that other job waits
+job running `job start` for a full build, the common case), that other job waits
 for this one to reach a verdict before it reports its own outcome — its exit
 code alone is never trusted while work it started has not finished. Pass
 --handoff for work that is meant to outlive the caller on purpose (a release,
@@ -42,10 +42,10 @@ a long render): it excludes this job from that wait entirely.
 --exclusive declares that the work needs the environment to itself. While it
 runs, every other job start here is refused and told which job holds the
 environment, rather than being queued or quietly allowed to contend. That
-includes plain jobs, not only other --exclusive ones: a gate needs protecting
-less from another gate than from everything else scheduled beside it. Reach
+includes plain jobs, not only other --exclusive ones: a full build needs
+protecting less from another one than from everything else beside it. Reach
 for it whenever the work saturates the environment and a neighbour would make
-its result meaningless -- a full gate run measured 7 minutes alone and 17
+its result meaningless -- a full check run measured 7 minutes alone and 17
 minutes with a second batch beside it, going red on two tests that pass
 standalone. The claim is a lease, not a lock: it expires without renewal and
 is reclaimed once its holder's process is gone, so a crashed job cannot pin
@@ -71,8 +71,8 @@ Examples:
   # Kick off a release that is meant to keep running past this run's own turn.
   erun exec job start --tenant team --environment dev --name release --handoff -- erun release
 
-  # Run a gate that must not share the environment with anything else.
-  erun exec job start --tenant team --environment dev --name check --exclusive -- make check-gate
+  # Run a full build that must not share the environment with anything else.
+  erun exec job start --tenant team --environment dev --name build --exclusive -- erun build
 
 Flags:
       --agent string           Run an AI tool (claude or codex) in streaming mode, taking the trailing arguments as its prompt

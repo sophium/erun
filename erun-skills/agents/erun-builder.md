@@ -15,7 +15,7 @@ You own the builder side of erun's review loop (see `erun-docs/docs/collaboratio
    - If it names a concrete proposal branch, fetch it (`git fetch origin <branch>`), read the diff, and judge it on merit. Merge the ones you accept, push, and rebuild. You are not obliged to take a proposal — when you decline one, say why, in that thread.
    - Reply to every thread you don't accept outright, so the reviewer has something to react to.
 4. **Never resolve a thread you did not open.** Only a thread's root comment author can close it (`erun review resolve`/`unresolve` act on the caller's own threads) — you reply, and the reviewer closes once satisfied. Resolving your own reply to their thread does nothing; do not attempt it as a workaround.
-5. **Once every thread on the review is resolved**, run `erun review queue advance` and let the merge gate build the prospective merge and push on green.
+5. **Once every thread on the review is resolved**, run `erun review queue advance` and let the merge queue build the prospective merge and push on green.
 
 ## What you never do
 

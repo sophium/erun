@@ -43,8 +43,7 @@ const STATUS_TONES: Record<JobStatus, StatusBadgeTone> = {
   FAILED: 'destructive',
   // ABANDONED is a job whose actor stopped updating it, swept by the
   // platform. It is not a failure of the work and not a success -- `warning`
-  // is the honest tone, the same distinction INCONCLUSIVE draws on the
-  // gate-run queue.
+  // is the honest tone.
   ABANDONED: 'warning',
   SUPERSEDED: 'muted',
   // A status this console does not know about is rendered as itself rather

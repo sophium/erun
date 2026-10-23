@@ -1,37 +1,35 @@
 ARG ERUN_VERSION=1.0.0
 
-# Stage 1: build the Docusaurus static site.
-# Pinned to the build host's platform: the site it emits is static assets with
-# no architecture, so building it once natively beats building it again under
-# emulation for the foreign arch every multi-arch build.
-FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS builder
+# Stages: `build` installs the site's dependencies and runs `yarn build`,
+# `test` runs the site's own check on top of that, and `runtime` publishes the
+# built site, taken from `test`, with wrangler. Because the site comes through
+# `test`, no image exists unless the check passed.
+#
+# Pinned to the build host's platform: the site is static assets with no
+# architecture, so it is built (and checked) once natively.
+FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS build
 
-WORKDIR /src
+WORKDIR /src/erun-docs
 
 # Install deps first so source edits don't bust the cache.
 COPY erun-docs/package.json erun-docs/yarn.lock /src/erun-docs/
 
-WORKDIR /src/erun-docs
-
-# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
-# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
-# never the /usr/local/share/.cache/yarn mounted below -- verified against
-# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
-# reproduced live (a real yarn install with the mount target unset resolved
-# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
-# every other yarn-using Dockerfile in the repo already uses.
+# YARN_CACHE_FOLDER: yarn classic otherwise caches under $HOME/.cache/yarn,
+# not the mounted /usr/local/share/.cache/yarn.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
     YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
-# Copy the rest and build.
 COPY erun-docs /src/erun-docs
 
-RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    yarn build
+RUN yarn build
 
-# Stage 2: tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
-FROM node:20.18.1-alpine
+FROM build AS test
+
+RUN yarn typecheck
+
+# A tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
+FROM node:20.18.1-alpine AS runtime
 
 ARG WRANGLER_VERSION=3.87.0
 
@@ -40,7 +38,7 @@ RUN apk add --no-cache ca-certificates tini && \
     addgroup -S erun && \
     adduser -S -G erun -h /home/erun erun
 
-COPY --from=builder --chown=erun:erun /src/erun-docs/build /site
+COPY --from=test --chown=erun:erun /src/erun-docs/build /site
 COPY --chmod=0755 erun-devops/docker/erun-docs/entrypoint.sh /usr/local/bin/erun-docs-entrypoint
 
 # Stamps the build actually being published, read back at GET /version.json once

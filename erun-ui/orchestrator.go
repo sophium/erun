@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -558,10 +556,10 @@ here happen to have files — read the config every time.
   course-correct. This list is required, not optional.
 - **Land work through the target repository's review and merge queue.** A branch
   that arrives as a pull request may be gated and landed as one; a branch you
-  caused to exist must reach MERGE, which the platform verifies against the
-  recorded gate build and the remote's own tip. A closed pull request asserts a
-  landing rather than proving one, so it is never the finish line. Do not finish
-  delegated work by opening a pull request.
+  caused to exist must reach MERGED, which the platform verifies against a
+  successful recorded build of the merge commit and the remote's own tip. A
+  closed pull request asserts a landing rather than proving one, so it is never
+  the finish line. Do not finish delegated work by opening a pull request.
 - Make irreversible, remote, and cross-environment actions explicit beforehand.
   A heads-up does not replace approval when the action is outside the authorized
   scope. General engineering and direct in-pod interaction rules remain in the
@@ -755,113 +753,37 @@ func orchestratorSkillsNotInstalledNotice(cause error) string {
 		"or rebuild the desktop from its checkout with erun-ui/build.sh (build.ps1 on Windows)."
 }
 
-// orchestratorSkillMarker records, per installed skill, the sha256 of the
-// SKILL.md erun last installed, so a later launch can tell an untouched copy
-// (safe to refresh from the shipped source) from one the operator edited in
-// place (must be preserved). Mirrors the runtime pod's skills-install.sh marker.
-const orchestratorSkillMarker = ".erun-skill-baked-sha256"
-
 // ensureOrchestratorSkills installs every erun skill into ~/.claude/skills so the
 // orchestrator's Claude session sees them by default, with no operator install
-// step. It installs a skill when absent and REFRESHES an untouched one when the
-// shipped source changed — so an orchestrator tracks the latest skill instead of
-// freezing at first install — while preserving any in-place operator edits via a
-// per-skill marker. Mirrors the pod entrypoint's install-or-refresh so host and
-// pod treat skill provenance identically. An unresolvable source is returned as
-// an error rather than skipped silently: the caller keeps launching, and says so.
+// step. It installs a skill when absent and refreshes an untouched one when the
+// shipped source changed, preserving in-place operator edits -- the same
+// install-or-refresh the runtime pod applies to its baked skills
+// (eruncommon.InstallOrRefreshSkills). An unresolvable source is returned as an
+// error rather than skipped silently: the caller keeps launching, and says so.
 func ensureOrchestratorSkills() error {
 	root, err := hostSkillsSource()
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(root)
+	home, err := orchestratorInstallHome("skills")
 	if err != nil {
-		return fmt.Errorf("read skills source %s: %w", root, err)
+		return err
 	}
+	_, err = eruncommon.InstallOrRefreshSkills(root, filepath.Join(home, ".claude", "skills"))
+	return err
+}
+
+// orchestratorInstallHome resolves the home directory skills or agents install
+// under.
+func orchestratorInstallHome(what string) (string, error) {
 	home, homeErr := os.UserHomeDir()
 	if strings.TrimSpace(home) == "" {
 		if homeErr == nil {
 			homeErr = errors.New("it resolved empty")
 		}
-		return fmt.Errorf("resolve the home directory to install skills into: %w", homeErr)
+		return "", fmt.Errorf("resolve the home directory to install %s into: %w", what, homeErr)
 	}
-	destRoot := filepath.Join(home, ".claude", "skills")
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		if err := installOrRefreshOrchestratorSkill(filepath.Join(root, entry.Name()), filepath.Join(destRoot, entry.Name())); err != nil {
-			return fmt.Errorf("install skill %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
-}
-
-// installOrRefreshOrchestratorSkill reconciles one installed skill against its
-// shipped source: install when absent; refresh when the installed copy is still
-// the one erun wrote (marker matches, or a legacy copy with no marker); leave a
-// copy the operator edited in place untouched.
-func installOrRefreshOrchestratorSkill(src, dst string) error {
-	bakedMD := filepath.Join(src, "SKILL.md")
-	if _, err := os.Stat(bakedMD); err != nil {
-		return nil // a source dir with no SKILL.md is not a skill
-	}
-	instMD := filepath.Join(dst, "SKILL.md")
-	if _, err := os.Stat(instMD); err != nil {
-		return copyOrchestratorSkill(src, dst) // absent — install
-	}
-	bakedSHA, err := fileSHA256(bakedMD)
-	if err != nil {
-		return err
-	}
-	instSHA, err := fileSHA256(instMD)
-	if err != nil {
-		return err
-	}
-	marker := filepath.Join(dst, orchestratorSkillMarker)
-	if instSHA == bakedSHA {
-		// Already the shipped version; record the marker so a future upgrade can
-		// still tell this untouched copy from an edited one (also adopts a
-		// pre-marker copy that happens to match).
-		return os.WriteFile(marker, []byte(bakedSHA+"\n"), 0o644)
-	}
-	markerSHA := ""
-	if b, readErr := os.ReadFile(marker); readErr == nil {
-		markerSHA = strings.TrimSpace(string(b))
-	}
-	if markerSHA == "" || instSHA == markerSHA {
-		// Unmodified since erun installed it, or a legacy copy with no marker —
-		// refresh to the shipped version.
-		return copyOrchestratorSkill(src, dst)
-	}
-	return nil // edited in place — preserve the operator's copy
-}
-
-// copyOrchestratorSkill replaces dst with a fresh copy of src and records the
-// shipped SKILL.md hash, so a later launch can distinguish an untouched copy
-// from an edited one.
-func copyOrchestratorSkill(src, dst string) error {
-	if err := os.RemoveAll(dst); err != nil {
-		return err
-	}
-	if err := copyDirTree(src, dst); err != nil {
-		return err
-	}
-	sha, err := fileSHA256(filepath.Join(src, "SKILL.md"))
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dst, orchestratorSkillMarker), []byte(sha+"\n"), 0o644)
-}
-
-// fileSHA256 returns the hex sha256 of a file's contents.
-func fileSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return home, nil
 }
 
 // buildAgentsSource is the erun-skills/agents directory of the checkout this
@@ -950,101 +872,21 @@ func orchestratorAgentsNotInstalledNotice(cause error) string {
 		"or rebuild the desktop from its checkout with erun-ui/build.sh (build.ps1 on Windows)."
 }
 
-// orchestratorAgentMarker records, per installed agent, the sha256 of the
-// <name>.md erun last installed — the sidecar-file counterpart of
-// orchestratorSkillMarker, since an agent is one flat file rather than a
-// directory. Mirrors the runtime pod's agents-install.sh marker.
-const orchestratorAgentMarker = ".erun-agent-baked-sha256"
-
 // ensureOrchestratorAgents installs every erun reusable agent into
 // ~/.claude/agents so the orchestrator's Claude session can delegate to
-// erun-builder/erun-reviewer by default, with no operator install step.
-// Mirrors ensureOrchestratorSkills, adapted for flat <name>.md files instead of
-// skill directories.
+// erun-builder/erun-reviewer by default, with no operator install step, under
+// the same install-or-refresh contract as ensureOrchestratorSkills.
 func ensureOrchestratorAgents() error {
 	root, err := hostAgentsSource()
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return fmt.Errorf("read agents source %s: %w", root, err)
-	}
-	home, homeErr := os.UserHomeDir()
-	if strings.TrimSpace(home) == "" {
-		if homeErr == nil {
-			homeErr = errors.New("it resolved empty")
-		}
-		return fmt.Errorf("resolve the home directory to install agents into: %w", homeErr)
-	}
-	destRoot := filepath.Join(home, ".claude", "agents")
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		if err := installOrRefreshOrchestratorAgent(filepath.Join(root, entry.Name()), filepath.Join(destRoot, entry.Name())); err != nil {
-			return fmt.Errorf("install agent %s: %w", entry.Name(), err)
-		}
-	}
-	return nil
-}
-
-// installOrRefreshOrchestratorAgent reconciles one installed agent file against
-// its shipped source: install when absent; refresh when the installed copy is
-// still the one erun wrote (marker matches, or a legacy copy with no marker);
-// leave a copy the operator edited in place untouched. Mirrors
-// installOrRefreshOrchestratorSkill for a single file instead of a directory.
-func installOrRefreshOrchestratorAgent(src, dst string) error {
-	if _, err := os.Stat(dst); err != nil {
-		return copyOrchestratorAgent(src, dst) // absent — install
-	}
-	bakedSHA, err := fileSHA256(src)
+	home, err := orchestratorInstallHome("agents")
 	if err != nil {
 		return err
 	}
-	instSHA, err := fileSHA256(dst)
-	if err != nil {
-		return err
-	}
-	marker := dst + orchestratorAgentMarker
-	if instSHA == bakedSHA {
-		// Already the shipped version; record the marker so a future upgrade can
-		// still tell this untouched copy from an edited one (also adopts a
-		// pre-marker copy that happens to match).
-		return os.WriteFile(marker, []byte(bakedSHA+"\n"), 0o644)
-	}
-	markerSHA := ""
-	if b, readErr := os.ReadFile(marker); readErr == nil {
-		markerSHA = strings.TrimSpace(string(b))
-	}
-	if markerSHA == "" || instSHA == markerSHA {
-		// Unmodified since erun installed it, or a legacy copy with no marker —
-		// refresh to the shipped version.
-		return copyOrchestratorAgent(src, dst)
-	}
-	return nil // edited in place — preserve the operator's copy
-}
-
-// copyOrchestratorAgent replaces dst with a fresh copy of src and records the
-// shipped file's hash in its sidecar marker, so a later launch can distinguish
-// an untouched copy from an edited one. Mirrors copyOrchestratorSkill for a
-// single file instead of a directory tree.
-func copyOrchestratorAgent(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(dst, data, 0o644); err != nil {
-		return err
-	}
-	sha, err := fileSHA256(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst+orchestratorAgentMarker, []byte(sha+"\n"), 0o644)
+	_, err = eruncommon.InstallOrRefreshAgents(root, filepath.Join(home, ".claude", "agents"))
+	return err
 }
 
 // orchestratorContractFallback is printed when the shared CLAUDE.md is somehow
@@ -1352,32 +1194,6 @@ func isOrchestratorSessionStartHookBlock(block any) bool {
 		}
 	}
 	return false
-}
-
-// copyDirTree recursively copies src into dst (files + subdirectories), portable
-// across host OSes (no shell cp).
-func copyDirTree(src, dst string) error {
-	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
 }
 
 // envInfos joins each linked env against the environment-activity poller's

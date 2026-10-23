@@ -32,7 +32,7 @@ func TestTenantDashboardPipelineReportsAFailedReadRatherThanAnEmptyPipeline(t *t
 	}
 	// The neighbouring panels are untouched: one failed read never blanks the
 	// ones that worked.
-	if len(dashboard.GateRuns) != 1 || len(dashboard.AuditEvents) != 1 {
-		t.Fatalf("expected the other panels to still resolve, got gates=%+v audit=%+v", dashboard.GateRuns, dashboard.AuditEvents)
+	if len(dashboard.MergeQueue) != 1 || len(dashboard.AuditEvents) != 1 {
+		t.Fatalf("expected the other panels to still resolve, got queue=%+v audit=%+v", dashboard.MergeQueue, dashboard.AuditEvents)
 	}
 }

@@ -299,8 +299,8 @@ This skill produces the service's source only; it stops one step short of
 something `erun deploy` can install. Apply the `erun-blueprint-service`
 skill against the module produced above to add the missing
 `<tenant>-devops/docker/<module>/Dockerfile` and
-`<tenant>-devops/k8s/<module>/` chart — that skill's Dockerfile builder
-stage is a Go skeleton already, so point it at `cmd/<module>` and
+`<tenant>-devops/k8s/<module>/` chart — that skill's Dockerfile is a Go
+skeleton already, so point its `dist` compile at `cmd/<module>` and
 `ERUN_API_PORT`'s default (`17033`, `server.go`) as the container port and
 health-check path (`GET /healthz`, already implemented). Do this before
 declaring the API "done": a scaffold that stops at `go build ./...` looks

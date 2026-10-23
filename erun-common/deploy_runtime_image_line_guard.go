@@ -150,3 +150,55 @@ func guardRuntimeChartLineSwitch(ctx Context, target OpenResult, resolvedChart s
 	return fmt.Errorf("deploy: %s/%s's last confirmed deploy ran %s, so this environment is on the %s release line, but this deploy resolved the %s chart, which is versioned on erun's own release line -- a version from erun's line does not name anything %s publishes, so the pod would wait on an image tag that does not exist; pass --version from %s's line, or --runtime-chart to install this chart on purpose",
 		target.Tenant, target.Environment, previous, previousLine, resolvedChart, previousLine, previousLine)
 }
+
+// guardRuntimeImageNotOlderThanChart refuses a deploy that would run the stock
+// erun-devops chart on a stock erun-devops image from an earlier erun release.
+// The chart's init containers and dind sidecar run the image's own erun
+// (`erun adopt-worktree`, and `erun dind-entrypoint` copied out of the image),
+// so the image must be at least as new as the chart: the two are one coordinate
+// on erun's release line. An older image fails the rollout at init or
+// crash-loops the sidecar, and the chart's Recreate strategy has already torn
+// the running pod down by then, so this runs before any cluster mutation. It
+// applies even to an image the operator named on this call, because no input
+// makes that pairing run. A tenant's own image is versioned on its own line, so
+// its erun base cannot be read off its tag and it is not checked here: the
+// erun-build-env contract re-pins its base with the chart.
+func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) error {
+	if strings.TrimSpace(chartName) != DevopsComponentName || !runtimeImageIsStockDevops(image) {
+		return nil
+	}
+	_, _, tag, ok := parseDockerImageReference(strings.TrimSpace(image))
+	if !ok {
+		return nil
+	}
+	imageRelease, imageOK := runtimeReleaseBase(tag)
+	chartRelease, chartOK := runtimeReleaseBase(chartVersion)
+	if !imageOK || !chartOK || compareSemver(imageRelease, chartRelease) >= 0 {
+		return nil
+	}
+	return fmt.Errorf("deploy: runtime image %s is from erun %s, older than the %s %s chart this deploy installs; the chart runs its init containers and dind sidecar on the image's own erun, so the rollout would fail after the running pod is torn down -- deploy an image at %s or newer with --runtime-image, or the chart matching the image with --runtime-chart %s:%s",
+		image, formatSemver(imageRelease), DevopsComponentName, strings.TrimSpace(chartVersion), formatSemver(chartRelease), DevopsComponentName, tag)
+}
+
+// runtimeReleaseBase reads the release a version or image tag belongs to:
+// 1.0.307, 1.0.307-snapshot, 1.0.307-rc.1 and 1.0.307-snapshot-<ts>-arm64 are
+// all 1.0.307. Anything else (a fingerprint tag, a digest) does not classify.
+func runtimeReleaseBase(version string) (semver, bool) {
+	base, _, _ := strings.Cut(strings.TrimSpace(version), "-")
+	return parseRegistryStableVersion(base)
+}
+
+// guardRuntimeCoordinate runs the runtime coordinate's pre-mutation guards: the
+// release-line switch, then the image against the chart this deploy will
+// actually install (the operator's --runtime-chart when one is coming,
+// otherwise the resolved coordinate).
+func guardRuntimeCoordinate(ctx Context, target OpenResult, chart resolvedRuntimeChart, runtimeChartOverride string, deployInput HelmDeploySpec, explicitLineChange bool) error {
+	if err := guardRuntimeLineSwitch(ctx, target, chart, deployInput.ResolvedRuntimeImage, explicitLineChange); err != nil {
+		return err
+	}
+	name, version := effectiveRuntimeChartCoordinateForImage(chart, runtimeChartOverride)
+	if strings.TrimSpace(version) == "" {
+		version = deployInput.resolvedChartVersion()
+	}
+	return guardRuntimeImageNotOlderThanChart(deployInput.ResolvedRuntimeImage, name, version)
+}

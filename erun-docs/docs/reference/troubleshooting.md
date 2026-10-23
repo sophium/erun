@@ -255,7 +255,7 @@ erun list
 
 ## An agent environment can fetch but can't push a branch or use `gh` {#git-push-access}
 
-**Symptoms:** a remote-agent (or runtime) environment clones, builds, and tests fine — `make check` or the equivalent gate goes green — but the very last step of the work fails:
+**Symptoms:** a remote-agent (or runtime) environment clones, builds, and tests fine — `erun build` or the equivalent gate goes green — but the very last step of the work fails:
 
 ```
 $ gh auth status

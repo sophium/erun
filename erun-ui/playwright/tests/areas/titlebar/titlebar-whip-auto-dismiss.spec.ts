@@ -38,7 +38,7 @@ async function mockWhipReport(
 // fastForward has an armed timer to advance. page.bringToFront() used to
 // supply that by asking the OS/window manager for real focus, but a headless
 // gate container does not reliably grant it -- confirmed by a real 'erun
-// build' run failing here while every standalone run.sh pass went green.
+// build' run failing here while every standalone suite run went green.
 // Pin document.hasFocus() to true directly instead of hoping the browser
 // wins real focus.
 async function forceDocumentFocused(page: import('@playwright/test').Page): Promise<void> {

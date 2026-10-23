@@ -8,7 +8,7 @@ import { expect, test, type Page } from '@playwright/test';
 // screen renders from bundled defaults with no token, and platform discovery
 // failing (there is deliberately no API behind this suite) is exactly the
 // "fall back, don't hard-fail" path `fetchPlatformConfig` already defines.
-const gated = process.env.ERUN_E2E_CONSOLE_LANDING_LAYOUT !== '1';
+// playwright.config.ts serves the built bundle with `vite preview`.
 
 // The hero visual's brand-tinted glow is inset -2rem on every side. Below
 // ~504px the visual spans the full content width, so its right-hand bleed
@@ -46,11 +46,6 @@ async function horizontalOverflow(
 
 for (const width of PHONE_WIDTHS) {
   test(`the landing page does not scroll horizontally at ${width}px`, async ({ page }) => {
-    test.skip(
-      gated,
-      'opt-in: set ERUN_E2E_CONSOLE_LANDING_LAYOUT=1 (./run-landing-layout.sh builds and serves the bundle, then sets it)',
-    );
-
     await openLanding(page, width);
     const { scrollWidth, clientWidth, innerWidth } = await horizontalOverflow(page);
 
@@ -65,11 +60,6 @@ for (const width of PHONE_WIDTHS) {
 test('the hero glow still renders and still bleeds past its parent at desktop widths', async ({
   page,
 }) => {
-  test.skip(
-    gated,
-    'opt-in: set ERUN_E2E_CONSOLE_LANDING_LAYOUT=1 (./run-landing-layout.sh builds and serves the bundle, then sets it)',
-  );
-
   await openLanding(page, 1280, 900);
   const glow = page.locator(GLOW);
   const measured = await glow.evaluate((el) => {

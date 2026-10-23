@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -29,10 +30,7 @@ import (
 // there is no Job, cluster, or DBOS workflow left here to be a gate on.
 func releaseQueueE2EFromEnv(t *testing.T) string {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_RELEASE_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_RELEASE_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	return databaseURL
 }
 

@@ -15,18 +15,14 @@ import (
 // a remedy written only as a sentence below the block is a remedy a
 // non-interactive driver never reaches.
 //
-// A build that watched BuildKit replay a Dockerfile's whole test stage exits
-// non-zero and is refused deliberately (ErrGateTestStageReplayed), and the
-// remedy is another build: the same step with --gate, which executes that stage
-// instead of accepting the replay. The block has to take that second step
-// itself, and it has to take it only for that one refusal -- a compile error or
-// a red `make check` is a verdict about the change, and retrying one under
-// --gate would record a green review over a red build.
+// The block builds once and records that one result: the version the build
+// minted on success, or --failed on failure. A failure is a verdict about the
+// change, so the block must not retry it into a green record.
 //
 // These tests exercise the block rather than reading it, because the property
 // under test is control flow: which failure routes to which record call. A
-// structural assertion on the block's text cannot tell "retries on a replay
-// refusal" from "retries on everything" without becoming a parser for the
+// structural assertion on the block's text cannot tell "records the failure"
+// from "retries until green" without becoming a parser for the
 // shell it is trying to check.
 //
 // The block is run verbatim, with `erun`, `jq` and `git` stubbed ahead of it on
@@ -45,18 +41,13 @@ const (
 	// What the failure path's `--dry-run` version mint returns. Distinct from
 	// every scripted build outcome so a test can tell which one was recorded.
 	readyRungDryRunVersion = "9.9.9-dry"
-
-	// The detail the block records for a failure that is not a replay refusal.
-	readyRungPlainFailureDetail = "erun build failed; see the build log"
 )
 
-// The three things a stubbed `erun build` can do. `ok:` mints the version that
-// follows it; `replay` prints a real replay refusal and fails; `red` prints the
-// shape of an ordinary build red -- a docker failure and a failing check
-// target -- and fails.
+// The two things a stubbed `erun build` can do. `ok:` mints the version that
+// follows it; `red` prints the shape of an ordinary build red -- a docker
+// failure and a failing check target -- and fails.
 const (
 	readyRungOutcomeOK         = "ok:"
-	readyRungOutcomeReplay     = "replay"
 	readyRungOutcomeRealRed    = "red"
 	readyRungNoScriptedOutcome = "stub erun: no outcome scripted for this build"
 )
@@ -79,7 +70,6 @@ printf '%s\n' "$((counter + 1))" > "${ERUN_STUB_COUNTER}"
 outcome=$(sed -n "$((counter + 1))p" "${ERUN_STUB_OUTCOMES}")
 case "${outcome}" in
   ` + readyRungOutcomeOK + `*) printf '{"version":"%s"}\n' "${outcome#` + readyRungOutcomeOK + `}" ;;
-  replay) printf '%s\n' "${ERUN_STUB_REPLAY_MESSAGE}" >&2; exit 1 ;;
   red) printf '%s\n' 'ERROR: failed to solve: process "/bin/sh -c make check" did not complete successfully: exit code: 2' 'make: *** [Makefile:1060: check] Error 2' >&2; exit 1 ;;
   *) printf '%s\n' "${ERUN_STUB_NO_OUTCOME}" >&2; exit 1 ;;
 esac
@@ -210,11 +200,6 @@ func runReadyRungFlow(t *testing.T, outcomes ...string) readyRungRun {
 		"ERUN_STUB_LOG="+fixture.logPath,
 		"ERUN_STUB_COUNTER="+fixture.counterPath,
 		"ERUN_STUB_OUTCOMES="+fixture.outcomesPath,
-		// The replay refusal's real text, not a paraphrase of it: whether the
-		// block recognises the refusal is exactly what this harness measures,
-		// and a hand-written stand-in could agree with a matcher the real
-		// message does not.
-		"ERUN_STUB_REPLAY_MESSAGE="+newGateTestStageReplayedError([]string{"erun-devops"}).Error(),
 		"ERUN_STUB_NO_OUTCOME="+readyRungNoScriptedOutcome,
 		// The block's only input from its caller: rungs 1-4 established it.
 		"review_id=01J0READYRUNGREVIEW0000000",
@@ -279,103 +264,51 @@ func recordedBuild(t *testing.T, calls []string) string {
 	return records[0]
 }
 
-// TestMergeSkillReadyRungReachesItsOwnReplayRemedy is the reproduction of the
-// reported defect. The block's remedy for a replayed test stage was a sentence
-// underneath it -- re-run the step with --gate -- and the failure branch
-// recorded FAILED for every non-zero build, so a driver that ran the block and
-// nothing else left the review at FAILED and never reached the escape the file
-// documents. On the pre-fix block this case records the --dry-run version with
-// --failed and runs no --gate build at all.
-func TestMergeSkillReadyRungReachesItsOwnReplayRemedy(t *testing.T) {
-	run := runReadyRungFlow(t, readyRungOutcomeReplay, readyRungOutcomeOK+"1.0.0-gate")
-	calls := run.calls
+// TestMergeSkillReadyRungRecordsTheVersionTheBuildMinted holds the success
+// path: one plain build, recorded with the version it minted.
+func TestMergeSkillReadyRungRecordsTheVersionTheBuildMinted(t *testing.T) {
+	calls := runReadyRungFlow(t, readyRungOutcomeOK+"1.0.0-ready").calls
 
 	builds := realBuildCalls(calls)
-	if len(builds) != 2 {
-		t.Fatalf("expected the rung to build twice -- the plain build and the replay remedy -- got %d: %v", len(builds), builds)
+	if len(builds) != 1 {
+		t.Fatalf("expected the rung to build exactly once, got %d: %v", len(builds), builds)
 	}
-	if builds[0] != "build --output json" {
-		t.Errorf("expected the rung to start with the plain build, got %q", builds[0])
-	}
-	if !strings.Contains(builds[1], "--gate") {
-		t.Fatalf("expected the second build to be the --gate re-run that executes the replayed stage, got %q", builds[1])
+	if strings.Contains(builds[0], "--gate") {
+		t.Errorf("expected a plain build, got %q", builds[0])
 	}
 
 	record := recordedBuild(t, calls)
 	if strings.Contains(record, "--failed") {
-		t.Errorf("expected a replay refusal to be recorded as the re-run's result, not as a FAILED review, got %q", record)
+		t.Errorf("expected a successful build to be recorded as a success, got %q", record)
 	}
-	if !strings.Contains(record, "--version 1.0.0-gate") {
-		t.Errorf("expected the recorded version to be the one the --gate re-run minted, got %q", record)
+	if !strings.Contains(record, "--version 1.0.0-ready") {
+		t.Errorf("expected the recorded version to be the one the build minted, got %q", record)
 	}
-	// The build's stderr is captured to classify the failure, so the block has
-	// to put it back: a refusal the operator never sees is its own defect.
-	if !strings.Contains(run.stderr, ErrGateTestStageReplayed.Error()) {
-		t.Errorf("expected the refusal to be reported to the operator, got stderr:\n%s", run.stderr)
+	if strings.Contains(record, "--gate") {
+		t.Errorf("expected a plain recorded build, got %q", record)
 	}
 }
 
-// TestMergeSkillReadyRungKeepsAnOrdinaryBuildFailureFailed is the other half of
-// the property, and the one that makes the fix safe: the re-run is keyed on the
-// replay refusal itself, not on the build having failed. A compile error, a red
-// `make check`, or a missing base image is a verdict about the change, and a
-// --gate re-run over one would record a green review over a red build.
-func TestMergeSkillReadyRungKeepsAnOrdinaryBuildFailureFailed(t *testing.T) {
+// TestMergeSkillReadyRungRecordsAFailedBuildFailedWithoutRetrying holds the
+// failure path: a compile error or a red test stage is a verdict about the
+// change, recorded FAILED with a version, and never retried into a green
+// record.
+func TestMergeSkillReadyRungRecordsAFailedBuildFailedWithoutRetrying(t *testing.T) {
 	calls := runReadyRungFlow(t, readyRungOutcomeRealRed).calls
 
 	builds := realBuildCalls(calls)
 	if len(builds) != 1 {
-		t.Fatalf("expected an ordinary build failure to run no remedy build, got %d builds: %v", len(builds), builds)
-	}
-	if builds[0] != "build --output json" {
-		t.Errorf("expected the rung's only build to be the plain one, got %q", builds[0])
+		t.Fatalf("expected a build failure to run no second build, got %d builds: %v", len(builds), builds)
 	}
 
 	record := recordedBuild(t, calls)
 	if !strings.Contains(record, "--failed") {
-		t.Errorf("expected a build failure that is not a replay refusal to record FAILED, got %q", record)
+		t.Errorf("expected a failed build to record FAILED, got %q", record)
 	}
-	if !strings.Contains(record, "--failure-detail "+readyRungPlainFailureDetail) {
-		t.Errorf("expected the ordinary failure to keep its own detail, got %q", record)
+	if !strings.Contains(record, "--version ") {
+		t.Errorf("expected the failed build to be recorded with a version, got %q", record)
 	}
-}
-
-// A replay refusal whose --gate re-run then fails is a real red: the re-run
-// threw away the layer-cache replay and ran make check, and make check did not
-// pass. That must land FAILED too, and must say which build was red -- the
-// review is not left green by a remedy that itself failed.
-func TestMergeSkillReadyRungDoesNotMaskARedGateRerun(t *testing.T) {
-	calls := runReadyRungFlow(t, readyRungOutcomeReplay, readyRungOutcomeRealRed).calls
-
-	builds := realBuildCalls(calls)
-	if len(builds) != 2 || !strings.Contains(builds[1], "--gate") {
-		t.Fatalf("expected the replay refusal to spend its one re-run on a --gate build, got %v", builds)
-	}
-
-	record := recordedBuild(t, calls)
-	if !strings.Contains(record, "--failed") {
-		t.Errorf("expected a red --gate re-run to record FAILED, got %q", record)
-	}
-	if strings.Contains(record, "--version 1.0.0-gate") {
-		t.Errorf("expected a failed re-run to record no minted version as a success, got %q", record)
-	}
-	if !strings.Contains(record, "--gate re-run") {
-		t.Errorf("expected the failure detail to name the re-run that was red rather than the plain build, got %q", record)
-	}
-}
-
-// The match is the refusal's own sentinel sentence. Binding it here to
-// ErrGateTestStageReplayed means the pattern the block greps for and the error
-// erun-common actually returns cannot drift apart silently: rewording the
-// sentinel fails this test instead of quietly disarming the remedy in the
-// skill, which is the failure mode the remedy exists to prevent and the one no
-// live build in a test could catch.
-func TestMergeSkillReadyRungMatchesTheReplayRefusalItClaimsTo(t *testing.T) {
-	block := readyRungRecordBlock(t)
-	if !strings.Contains(block, ErrGateTestStageReplayed.Error()) {
-		t.Errorf("the READY rung does not match %q, the text ErrGateTestStageReplayed carries; its replay remedy is keyed on something else", ErrGateTestStageReplayed.Error())
-	}
-	if !strings.Contains(block, "--dry-run") {
-		t.Errorf("the READY rung's failure path no longer resolves a version, so a failed build has nothing to record")
+	if strings.Contains(record, "--gate") {
+		t.Errorf("expected a plain recorded build, got %q", record)
 	}
 }

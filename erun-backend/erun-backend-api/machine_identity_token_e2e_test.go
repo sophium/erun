@@ -7,11 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -203,10 +204,7 @@ type machineIdentityTokenFixture struct {
 
 func newMachineIdentityTokenFixture(t *testing.T, issuerURL string) *machineIdentityTokenFixture {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_MACHINE_IDENTITY_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	db, err := sql.Open("pgx", databaseURL)
 	mustNoErr(t, err, "open db")
 	t.Cleanup(func() { _ = db.Close() })

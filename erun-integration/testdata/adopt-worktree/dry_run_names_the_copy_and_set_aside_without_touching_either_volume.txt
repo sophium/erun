@@ -1,0 +1,4 @@
+audit: erun adopt-worktree --dry-run <STAGE>/mnt/erun-home/git/petios <STAGE>/mnt/erun-worktree
+worktree-adopt: adopting the repository at <STAGE>/mnt/erun-home/git/petios onto the worktree volume
+worktree-adopt: dry run: would copy <STAGE>/mnt/erun-home/git/petios into <STAGE>/mnt/erun-worktree/.erun-worktree-adopt-partial and move the copy into <STAGE>/mnt/erun-worktree once it holds .git
+worktree-adopt: dry run: would set the original aside at <STAGE>/mnt/erun-home/git/petios.pre-worktree-volume

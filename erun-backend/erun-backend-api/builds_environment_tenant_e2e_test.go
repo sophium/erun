@@ -10,8 +10,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
+
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
@@ -42,10 +43,7 @@ type buildsEnvironmentTenantE2E struct {
 
 func buildsEnvironmentTenantE2EFromEnv(t *testing.T) buildsEnvironmentTenantE2E {
 	t.Helper()
-	databaseURL := os.Getenv("ERUN_E2E_REVIEWS_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("opt-in: set ERUN_E2E_REVIEWS_DATABASE_URL to a migrated PostgreSQL")
-	}
+	databaseURL := testpg.URL(t)
 	return buildsEnvironmentTenantE2E{databaseURL: databaseURL}
 }
 

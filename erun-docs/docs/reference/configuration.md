@@ -110,9 +110,9 @@ One per environment. This is the most-edited file.
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build, or the stable release once one is published on top of it — see [`erun upgrade`](/cli/upgrade#what-opted-in-means)). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `stopped` | bool | [`erun stop`](/cli/stop), [`erun open`](/cli/open), `erun deploy`, helm chart (`stopped`) | Records that the Operator stopped this environment. `erun stop` sets it and scales the runtime Deployment to zero; `erun open` clears it and scales back up. `deploy` renders the chart's `stopped` value from it, so the chart emits `replicas: 0` and a `helm upgrade` reconciles the stop instead of silently restarting the pod — a bare scale patch alone would be drift the next upgrade reverts. `deploy` therefore never wakes an environment; opening it does. Clearing the field is an Operator gesture: `erun open --reconnect`, the form a supervisor uses to re-establish a dropped session, leaves it set (see [`erun open`](/agent-reference/cli-flags#erun-open)), so a stop is not erased by the reconnects the stop itself triggers. Default false. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
-| `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `16384Mi`, `2Gi`). Default `16384Mi`: agents run `make check-gate` in this container, which is the same ten-target gate the `erun-dind` sidecar runs during an image build (see the row below). Trim it for an env that only serves an app; raise it with `erun resize --memory` if the cgroup reports OOM kills. |
+| `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `16384Mi`, `2Gi`). Default `16384Mi`: agents run the components' lint and test suites in this container, the same ones each component's test stage runs in the `erun-dind` sidecar during an image build (see the row below). Trim it for an env that only serves an app; raise it with `erun resize --memory` if the cgroup reports OOM kills. |
 | `runtimedindpod.cpu` | string | helm chart (`runtime.dind.resources.limits.cpu`) | CPU limit for the `erun-dind` sidecar — the container that actually runs `erun build`/`erun release`, independent of `runtimepod.cpu`. Default `12`, which is a sizing rule rather than a fixed number: the node's CPUs divided across the build-capable environments erun expects to be building on it at once, floored at `4` (see [Sizing the build CPU cap](/concepts/runtime-pods#sizing-the-build-cpu-cap)). A limit is a ceiling, not a reservation, so size it for the node — a cap well under the node throttles the build while the node sits idle. Set with `erun init --dind-cpu` / `erun resize --dind-cpu`. |
-| `runtimedindpod.memory` | string | helm chart (`runtime.dind.resources.limits.memory`) | Memory limit for the `erun-dind` sidecar — every image build's `make check` gate runs here, against a measured peak the runtime container's own default is sized from. Default `20Gi`; raise it further if a release still reports resource exhaustion inside the sidecar. Set with `erun init --dind-memory` / `erun resize --dind-memory`. |
+| `runtimedindpod.memory` | string | helm chart (`runtime.dind.resources.limits.memory`) | Memory limit for the `erun-dind` sidecar — every image build's test stages run here, against a measured peak the runtime container's own default is sized from. Default `20Gi`; raise it further if a release still reports resource exhaustion inside the sidecar. Set with `erun init --dind-memory` / `erun resize --dind-memory`. |
 | `sshd.enabled` | bool | `erun open`, chart (SSH port-forward setup) | Whether the in-pod SSH server is exposed via port forward. Needed for IDE attach. |
 | `sshd.localport` | int | `erun open` | Local port the desktop binds for the SSH forward. `0` = auto-allocate. |
 | `sshd.publickeypath` | string | `erun open --vscode`, `erun open --intellij`, SSH key sync | Path to the SSH public key authorized for the env. |
@@ -172,9 +172,10 @@ Committed to the repo, applies to anyone who checks it out. A gitignored copy de
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
 | `release.developbranch` | string | `erun release` | Develop branch name (default `develop`). |
+| `e2e.secrets` | list | `erun e2e` | The [BuildKit secrets](#e2e-secrets) every e2e suite build receives, such as a test account's credentials. Same `{id, env}` / `{id, src}` shape as `docker.secrets`, but never passed to a component build. |
 | `platform` | map | `erun deploy` (PowerDNS), `erun expose` | Per-instance platform deployment config. Absent for non-platform projects. See [`platform:` block](#platform-block). |
-| `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun e2e`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/`, `k8s/`, and `playwright/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
-| `components` | map | `erun build`, `erun push`, `erun deploy`, `erun e2e` | Declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s`/`playwright` root. Absent → `paths:` is the project's only root, unchanged. See [`components:` block](#components-block). |
+| `paths` | map | `erun build`, `erun push`, `erun deploy`, `erun e2e`, `erun terraform` | Overrides where erun discovers the devops assets — the `docker/`, `k8s/`, and `e2e/` folders, the `terraform-<tenant>` root, and the `VERSION` file. Absent → the conventional layout. See [`paths:` block](#paths-block). |
+| `components` | map | `erun build`, `erun push`, `erun deploy` | Declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root. Absent → `paths:` is the project's only root, unchanged. See [`components:` block](#components-block). |
 
 #### `paths:` block {#paths-block}
 
@@ -189,7 +190,8 @@ Every field is optional; an unset field keeps the conventional location. A confi
 | `k8s` | string | `<tenant>-devops/k8s` | Directory (named `k8s`) whose subdirectories are the per-component Helm charts (`<k8s>/<component>/Chart.yaml`). Read by `erun deploy`, and by `erun build` for chart packaging. |
 | `terraform` | string | `terraform-<tenant>` or `<tenant>-devops/terraform-<tenant>` | Base directory under which the per-environment Terraform roots live; erun still appends `/<environment>`. Read by `erun terraform`, which by convention checks `terraform-<tenant>/` then `<tenant>-devops/terraform-<tenant>/` (the same `-devops` discovery as `docker`/`k8s`) before this override is needed. |
 | `version` | string | walk up from the build dir to the project root | Path to the `VERSION` file that mints the build version. A directory resolves to `<dir>/VERSION`. Read by `erun build` / `erun push` / `erun release`. |
-| `playwright` | string | `<tenant>-devops/playwright` | Directory (named `playwright`) holding the project's e2e suite — either a Playwright project directly, or per-component subdirectories (`<playwright>/<component>/playwright.config.ts`) mirroring `docker`/`k8s`. Read by `erun e2e`. |
+| `e2e` | string | `<tenant>-devops/e2e` | Directory whose subdirectories are the project's e2e suites (`<e2e>/<component>/Dockerfile`, each with an `AS e2e` stage), mirroring `docker`/`k8s`. Read by `erun e2e` from `paths:` only. See [Conventions spec · e2e suite discovery](/agent-reference/conventions-spec#e2e-suite-discovery). |
+| `playwright` | string | — | Retired. It named a host-run Playwright suite, which `erun e2e` no longer runs; `erun e2e` refuses it (and a `<tenant>-devops/playwright` folder) with the move to `e2e`. |
 
 ```yaml
 # <repo>/.erun/config.yaml — a devops repo that holds the folders at its root
@@ -202,14 +204,16 @@ paths:
 
 **Error behaviour.** A configured override that does not resolve fails the command (exit code 1) rather than silently falling back to convention:
 
-- `paths.docker` / `paths.k8s` / `paths.playwright` pointing at a directory that is missing, not named `docker`/`k8s`/`playwright`, or holding no build contexts / charts / suites → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s`/`playwright` analogues).
+- `paths.docker` / `paths.k8s` pointing at a directory that is missing, not named `docker`/`k8s`, or holding no build contexts / charts → `configured docker path "<p>" (.erun/config.yaml paths.docker) is not a docker build module: …` (and the `k8s` analogue).
+- `paths.e2e` pointing at something that is not a directory → `configured e2e path "<p>" (.erun/config.yaml paths.e2e) is not a directory: …`.
+- `paths.playwright`, or `components.<name>.playwright`, set at all → `erun e2e` refuses it, naming the move to `<tenant>-devops/e2e/<component>/Dockerfile`.
 - `paths.terraform` with no `<base>/<environment>/` directory → `no Terraform root at <dir> … the .erun/config.yaml paths.terraform base "<p>" must contain a <env>/ dir …`.
 - `paths.version` pointing at a missing file → `configured version file <p> (.erun/config.yaml paths.version) not found`.
 - `paths.dockercontext` set to anything other than `repo-root` or `component` → `invalid docker context "<v>" (.erun/config.yaml paths.dockercontext): expected "repo-root" or "component"`.
 
 #### `components:` block {#components-block}
 
-The `components:` block declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root — a repo shaped like `harnesses/<name>/{docker,k8s}`, where each harness carries its own `docker/`, `k8s/`, and `VERSION`. `paths:` cannot express this: it is a single, project-global root, so a repo with N independent harnesses could commit only one of them at a time. `components:` is additive — present only for a repo that needs it — and each entry is exactly `paths:`-shaped (`docker`, `dockercontext`, `k8s`, `terraform`, `version`, `playwright`), reusing the same fields and resolution rules documented above. A project with no `components:` map keeps resolving through `paths:` exactly as before this block existed.
+The `components:` block declares more than one `paths:`-shaped root, keyed by component name, for a monorepo of independent deployables that do not share one `docker`/`k8s` root — a repo shaped like `harnesses/<name>/{docker,k8s}`, where each harness carries its own `docker/`, `k8s/`, and `VERSION`. `paths:` cannot express this: it is a single, project-global root, so a repo with N independent harnesses could commit only one of them at a time. `components:` is additive — present only for a repo that needs it — and each entry is exactly `paths:`-shaped (`docker`, `dockercontext`, `k8s`, `terraform`, `version`), reusing the same fields and resolution rules documented above. A project with no `components:` map keeps resolving through `paths:` exactly as before this block existed.
 
 ```yaml
 # <repo>/.erun/config.yaml — a monorepo of independent harnesses
@@ -494,6 +498,21 @@ set it, or point the entry at a file with `src:`
 ```
 
 That is deliberate. A Dockerfile typically guards secret-dependent work with `if [ -f /run/secrets/<id> ]`, so a secret that silently fails to arrive would make the build **skip** that work and still exit zero — reporting success having verified less than the project asked for. Failing loudly is the only outcome that cannot be mistaken for a passing check.
+
+### e2e secrets {#e2e-secrets}
+
+An [e2e suite](/agent-reference/dockerfile-stages#e2e-stage) often needs a credential, such as the password of a test account it signs in with. `e2e.secrets` hands it to every suite's `docker build` as a BuildKit secret, in the same shape as [`docker.secrets`](#build-secrets):
+
+```yaml
+e2e:
+    secrets:
+        - id: e2e_login_password
+          env: E2E_LOGIN_PASSWORD
+```
+
+The suite's `e2e` stage mounts it by id (`RUN --mount=type=secret,id=e2e_login_password,env=E2E_LOGIN_PASSWORD yarn test`). Only the reference reaches the command line, as for build secrets, and a declared entry that cannot be supplied fails the run naming the entry.
+
+The list is separate from `docker.secrets` on purpose. `docker.secrets` reach every component build, including the merge queue's, so an e2e credential declared there would become mandatory for every build. `e2e.secrets` is project-wide only; there is no per-environment override.
 
 ### Deploy chart source {#deploy-chart-source}
 

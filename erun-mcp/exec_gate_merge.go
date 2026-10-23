@@ -11,15 +11,15 @@ import (
 // the order it should land, carrying its own commit message.
 type ExecGateMergeSource struct {
 	Branch  string `json:"branch" jsonschema:"branch to fetch and squash-merge in"`
-	Message string `json:"message" jsonschema:"this branch's own squash commit message — its review's name, since that commit is what ends up on targetBranch if the gate passes. The branch's own load-bearing trailers (Closes #N, Reproduces:, Regression-Test:) are appended beneath it automatically, and a trailer the message already carries is not repeated"`
+	Message string `json:"message" jsonschema:"this branch's own squash commit message — its review's name, since that commit is what ends up on targetBranch if its build succeeds. The branch's own load-bearing trailers (Closes #N, Reproduces:, Regression-Test:) are appended beneath it automatically, and a trailer the message already carries is not repeated"`
 }
 
-// ExecGateMergeInput builds the prospective merge a merge queue promotion
-// (or batch) gates: fetch targetBranch and every source, check out a fresh
+// ExecGateMergeInput prepares the prospective merge a merge queue promotion
+// (or batch) builds: fetch targetBranch and every source, check out a fresh
 // local branch named targetBranch at its own current remote tip, and
 // squash-merge each source onto it in turn, each as its own commit.
 type ExecGateMergeInput struct {
-	Sources      []ExecGateMergeSource `json:"sources" jsonschema:"branches to squash-merge in, in order; more than one batches several unmerged branches into one prospective merge so the gate that follows tests whether they compile together"`
+	Sources      []ExecGateMergeSource `json:"sources" jsonschema:"branches to squash-merge in, in order; more than one batches several unmerged branches into one prospective merge so the build that follows tests whether they compile together"`
 	TargetBranch string                `json:"targetBranch" jsonschema:"branch the squash merge(s) land onto, checked out fresh from its own current remote tip"`
 	Remote       string                `json:"remote,omitempty" jsonschema:"git remote to fetch and merge from; defaults to origin"`
 	UnderLeaseID string                `json:"underLeaseId,omitempty" jsonschema:"id of an exclusive environment claim this caller already holds. This rewrites the environment's one shared worktree, so it is refused while anything else holds the environment exclusively -- a drive that took the claim for its own whole window names it here so its own hold does not refuse it"`

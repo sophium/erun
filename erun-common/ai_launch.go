@@ -158,7 +158,9 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig, gatew
 	}
 	prefix := claudeLaunchEnvPrefix(claude, gateway)
 	flags := claudeLaunchFlags(claude, gateway, tenant, environment)
-	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then ` + prefix + `claude --continue` + flags + `; else ` + prefix + `claude` + flags + `; fi`
+	// The runtime image links claude to erun, which resumes the working
+	// directory's conversation when Claude Code has one (claude_resume.go).
+	return prefix + `claude` + flags
 }
 
 // AISessionLaunchLines returns the dtach session's AI program as script lines:

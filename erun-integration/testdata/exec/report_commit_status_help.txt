@@ -1,6 +1,6 @@
-Report a commit status on GitHub for COMMIT. This is the last step in the merge queue gate (`erun exec gate-merge`, `erun build --gate`, `erun review record-build --gate`): report success once the gate build is green, or failure the moment it is not, naming which gate step failed in --description. A required status check on the remote's branch protection has nothing to require until this reports it.
+Report a commit status on GitHub for COMMIT. This is the last step in the merge queue (`erun exec gate-merge`, `erun build`, `erun review record-build`): report success once the recorded build succeeded, or failure the moment it did not, naming which step failed in --description. A required status check on the remote's branch protection has nothing to require until this reports it.
 
-COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed.
+COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the build has already succeeded and been pushed.
 
 --dry-run traces the request without sending it.
 
@@ -12,11 +12,11 @@ Examples:
     --description 'erun build failed against the prospective merge' \
     --remote-url https://github.com/org/repo.git
   erun exec report-commit-status $(git rev-parse HEAD) --state success \
-    --description 'gate build passed' --remote-url https://github.com/org/repo.git
+    --description 'merge queue build succeeded' --remote-url https://github.com/org/repo.git
 
 Flags:
       --context string       Status check name a required-status-checks rule names (defaults to erun/merge-gate)
-      --description string   Short human-readable status, naming which gate step failed on failure (required)
+      --description string   Short human-readable status, naming which step failed on failure (required)
       --dry-run              Resolve and trace mutating actions without executing them.
   -h, --help                 help for report-commit-status
       --remote-url string    The github.com remote to report the status against (required)

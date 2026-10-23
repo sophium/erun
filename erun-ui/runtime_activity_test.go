@@ -52,10 +52,9 @@ func TestRuntimeActivityGroupsResourceHoldingProcesses(t *testing.T) {
 // should be killed out from under (the agent's own tool) is shown but carries
 // no reclaim action.
 func TestRuntimeActivityGroupsAreReadOnly(t *testing.T) {
-	// `claude-real`, not `claude`: the image wraps the AI tools, so the wrapper's
-	// name is what an exact-match classifier would have looked for and the real
-	// memory holder is what `ps` actually reports. Observed live in petios/local.
-	probe := "erun-process\t1048576\tclaude-real\tclaude-real --continue --model opus"
+	// A suffixed name, not `claude`: the real memory holder can be reported under
+	// a longer comm than the name an exact-match classifier would look for.
+	probe := "erun-process\t1048576\tclaude.exe\tclaude.exe --continue --model opus"
 	activity := runtimeActivityFromProbe(uiSelection{Tenant: "petios", Environment: "local"}, probe)
 	if len(activity.Processes) != 1 {
 		t.Fatalf("expected the agent process to be shown, got %+v", activity.Processes)

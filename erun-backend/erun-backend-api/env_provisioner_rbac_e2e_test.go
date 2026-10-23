@@ -1,11 +1,10 @@
 package backendapi
 
-// This file proves #1083's fix against a real Kubernetes RBAC engine rather
-// than pinning a rule list: #1081 added a rule-pinning test (see
-// erun-devops/k8s/erun-backend-api-chart_test.sh) that passed while
-// provisioning stayed completely broken, because a test that only checks
-// "does the rendered YAML contain resource X" can never catch a grant nobody
-// thought to add. helm's own readiness wait for a Deployment walks
+// This file proves the provisioner's grants against a real Kubernetes RBAC
+// engine rather than pinning a rule list: a rule-pinning render test of the
+// chart once passed while provisioning stayed completely broken, because a
+// test that only checks "does the rendered YAML contain resource X" can never
+// catch a grant nobody thought to add. helm's own readiness wait for a Deployment walks
 // Deployment -> its current ReplicaSet -> that ReplicaSet's ready count, and
 // that object graph is not knowable from erun's own call sites -- it has to
 // be observed against a real apiserver's authorizer.
@@ -18,7 +17,7 @@ package backendapi
 // ReplicaSets and read the owned one's ready count. It asserts that call
 // succeeds under the current (fixed) rule set and is Forbidden under the
 // rule set with the apps/replicasets grant removed -- i.e. the exact
-// pre-#1083 state -- reproducing the issue's own live reproduction
+// broken state -- reproducing the original live failure
 // (`kubectl get replicasets --as=<deployer-sa>` => Forbidden) against a real
 // cluster instead of asserting it once by hand.
 //

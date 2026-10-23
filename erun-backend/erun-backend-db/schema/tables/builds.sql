@@ -6,8 +6,8 @@ CREATE TABLE builds (
   -- happened, not its identity.
   review_id UUID,
   -- The environment the build ran in, when the caller reports one. NULL for
-  -- a review-linked build (RECORDED/GATE builds reported through the
-  -- review-nested route carry no environment today) and SET NULL if the
+  -- a review-linked build (builds reported through the review-nested route
+  -- carry no environment today) and SET NULL if the
   -- environment is later deleted -- an append-only build history should
   -- outlive the row it described, the same choice usage_events.environment_id
   -- already made. The reference carries tenant_id (builds_tenant_environment_fkey
@@ -16,17 +16,18 @@ CREATE TABLE builds (
   -- route able to tell a caller whether any tenant holds a given environment
   -- id.
   environment_id UUID,
-  -- RECORDED is a reported build (client POST or a release's own build), which
-  -- always names the version it produced. GATE is the merge queue's own
-  -- prospective-merge build, which publishes nothing and so mints no version,
-  -- and always belongs to the review it gates.
+  -- Every build written today is RECORDED and names the version it minted,
+  -- including the merge queue's build of a prepared merge commit. GATE is a
+  -- retired value the API no longer writes; historical GATE rows (no version,
+  -- always review-linked) stay valid under the CHECKs below and must never be
+  -- deleted or rewritten -- reviews.last_merged_build_id points at them, and
+  -- the next queue merge anchors its verification on that pointer.
   kind TEXT NOT NULL DEFAULT 'RECORDED',
   successful BOOLEAN NOT NULL,
   commit_id TEXT NOT NULL,
   version TEXT,
-  -- Populated only for a failed GATE build, in the gate's own words — the
-  -- reason a caller-reported RECORDED failure lives wherever that caller's own
-  -- CI recorded it, not here.
+  -- An optional account of why a failed build failed, in the reporting
+  -- build's own words. Historical failed GATE rows always carry one.
   failure_detail TEXT,
   -- The bounded per-build profile a caller self-reports alongside its
   -- outcome -- a duration/CPU/throttle/IO summary plus the top costliest

@@ -74,10 +74,10 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		// SIGWINCH redraws it.
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
 		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
-		assertScriptHas(t, script, `claude --continue --settings '{"ultracode":true}'`, "AI tab must launch the claude guard at the default effort (ultracode)")
+		assertScriptHas(t, script, `claude --settings '{"ultracode":true}'`, "AI tab must launch claude at the default effort (ultracode)")
 		// Claude's exit must surface to the user, not silently fall through to
 		// the shell.
-		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
+		if !strings.Contains(script, " || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
 			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
 		}
 		assertScriptHas(t, script, "exec "+bashrc, "AI launcher must drop to an interactive shell after claude")
@@ -90,7 +90,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req.Contribute = true
 		script := preview(t, req)
 		clone := strings.Index(script, `cd "$HOME/git/erun"`)
-		claude := strings.Index(script, "claude --continue")
+		claude := strings.Index(script, "claude --settings")
 		if clone < 0 || claude < 0 || clone > claude {
 			t.Fatalf("contribute-AI must cd to the clone before launching claude:\n%s", script)
 		}

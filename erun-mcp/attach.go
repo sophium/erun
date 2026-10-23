@@ -152,9 +152,8 @@ func runAttachSession(conn *websocket.Conn, runtime RuntimeConfig, session strin
 	socket := eruncommon.RemoteAppSessionSocketPath(runtime.Context.Tenant, runtime.Context.Environment, session)
 	// The CLI's own shell path (open.go's remoteShellLaunchLines) always
 	// mkdir -p's this directory itself before reusing this same script
-	// builder, and session-prune.sh's boot-time reconciliation explicitly
-	// no-ops when the directory is absent ("nothing created yet: no
-	// sessions have ever run in this container") rather than creating it.
+	// builder, and nothing in the runtime image's boot creates it: it is
+	// container-local, so a container starts without it.
 	// This edge is the one caller of RemoteAppSessionAttachLines with no
 	// such guarantee upstream: a freshly deployed or restarted pod that has
 	// never had a CLI-driven session (`erun open --ai`, a linked

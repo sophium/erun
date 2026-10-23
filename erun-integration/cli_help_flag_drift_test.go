@@ -2,14 +2,8 @@ package integration
 
 import (
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -20,10 +14,9 @@ import (
 
 // cli_help_flag_drift_test.go extends the doc-drift gate (see AGENTS.md
 // "Doc-drift gate") to the CLI's own help text -- the surface an operator
-// reads at the moment they run a destructive command. A gate-run status
-// flag documented lowercase while the route accepted only uppercase, and a
-// misremembered `erun release --version`, both drifted from real
-// command/flag registration this way, found only by someone hitting them.
+// reads at the moment they run a destructive command. A misremembered
+// `erun release --version` drifted from real command/flag registration this
+// way, found only by someone hitting it.
 //
 // What is mechanically comparable here: a flag's *name* and a command's
 // *existence*. A flag's prose description (what it does, its effective
@@ -34,29 +27,19 @@ import (
 // in prose" convention (e.g. `erun expose --port` registers 0 and describes
 // "(default 80)"; the two are supposed to differ).
 //
-// So this file checks exactly two claim classes, both fully mechanical:
-//  1. Every literal `erun ...` invocation quoted in a command's own Example
-//     field, or backtick-quoted in any command's Short/Long prose, resolves
-//     to a real subcommand path, and every `--flag`/`-f` token in it is
-//     actually registered on that resolved command (TestCLIExample...,
-//     TestCLIProse...). This is the exact shape of the "release --version"
-//     class: a flag reachable for in prose or an example, but never wired.
-//  2. The gate-run status vocabulary specifically (RUNNING/PASSED/FAILED/
-//     INCONCLUSIVE): that erun-backend-api still case-normalizes every
-//     entry point before comparing against that vocabulary, so the CLI's
-//     own lowercase-example convention keeps working, and that the CLI's
-//     own help text still mentions every value the backend accepts
-//     (TestGateRunStatusVocabularyStaysMechanicallyValid). This is the
-//     narrow, per-claim style TestGateRunInfrastructureSignaturesAreDocumented
-//     above already established, applied to the exact vocabulary that once
-//     regressed this way.
+// So this file checks exactly one claim class, fully mechanically: every
+// literal `erun ...` invocation quoted in a command's own Example field, or
+// backtick-quoted in any command's Short/Long prose, resolves to a real
+// subcommand path, and every `--flag`/`-f` token in it is actually registered
+// on that resolved command (TestCLIExample..., TestCLIProse...). This is the
+// exact shape of the "release --version" class: a flag reachable for in prose
+// or an example, but never wired.
 //
 // What this file does NOT check, so a green run is never read as "the help
 // is all true": flag *prose* (what a flag's usage string says it does or
 // defaults to), whether help is *useful* (erun-cli/AGENTS.md's CLI Help quality
-// bar is still a human review job), and any vocabulary other than gate-run
-// status. "Every registered flag appears in help" is not a separate check
-// here either -- Cobra generates the flags section of `--help` directly from
+// bar is still a human review job), and any value vocabulary. "Every
+// registered flag appears in help" is not a separate check here either -- Cobra generates the flags section of `--help` directly from
 // the registered FlagSet, so it holds by construction for every command
 // except the one that opts out of Cobra's flag parsing (`erun exec raw`,
 // DisableFlagParsing: true), which documents its one real flag (--dry-run)
@@ -347,116 +330,5 @@ func TestCLIProseInvocationsUseRegisteredFlags(t *testing.T) {
 	sort.Strings(problems)
 	for _, p := range problems {
 		t.Error(p)
-	}
-}
-
-// findCLICommand resolves a space-joined command path (e.g. "exec gate-run
-// report") against the real tree, the same key shape
-// cliOnlyAgentFacingCommands uses.
-func findCLICommand(root *cobra.Command, path string) *cobra.Command {
-	node := root
-	for _, name := range strings.Fields(path) {
-		node = commandChild(node, name)
-		if node == nil {
-			return nil
-		}
-	}
-	return node
-}
-
-// gateRunStatusConstsFromModel parses erun-backend-api/internal/model/gate_run.go
-// (a separate Go module, so read as source rather than imported -- the same
-// cross-module technique desktop_surface_test.go's apiRouteCapabilities
-// uses) for the string literal values of the GateRunStatus typed constants:
-// the actual, code-owned status vocabulary a gate run can hold.
-func gateRunStatusConstsFromModel(t *testing.T, root string) []string {
-	t.Helper()
-	path := filepath.Join(root, "erun-backend", "erun-backend-api", "internal", "model", "gate_run.go")
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	var values []string
-	ast.Inspect(file, func(n ast.Node) bool {
-		spec, ok := n.(*ast.ValueSpec)
-		if !ok {
-			return true
-		}
-		typeIdent, ok := spec.Type.(*ast.Ident)
-		if !ok || typeIdent.Name != "GateRunStatus" {
-			return true
-		}
-		for _, v := range spec.Values {
-			lit, ok := v.(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				continue
-			}
-			if s, err := strconv.Unquote(lit.Value); err == nil {
-				values = append(values, s)
-			}
-		}
-		return true
-	})
-	return values
-}
-
-// TestGateRunStatusVocabularyStaysMechanicallyValid is the per-claim doc-drift
-// check for a vocabulary that has already drifted this way once: a gate run's
-// --status value is case-sensitive end to end unless erun-backend-api
-// normalizes it, and the CLI's own help/Example text has taught a lowercase
-// convention since before the fix landed. This does not re-verify the fix by
-// calling the API (that is erun-backend-api's own regression-test job); it
-// verifies the two facts that made the fix correct and would catch either
-// half regressing: the normalization is still present at every entry point,
-// and the CLI still mentions every value the backend actually accepts.
-func TestGateRunStatusVocabularyStaysMechanicallyValid(t *testing.T) {
-	root := repoRoot(t)
-	statuses := gateRunStatusConstsFromModel(t, root)
-	if len(statuses) == 0 {
-		t.Fatal("no GateRunStatus constants found in erun-backend-api/internal/model/gate_run.go; the rest of this test would pass vacuously")
-	}
-
-	routesPath := filepath.Join(root, "erun-backend", "erun-backend-api", "internal", "routes", "gate_runs.go")
-	data, err := os.ReadFile(routesPath)
-	if err != nil {
-		t.Fatalf("read %s: %v", routesPath, err)
-	}
-	const normalizeCall = "strings.ToUpper(strings.TrimSpace("
-	if count := strings.Count(string(data), normalizeCall); count < 3 {
-		t.Errorf("%s: expected case-normalization (%s...)) at all three gate-run status entry points -- "+
-			"list, start, report -- so the CLI's lowercase --status examples keep working; found %d call(s), want at least 3",
-			routesPath, normalizeCall, count)
-	}
-
-	cliRoot := cmd.CommandTreeForAudit()
-	var cliText strings.Builder
-	for _, path := range []string{"exec gate-run start", "exec gate-run report", "gate list"} {
-		c := findCLICommand(cliRoot, path)
-		if c == nil {
-			t.Errorf("erun %s: command not found in the real command tree; the CLI side of this check cannot run", path)
-			continue
-		}
-		cliText.WriteString(c.Long)
-		cliText.WriteString("\n")
-		cliText.WriteString(c.Example)
-		cliText.WriteString("\n")
-		c.Flags().VisitAll(func(f *pflag.Flag) {
-			cliText.WriteString(f.Usage)
-			cliText.WriteString("\n")
-		})
-	}
-	words := normalizedWordSet(cliText.String())
-	var missing []string
-	for _, status := range statuses {
-		if !words[strings.ToLower(status)] {
-			missing = append(missing, status)
-		}
-	}
-	sort.Strings(missing)
-	for _, status := range missing {
-		t.Errorf("gate-run status %q exists in erun-backend-api's GateRunStatus but is not mentioned anywhere in "+
-			"`erun exec gate-run start`/`report` or `erun gate list`'s own help text -- update the CLI's --status "+
-			"flag usage, Long, or Example", status)
 	}
 }

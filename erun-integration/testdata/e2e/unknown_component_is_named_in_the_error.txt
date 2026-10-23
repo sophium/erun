@@ -1,2 +1,2 @@
 audit: erun e2e --component does-not-exist --dry-run
-playwright suite not found for component "does-not-exist"
+e2e suite not found for component "does-not-exist" (discovered: erun-backend-api, erun-console)

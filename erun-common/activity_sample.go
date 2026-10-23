@@ -74,8 +74,8 @@ type ResidentActivityResult struct {
 }
 
 // residentActivityCommPrefixes are the process names worth treating as work.
-// Matched on a comm prefix because the runtime image wraps its agent tools, so
-// the process that actually burns the CPU is `claude-real`, not `claude`.
+// Matched on a comm prefix because the process that actually burns the CPU can
+// carry a suffixed name (Claude Code's native `claude.exe`).
 // Deliberately excludes erun's own binaries: a check that can match the observer
 // is not a check.
 var residentActivityCommPrefixes = []string{

@@ -12,7 +12,7 @@ import (
 
 // platform_client_jobs.go extends PlatformClient with the jobs surface: the
 // platform's record of work in flight, claimed before the work starts rather
-// than reported only once it finishes the way builds and gate runs are. That
+// than reported only once it finishes the way builds are. That
 // is the half that lets two agents see each other and stop duplicating work.
 
 // PlatformJob mirrors model.Job's JSON shape.

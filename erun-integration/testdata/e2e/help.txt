@@ -1,19 +1,35 @@
-Discover a project's playwright/ folder the way `erun build` discovers
-docker/ and `erun deploy` discovers k8s/, then run it once against a real,
-already-deployed environment. The suite receives the environment's resolved
-HTTPS base URL and its currently deployed version as the ERUN_E2E_BASE_URL
-and ERUN_E2E_VERSION environment variables -- both derived from the live
-environment, never declared by the suite.
+Discover the project's e2e suites -- <tenant>-devops/e2e/<component>/Dockerfile,
+each declaring an `e2e` stage -- the way `erun build` discovers docker/ and
+`erun deploy` discovers k8s/, and run each one as a docker build of that stage
+against a real, already-deployed environment. The e2e stage re-runs every time
+while the stages before it stay cached, and the build keeps no image.
 
-Refuses before a browser starts, naming the cause, when the environment is
-not deployed, the target service is not exposed, or its certificate is not
-yet issued. Also refuses a suite that sets ignoreHTTPSErrors or hardcodes its
-own baseURL, since both would silently defeat the guarantee this command
-exists to make. A project with no playwright/ folder is a clean no-op.
+Each suite receives build args derived from the live environment, never
+declared by the suite: ERUN_E2E_VERSION (the deployed version),
+ERUN_E2E_BASE_URL (the HTTPS URL of the exposed service named like the suite's
+directory), and ERUN_E2E_URL_<SERVICE> for every exposed service. The
+.erun/config.yaml e2e.secrets list is passed as --secret.
 
-erun e2e is a separate step with its own exit code: `erun deploy` never runs
-it, and `erun build --e2e` composes build, push, deploy, and this command for
-the everyday branch flow.
+--base-url points the suites at an address you name instead and skips the
+exposure and certificate checks. --version sets the version the suites
+expect instead of the deployed one. Because a --base-url may serve a
+different deployment than the current scope, it needs either --version or
+an explicit --tenant/--environment naming the environment it serves (whose
+deployed version is then resolved); with both --base-url and --version the
+environment is not read at all.
+
+With no --component every suite runs, in order, and the exit code is non-zero
+if any failed. Refuses before any suite runs, naming the cause, when the
+environment is not deployed, a suite's service is not exposed or its
+certificate is not yet issued, or its URL resolves to a loopback address a
+docker build cannot reach. Also refuses a suite whose playwright.config sets
+ignoreHTTPSErrors or hardcodes baseURL. A project with no e2e/ suite is a
+clean no-op.
+
+erun e2e is a separate step with its own exit code: `erun build`, `erun deploy`
+and releases never run it, and it is not a release or merge gate. A failure
+names the suite, target URL, deployed version, and log so it can be filed as
+a bug; erun e2e files nothing itself.
 
 Usage:
   erun e2e [flags]
@@ -21,13 +37,17 @@ Usage:
 Examples:
   erun e2e --tenant team --environment dev
   erun e2e --tenant team --environment dev --component erun-console
+  erun e2e --tenant team --environment dev --component erun-console --base-url https://console.example.com
+  erun e2e --component erun-console --base-url https://console.example.com --version <VERSION>
 
 Flags:
-      --component string     Run the named component's suite when playwright/ has more than one
+      --base-url string      Run the suites against this URL instead of the exposed service's, skipping the exposure and certificate checks; needs --version or an explicit --tenant/--environment
+      --component string     Run only the named suite (a directory under e2e/); default runs every suite
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Target a specific environment; requires --tenant
   -h, --help                 help for e2e
       --tenant string        Target a specific tenant (default: the current scope)
+      --version string       Version the suites expect (ERUN_E2E_VERSION) instead of the environment's deployed version
 
 Global Flags:
       --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")

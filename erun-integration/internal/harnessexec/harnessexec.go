@@ -38,7 +38,14 @@ package harnessexec
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -55,9 +62,9 @@ const WaitDelay = 10 * time.Second
 //
 // It is a backstop, not a latency SLA, and it is set longer than the suite's
 // own package deadline so it can never fail a healthy child: that deadline is
-// the INTEGRATION_TEST_TIMEOUT the gate derives (see the Makefile), capped so
-// its maximum is a value this constant can be compared against at build time
-// rather than a number that moves with the environment. What this catches is a
+// the fixed -timeout the erun-cli image's test stage passes, a value this
+// constant can be compared against rather than a number that moves with the
+// environment. What this catches is a
 // run whose deadline was raised past that cap or disabled outright, where an
 // unbounded wait would otherwise never conclude at all.
 //
@@ -106,5 +113,90 @@ func command(parent context.Context, delay, net time.Duration, name string, args
 	// exited with no context and no cancellation at all, which is why a call
 	// site cannot substitute for it by arming a context of its own.
 	cmd.WaitDelay = delay
+	if isGit(name) {
+		if config, err := harnessGitConfig(); err == nil {
+			cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+config)
+		}
+	}
 	return cmd
 }
+
+// A git child runs with automatic maintenance off. After a commit, fetch or
+// push, git detaches `git maintenance run --auto` -- for a local push, in the
+// receiving repository too -- and that process outlives the command, so under
+// load it can still be writing into a scenario's repositories when
+// t.TempDir's cleanup removes them, failing the scenario with "directory not
+// empty". The setting travels as GIT_CONFIG_GLOBAL, which git keeps for the
+// receive-pack it runs for a local remote (it drops -c and GIT_CONFIG_COUNT
+// there); the file includes the developer's own global config so identity and
+// everything else the fixtures rely on are unchanged. The CLI under test runs
+// git with the scenario's own HOME instead, which env.New configures the same
+// way. A caller that sets cmd.Env itself replaces this.
+func isGit(name string) bool {
+	base := strings.TrimSuffix(filepath.Base(name), ".exe")
+	return base == "git"
+}
+
+var (
+	harnessGitConfigOnce sync.Once
+	harnessGitConfigPath string
+	harnessGitConfigErr  error
+)
+
+// harnessGitConfig writes, once per process, the global git config git
+// children run with: the developer's global config plus maintenance off. Its
+// name is derived from its content, so repeated runs reuse one file.
+func harnessGitConfig() (string, error) {
+	harnessGitConfigOnce.Do(func() {
+		var b strings.Builder
+		for _, include := range hostGlobalGitConfigs() {
+			b.WriteString("[include]\n\tpath = " + include + "\n")
+		}
+		b.WriteString(MaintenanceOffGitConfig)
+		sum := sha256.Sum256([]byte(b.String()))
+		path := filepath.Join(os.TempDir(), "erun-integration-gitconfig-"+hex.EncodeToString(sum[:8]))
+		if existing, err := os.ReadFile(path); err == nil && string(existing) == b.String() {
+			harnessGitConfigPath = path
+			return
+		}
+		tmp, err := os.CreateTemp(os.TempDir(), "erun-integration-gitconfig-*")
+		if err != nil {
+			harnessGitConfigErr = err
+			return
+		}
+		_, werr := tmp.WriteString(b.String())
+		if err := errors.Join(werr, tmp.Close()); err != nil {
+			_ = os.Remove(tmp.Name())
+			harnessGitConfigErr = err
+			return
+		}
+		if err := os.Rename(tmp.Name(), path); err != nil {
+			_ = os.Remove(tmp.Name())
+			harnessGitConfigErr = err
+			return
+		}
+		harnessGitConfigPath = path
+	})
+	return harnessGitConfigPath, harnessGitConfigErr
+}
+
+// hostGlobalGitConfigs lists the global config files git would read for the
+// developer; a missing include is ignored by git.
+func hostGlobalGitConfigs() []string {
+	if explicit := os.Getenv("GIT_CONFIG_GLOBAL"); explicit != "" {
+		return []string{explicit}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	xdg := os.Getenv("XDG_CONFIG_HOME")
+	if xdg == "" {
+		xdg = filepath.Join(home, ".config")
+	}
+	return []string{filepath.Join(xdg, "git", "config"), filepath.Join(home, ".gitconfig")}
+}
+
+// MaintenanceOffGitConfig turns off the background maintenance git would
+// otherwise detach after commits, fetches and pushes.
+const MaintenanceOffGitConfig = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[receive]\n\tautogc = false\n"

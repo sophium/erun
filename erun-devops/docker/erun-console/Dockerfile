@@ -1,64 +1,78 @@
 ARG ERUN_VERSION=1.0.0
 
-# Stage 1: build the Vite/React SPA. Node 22 rather than 20: installing from the
-# workspace root (see below) resolves the whole workspace's devDependencies, and
-# @testing-library/jest-dom@6 declares engines node >=22. Pinned to the same
-# 22.14 line the erun-devops test stage already uses, so the two agree. Bumping
-# the image is the honest fix here — --ignore-engines would silently install a
-# module against an engine it rejects.
-# Pinned to the build host's platform: the bundle it emits is static assets with
-# no architecture, so building it once natively beats building it again under
-# emulation for the foreign arch every multi-arch build.
-FROM --platform=$BUILDPLATFORM node:22.14-alpine AS builder
+# Install from the WORKSPACE ROOT, not from erun-console alone. erun-console
+# depends on erun-kit ("erun-kit": "*"), a yarn workspace sibling resolved
+# through the root node_modules symlink rather than published to a registry;
+# installing the console on its own makes yarn try to fetch it and fail with
+# `https://registry.yarnpkg.com/erun-kit: Not found`. All workspace manifests
+# are copied because yarn 1 resolves the whole set from the root lockfile;
+# omitting one makes --frozen-lockfile unsatisfiable.
+#
+# Node 22 because @testing-library/jest-dom@6 declares engines node >=22.
+# Debian rather than alpine because the landing-layout spec drives Chromium,
+# which Playwright does not ship for musl. Pinned to the build host's platform:
+# the bundle is static assets with no architecture, so it is built (and
+# tested) once natively.
+#
+# YARN_CACHE_FOLDER: yarn classic otherwise caches under $HOME/.cache/yarn,
+# not the mounted /usr/local/share/.cache/yarn.
+FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS build
+
+ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /src
 
-# Install from the WORKSPACE ROOT, not from erun-console alone. erun-console
-# depends on erun-kit ("erun-kit": "*"), which is a yarn workspace sibling
-# resolved through the root node_modules symlink rather than published to a
-# registry. Installing erun-console on its own makes yarn try to fetch it and
-# fail with `https://registry.yarnpkg.com/erun-kit: Not found` — which is
-# exactly how this image broke when the kit was extracted, and why no gate
-# caught it: every other check runs at the root, where the symlink exists, and
-# this image build is the only place the console is installed in isolation.
-#
-# All four workspace manifests are copied because yarn 1 resolves the whole
-# workspace set from the root lockfile; omitting one makes --frozen-lockfile
-# unsatisfiable. Manifests first, sources after, so a source edit does not bust
-# the dependency layer.
+# The console's own Playwright package and the Chromium it pins, for the test
+# stage. Ahead of the workspace install and the source so neither invalidates
+# the browser download.
+COPY erun-console/playwright/package.json erun-console/playwright/yarn.lock /src/erun-console/playwright/
+RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    cd /src/erun-console/playwright && \
+    yarn install --frozen-lockfile --non-interactive && \
+    yarn playwright install --with-deps chromium
+
 COPY package.json yarn.lock /src/
 COPY erun-kit/package.json /src/erun-kit/
 COPY erun-console/package.json /src/erun-console/
 COPY erun-ui/frontend/package.json /src/erun-ui/frontend/
 
-# YARN_CACHE_FOLDER: this stage runs as root with no HOME override, so yarn
-# classic's own default cache dir is $HOME/.cache/yarn (/root/.cache/yarn),
-# never the /usr/local/share/.cache/yarn mounted below -- verified against
-# the repo's own yarn (getCacheDir() falls back to $HOME/.cache/yarn) and
-# reproduced live (a real yarn install with the mount target unset resolved
-# to /root/.cache/yarn). Redirecting via env var keeps the mount target that
-# every other yarn-using Dockerfile in the repo already uses.
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
-# erun-kit's package.json main points at ./src/index.ts, so the console's vite
-# build compiles the kit from source and the kit needs no build step of its own.
+# erun-kit's package.json main points at ./src/index.ts, so the console compiles
+# the kit from source and the kit needs no build step of its own.
 COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
 
 WORKDIR /src/erun-console
 
-RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    yarn build
+RUN yarn build
 
-# Stage 2: a small static server that also proxies /v1 to the API, so the
-# console is served same-origin with erun-backend-api (its production design —
-# see erun-console/vite.config.ts) and no browser CORS preflight is ever
-# needed (the API sets no CORS headers by design).
-FROM nginx:1.27.4-alpine3.21
+# The kit's, the console's and its Playwright package's own checks, then the
+# landing-layout spec against the bundle `build` produced, which the Playwright
+# config serves with `vite preview`. The runtime stage copies the bundle from
+# this stage, so no image is produced when they fail.
+FROM build AS test
 
-COPY --from=builder /src/erun-console/dist /usr/share/nginx/html
+RUN cd /src/erun-kit && \
+    yarn typecheck && yarn lint && yarn format:check && yarn test && \
+    cd /src/erun-console && \
+    yarn typecheck && yarn lint && yarn format:check && yarn test && \
+    cd /src/erun-console/playwright && \
+    yarn typecheck && yarn lint && yarn format:check && \
+    yarn playwright test tests/landing-no-horizontal-scroll.spec.ts
+
+# A small static server that also proxies /v1 to the API, so the console is
+# served same-origin with erun-backend-api (its production design — see
+# erun-console/vite.config.ts) and no browser CORS preflight is ever needed
+# (the API sets no CORS headers by design).
+FROM nginx:1.27.4-alpine3.21 AS runtime
+
+COPY --from=test /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
 
 # Stamps this instance's brand into the served index.html before nginx starts,

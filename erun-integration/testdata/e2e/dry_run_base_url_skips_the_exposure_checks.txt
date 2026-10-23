@@ -1,0 +1,8 @@
+audit: erun e2e --base-url https://console.staging.invalid --component erun-console --dry-run --environment dev --tenant team
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+e2e: deployed version <VERSION>
+e2e: suite erun-console: <TMP>
+e2e: base url https://console.staging.invalid (from --base-url; exposure and certificate checks skipped)
+e2e: console.staging.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+cd <TMP> && docker build --progress=plain --target e2e --no-cache-filter e2e --output type=cacheonly --build-arg ERUN_E2E_VERSION=<VERSION> --build-arg ERUN_E2E_BASE_URL=https://console.staging.invalid -f <TMP> .

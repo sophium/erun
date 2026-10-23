@@ -169,3 +169,18 @@ func componentDockerBuildContextCandidate(searchRoot string, ignored *ignoreSet,
 	}
 	return DockerBuildContext{Dir: dir, DockerfilePath: path}, true, nil
 }
+
+// checkNotE2ESuiteDockerfile refuses a Dockerfile under <tenant>-devops/e2e/.
+// An e2e suite runs against a deployed environment and must re-run every
+// time, so it is never a component: building it would fingerprint, promote
+// and push the suite like an image. Discovery never reaches it -- it only
+// walks docker/ directories -- so this guards the cwd and explicit-context
+// paths that hand a Dockerfile in directly.
+func checkNotE2ESuiteDockerfile(dockerfilePath string) error {
+	suiteDir := filepath.Dir(filepath.Clean(strings.TrimSpace(dockerfilePath)))
+	e2eDir := filepath.Dir(suiteDir)
+	if filepath.Base(e2eDir) != "e2e" || !strings.HasSuffix(filepath.Base(filepath.Dir(e2eDir)), "-devops") {
+		return nil
+	}
+	return fmt.Errorf("%s is an e2e suite, not a component: erun build and push never build <tenant>-devops/e2e/; run it against a deployed environment with `erun e2e --component %s`", dockerfilePath, filepath.Base(suiteDir))
+}

@@ -1,0 +1,5 @@
+audit: erun adopt-worktree <STAGE>/mnt/erun-home/git/petios <STAGE>/mnt/erun-worktree
+worktree-adopt: adopting the repository at <STAGE>/mnt/erun-home/git/petios onto the worktree volume
+worktree-adopt: adopted; the pre-move copy is preserved at <STAGE>/mnt/erun-home/git/petios.pre-worktree-volume
+audit: erun adopt-worktree <STAGE>/mnt/erun-home/git/petios <STAGE>/mnt/erun-worktree
+worktree-adopt: worktree volume already holds a tree; leaving it untouched

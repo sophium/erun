@@ -63,14 +63,8 @@ func (r BuildRoutes) createBuild(w http.ResponseWriter, req *http.Request) {
 		writeBuildError(w, req, err)
 		return
 	}
-	// A caller may report either kind now: RECORDED for its own build, or GATE
-	// for a merge-queue gate it ran itself — see AGENTS.md "Merge Queue". An
-	// unrecognized kind is refused rather than silently coerced to RECORDED.
-	if build.Kind == "" {
-		build.Kind = model.BuildKindRecorded
-	}
-	if build.Kind != model.BuildKindRecorded && build.Kind != model.BuildKindGate {
-		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", "kind must be RECORDED or GATE")
+	if err := normalizeReportedBuildKind(&build); err != nil {
+		writeBuildError(w, req, err)
 		return
 	}
 	build, err := r.service.Create(req.Context(), build)
@@ -108,9 +102,7 @@ func (r BuildRoutes) requireEnvironment(ctx context.Context, environmentID strin
 // self-reporting outside any review (erun#1954). ReviewID is always cleared
 // regardless of what the body carries -- a review-linked build is reported
 // through the review-nested route above, never through this one, so there is
-// exactly one way to report each kind of build. Kind GATE is refused here:
-// a gate build always gates a specific review's merge (see
-// GateBuildRequiresReviewError), so it has no unattached form.
+// exactly one way to report each kind of build.
 func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Request) {
 	var build model.Build
 	if err := decodeJSON(req, &build); err != nil {
@@ -122,11 +114,8 @@ func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Requ
 		writeBuildError(w, req, err)
 		return
 	}
-	if build.Kind == "" {
-		build.Kind = model.BuildKindRecorded
-	}
-	if build.Kind != model.BuildKindRecorded {
-		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", "kind must be RECORDED for an unattached build")
+	if err := normalizeReportedBuildKind(&build); err != nil {
+		writeBuildError(w, req, err)
 		return
 	}
 	build, err := r.service.Create(req.Context(), build)
@@ -135,6 +124,19 @@ func (r BuildRoutes) createUnattachedBuild(w http.ResponseWriter, req *http.Requ
 		return
 	}
 	writeJSON(w, http.StatusCreated, build)
+}
+
+// normalizeReportedBuildKind defaults an omitted kind to RECORDED and refuses
+// any other: every build is written as RECORDED, and an unrecognized kind is
+// refused rather than silently coerced.
+func normalizeReportedBuildKind(build *model.Build) error {
+	if build.Kind == "" {
+		build.Kind = model.BuildKindRecorded
+	}
+	if build.Kind != model.BuildKindRecorded {
+		return &service.UnsupportedBuildKindError{Kind: build.Kind}
+	}
+	return nil
 }
 
 type buildsPageResponse struct {
@@ -166,6 +168,7 @@ func parseBuildListFilter(query url.Values) (apirepository.BuildListFilter, erro
 	filter := apirepository.BuildListFilter{
 		EnvironmentID: get("environmentId"),
 		Kind:          model.BuildKind(get("kind")),
+		CommitID:      get("commit"),
 	}
 	if successful := get("successful"); successful != "" {
 		parsed, err := strconv.ParseBool(successful)
@@ -219,14 +222,9 @@ func writeBuildError(w http.ResponseWriter, req *http.Request, err error) {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_VERSION", invalidVersion.Error())
 		return
 	}
-	var missingFailureDetail *service.MissingFailureDetailError
-	if errors.As(err, &missingFailureDetail) {
-		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", missingFailureDetail.Error(), map[string]any{"field": "failureDetail"})
-		return
-	}
-	var gateRequiresReview *service.GateBuildRequiresReviewError
-	if errors.As(err, &gateRequiresReview) {
-		writeErrorCode(w, http.StatusBadRequest, "INVALID_BODY", gateRequiresReview.Error())
+	var unsupportedKind *service.UnsupportedBuildKindError
+	if errors.As(err, &unsupportedKind) {
+		writeErrorDetails(w, http.StatusBadRequest, "INVALID_BODY", unsupportedKind.Error(), map[string]any{"field": "kind"})
 		return
 	}
 	var unattachedRequiresEnvironment *service.UnattachedBuildRequiresEnvironmentError

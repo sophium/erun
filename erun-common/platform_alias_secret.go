@@ -13,8 +13,8 @@ import (
 // registry credential, over the same channel and at the same point in init.
 //
 // The invariant: every platform command (`erun review show`, `erun exec
-// gate-merge`, `erun review record-build --gate`, `erun exec gate-run
-// start/report`, `erun review report-merged`, `erun gate list`) resolves through
+// gate-merge`, `erun review record-build`, `erun review report-merged`,
+// `erun jobs list`) resolves through
 // newPlatformClientForAlias, which needs a configured erun-type cloud provider
 // alias; and the only way to create one the CLI offers requires an interactive
 // OIDC login, which no unattended pod can complete. So the session has to be
@@ -34,12 +34,11 @@ func platformAliasSecretName(tenant string) string {
 }
 
 // The runtime chart mounts this Secret read-only at
-// "/etc/erun/platform-alias", where the entrypoint's sync_platform_alias reads
-// it. That path belongs to those two, not here: init only mints the Secret, and
-// a Go copy of the path would be a third name for it that nothing enforces.
+// "/etc/erun/platform-alias", where the runtime boot (syncRuntimePlatformAlias)
+// reads it; init only mints the Secret.
 //
-// The Secret's three keys. The entrypoint combines them into the two files the
-// pod's own `erun` actually reads: the cloudproviders entry is appended to
+// The Secret's three keys. The boot combines them into the two files the pod's
+// own `erun` actually reads: the cloudproviders entry joins
 // ~/.config/erun/config.yaml, and the token is written to the path the file
 // secret store resolves that alias's refresh-token ref to.
 const (
@@ -48,13 +47,13 @@ const (
 	// the pod's root config already emits that key for the infrastructure
 	// provider the chart injected, and a second one is a duplicate mapping key,
 	// which the config reader refuses outright rather than merging. The item is
-	// rendered here, where the values are typed, and the entrypoint only has to
-	// place it inside the block that already exists.
+	// rendered here, where the values are typed, and the boot only has to add
+	// it to the list that already exists.
 	platformAliasEntryKey = "cloud-provider-entry.yaml"
 	// platformAliasSecretFileKey holds the *basename* the token must be saved
-	// as. The store names a secret file after a hash of its ref, which the pod's
-	// entrypoint deliberately does not reimplement in shell -- init computes it
-	// with the store's own function so the two cannot drift.
+	// as. The store names a secret file after a hash of its ref; init computes
+	// it with the store's own function and ships it, so the pod never derives
+	// it.
 	platformAliasSecretFileKey = "cloud-secret-file"
 	// platformAliasSecretTokenKey holds the refresh token itself.
 	platformAliasSecretTokenKey = "cloud-secret-token"
@@ -64,10 +63,11 @@ const (
 // pod's `cloudproviders:` sequence, indented to sit under that key.
 //
 // It marshals a bare sequence and re-indents it rather than marshalling the
-// mapping, because yaml.v3's default indent (4) is not the indent the runtime
-// entrypoint writes that block with (2), and YAML requires every item of a block
+// mapping, because yaml.v3's default indent (4) is not the indent older runtime
+// images append that block with (2), and YAML requires every item of a block
 // sequence to share one indentation -- mixing the two is a parse error, not a
-// cosmetic difference.
+// cosmetic difference. The current runtime boot parses the item instead, so it
+// reads either indent.
 func renderPlatformAliasEntry(provider CloudProviderConfig) (string, error) {
 	// The refresh-token reference travels with the alias, exactly as it does in
 	// an operator's own config.yaml. The token itself never appears here -- it
@@ -265,7 +265,7 @@ func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, nam
 // provisioning was reachable from init alone, so an environment initialised
 // before it existed was left permanently unable to call the platform API:
 // nothing mints the Secret, nothing records its name on the env, so the runtime
-// chart mounts nothing and the entrypoint's seeder correctly does nothing. Deploy is where that is fixable, because it is the one step an
+// chart mounts nothing and the runtime boot's seeder correctly does nothing. Deploy is where that is fixable, because it is the one step an
 // existing environment takes that already has the invoking host's credentials in
 // hand and already writes pre-rollout Secrets into the namespace -- the same
 // place the registry credential, the MCP auth key and the image pull secrets are

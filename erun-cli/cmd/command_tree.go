@@ -78,11 +78,6 @@ var cliOnlyAgentFacingCommands = map[string]bool{
 	"devops container build": true,
 	"devops container push":  true,
 	"devops k8s deploy":      true,
-	// A repository build-tooling utility that resolves the same Playwright
-	// smoke+area gate selection `erun build` threads into the Docker
-	// build-arg, for a local `make check` run to consume -- a build-system
-	// concern, not an end-user action with a desktop surface.
-	"exec resolve-playwright-areas": true,
 }
 
 // IsAgentFacingCLIOnlyCommand reports whether a CLI-only command path (no
@@ -149,14 +144,6 @@ var cliOnlyAgentFacingFlags = map[string]bool{
 	// Contract"). The drift it reports is already surfaced; only the exit code
 	// is CLI-shaped.
 	"list --fail-on-drift": true,
-	// Declares a build the merge queue's gate: it executes the Dockerfile's test
-	// stage instead of accepting BuildKit's replay of it, and a run that would
-	// build nothing fails rather than certifying a tree (see
-	// erun-common/AGENTS.md § "Gate execution and verdicts"). It exists for the
-	// orchestrator that promotes and reports a review, and for the merge queue's
-	// own exit-code contract; the desktop's build action has no queue behind it
-	// and no record to protect.
-	"build --gate": true,
 	// Scripted-composition switches, in their own usage strings' words: they
 	// let a caller chain expose/unexpose after another command without first
 	// checking whether the project declares a platform block, and let one run
@@ -200,10 +187,6 @@ var knownUnsurfacedFlags = map[string]bool{
 	// fingerprint-based caching, with no "rebuild everything" escape hatch for
 	// an operator who suspects a stale layer.
 	"build --no-incremental": true,
-	// The compose-e2e-into-build convenience: the desktop's build action runs a
-	// build alone and its deploy is a separate step, so nothing there composes
-	// e2e into the build.
-	"build --e2e": true,
 	// Cloud-provider enrollment inputs. The desktop can sign in to an already
 	// configured alias but does not run the guided init that collects these.
 	"cloud init aws --role-name":         true,

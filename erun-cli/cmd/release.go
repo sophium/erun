@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runGit common.GitCommandRunnerFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
+func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runGit common.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -18,7 +18,7 @@ func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runReleaseCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push)
+			return runReleaseCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, now, force, runGit, buildDockerImage, loginToDockerRegistry, selectRunner, push)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -34,7 +34,7 @@ func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	return cmd
 }
 
-func runReleaseCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit common.GitCommandRunnerFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
+func runReleaseCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit common.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, common.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err
@@ -47,16 +47,10 @@ func runReleaseCommand(ctx common.Context, store common.DockerStore, findProject
 	if runGit == nil {
 		runGit = common.GitCommandRunner
 	}
-	if runBuildScript == nil {
-		runBuildScript = common.BuildScriptRunner
-	}
-	// stdout carries the released version and nothing else, so git and script
-	// chatter is redirected to stderr for orchestrators reading the version.
+	// stdout carries the released version and nothing else, so git chatter is
+	// redirected to stderr for orchestrators reading the version.
 	gitToStderr := func(dir string, stdout, stderr io.Writer, args ...string) error {
 		return runGit(dir, ctx.Stderr, stderr, args...)
-	}
-	scriptToStderr := func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-		return runBuildScript(dir, path, env, stdin, ctx.Stderr, stderr)
 	}
 	// Source control only: release stamps, commits, tags and pushes the version
 	// and never builds or publishes an artifact. Build and publish are
@@ -65,5 +59,5 @@ func runReleaseCommand(ctx common.Context, store common.DockerStore, findProject
 	if !ok {
 		return fmt.Errorf("release: the resolved plan is not a release")
 	}
-	return common.RunReleaseSpec(ctx, spec, gitToStderr, scriptToStderr)
+	return common.RunReleaseSpec(ctx, spec, gitToStderr)
 }

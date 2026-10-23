@@ -1,3 +1,4 @@
 audit: erun build --dry-run --version <VERSION>
 docker info -f '{{.DockerRootDir}}'
-cd <TMP> && ERUN_BUILD_VERSION=<VERSION> ./build.sh
+erun-ui: running its test stage: no recorded pass for fingerprint fp-<HEX16>
+cd <TMP> && docker build --progress=plain --target test --output type=cacheonly -f <TMP> .

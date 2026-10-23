@@ -1013,11 +1013,11 @@ func TestOrchestratorSkillsRefreshFromBuildStampedCheckout(t *testing.T) {
 	}
 	// The marker moves with the refresh, so the next launch can still tell this
 	// untouched copy from an edited one.
-	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), orchestratorSkillMarker))
+	marker, err := os.ReadFile(filepath.Join(filepath.Dir(installed), eruncommon.AgentSkillMarker))
 	if err != nil {
 		t.Fatalf("read skill marker: %v", err)
 	}
-	want, err := fileSHA256(srcMD)
+	want, err := eruncommon.FileSHA256(srcMD)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1355,11 +1355,11 @@ func TestOrchestratorAgentsRefreshFromBuildStampedCheckout(t *testing.T) {
 	}
 	// The marker moves with the refresh, so the next launch can still tell this
 	// untouched copy from an edited one.
-	marker, err := os.ReadFile(installed + orchestratorAgentMarker)
+	marker, err := os.ReadFile(installed + eruncommon.AgentFileMarkerSuffix)
 	if err != nil {
 		t.Fatalf("read agent marker: %v", err)
 	}
-	want, err := fileSHA256(srcMD)
+	want, err := eruncommon.FileSHA256(srcMD)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1927,7 +1927,7 @@ func TestBuildOrchestratorLaunchCannotStopToAsk(t *testing.T) {
 // first, and the host shell executes the metacharacters unless the value is
 // quoted for the shell that re-parses the command line.
 func TestBuildOrchestratorLaunchHandsThePromptOverVerbatim(t *testing.T) {
-	const prompt = "Run `erun-ui/playwright/run.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
+	const prompt = "Run `erun-ui/build.sh`, read $HOME, keep C:\\tmp\\x and \"quotes\" and 'apostrophes'"
 
 	_, launch := buildOrchestratorLaunch("linux", defaultOrchestratorLaunch(), prompt, "/cfg/orchestrator-mcp-erun.json")
 	command := launch[len(launch)-1]

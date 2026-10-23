@@ -19,7 +19,6 @@ var malformedPathIDCases = []struct {
 	path   string
 }{
 	{http.MethodGet, "/v1/reviews/not-a-uuid"},
-	{http.MethodGet, "/v1/gate-runs/not-a-uuid"},
 	{http.MethodGet, "/v1/environments/not-a-uuid"},
 	{http.MethodGet, "/v1/contexts/not-a-uuid"},
 	{http.MethodGet, "/v1/jobs/not-a-uuid"},
@@ -32,7 +31,6 @@ var malformedPathIDCases = []struct {
 	{http.MethodGet, "/v1/users/not-a-uuid/roles"},
 	{http.MethodGet, "/v1/environments/not-a-uuid/jobs"},
 	{http.MethodPatch, "/v1/reviews/not-a-uuid/status"},
-	{http.MethodPatch, "/v1/gate-runs/not-a-uuid"},
 	{http.MethodPatch, "/v1/jobs/not-a-uuid"},
 	{http.MethodPost, "/v1/invite-requests/not-a-uuid/approve"},
 }
@@ -42,7 +40,6 @@ var malformedPathIDCases = []struct {
 // failure above is isolated to parsing rather than to lookup.
 var absentPathIDs = []string{
 	"/v1/reviews/00000000-0000-0000-0000-000000000000",
-	"/v1/gate-runs/00000000-0000-0000-0000-000000000000",
 	"/v1/environments/00000000-0000-0000-0000-000000000000",
 	"/v1/contexts/00000000-0000-0000-0000-000000000000",
 }

@@ -4,7 +4,7 @@ title: erun exec
 
 # `erun exec`
 
-Repository helpers that run from the project root. Fourteen subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (build the prospective squash merge a merge queue promotion gates), `report-commit-status` (report a GitHub commit status for a merge queue gate result), `close-pr` (close the GitHub pull request a merge queue gate actually shipped), `gate-run start`/`gate-run report` (make one gate attempt visible on [`erun gate list`](/cli/gate), independent of whether an erun review exists for the change), `reconcile-bypass` (check every ruleset-bypassed push against a real passed gate run), `plan-ruleset-bypass` (plan narrowing a ruleset's bypass grant to one non-human queue identity), and `route-check` (prove every registered API route is reachable on a deployed plane).
+Repository helpers that run from the project root. Twelve subcommands: `diff` (a structured git diff), `raw` (run an arbitrary command), `write` (write file content), `commit` (commit every change), `push` (push a branch to a remote), `merge` (merge a branch into the current one), `gate-merge` (compose the prospective squash merge a merge queue promotion builds), `report-commit-status` (report a GitHub commit status for a merge queue build result), `close-pr` (close the GitHub pull request a merge queue merge actually shipped), `reconcile-bypass` (check every ruleset-bypassed push against a successful recorded build of what it landed), `plan-ruleset-bypass` (plan narrowing a ruleset's bypass grant to one non-human queue identity), and `route-check` (prove every registered API route is reachable on a deployed plane).
 
 ## Synopsis
 
@@ -18,8 +18,6 @@ erun exec merge TARGET_BRANCH [flags]
 erun exec gate-merge --source SOURCE_BRANCH [--source SOURCE_BRANCH...] --target TARGET_BRANCH [flags]
 erun exec report-commit-status COMMIT --state STATE --description DESCRIPTION --remote-url URL [flags]
 erun exec close-pr BRANCH --target TARGET_BRANCH --remote-url URL --gated-commit SHA --landing-commit SHA [flags]
-erun exec gate-run start --source-branch BRANCH --target-branch BRANCH --source-commit SHA [flags]
-erun exec gate-run report GATE_RUN_ID --status STATUS [flags]
 erun exec reconcile-bypass --ruleset-id ID --target-branch BRANCH [flags]
 erun exec plan-ruleset-bypass --ruleset-id ID --queue-actor IDENTITY [flags]
 erun exec route-check [flags]
@@ -59,7 +57,7 @@ Pushes the project working tree's current branch to a remote (`origin` by defaul
 
 `--dry-run` verifies the branch and traces the push without running it. Reports the branch, remote, and pushed commit id; add `--output json` for a structured result.
 
-When GitHub admits the push by **bypassing** the target branch's ruleset — the credential in use holds a bypass grant, which is how the merge queue's own pushes land on a protected branch — `push` says so in its own output and names the rules that were stepped over. A bypass is not a failure and never fails the push; it is reported because GitHub attributes a bypass to a credential's grant rather than to a person, so erun's own output is the one place an operator sees at the time that a protected branch was written through rather than around. `erun exec reconcile-bypass` is what resolves it afterwards, against the gate run that accounts for the push.
+When GitHub admits the push by **bypassing** the target branch's ruleset — the credential in use holds a bypass grant, which is how the merge queue's own pushes land on a protected branch — `push` says so in its own output and names the rules that were stepped over. A bypass is not a failure and never fails the push; it is reported because GitHub attributes a bypass to a credential's grant rather than to a person, so erun's own output is the one place an operator sees at the time that a protected branch was written through rather than around. `erun exec reconcile-bypass` is what resolves it afterwards, against a successful recorded build of a commit the push landed.
 
 ### `exec merge` {#exec-merge}
 
@@ -73,19 +71,21 @@ A conflicted merge is reported as a distinct, named outcome rather than a generi
 
 Fetches `--target` and every `--source` from a remote (`origin` by default; override with `--remote`), checks out a fresh local branch named `--target` at its own current remote tip, then squash-merges each `--source` onto it in turn, each as its own commit — one commit message per source, read verbatim from stdin as NUL-separated fields in the same order as the `--source` flags (a single `--source` needs no separator), the same shell-avoidance property as `write`/`commit`.
 
-Repeat `--source` to batch several unmerged branches into one prospective merge, so the gate that follows tests whether they compile *together* — the failure a single-branch gate cannot see, since each branch might pass alone while breaking against another unmerged branch. A single `--source` is the ordinary one-branch gate.
+Repeat `--source` to batch several unmerged branches into one prospective merge, so the build that follows tests whether they compile *together* — the failure a single-branch build cannot see, since each branch might pass alone while breaking against another unmerged branch. A single `--source` is the ordinary one-branch merge.
 
-This is the git half of gating a [merge queue](/collaboration/merge-queue) promotion: the environment a review's merge queue promotes to `MERGE` runs `gate-merge`, then `erun build` against the result, then `erun review record-build --gate` and, only on success, `erun exec push` and `erun review report-merged`.
+This is the git half of landing a [merge queue](/collaboration/merge-queue) promotion: the environment a review's merge queue promotes to `MERGE` runs `gate-merge`, then a plain `erun build` of the result, then `erun review record-build` with the version that build minted and, only on success, `erun exec push` and `erun review report-merged` with that recorded build's id.
 
-The `erun` that runs it is the environment's installed binary, **not** the checkout it is landing onto. That binary is a release, routinely one or two behind that checkout, so a fix merged into erun's own landing path — this trailer carriage included — is inert until the environment is upgraded (`erun pin` / `erun deploy`), and a trailer that still comes back the old way is not on its own evidence that such a fix failed. `erun version --no-registry` reports the binary that actually ran (`scripts/agent-gate.sh` names the same version for `make check`), so read it before concluding anything about a change in that layer.
+The `erun` that runs it is the environment's installed binary, **not** the checkout it is landing onto. That binary is a release, routinely one or two behind that checkout, so a fix merged into erun's own landing path — this trailer carriage included — is inert until the environment is upgraded (`erun pin` / `erun deploy`), and a trailer that still comes back the old way is not on its own evidence that such a fix failed. `erun version --no-registry` reports the binary that actually ran, so read it before concluding anything about a change in that layer.
 
-Each landed source's commit carries that branch's own load-bearing trailers. The message you supply stays the commit's subject line and the whole of its own body, and beneath it `gate-merge` appends the `Closes #N` line and the `Reproduces:` / `Regression-Test:` lines the branch's own commits declare. A squash replaces the rest of the branch's history with that one commit, so this is what keeps a declaration about the change — that it closes an issue, and which case reproduces the defect it fixed — visible on the target after the queue lands it. A trailer the message already carries is not repeated, and a trailing line that is none of those stays behind with the branch. Those lines are read from the whole of each commit's message rather than from a trailing group of trailer-shaped paragraphs, so a declaration is never lost to whatever paragraph the author wrote after it, and each landed source reports the trailers it carried — `carriedTrailers` in the result, named per source in the text output — so a carriage that found nothing is visible where it happens instead of being counted out of the squash message later.
+Each landed source's commit carries that branch's own load-bearing trailers. The message you supply stays the commit's subject line and the whole of its own body, and beneath it `gate-merge` appends the `Closes #N` and `Defect-Fix:` lines and the `Reproduces:` / `Regression-Test:` lines the branch's own commits declare. A squash replaces the rest of the branch's history with that one commit, so this is what keeps a declaration about the change — that it closes an issue, and which case reproduces the defect it fixed — visible on the target after the queue lands it. A trailer the message already carries is not repeated, and a trailing line that is none of those stays behind with the branch. Those lines are read from the whole of each commit's message rather than from a trailing group of trailer-shaped paragraphs, so a declaration is never lost to whatever paragraph the author wrote after it, and each landed source reports the trailers it carried — `carriedTrailers` in the result, named per source in the text output — so a carriage that found nothing is visible where it happens instead of being counted out of the squash message later.
 
 The working tree must already be clean: unlike `merge`, this checks out a **different** local branch than whatever the tree is currently on, so uncommitted work there is refused rather than silently carried onto the prospective merge or lost.
 
-A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with the conflicted files) recorded in the result's `skipped` list, and the rest of the batch still gates against the tree as it stood before that attempt. The one conflict that is not a skip is `atlas.sum`: it is a hash chain over its directory's migrations, so two branches that each add one conflict on it by construction and the conflict carries no information about which side is right. A conflict confined to `atlas.sum` files is therefore resolved rather than skipped — each is regenerated from the migration files already on disk and staged, and the source lands as an ordinary squash commit.
+A source whose squash conflicts is skipped, not fatal: the working tree is reset back to a clean state and the conflict (with the conflicted files) recorded in the result's `skipped` list, and the rest of the batch still builds against the tree as it stood before that attempt. The one conflict that is not a skip is `atlas.sum`: it is a hash chain over its directory's migrations, so two branches that each add one conflict on it by construction and the conflict carries no information about which side is right. A conflict confined to `atlas.sum` files is therefore resolved rather than skipped — each is regenerated from the migration files already on disk and staged, and the source lands as an ordinary squash commit.
 
-A source that contributes nothing is skipped the same way. When a source's content is already on the target — the branch is still at the target's tip, or its change has already landed there — its squash stages no changes and there is no commit to record, so it is reported in `skipped` with that reason instead of failing the batch. An already-landed branch is a no-op for a batch, not a dead gate.
+A source that contributes nothing is skipped the same way. When a source's content is already on the target — the branch is still at the target's tip, or its change has already landed there — its squash stages no changes and there is no commit to record, so it is reported in `skipped` with that reason instead of failing the batch. An already-landed branch is a no-op for a batch, not a dead merge.
+
+A defect fix whose regression-test declaration does not resolve against what its squash staged is skipped too, with a `regression-test policy: …` reason; see [the merge queue](/collaboration/merge-queue).
 
 A batch where every source is skipped lands nothing and exits non-zero rather than reporting success against an unchanged target.
 
@@ -93,9 +93,9 @@ A batch where every source is skipped lands nothing and exits non-zero rather th
 
 ### `exec report-commit-status` {#exec-report-commit-status}
 
-Reports a commit status on GitHub for COMMIT — the last step in the merge queue gate: report `--state success` once the gate build is green, or `--state failure` the moment it is not, naming which gate step failed in `--description`. A required status check on the remote's branch protection has nothing to require until this reports it.
+Reports a commit status on GitHub for COMMIT — the last step in the merge queue (`gate-merge`, `erun build`, `erun review record-build`): report `--state success` once the recorded build succeeded, or `--state failure` the moment it did not, naming which step failed in `--description`. A required status check on the remote's branch protection has nothing to require until this reports it.
 
-COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the gate has already passed and pushed.
+COMMIT should be the review's source branch tip — the pull request's own head commit — never the local prospective squash-merge commit `gate-merge` produces: GitHub only evaluates a required check against a commit reachable from the open pull request, and the squash commit does not exist there until after the build has already succeeded and been pushed.
 
 `--remote-url` names the github.com remote to report against, in any form git accepts. `--context` names the status check a required-status-checks rule points at (defaults to `erun/merge-gate`); `--target-url` is an optional link a reader clicks through to (e.g. a build log). Reporting needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
 
@@ -107,46 +107,26 @@ Closes BRANCH's open pull request on GitHub and records `--landing-commit` on it
 
 Safe when BRANCH has no open pull request against `--target`: this is a no-op, not an error, since queueing a plain branch with no review is legitimate.
 
-Refuses, loudly, when the pull request's current head does not match `--gated-commit` — something pushed to BRANCH after the gate fetched it, so the gated content is not what closing would discard.
+Refuses, loudly, when the pull request's current head does not match `--gated-commit` — something pushed to BRANCH after the merge queue fetched it, so the built content is not what closing would discard.
 
-`--remote-url` names the github.com remote the pull request lives on. `--gated-commit` is BRANCH's tip at the moment `gate-merge` fetched and tested it (its own reported `sourceCommit`). `--landing-commit` is the commit that actually landed on `--target` — recorded in a comment on the pull request before it is closed. Closing needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+`--remote-url` names the github.com remote the pull request lives on. `--gated-commit` is BRANCH's tip at the moment `gate-merge` fetched it for the build (its own reported `sourceCommit`). `--landing-commit` is the commit that actually landed on `--target` — recorded in a comment on the pull request before it is closed. Closing needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
 
 `--dry-run` traces the lookup without closing or commenting on anything.
 
-### `exec gate-run start` {#exec-gate-run-start}
-
-Records the beginning of one attempt to gate a prospective merge — `--source-branch`, `--target-branch`, `--source-commit`, and the prospective squash-merge commit `--merge-commit` — so [`erun gate list`](/cli/gate#gate-list) can show it as currently gating, independent of whether an erun review exists for the change. Prints the new gate run's id; pass it to `exec gate-run report` once the gate finishes.
-
-A run with no trackable running phase at all — a squash conflict before any build ever starts — may set `--status` directly to `failed` or `inconclusive` and omit `--merge-commit`. `--review-id` links the run to an erun review, when one exists.
-
-`--dry-run` traces the request without sending it.
-
-### `exec gate-run report` {#exec-gate-run-report}
-
-Moves GATE_RUN_ID from `running` to a terminal verdict: `--status passed`, `failed`, or `inconclusive`.
-
-A wrapper that hit its own timeout, or a run interrupted by an environment-specific fault, must report `inconclusive` — never `failed`, which asserts a real gate step actually produced a red verdict. `--failing-step` is required when `--status` is `failed`; `--log-ref` points at where to read the run's own output.
-
-A `--status failed` report is not taken at face value: if `--failing-step`, `--log-ref`, or the file `--log-ref` points at matches one of erun's own known infrastructure-failure signatures (a registry or network giving up, e.g. a TLS handshake timeout resolving a base image) rather than a real verdict about the change, the platform silently upgrades it to `inconclusive` before recording it — traced either way so the override is visible.
-
-Reporting against a gate run that already has an outcome is refused: a verdict is immutable once reached.
-
-`--dry-run` traces the request without sending it.
-
 ### `exec reconcile-bypass` {#exec-reconcile-bypass}
 
-Cross-references GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for `--ruleset-id` on `--target-branch` against erun's gate runs and the repository's own tags: every push that bypassed `--ruleset-id` is reported next to what accounts for it. See [merge queue](/collaboration/merge-queue#checking-each-bypass) for why the queue's own push structurally needs a ruleset bypass in the first place — this is the after-the-fact accountability check for it, and [`exec plan-ruleset-bypass`](#exec-plan-ruleset-bypass) below is the other half, narrowing who may hold the grant at all.
+Cross-references GitHub's own bypass ledger (`GET .../rulesets/rule-suites`) for `--ruleset-id` on `--target-branch` against erun's recorded builds and the repository's own tags: every push that bypassed `--ruleset-id` is reported next to what accounts for it. See [merge queue](/collaboration/merge-queue#checking-each-bypass) for why the queue's own push structurally needs a ruleset bypass in the first place — this is the after-the-fact accountability check for it, and [`exec plan-ruleset-bypass`](#exec-plan-ruleset-bypass) below is the other half, narrowing who may hold the grant at all.
 
 | Verdict | What it means |
 |---|---|
-| `RECONCILED` | A `PASSED` gate run built one of the commits this push landed. |
-| `RELEASE` | A tag points at one of them — a release stamps, tags and then pushes, so its own commits were never gated as a merge. |
+| `RECONCILED` | A successful build is recorded for one of the commits this push landed. |
+| `RELEASE` | A tag points at one of them — a release stamps, tags and then pushes, so its own commits were never built as a merge. |
 | `UNEXPECTED_ACTOR` | An identity `--expected-actor` did not name exercised the bypass, whatever its content turned out to be. |
 | `UNRECONCILED` | Nothing accounts for what landed. |
 
 Matching is against **every commit the push added** (`before_sha..after_sha`), not only its tip: a release push carries three commits and a batched merge more than one, so a tip-only check would report every release as unaccounted for.
 
-`--remote-url` names the github.com remote the ruleset lives on; omit it to use the current checkout's `origin`. `--ruleset-id` is required and never defaulted: a bypass GitHub attributes to some other ruleset on the same push is not folded into this one's reconciliation. `--expected-actor` names an identity allowed to hold the bypass grant and is repeatable. `--since` narrows the GitHub lookup window to one of `hour`, `day`, `week`, or `month`; omit it to use GitHub's own default window. Reading rule suites needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment.
+`--remote-url` names the github.com remote the ruleset lives on; omit it to use the current checkout's `origin`. `--ruleset-id` is required and never defaulted: a bypass GitHub attributes to some other ruleset on the same push is not folded into this one's reconciliation. `--expected-actor` names an identity allowed to hold the bypass grant and is repeatable. `--since` narrows the GitHub lookup window to one of `hour`, `day`, `week`, or `month`; omit it to use GitHub's own default window. Reading rule suites needs a GitHub token — `gh auth login`, or `GITHUB_TOKEN`/`GH_TOKEN` in the environment — and looking up builds by commit (`GET /v1/builds?commit=…&successful=true`) needs a configured erun platform alias.
 
 Prints one line per bypassed push (the verdict, the commit, when it pushed, which rule it bypassed, who pushed it, and what accounts for it) plus a summary count. **Exits non-zero, after printing the full report, when any push is unaccounted for or any unnamed identity bypassed** — a bypass nobody can explain is loud, never silent, so this command is safe to run on a schedule and alert on a non-zero exit.
 
@@ -199,14 +179,10 @@ erun exec push feature/add-widget
 erun exec merge main
 echo 'Add widget' | erun exec gate-merge feature/add-widget --target main
 erun exec report-commit-status $(git rev-parse HEAD) --state success \
-  --description 'gate build passed' --remote-url https://github.com/org/repo.git
+  --description 'merge queue build succeeded' --remote-url https://github.com/org/repo.git
 erun exec close-pr feature/add-widget --target main \
   --remote-url https://github.com/org/repo.git \
   --gated-commit $(git rev-parse origin/feature/add-widget) --landing-commit $(git rev-parse HEAD)
-erun exec gate-run start --source-branch feature/add-widget --target-branch main \
-  --source-commit $(git rev-parse feature/add-widget) --merge-commit $(git rev-parse HEAD)
-erun exec gate-run report abc123 --status passed
-erun exec gate-run report abc123 --status failed --failing-step 'erun build' --log-ref /tmp/build.json
 erun exec reconcile-bypass --remote-url https://github.com/org/repo.git \
   --ruleset-id 11081432 --target-branch main
 erun exec route-check --erun-alias erun+api.erunpaas.com@erun
@@ -243,13 +219,10 @@ erun exec route-check --erun-alias erun+api.erunpaas.com@erun
 | The pull request's current head does not match `--gated-commit` (`close-pr`). | Refuses with `refusing to close pull request #N for BRANCH: its head is X, not Y — the commit the gate actually tested. ...`; nothing is commented or closed. |
 | No GitHub token is available (`close-pr`). | Refuses with `no GitHub token available to close a pull request; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
 | GitHub rejects a request (`close-pr`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
-| `--source-branch`, `--target-branch`, or `--source-commit` is missing (`gate-run start`). | Refuses naming the missing field before the network call. |
-| `--merge-commit` is missing and `--status` is not `failed`/`inconclusive` (`gate-run start`). | Refuses with `mergeCommit: is required unless status is FAILED or INCONCLUSIVE`. |
-| `--status failed` with no `--failing-step` (`gate-run start` or `gate-run report`). | Refuses with `failingStep: is required when status is FAILED`. |
-| GATE_RUN_ID already has an outcome (`gate-run report`). | Refuses with `409` and `gate run ... already reached ...; a verdict cannot be re-reported`. |
 | `--target-branch` or `--ruleset-id` is missing, or `--remote-url` is not a recognized github.com remote and the checkout has no usable `origin` (`reconcile-bypass`, `plan-ruleset-bypass`). | Refuses with a message naming the missing or invalid field; nothing is looked up, even under `--dry-run`. |
 | No GitHub token is available (`reconcile-bypass`). | Refuses with `no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN`; never reaches the network. |
 | GitHub rejects a request (`reconcile-bypass`), e.g. insufficient scope. | GitHub's own response body surfaces verbatim. |
+| The platform's build lookup fails (`reconcile-bypass`). | The whole run fails with the platform's error rather than reporting the affected pushes `UNRECONCILED`: an unanswered lookup is not evidence that nothing was built. Fix the alias or the platform and re-run. |
 | Any bypassed push is unaccounted for, or an unnamed identity bypassed (`reconcile-bypass`). | The full report still prints, then the command exits non-zero naming how many pushes are unaccounted for and how many an unexpected identity made. |
 | `--queue-actor` is missing, or `--queue-actor-type` is not a GitHub ruleset actor type (`plan-ruleset-bypass`). | Refuses naming the field and, for the actor type, the accepted values; nothing is looked up. |
 | The queue identity cannot push, GitHub hides the ruleset's `bypass_actors`, or the ruleset does not govern `--target-branch` (`plan-ruleset-bypass`). | Refuses naming which precondition failed and what to do about it; no payload file is written. |

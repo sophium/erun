@@ -1,0 +1,9 @@
+audit: erun build
+==> Building
+build: docker root free disk space is not observable from this process (docker reported no root directory); skipping the headroom check
+erun-cli: its build stage is reused (fingerprint fp-<HEX16>)
+erun-cli: test: none declared
+==> Built in <ELAPSED>
+step timing (ordered by duration):
+  build [<ELAPSED>]
+timing record written to <TMP>

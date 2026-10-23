@@ -161,7 +161,7 @@ export interface RuntimeResourceValidation {
 // be compared against what the scheduler admits a pod on. The warning this
 // replaced ("No node currently has 4 CPU and 8.7 GiB free ... or you lower the
 // request") said the opposite and offered the one remedy that is harmful --
-// shrinking a limit sized for the cold `make check-gate` an agent runs in that
+// shrinking a limit sized for the cold full build an agent runs in that
 // container re-creates the OOM kills that destroy its run and its unpushed work.
 export const SCHEDULER_EXHAUSTED_WARNING =
   'No node has request capacity left to admit another runtime pod — a new pod stays Pending until a node frees it. Stopping an environment nobody is using on one of these nodes is what returns it.';

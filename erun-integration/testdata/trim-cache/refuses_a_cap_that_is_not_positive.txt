@@ -1,0 +1,2 @@
+audit: erun trim-cache --max-bytes -5 <TMP>
+the go build cache cap must be a positive number of bytes, got -5

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
 // shellUtilities are the POSIX utilities the suite's own stub scripts invoke
@@ -128,6 +130,12 @@ func New(t testing.TB) Setup {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
+	}
+	// The CLI under test runs git with this HOME, so this is its global config:
+	// automatic maintenance off, for the reason harnessexec gives for the
+	// harness's own git children.
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte(harnessexec.MaintenanceOffGitConfig), 0o644); err != nil {
+		t.Fatalf("write scenario git config: %v", err)
 	}
 	return Setup{
 		Home:       home,

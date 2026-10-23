@@ -8,7 +8,7 @@ import {
   uniqueEnvironmentName,
 } from '../../../fixtures/seedRoot.js';
 
-// Mirrors tenant-dashboard-gates.spec.ts's own setup: the dashboard only calls
+// Mirrors tenant-dashboard-reviews.spec.ts's own setup: the dashboard only calls
 // LoadTenantDashboard once it can resolve an API URL, so this stages one
 // throwaway env carrying one, purely to satisfy that gate -- the RPC itself is
 // stubbed below rather than hitting a real backend.

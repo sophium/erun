@@ -1,0 +1,2 @@
+audit: erun build --dry-run
+<TMP> is an e2e suite, not a component: erun build and push never build <tenant>-devops/e2e/; run it against a deployed environment with `erun e2e --component console`

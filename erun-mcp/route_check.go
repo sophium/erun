@@ -8,7 +8,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-// route_check.go mirrors gate_runs.go's platform-call shape for
+// route_check.go mirrors review.go's platform-call shape for
 // exec_route-check: proving every route erun-backend-api's router registers
 // is actually reachable on a deployed plane, rather than trusting that
 // "merged" means "deployed".

@@ -16,8 +16,7 @@ import (
 
 // PlatformCreateUnattachedBuildParams is the input for a build with no
 // review -- an ordinary `erun build` self-reporting. EnvironmentID is
-// required; Kind is always RECORDED, since a GATE build always gates a
-// review's merge.
+// required; the platform records it as RECORDED.
 type PlatformCreateUnattachedBuildParams struct {
 	EnvironmentID string `json:"environmentId"`
 	CommitID      string `json:"commitId"`
@@ -42,6 +41,8 @@ func (c *PlatformClient) CreateUnattachedBuild(ctx context.Context, params Platf
 type PlatformBuildListFilter struct {
 	EnvironmentID string
 	Kind          string
+	// CommitID narrows the page to builds of exactly that commit.
+	CommitID string
 	// Successful is nil for "either".
 	Successful *bool
 	Since      time.Time
@@ -59,6 +60,9 @@ func (f PlatformBuildListFilter) queryString() string {
 	}
 	if strings.TrimSpace(f.Kind) != "" {
 		values.Set("kind", f.Kind)
+	}
+	if strings.TrimSpace(f.CommitID) != "" {
+		values.Set("commit", f.CommitID)
 	}
 	if f.Successful != nil {
 		values.Set("successful", strconv.FormatBool(*f.Successful))

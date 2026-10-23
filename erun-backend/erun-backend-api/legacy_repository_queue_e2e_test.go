@@ -19,7 +19,7 @@ import (
 // see AGENTS.md "Merge Queue".
 //
 // These gates drive the real API against a real migrated PostgreSQL, the same
-// way merge_queue_e2e_test.go does (ERUN_E2E_MERGE_DATABASE_URL).
+// way merge_queue_e2e_test.go does (internal/testpg).
 
 // e2eOpenReviewInRepository creates a review naming a repository, the form
 // every erun client sends. An empty repository recreates a legacy row: one

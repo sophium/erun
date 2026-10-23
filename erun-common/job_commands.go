@@ -8,7 +8,7 @@ import (
 
 // job_commands.go is the shared planning/execution layer `erun jobs
 // list`/`show` and `erun jobs start`/`finish` (CLI) and their MCP tools both
-// drive, mirroring gate_run_commands.go: resolve the erun platform alias,
+// drive, mirroring review_commands.go: resolve the erun platform alias,
 // build a PlatformClient, trace the resolved HTTP call so --dry-run (CLI) and
 // a preview path (MCP) never touch the network, then perform it for real.
 //

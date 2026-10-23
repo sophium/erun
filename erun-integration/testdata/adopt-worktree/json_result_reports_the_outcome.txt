@@ -1,0 +1,5 @@
+{
+  "outcome": "not-a-repository",
+  "legacyDir": "<STAGE>/mnt/erun-home/git/petios",
+  "claimDir": "<STAGE>/mnt/erun-worktree"
+}

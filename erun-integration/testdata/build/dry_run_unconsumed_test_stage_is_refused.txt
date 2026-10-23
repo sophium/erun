@@ -1,0 +1,5 @@
+audit: erun build --dry-run
+cd <TMP> && git check-ignore -q -- .erun/config.yaml
+build: docker build root configured as build/docker (.erun/config.yaml paths.docker)
+build: version file configured as build/VERSION (.erun/config.yaml paths.version)
+<TMP> declares a stage named "test" that no later stage consumes, so docker build would skip it and its tests would never run: take the image's artifacts from the tested stage (`COPY --from=test <artifact> <dest>` in the final stage, or build a helper stage `FROM test` and copy from that), or rename the stage if it is not the component's tests

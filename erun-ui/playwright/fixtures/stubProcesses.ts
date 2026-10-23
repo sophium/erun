@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
-
-import { stubRegistryPath, stubsDir } from './seedRoot.js';
+import * as path from 'node:path';
 
 // Stub process lifetime.
 //
@@ -12,15 +11,20 @@ import { stubRegistryPath, stubsDir } from './seedRoot.js';
 // them and neither is a child of this process, so nothing here would ever
 // collect one. A spec that opens an orchestrator session and never closes it
 // left a live `sleep` behind for the rest of the run: a full ALL run reached 117
-// of them, every one competing with the suite for the gate's CPUs (#2512).
+// of them, every one competing with the suite for the gate's CPUs.
 //
 // So every long-lived stub records the pid it is about to park under, and which
 // stub it is, in an append-only file inside the isolated root, and the harness
-// reaps that registry on each spec's teardown (fixtures/erunApp.ts), with the
-// worker teardown as the backstop (fixtures/workerBackend.ts). Registry + signal
-// is deliberately the same shape the rest of this harness uses — the stub itself
-// owns the pid, exactly as it owns its own prompt line — rather than scanning
-// the process table for something that looks like a stub.
+// reaps that registry on each spec's teardown (fixtures/erunApp.ts), and every
+// removal of an isolated root reaps the registries beneath it before deleting it
+// (removeWorkerRoot and removeIsolatedRoot in fixtures/seedRoot.ts), which is
+// the backstop for whatever the last spec in a worker, or a worker that died,
+// left parked. Every function here takes the isolated root it acts on, so
+// seedRoot.ts can call them without this module reaching back into it.
+//
+// Registry + signal is deliberately the same shape the rest of this harness
+// uses — the stub itself owns the pid, exactly as it owns its own prompt line —
+// rather than scanning the process table for something that looks like a stub.
 
 const isWindows = process.platform === 'win32';
 
@@ -31,6 +35,16 @@ const isWindows = process.platform === 'win32';
 // than leaving one stub behind.
 const STUB_SLEEP_ARG = '2147483647';
 const STUB_NAMES = ['kubectl', 'helm', 'docker', 'aws', 'erun', 'claude'];
+
+// The registry file and the stub directory inside an isolated root. seedRoot.ts
+// resolves its own stubRegistryPath() and stubsDir() through these, so the
+// writer and the reaper cannot disagree about where a root keeps them.
+export const STUB_REGISTRY_FILENAME = 'stub-pids';
+export const STUBS_DIRNAME = 'stubs';
+
+function registryPathIn(root: string): string {
+  return path.join(root, STUB_REGISTRY_FILENAME);
+}
 
 // How long a signalled stub gets to exit before the reap escalates. A parked
 // stub is a `sleep` or a Go binary with no signal handling, so SIGTERM is
@@ -45,10 +59,10 @@ interface StubEntry {
 // registeredStubs reads the registry. A line is `<pid> <name>`; the name is what
 // lets a caller ask for one kind of session — an orchestrator's `claude` rather
 // than an env tab's `erun` — when the machine has both parked.
-function registeredStubs(): StubEntry[] {
+function registeredStubs(root: string): StubEntry[] {
   let raw: string;
   try {
-    raw = fs.readFileSync(stubRegistryPath(), 'utf8');
+    raw = fs.readFileSync(registryPathIn(root), 'utf8');
   } catch {
     return [];
   }
@@ -67,8 +81,8 @@ function registeredStubs(): StubEntry[] {
 // tracking. The temp-file rename keeps a concurrent stub append from observing a
 // torn file; a stub that appends into the window between the two loses its own
 // line, which costs one un-reaped stub, never a signalled stranger.
-function writeRegistry(entries: StubEntry[]): void {
-  const file = stubRegistryPath();
+function writeRegistry(root: string, entries: StubEntry[]): void {
+  const file = registryPathIn(root);
   const tmp = `${file}.tmp-${String(process.pid)}`;
   const body = entries.map((entry) => `${String(entry.pid)} ${entry.name}\n`).join('');
   fs.writeFileSync(tmp, body);
@@ -111,7 +125,7 @@ function commandLine(pid: number): string {
   }
 }
 
-function isStubProcess(entry: StubEntry): boolean {
+function isStubProcess(root: string, entry: StubEntry): boolean {
   if (!isProcessAlive(entry.pid)) {
     return false;
   }
@@ -124,27 +138,27 @@ function isStubProcess(entry: StubEntry): boolean {
   }
   // Between registering and exec'ing the sleep the stub still shows its script
   // path, so both forms count as ours.
-  return cmd.includes(STUB_SLEEP_ARG) || cmd.includes(stubsDir());
+  return cmd.includes(STUB_SLEEP_ARG) || cmd.includes(path.join(root, STUBS_DIRNAME));
 }
 
-function liveStubs(name?: string): StubEntry[] {
-  return registeredStubs()
+function liveStubs(root: string, name?: string): StubEntry[] {
+  return registeredStubs(root)
     .filter((entry) => (name ? entry.name === name : true))
-    .filter(isStubProcess);
+    .filter((entry) => isStubProcess(root, entry));
 }
 
-// liveStubProcesses is the observable stub population: the registered pids that
-// are still running, and still running *as* a stub. Pass a name to ask for one
-// kind of session rather than every parked stub on the machine.
-export function liveStubProcesses(name?: string): number[] {
-  return liveStubs(name).map((entry) => entry.pid);
+// liveStubProcesses is the observable stub population of one isolated root: the
+// registered pids that are still running, and still running *as* a stub. Pass a
+// name to ask for one kind of session rather than every parked stub.
+export function liveStubProcesses(root: string, name?: string): number[] {
+  return liveStubs(root, name).map((entry) => entry.pid);
 }
 
-// reapStubProcesses ends every live stub the harness still owns and returns the
-// pids that would not die, so a caller can surface them instead of pretending
-// the sweep worked.
-export function reapStubProcesses(name?: string): number[] {
-  const live = liveStubs(name);
+// reapStubProcesses ends every live stub one isolated root still owns and
+// returns the pids that would not die, so a caller can surface them instead of
+// pretending the sweep worked.
+export function reapStubProcesses(root: string, name?: string): number[] {
+  const live = liveStubs(root, name);
   for (const entry of live) {
     killPid(entry.pid, 'SIGTERM');
   }
@@ -166,9 +180,30 @@ export function reapStubProcesses(name?: string): number[] {
   );
   const targeted = new Set(live.map((entry) => entry.pid));
   writeRegistry(
-    registeredStubs().filter((entry) => !targeted.has(entry.pid) || stubborn.has(entry.pid)),
+    root,
+    registeredStubs(root).filter((entry) => !targeted.has(entry.pid) || stubborn.has(entry.pid)),
   );
   return [...stubborn];
+}
+
+// reapStubProcessesBeneath reaps the root's own registry and that of every
+// directory directly inside it — the parent root holds one subdirectory per
+// worker (fixtures/workerBackend.ts) — so a root is never deleted out from under
+// a stub it still parks. Returns the pids that would not die.
+export function reapStubProcessesBeneath(root: string): number[] {
+  const roots = [root];
+  try {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        roots.push(path.join(root, entry.name));
+      }
+    }
+  } catch {
+    return [];
+  }
+  return roots
+    .filter((dir) => fs.existsSync(registryPathIn(dir)))
+    .flatMap((dir) => reapStubProcesses(dir));
 }
 
 function killPid(pid: number, signal: NodeJS.Signals): void {

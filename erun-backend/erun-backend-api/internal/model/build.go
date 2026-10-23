@@ -7,16 +7,18 @@ import (
 	"github.com/uptrace/bun"
 )
 
-// BuildKind distinguishes a reported build from the merge queue's own gate
-// build, since only one of the two ever mints a version.
+// BuildKind is the kind a build row was written with. Every build written
+// today is RECORDED; GATE survives only on historical rows.
 type BuildKind string
 
 const (
-	// BuildKindRecorded is a client-reported build or a release's own build,
-	// either of which mints a version and requires it non-empty.
+	// BuildKindRecorded is every build the API writes: a client-reported
+	// build, the merge queue's build of a prepared merge commit, or a
+	// release's own build. It always carries a version.
 	BuildKindRecorded BuildKind = "RECORDED"
-	// BuildKindGate is the merge queue's own build of the prospective merge. It
-	// publishes nothing, so it never carries a version.
+	// BuildKindGate is a retired kind the API refuses to write. Historical
+	// rows still carry it (with no version), so it stays readable, and a
+	// MERGED review's last_merged_build_id may point at one.
 	BuildKindGate BuildKind = "GATE"
 )
 
@@ -26,7 +28,7 @@ type Build struct {
 	TenantID      string `json:"tenantId" bun:"tenant_id,scanonly"`
 	// ReviewID is empty for an ordinary `erun build` that reports itself with
 	// no review attached (erun#1954) -- a review association is one reason a
-	// build happened, not its identity. A GATE build always carries one.
+	// build happened, not its identity.
 	ReviewID string `json:"reviewId,omitempty" bun:"review_id,nullzero"`
 	// ReviewName is read-only display data populated by build read queries.
 	ReviewName string `json:"reviewName,omitempty" bun:"review_name,scanonly"`
@@ -36,19 +38,17 @@ type Build struct {
 	// EnvironmentName is read-only display data populated by build read
 	// queries.
 	EnvironmentName string `json:"environmentName,omitempty" bun:"environment_name,scanonly"`
-	// Kind defaults to BuildKindRecorded when the caller omits it, but the
-	// client-facing route also accepts BuildKindGate: the environment the merge
-	// queue promotes reports its own gate build this way (see AGENTS.md "Merge
-	// Queue"). Only a successful GATE build's commit can later reach MERGED. A
-	// GATE build always carries a ReviewID -- it gates that review's merge.
+	// Kind defaults to BuildKindRecorded when the caller omits it, and any
+	// other kind is refused on write. The environment the merge queue
+	// promotes records its build of the prepared merge commit on the review
+	// like any other build (see AGENTS.md "Merge Queue").
 	Kind       BuildKind `json:"kind" bun:"kind"`
 	Successful bool      `json:"successful" bun:"successful"`
 	CommitID   string    `json:"commitId" bun:"commit_id"`
-	// Version is empty for a GATE build, which publishes nothing.
+	// Version is empty only on a historical GATE row.
 	Version string `json:"version,omitempty" bun:"version,nullzero"`
-	// FailureDetail is the gate's own account of why a GATE build failed; a
-	// RECORDED failure's reason lives wherever the reporting caller's own CI
-	// recorded it, not here.
+	// FailureDetail is an optional account of why a failed build failed, in
+	// the reporting build's own words.
 	FailureDetail string `json:"failureDetail,omitempty" bun:"failure_detail,nullzero"`
 	// Profile is the bounded per-step profile the caller self-reported
 	// alongside this build's outcome -- a duration/CPU/throttle/IO summary
