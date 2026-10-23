@@ -9,9 +9,8 @@ import (
 )
 
 // loginPolicy is the writable field set Zitadel's org login policy accepts,
-// proven against a real instance by
-// erun-console/playwright/zitadel/provision.sh (which pins these exact
-// fields to make sign-in deterministic). GET responses wrap this under
+// proven against a real instance (these exact fields are what make sign-in
+// deterministic). GET responses wrap this under
 // "policy" alongside read-only fields (isDefault, details, ...); decoding
 // into this struct drops them, which is what makes a GET-then-POST
 // round-trip safe as an update body.

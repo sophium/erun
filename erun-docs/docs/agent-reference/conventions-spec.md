@@ -38,7 +38,7 @@ That is: ASCII lowercase letters, digits, and hyphens; first character must be a
 | `code` | Cause |
 |---|---|
 | `INVALID_COMPONENT_NAME` | Name fails the regex. |
-| `COMPONENT_NAME_COLLISION` | A directory with this name already exists under `<tenant>-devops/docker/`, `<tenant>-devops/k8s/`, or `<tenant>-devops/playwright/`. The skill writing the component aborts unless it was invoked with an explicit overwrite hint. |
+| `COMPONENT_NAME_COLLISION` | A directory with this name already exists under `<tenant>-devops/docker/`, `<tenant>-devops/k8s/`, or `<tenant>-devops/e2e/`. The skill writing the component aborts unless it was invoked with an explicit overwrite hint. |
 | `RESERVED_NAME` | The name `<tenant>-devops` is reserved for the runtime-pod chart (see below). |
 
 ### Usage sites
@@ -52,7 +52,7 @@ The component name appears identically in every location below:
 | VERSION file (optional per-component override) | `<projectRoot>/<tenant>-devops/docker/<component>/VERSION` |
 | Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/Chart.yaml` |
 | Per-env values overlay | `<projectRoot>/<tenant>-devops/k8s/<component>/values.<env>.yaml` |
-| Playwright suite (optional, per component) | `<projectRoot>/<tenant>-devops/playwright/<component>/playwright.config.ts` |
+| e2e suite (optional, per exposed service) | `<projectRoot>/<tenant>-devops/e2e/<component>/Dockerfile` with an `AS e2e` stage |
 | Deploy plan | An entry in `ProjectConfig.environments.<env>.k8s.deployments[]` |
 | Image reference | `<registry>/<component>:<version>` |
 | Kubernetes resources | `Deployment.metadata.name = <component>`, `Service.metadata.name = <component>`, pod label `app: <component>` |
@@ -92,73 +92,13 @@ The Kubernetes Service named `<component>` is reachable in-cluster as:
 
 ## Multi-stage Dockerfile expectation
 
-ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain, runs the tests, and produces an artefact, then a runtime stage that ships only the artefact.
+ERun expects a component's Dockerfile to chain named stages so that what ships passes through the tested stage: `build` (toolchain, dependencies, source, native compile) → `test` (`FROM build`; the component's own lint and tests) → optional helpers built `FROM test` (version stamping, the target-arch compile) → `runtime` (the last stage, which copies its artefacts from `test` or from a helper, never from `build`). Because `runtime` depends on `test`, a failing test fails the build and no image is tagged; a stage `runtime` never reaches would be skipped by BuildKit.
 
-Minimal skeleton:
+[Dockerfile stages](/agent-reference/dockerfile-stages) owns the full contract: what each stage holds, a skeleton, why `runtime` copies from `test`, when tests rerun, tests that need a container runtime, and the e2e stage. `erun build` checks one part of it and refuses a Dockerfile that declares a `test` stage no later stage uses (see [Refuses a `test` stage nothing uses](/agent-reference/dockerfile-stages#unused-test-stage)).
 
-```dockerfile
-# Stage 1: builder — provisions toolchain, runs tests, produces the artefact.
-FROM golang:1.26.0 AS builder
-WORKDIR /src
-COPY . .
-# Tests that don't depend on a deployed artefact run here. A failure fails
-# the build, so no image is produced from a red test run.
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go test ./...
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags "-s -w" -o /out/app ./cmd/app
+Two layer-order choices dominate rebuild cost in any real Dockerfile: copy dependency manifests and resolve them **before** copying source, so an ordinary source edit reuses the dependency layer; and read `ARG TARGETARCH` and the version only **after** `test`, so a version bump does not change the tested layers. The `erun-blueprint-service` skill ships a template and a "Build speed" section covering the full set.
 
-# Stage 2: runtime — thin, no build tools.
-FROM alpine:3.20
-COPY --from=builder --chmod=0755 /out/app /usr/local/bin/app
-ENTRYPOINT ["app"]
-```
-
-Why ERun expects this:
-
-- **Runtime images stay small** — no compilers, no source, no test deps in production.
-- **Build cache stays effective** — BuildKit `--mount=type=cache` persists across builds in the runtime pod's dind PVC.
-- **Security separation** — production images don't ship a build toolchain.
-
-The skeleton above shows the required *shape*, not an optimal layer order. Two choices dominate rebuild cost in any real Dockerfile: copy dependency manifests and resolve them **before** copying source, so an ordinary source edit reuses the dependency layer rather than re-resolving; and declare `ARG TARGETARCH` **below** any architecture-independent step such as the test run, so the per-architecture build invocations share one cached test layer instead of repeating the work per arch. The `erun-blueprint-service` skill ships a template and a "Build speed" section covering the full set.
-
-Single-stage Dockerfiles are not rejected, but the multi-arch and cache benefits don't apply.
-
-### Tests run in the builder stage
-
-ERun adds no separate test phase — `erun build` is `docker build`, so tests run where the Dockerfile puts them. The recommendation, **for any stack**, is to run the project's test command in the builder stage, as a `RUN` step before the artefact is produced — `go test ./...`, `npm test`, `pytest`, `mvn test`, `cargo test`, `dotnet test`, whatever the toolchain uses. The Go skeleton above is only an example; the rule is language-independent.
-
-Run every test that **does not depend on a deployed artefact** there:
-
-- **Unit tests**, and
-- **integration tests that run in-process or against fixtures the build can stand up itself** (an embedded database, a stub server, a temp filesystem) — anything that needs no live cluster, no running service, and no network to a deployed dependency.
-
-Because the test step is part of `docker build`, a failing test fails the build and no image is tagged — so a successful build is always a tested build, which is what marks a [review](/collaboration/reviews) `READY`. A component whose inputs are unchanged since its last successful build — the same fingerprint, or a BuildKit cache hit on the test step — reuses that build's result; it was a tested build, so the reuse is a valid result rather than a skipped test. Keep the test step in the builder stage (never the runtime stage) so test dependencies stay out of the shipped image, and reuse the build cache (e.g. BuildKit `--mount=type=cache`) across the test and compile steps so downloads and intermediate objects are shared.
-
-Whether the test step runs before or after the compile step is toolchain-specific, and doesn't matter to the gate. `go test` compiles and runs the tests on its own, so it can precede the `go build` that produces the shipped binary (as in the skeleton above); a toolchain that exercises a compiled artefact would build first, then test. The only requirement is that the test command is a `RUN` in the builder stage, so a non-zero exit aborts the build before the runtime stage is reached.
-
-Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build: [`erun e2e`](/cli/e2e) discovers a `playwright/` folder the same way this section's algorithm discovers `docker/`, and runs it once with the deployed environment's resolved URL and version injected.
-
-### Tests that need a container runtime
-
-A test that starts its own container-runtime fixture — a Testcontainers-style ephemeral database, a compose-style sidecar — is a third category, distinct from both of the above. It needs no live cluster and no deployed version of the project under test; it only needs a docker daemon to start its own throwaway containers against.
-
-The [agent env](/concepts/environment-types) already runs a docker daemon of its own (the one `erun build` itself uses), and `erun build` grants BuildKit's `network.host` entitlement on a build whose Dockerfile declares a `test` stage, so a `RUN` step there can reach it:
-
-```dockerfile
-RUN --network=host \
-    DOCKER_HOST=tcp://127.0.0.1:2375 \
-    go test ./... -run TestAgainstRealPostgres
-```
-
-Plain `docker build` would refuse this step with BuildKit's own refusal (`network.host is not allowed`) before any step ran; `erun build` grants the entitlement because it owns the builder, and the daemon being reached is the same environment's own. The grant is scoped to a Dockerfile that declares a `test` stage, so a build with no tests in it never lifts BuildKit's default deny. It is a deliberate capability, not a sandbox boundary: a `RUN --network=host` step can also reach the daemon that is building it, so a component's test stage is trusted code running against its own environment's runtime.
-
-Two categories never belong in the builder stage, even once the entitlement lands — both for the same reason as the deployed-environment case above, not a new rule:
-
-- a test that needs the build's **own output** (an end-to-end suite driving a built application binary, for example) — the stage producing that output is the one such a test would have to depend on, which a test stage cannot do without inverting the dependency that gates the build in the first place;
-- a test asserting a **deployed** version — that is the "requires a running deployment" case immediately above, unchanged by this.
+Single-stage Dockerfiles are not rejected, but they have no tests in the build, and the multi-arch and cache benefits don't apply.
 
 ## Docker build context resolution
 
@@ -180,21 +120,21 @@ Algorithm:
 
 The standard layout (`<module>/docker/<image>/Dockerfile`) is ERun's convention for project Dockerfiles; the flat layout is the fallback for hand-built contexts.
 
-The `docker/` root the algorithm scans is the convention default (`<tenant>-devops/docker`) unless a project relocates it — along with the `k8s/` chart root, the `playwright/` suite root, the `terraform-<tenant>` base, and the `VERSION` file — via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`. A configured `docker`/`k8s`/`playwright` path must still end in a `docker`/`k8s`/`playwright` segment, so the regex above is evaluated against the configured root.
+The `docker/` root the algorithm scans is the convention default (`<tenant>-devops/docker`) unless a project relocates it — along with the `k8s/` chart root, the `e2e/` suite root, the `terraform-<tenant>` base, and the `VERSION` file — via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`. A configured `docker`/`k8s` path must still end in a `docker`/`k8s` segment, so the regex above is evaluated against the configured root.
 
-## Playwright suite discovery
+Discovery never walks `<tenant>-devops/e2e/`, and a Dockerfile there is refused by `erun build` and `erun push` even when run from its own directory: it is an e2e suite, not a component (see [Dockerfile stages · Refuses an e2e suite](/agent-reference/dockerfile-stages#refuses-e2e)).
 
-`erun e2e` resolves the project's e2e suite the same way build resolves `docker/` and deploy resolves `k8s/`: the configured `paths.playwright` override (or a selected `components.<name>.playwright` entry), else the `<tenant>-devops/playwright` convention default.
+## e2e suite discovery {#e2e-suite-discovery}
 
-1. Resolve the `playwright/` root (override, then convention).
-2. If the root itself holds a `playwright.config.ts`/`.js`, it is the one suite. `--component` is not required and is ignored.
-3. Otherwise, each subdirectory holding its own `playwright.config.ts`/`.js` is a per-component suite, mirroring `<k8s>/<component>/Chart.yaml`.
-   - Exactly one such subdirectory and no `--component` → it auto-selects.
-   - More than one and no `--component` → the command fails naming every discovered component.
-   - `--component <name>` naming a subdirectory that doesn't exist → fails naming the component.
-4. No `playwright/` root resolves at all → `erun e2e` is a clean no-op (exit 0), the same tolerance `docker/`'s absence gets from `erun build`.
+`erun e2e` resolves the project's e2e suites the way build resolves `docker/` and deploy resolves `k8s/`: the configured `paths.e2e` directory, else the `<tenant>-devops/e2e` convention default.
 
-`erun e2e` runs the resolved suite exactly once per invocation, regardless of whether the root is a single suite or several per-component subdirectories — the subdirectory is organisation, not a separate trigger. It refuses, naming the cause, before Playwright starts when the target environment is not deployed, the service is not exposed, or its certificate is not yet issued; and refuses a suite that sets `ignoreHTTPSErrors` or hardcodes its own `baseURL`, since both would silently defeat the resolved-URL/version injection (`ERUN_E2E_BASE_URL` / `ERUN_E2E_VERSION`) this command exists to guarantee.
+1. Refuse retired configuration before anything else: a `<tenant>-devops/playwright` folder, `paths.playwright`, or `components.<name>.playwright` fails naming the move to `<tenant>-devops/e2e/<component>/Dockerfile`; `components.<name>.e2e` fails, because suites are discovered project-wide (set `paths.e2e`).
+2. Resolve the `e2e/` root. A configured `paths.e2e` that is not a directory fails. Without one, every `<name>-devops/e2e` directory under the project root is a candidate: none means no suites, more than one fails asking for `paths.e2e`.
+3. Each subdirectory of the root holding a `Dockerfile` is one suite, named after the subdirectory, in name order. A subdirectory without a `Dockerfile` is not a suite. A `Dockerfile` that declares no stage named exactly `e2e` (`FROM <base> AS e2e`) fails naming the file.
+4. With no `--component`, every suite runs. `--component <name>` runs only that suite, and fails naming the discovered suites when none matches.
+5. No `e2e/` root, or a root with no suites → `erun e2e` is a clean no-op (exit 0), the same tolerance `docker/`'s absence gets from `erun build`.
+
+The suite's directory name is the exposed service it targets by default. How each suite is built and targeted, and what `erun e2e` refuses before running one, is in [Dockerfile stages · The `e2e` stage](/agent-reference/dockerfile-stages#e2e-stage).
 
 ## Multi-architecture build contract
 
@@ -409,9 +349,9 @@ must be derived from the same probe, or the two can contradict each other.
 
 Sockets are container-lifetime by design. A `dtach` server is a process in the container, so a
 socket that outlived its pod could never be attached to; clearing them with the pod is what lets
-`claude --continue` resume in a fresh session instead of failing against a dead socket. The
-entrypoint runs `erun-prune-sessions /tmp/erun-sessions` on the container-boot path (never on the
-in-container `shell` path), removing any `*.dtach` with no live server plus its `.owner` file.
+`claude --continue` resume in a fresh session instead of failing against a dead socket.
+`/tmp/erun-sessions` is in the container's own filesystem, not on a volume, so every container
+starts with it empty and nothing has to prune it.
 
 The directory name shares nothing with the desktop binary's process name (`erun-app`) on purpose. A
 session is held open by a `dtach` command line naming its socket, so a directory whose name contained
@@ -440,15 +380,15 @@ the dind sidecar. An environment created before that claim existed kept its chec
 volume directly over a populated checkout.
 
 The chart prevents that with an `adopt-worktree` init container, rendered only when
-`worktreeStorage=pvc`. It runs the runtime image (no extra image dependency) and stages **both**
-volumes outside `/home/erun`, where the claim cannot shadow the home tree:
+`worktreeStorage=pvc`. It runs the runtime image's own `erun` (no extra image dependency) and stages
+**both** volumes outside `/home/erun`, where the claim cannot shadow the home tree:
 
 | Volume | Staged at |
 |---|---|
 | `<release>-home` | `/mnt/erun-home` — the legacy checkout is at `/mnt/erun-home/git/<repo>` |
 | `<release>-worktree` | `/mnt/erun-worktree` |
 
-The container runs `erun-adopt-worktree <legacy> <claim>` and decides in this order:
+The container runs `erun adopt-worktree <legacy> <claim>` and decides in this order:
 
 1. The claim is not staged as a directory → nothing to adopt; exit 0.
 2. The claim holds anything other than `lost+found` or an abandoned `.erun-worktree-adopt-partial`
@@ -466,9 +406,15 @@ interrupted run leaves the legacy tree intact and the partial copy in the stagin
 step 2 ignores, so the next boot retries. A copy that fails exits non-zero and the pod does not start,
 because starting is what masks the tree.
 
-A runtime image with no `/usr/local/bin/erun-adopt-worktree` (an older image pinned under a newer
-chart) falls back to the same rule: if the legacy path holds a `.git` the init container exits 1 and
-refuses the rollout; otherwise it logs and exits 0.
+The copy keeps file modes, modification times, symlinks and hard links within the tree; a socket,
+pipe or device in the checkout has no content to carry and is skipped. `erun adopt-worktree --dry-run`
+prints the same decision and the copy it would make without touching either volume, and
+`--output json` reports the outcome (`adopted`, `adopted-original-kept`, `claim-populated`,
+`no-legacy-tree`, `not-a-repository` or `no-claim`).
+
+A runtime image whose `erun` has no `adopt-worktree` (an older image pinned under a newer chart) fails
+the init container and so refuses the rollout, whether or not there was anything to adopt: run the
+image the chart was released with.
 
 ### What deploy reports
 

@@ -2662,7 +2662,7 @@ func githubRulesetStubServer(t testing.TB, opts githubRulesetStubOptions) *httpt
 // has no happens-before edge to that handler's read.
 //
 // The ordering that fixes is not observable without -race, and no gated venue
-// runs -race for this module: the erun-cli image's test stage runs it with
+// runs -race for this module: the erun-devops image's cli-test stage runs it with
 // -count=1 and -timeout and nothing else, and -race is wired for erun-common
 // alone. So this test is green in the gate on the pre-fix tree as well as the
 // post-fix one, and a green gate is evidence for its behavioral half only. Run

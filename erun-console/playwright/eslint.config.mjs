@@ -47,9 +47,8 @@ export default tseslint.config(
     ...playwright.configs['flat/recommended'],
     rules: {
       ...playwright.configs['flat/recommended'].rules,
-      // The suite is opt-in behind ERUN_E2E_CONSOLE_OIDC, which is a conditional
-      // skip — the rule's own supported shape, not a disabled test.
-      'playwright/no-skipped-test': ['error', { allowConditional: true }],
+      // Nothing here is opt-in: the config serves the bundle every spec needs.
+      'playwright/no-skipped-test': 'error',
     },
   },
 );

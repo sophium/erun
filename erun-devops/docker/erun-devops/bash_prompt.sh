@@ -1,4 +1,5 @@
-#!/bin/sh
+# Sourced by /etc/bash.bashrc to set the runtime image's prompt. Not a script:
+# it uses bash-only $'...' quoting and returns at once under any other shell.
 
 [ -n "${BASH_VERSION:-}" ] || return 0
 

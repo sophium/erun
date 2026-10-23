@@ -8,7 +8,7 @@
   Zitadel v4 is NOT one container. Core serves no interactive login at all (a
   lone core answers {"code":5,"message":"Not Found"} at /ui/v2/login), so the
   OIDC authorize endpoint has no page to render. The faithful topology — the one
-  the console e2e already runs (erun-console/playwright/zitadel/stack.sh) — is
+  the deployed console's e2e sign-in goes through (erun-devops/e2e/console) — is
   core + the separate Login V2 container + one origin unifying them, which is
   what the issuer, the browser and every redirect_uri must agree on:
 
@@ -156,11 +156,13 @@
        now this chart created only the two machine-user PATs, never an
        application. A sidecar (not a hook Job) is what can reach the
        org-owner PAT: it lives on the shared bootstrap emptyDir inside this
-       pod, which a separate Job cannot mount. It runs the erun-oidc-bootstrap
-       script baked into the erun-devops runtime image
-       (erun-devops/docker/erun-devops/oidc-bootstrap.sh), rather than a
-       container command inlined here, so the reconcile logic is directly
-       unit-testable. It idempotently ensures a project and three apps via the
+       pod, which a separate Job cannot mount. It runs `eapi oidc-bootstrap`
+       from the erun-backend-api image (erun-backend-api's
+       internal/oidcbootstrap, over the same internal/zitadel Management API
+       client the API uses), rather than a container command inlined here, so
+       the reconcile logic is directly unit-testable; the restore-pats init
+       container runs the same command with --restore-pats. It idempotently
+       ensures a project and three apps via the
        Management API over the core container's loopback, all issuing JWT
        access tokens (erun's bearer verifier rejects Zitadel's default opaque
        token), then publishes the client ids to a ConfigMap the
@@ -227,7 +229,7 @@
 {{- end -}}
 {{- $oidcConsoleRedirectURIs = uniq $oidcConsoleRedirectURIs -}}
 {{- $oidcMobileRedirectURIs := uniq (default (list) $oidc.mobileRedirectUris) -}}
-{{- $oidcBootstrapImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
+{{- $oidcBootstrapImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
 {{- $oidcServiceAccount := printf "%s-zitadel" $tenant -}}
 apiVersion: v1
 kind: ServiceAccount
@@ -433,22 +435,16 @@ spec:
           env:
             - name: PATS_SECRET_NAME
               value: {{ $patsSecretName | quote }}
+            - name: BOOTSTRAP_DIR
+              value: {{ $bootstrapDir | quote }}
             - name: POD_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
           command:
-            - sh
-            - -c
-            - |
-              set -eu
-              if kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" >/dev/null 2>&1; then
-                echo "restore-pats: restoring bootstrap PATs from ${PATS_SECRET_NAME}"
-                kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" -o jsonpath='{.data.admin-sa\.pat}' | base64 -d > "{{ $bootstrapDir }}/admin-sa.pat"
-                kubectl get secret "${PATS_SECRET_NAME}" --namespace "${POD_NAMESPACE}" -o jsonpath='{.data.login-client\.pat}' | base64 -d > "{{ $bootstrapDir }}/login-client.pat"
-              else
-                echo "restore-pats: no ${PATS_SECRET_NAME} Secret yet; first-instance init will mint the PATs"
-              fi
+            - eapi
+            - oidc-bootstrap
+            - --restore-pats
           volumeMounts:
             - name: bootstrap
               mountPath: {{ $bootstrapDir }}
@@ -648,7 +644,8 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
           command:
-            - erun-oidc-bootstrap
+            - eapi
+            - oidc-bootstrap
           volumeMounts:
             - name: bootstrap
               mountPath: {{ $bootstrapDir }}

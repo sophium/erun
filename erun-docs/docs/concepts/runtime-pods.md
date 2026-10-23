@@ -28,6 +28,8 @@ One pod with two containers:
 
 Because the MCP edge runs in this container, an MCP tool call executes with exactly the toolchain the env is built with. Add Java or a compose plugin to the runtime image and MCP-driven `raw` and `build` see it, the same as an `erun open` shell does.
 
+The `erun-devops` container's first process is erun itself: the image's entrypoint is `erun runtime-init`. At every container start it writes the kubeconfig for the pod's service account, the env's erun config and the Agents' configuration (instructions, skills, settings, the MCP server), then starts sshd, the activity monitor and the MCP edge, and stays running as the container's init — it reaps exited background processes and passes a stop signal on to what it started. A tenant runtime image built `FROM` the erun-devops image inherits that entrypoint; one that overrides `ENTRYPOINT` gives all of this up.
+
 Both share two persistent volume claims: `/home/erun` (workspace + config, and the go build cache, which is bounded — see [below](#what-is-holding-the-environments-resources)) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts). The home PVC also holds the **agent outputs directory** (`$ERUN_OUTPUTS_DIR`, default `/home/erun/.erun/outputs`) — where agents and skills drop deliverables you pull out with [`erun outputs`](/cli/outputs); because it's on the PVC, those files survive pod restarts.
 
 This pod is the **shared surface** for Operator and Agent. Two endpoints on the same pod, both accepting any client:
@@ -341,8 +343,9 @@ A session's running state is **observed in the pod** — its socket exists *and*
 behind it — rather than inferred from how recently it printed something. An Agent waiting on a
 compile is silent but running; a dropped connection is quiet but finished. Inferring from output
 gets both backwards, which is how a pane could show a stalled indicator beside a truthful "still
-running" count. The session sockets themselves live and die with the pod, and a replaced pod clears
-any left behind at boot, so a leftover socket is never presented as a running session.
+running" count. The session sockets themselves live and die with the container: they sit in its own
+filesystem, so a replaced pod starts with none and a leftover socket is never presented as a running
+session.
 
 ## Idle / auto-stop
 

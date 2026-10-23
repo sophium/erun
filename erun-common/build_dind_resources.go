@@ -29,7 +29,7 @@ var (
 // limit they are resolved from is nonetheless enforced on that same build work
 // by a separate mechanism: buildContainerCPUCapCgroupParent nests every
 // RUN-instruction container under /docker/erun-build-cpu-cap-<pod>, whose
-// cpu.max dind-entrypoint.sh mirrors from the sidecar's own kubelet-enforced
+// cpu.max `erun dind-entrypoint` mirrors from the sidecar's own kubelet-enforced
 // quota. So `erun resize --dind-cpu` moves both the concurrency this value
 // sizes and the ceiling the build actually runs under; it is only this ARG
 // read on its own that is not that ceiling. Memory is the one left uncapped

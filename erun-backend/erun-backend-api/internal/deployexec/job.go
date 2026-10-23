@@ -191,7 +191,7 @@ func buildDeployJob(params DeployJobParams) *batchv1.Job {
 
 // buildDeployCommand composes the Job's argv. The Job's `command` replaces the
 // image's entrypoint, so none of the entrypoint's usual setup runs: no
-// in-cluster kubeconfig (entrypoint.sh's write_kubeconfig) and no
+// in-cluster kubeconfig (the runtime boot's writeRuntimeKubeconfig) and no
 // ~/.config/erun/<tenant>/<environment>/config.yaml for `erun deploy` to
 // resolve — a freshly-registered environment was never baked into any image,
 // so nothing on disk describes it. bootstrapEnvironmentScript seeds both
@@ -348,9 +348,9 @@ func writeMCPAuthPublicKeyScript(pem string) string {
 }
 
 // bootstrapEnvironmentScript seeds the in-cluster kubeconfig context
-// (mirroring entrypoint.sh's write_kubeconfig, from the ServiceAccount token
+// (mirroring the runtime boot's writeRuntimeKubeconfig, from the ServiceAccount token
 // Kubernetes auto-mounts into every pod, or — when Placement names a remote
-// cluster (#1112) — that cluster's own admin-token credential instead) and a
+// cluster — that cluster's own admin-token credential instead) and a
 // minimal tenant/env config for erun's CLI verbs to resolve, then chains the
 // real command with `&&`. Every lifecycle Job — deploy, stop, delete — sets
 // `command`, which replaces the image's entrypoint, so none of the

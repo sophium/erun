@@ -194,3 +194,46 @@ func TestCommandArmsBothBounds(t *testing.T) {
 		t.Error("CommandContext built a Cmd with no cancellable context, so the HangNet backstop has nothing to cancel")
 	}
 }
+
+// TestGitChildrenDetachNoMaintenance reproduces the TempDir cleanup race
+// deterministically: a local push makes both the pushing git and the
+// receive-pack it runs for the bare remote detach `git maintenance run
+// --auto`, a process that outlives the push and can still be writing into the
+// repositories when t.TempDir removes them ("directory not empty"). GIT_TRACE
+// names every child git starts, so the push run through Command must start no
+// maintenance on either side, while the same push with the plain environment
+// still does -- which is what keeps this test honest if git ever stops
+// detaching on its own.
+func TestGitChildrenDetachNoMaintenance(t *testing.T) {
+	root := t.TempDir()
+	run := func(cmd *exec.Cmd) string {
+		t.Helper()
+		cmd.Env = append(cmd.Env, "GIT_TRACE=1")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%v: %v: %s", cmd.Args, err, out)
+		}
+		return string(out)
+	}
+	git := func(dir string, args ...string) *exec.Cmd {
+		cmd := Command("git", args...)
+		cmd.Dir = dir
+		return cmd
+	}
+	run(git(root, "init", "-q", "--bare", "origin.git"))
+	run(git(root, "init", "-q", "-b", "main", "work"))
+	work := filepath.Join(root, "work")
+	run(git(work, "-c", "user.email=t@example", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "one"))
+	run(git(work, "remote", "add", "origin", filepath.Join(root, "origin.git")))
+
+	if trace := run(git(work, "push", "-q", "origin", "main")); bytes.Contains([]byte(trace), []byte("maintenance run")) {
+		t.Fatalf("a git child built by Command still detached maintenance:\n%s", trace)
+	}
+
+	run(git(work, "-c", "user.email=t@example", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "two"))
+	plain := git(work, "push", "-q", "origin", "main")
+	plain.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+filepath.Join(root, "empty-gitconfig"))
+	if trace := run(plain); !bytes.Contains([]byte(trace), []byte("maintenance run")) {
+		t.Fatalf("expected git's default to detach maintenance after a push, so this test reproduces the race:\n%s", trace)
+	}
+}

@@ -30,9 +30,24 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 	}
 }
 
-// executeDockerBuild runs one build against the given streams. The streams are
+// executeDockerBuild runs one build against the given streams and, once it
+// succeeds, reports the component's test outcome. It is the sequential form:
+// the outcome line follows the build's own output directly. The concurrent
+// dispatch runs runDockerBuildStep instead and reports every outcome after the
+// builds, in build order, so the stream does not depend on which image
+// finished first.
+func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+	outcome, err := runDockerBuildStep(ctx, buildInput, build, stdout, stderr)
+	if err == nil {
+		reportDockerBuildTestOutcome(ctx, buildInput, outcome)
+	}
+	return err
+}
+
+// runDockerBuildStep runs one build against the given streams. The streams are
 // a parameter rather than ctx's own so a concurrent build can buffer each image
-// separately and replay them in a fixed order.
+// separately and replay them in a fixed order. It returns the build's test
+// outcome (see dockerBuildTestOutcome), meaningful only when err is nil.
 //
 // It also starts this image's step-timing child (a no-op when no timing root
 // is active — see startTimingStep) and wires PlatformObserver so the builder
@@ -42,7 +57,7 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // It is also where an image joins the run's heartbeat for as long as its build
 // takes, which is the only signal a run has that a long build is still working —
 // see build_heartbeat.go.
-func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+func runDockerBuildStep(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) (string, error) {
 	if build == nil {
 		build = DockerImageBuilder
 	}
@@ -64,7 +79,29 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 	err := build(buildInput, stdout, stderr)
 	doneBuilding()
 	finish(err)
-	return err
+	return dockerBuildTestOutcome(buildInput, cache), err
+}
+
+func reportDockerBuildTestOutcome(ctx Context, buildInput DockerBuildSpec, outcome string) {
+	ctx.Info(dockerBuildStepName(buildInput) + ": test: " + outcome)
+}
+
+// dockerBuildTestOutcome names what a successful build established about the
+// component's tests, keeping a fresh run distinct from reuse of an earlier one.
+// It is read after the build, so a promote that fell back to a rebuild (see
+// settlePromoteFailure) reports the tests it really ran. "passed" means the
+// test stage was part of a successful docker build; BuildKit may have served
+// it from its layer cache on byte-identical inputs, which is equally valid.
+func dockerBuildTestOutcome(buildInput DockerBuildSpec, cache *cacheDecision) string {
+	if !dockerfileDeclaresTestStage(buildInput.DockerfilePath) {
+		return "none declared"
+	}
+	if cache != nil {
+		if hit, _ := cache.decision(); hit {
+			return "reused (fingerprint " + fingerprintTagPrefix + buildInput.Fingerprint + ")"
+		}
+	}
+	return "passed"
 }
 
 // traceIncrementalDecision re-emits the fingerprint inspect already run during
@@ -300,7 +337,7 @@ func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCo
 }
 
 // runBuildExecution is the last point before this run's exit code is decided.
-// A plan that does nothing -- no release, no script, no linux build, no image,
+// A plan that does nothing -- no release, no script, no linux package, no image,
 // no chart -- runs no work and tests nothing, so reporting success for it turns
 // "not tested" into "tested and green" for every caller reading the exit code.
 // That precondition is checked here, before the execution it guards.
@@ -317,13 +354,10 @@ func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploy
 		// around the build+push so the version's images and charts exist, and
 		// resolve, before the tag and branch pushes make it public.
 		publisher := newReleasePublisher(execution, deploySpecs, runScript, build, push)
-		if err := runReleaseSpec(ctx, *execution.release, runGit, runScript, nil, &publisher); err != nil {
+		if err := runReleaseSpec(ctx, *execution.release, runGit, nil, &publisher); err != nil {
 			return err
 		}
 	} else {
-		if execution.skippedLinux {
-			ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
-		}
 		// A release runs this via ensureReleaseReadyToPublish; a plain build has
 		// to run it here. Builds are what actually fill the node between
 		// releases, since every one of them grows the BuildKit cache.
@@ -374,7 +408,11 @@ func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySp
 		}
 		return pushedTags, runScriptSpec(ctx, *execution.script, runScript)
 	}
-	if err := runScriptSpecs(ctx, execution.linuxBuilds, runScript); err != nil {
+	if execution.release != nil {
+		if err := exportReleaseLinuxPackages(ctx, *execution.release); err != nil {
+			return nil, err
+		}
+	} else if err := runLinuxPackageChecks(ctx, execution.linuxPackages); err != nil {
 		return nil, err
 	}
 	return runDockerBuildExecutionPhase(ctx, execution, deploySpecs, build, push, pushedTags)

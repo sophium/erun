@@ -1,0 +1,9 @@
+audit: erun install-skills --agents-dir <TMP> --skills-dir <TMP>
+skills -> <TMP> 1 installed, 0 refreshed, 0 current, 0 preserved
+skills -> <TMP> 1 installed, 0 refreshed, 0 current, 0 preserved
+agents -> <TMP> 1 installed, 0 refreshed, 0 current, 0 preserved
+--- second run ---
+audit: erun install-skills --agents-dir <TMP> --skills-dir <TMP>
+skills -> <TMP> 0 installed, 0 refreshed, 0 current, 1 preserved (erun-build-env)
+skills -> <TMP> 0 installed, 1 refreshed, 0 current, 0 preserved
+agents -> <TMP> 0 installed, 1 refreshed, 0 current, 0 preserved

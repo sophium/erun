@@ -193,6 +193,20 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Record a failure in the run's own words. A reason that says only that a Job exited names nothing an operator can act on.
 - Merge-queue builds and releases run in the owning environment's warm checkout/daemon, not cold API-created Jobs. Do not restore removed mergeexec/releaseexec placement configuration.
 
+## Zitadel OIDC Bootstrap (`eapi oidc-bootstrap`)
+
+- The erun-zitadel chart's `oidc-bootstrap` sidecar and `restore-pats` init
+  container run `eapi oidc-bootstrap` (`--restore-pats` for the latter) from this
+  module's image, not a shell script: `internal/oidcbootstrap` reconciles the
+  platform's OIDC apps through `internal/zitadel` and writes the client-id
+  ConfigMap and the PATs Secret through client-go — no `kubectl`, `curl` or `jq`.
+- Behaviour it must keep (locked by `internal/oidcbootstrap/reconcile_test.go`
+  against an `httptest` Management API and a fake clientset): converge redirect
+  URIs every tick and write only on a difference; never converge to an empty
+  list; carry every unmanaged oidcConfig field across the replace-not-merge
+  update; log a failed update loudly; and never publish the ConfigMap while an
+  app is unresolved, so prior good client ids survive a failed tick.
+
 ## Release Queue
 
 - The queue releases what has already been accepted. It does not approve, and it must not grow merge-decision logic.

@@ -344,9 +344,9 @@ func readStopHistoryFile(path string) ([]EnvironmentStopHistoryEntry, error) {
 }
 
 // environmentRuntimeStateDir resolves the per-env HOME/.erun state
-// directory. The path must match entrypoint.sh
-// (erun-devops/docker/erun-devops/entrypoint.sh) so the in-pod monitor
-// and any tool under the same HOME share the same files.
+// directory, the one the runtime boot's monitor (startRuntimeEnvironmentMonitor)
+// writes, so the in-pod monitor and any tool under the same HOME share the same
+// files.
 func environmentRuntimeStateDir(tenant, environment string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

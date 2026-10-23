@@ -20,6 +20,12 @@ That publish happens **before** the release tag reaches origin, and the build re
 
 Base images (`erun-ubuntu`, `erun-dind`, `erun-ubuntu`-derived) publish first; dependent images publish only after their bases are available in the registry.
 
+## Linux packages
+
+A package component is a Dockerfile under `<tenant>-devops/linux/<name>/` that builds a `.deb` rather than an image. In this repository that is `erun-devops/linux/erun-cli` (the `erun` package: `erun`, `emcp`, `eapi`) and `erun-devops/linux/erun-ui` (the `erun-desktop` package: `erun-app`). Its stages are `build` -> `test` -> a packing helper -> `dist`, the last stage, `FROM scratch` with the `.deb` alone; a package tested elsewhere has no `test` stage. See [Dockerfile stages · Package components](/agent-reference/dockerfile-stages#package-components).
+
+`erun build --release` builds each package's `dist` stage for `linux/amd64` and `linux/arm64` with `--output type=local`, and uploads every exported `.deb` to the GitHub release for the tag (creating the release with generated notes when it does not exist yet, as a prerelease for a `-rc.` or `-pr.` version). The packages build inside Docker, so a release needs no Linux host or `dpkg-deb` of its own. The `.deb` files are the only Linux binaries ERun publishes; the Homebrew and Scoop installs build from source as before.
+
 ## Published runtime chart
 
 Chart publishing belongs to [`erun push`](/cli/push), not to a release-only step: push publishes **every** component's co-located helm chart at the pushed version. It runs `helm package` + `helm push` to `oci://<registry>/charts`, so a chart is addressable as `oci://<registry>/charts/<component>:<version>` (e.g. `erun-devops`, `erun-powerdns`, `erun-backend-*`, `erun-docs`; default registry `ghcr.io/sophium`) — kept separate from the same-named image repo so a chart never collides with its image at the same ref — then verifies each artifact with a `helm pull` round-trip before the push is considered complete. Chart publishing is decoupled from the image push: a **version-pinned base** (`erun-powerdns` at `4.9.3`, `erun-backend-postgres` at `18.3`, `erun-zitadel`/`erun-zitadel-login` at `v4.15.3`) keeps its image at the upstream pin and is not re-pushed at the release version, but its chart still publishes at the release version so platform deploys and wrapper charts resolve it. Each chart's `version` and `appVersion` equal the pushed version.

@@ -11,9 +11,9 @@ import (
 )
 
 type BuildInput struct {
-	Component     string   `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
+	Component     string   `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images and test the linux packages"`
 	Version       string   `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
-	Release       bool     `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
+	Release       bool     `json:"release,omitempty" jsonschema:"when true, run release first, publish the resolved release-tagged images, and attach the linux packages' .deb files to the GitHub release for the tag"`
 	NoIncremental bool     `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
 	Platforms     []string `json:"platforms,omitempty" jsonschema:"optional docker --platform overrides (e.g. [\"linux/amd64\"]) for an environment that can only ever run one architecture; takes precedence over the project's configured docker.platforms (project-wide or per-environment). Mutually exclusive with release, which always publishes every platform erun supports"`
 	Preview       bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`

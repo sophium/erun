@@ -172,7 +172,7 @@ func dockerDefaultBridgeMTU() (int, bool) {
 
 // localEgressMTU reports the MTU of the interface carrying this process's
 // default route, and its name. Reads procfs/sysfs directly so it needs no
-// iproute2 and no privileges, matching what the dind entrypoint wrapper does
+// iproute2 and no privileges, matching what `erun dind-entrypoint` does
 // from the other side of the same namespace.
 func localEgressMTU() (int, string, bool) {
 	return egressMTUUnder(procRootForMTU(), sysRootForMTU())

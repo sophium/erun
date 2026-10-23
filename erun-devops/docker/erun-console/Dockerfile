@@ -9,14 +9,31 @@ ARG ERUN_VERSION=1.0.0
 # omitting one makes --frozen-lockfile unsatisfiable.
 #
 # Node 22 because @testing-library/jest-dom@6 declares engines node >=22.
-# Pinned to the build host's platform: the bundle is static assets with no
-# architecture, so it is built (and tested) once natively.
+# Debian rather than alpine because the landing-layout spec drives Chromium,
+# which Playwright does not ship for musl. Pinned to the build host's platform:
+# the bundle is static assets with no architecture, so it is built (and
+# tested) once natively.
 #
 # YARN_CACHE_FOLDER: yarn classic otherwise caches under $HOME/.cache/yarn,
 # not the mounted /usr/local/share/.cache/yarn.
-FROM --platform=$BUILDPLATFORM node:22.14-alpine AS deps
+FROM --platform=$BUILDPLATFORM node:22.14-bookworm AS build
+
+ENV YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /src
+
+# The console's own Playwright package and the Chromium it pins, for the test
+# stage. Ahead of the workspace install and the source so neither invalidates
+# the browser download.
+COPY erun-console/playwright/package.json erun-console/playwright/yarn.lock /src/erun-console/playwright/
+RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    cd /src/erun-console/playwright && \
+    yarn install --frozen-lockfile --non-interactive && \
+    yarn playwright install --with-deps chromium
 
 COPY package.json yarn.lock /src/
 COPY erun-kit/package.json /src/erun-kit/
@@ -24,7 +41,6 @@ COPY erun-console/package.json /src/erun-console/
 COPY erun-ui/frontend/package.json /src/erun-ui/frontend/
 
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
-    YARN_CACHE_FOLDER=/usr/local/share/.cache/yarn \
     yarn install --frozen-lockfile --non-interactive
 
 # erun-kit's package.json main points at ./src/index.ts, so the console compiles
@@ -32,32 +48,31 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 COPY erun-kit /src/erun-kit
 COPY erun-console /src/erun-console
 
-# The console's and the kit's own checks are this image's gate: the builder
-# depends on this stage through `COPY --from=test`, so no image is produced
-# when they fail.
-FROM deps AS test
+WORKDIR /src/erun-console
+
+RUN yarn build
+
+# The kit's, the console's and its Playwright package's own checks, then the
+# landing-layout spec against the bundle `build` produced, which the Playwright
+# config serves with `vite preview`. The runtime stage copies the bundle from
+# this stage, so no image is produced when they fail.
+FROM build AS test
 
 RUN cd /src/erun-kit && \
     yarn typecheck && yarn lint && yarn format:check && yarn test && \
     cd /src/erun-console && \
     yarn typecheck && yarn lint && yarn format:check && yarn test && \
-    touch /test-ok
+    cd /src/erun-console/playwright && \
+    yarn typecheck && yarn lint && yarn format:check && \
+    yarn playwright test tests/landing-no-horizontal-scroll.spec.ts
 
-FROM deps AS builder
+# A small static server that also proxies /v1 to the API, so the console is
+# served same-origin with erun-backend-api (its production design — see
+# erun-console/vite.config.ts) and no browser CORS preflight is ever needed
+# (the API sets no CORS headers by design).
+FROM nginx:1.27.4-alpine3.21 AS runtime
 
-COPY --from=test /test-ok /tmp/erun-test-ok
-
-WORKDIR /src/erun-console
-
-RUN yarn build
-
-# Stage 2: a small static server that also proxies /v1 to the API, so the
-# console is served same-origin with erun-backend-api (its production design —
-# see erun-console/vite.config.ts) and no browser CORS preflight is ever
-# needed (the API sets no CORS headers by design).
-FROM nginx:1.27.4-alpine3.21
-
-COPY --from=builder /src/erun-console/dist /usr/share/nginx/html
+COPY --from=test /src/erun-console/dist /usr/share/nginx/html
 COPY erun-devops/docker/erun-console/default.conf.template /etc/nginx/templates/default.conf.template
 
 # Stamps this instance's brand into the served index.html before nginx starts,

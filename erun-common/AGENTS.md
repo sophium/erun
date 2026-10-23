@@ -30,6 +30,37 @@ this file for the conventions below.
 - Follow root "Refactoring Rules" for behavior preservation, ownership moves,
   visibility, and removal of obsolete wrappers.
 
+### Target package layers (planned, not yet in place)
+
+https://github.com/sophium/erun/issues/2741 splits this one package into layers
+so an edit recompiles only its dependents and the compiler enforces primitive
+independence. Today everything is still package `eruncommon`; new code is
+written so it would already sit in one layer:
+
+```
+erun-common/
+  base/          model/ core/ config/
+  infra/         docker/ kube/ helm/ gitx/ platformclient/ cloud/ activity/ mcpauth/ mcptools/
+  primitive/     build/ push/ deploy/ open/ release/
+  orchestration/ build --release, --deploy, --push: compositions of primitives
+  command/       mergequeue/ review/ jobs/ lifecycle/ setup/ doctor/ observe/ terraform/ e2e/ orchestrator/ podruntime/
+```
+
+| Layer | May depend on |
+|---|---|
+| `base/model` | stdlib only |
+| `base/core`, `base/config` | lower `base/*` (config → core → model) |
+| `infra/*` | `base/*`; other `infra/*` only downward |
+| `primitive/*` | `base/*`, `infra/*`; never another primitive |
+| `orchestration` | `base/*`, `infra/*`, `primitive/*` |
+| `command/*` | anything below; never another `command/*` |
+| erun-backend-api | `base/*`, `infra/mcpauth`, `infra/cloud` only |
+
+Until the split lands: a primitive's files never call another primitive (the
+composition goes in an orchestration-shaped file), types and config code never
+call build, deploy or release, and no new file mixes layers. depguard rules
+enforce the table once each step lands.
+
 ### Platform identity: one per environment, and its form says which grant
 
 - An environment carries **one** platform identity, delivered as the single
@@ -158,7 +189,8 @@ demonstrated:
   several review acceptances remains an API design question, not an execution
   shortcut.
 - `build_failure_classifier.go` owns erun's known infrastructure failure
-  signatures (`BuildInconclusiveSignatures`). `review record-build --failed`
+  signatures (`BuildInconclusiveSignatures`: registry/network blips and a loaded
+  Docker daemon failing Testcontainers startup). `review record-build --failed`
   refuses a failure detail matching one instead of moving the review to
   FAILED: `builds.successful` cannot represent a non-verdict, so the remedy is
   to re-run the build and record that result.
@@ -166,8 +198,8 @@ demonstrated:
   `erun-backend/erun-backend-api/AGENTS.md` § "Release cadence policy".
   Do not treat drift reporting as an automated release drainer.
 - Testing is part of building. A component's Dockerfile runs its lint and
-  tests in a `test` stage the final stage consumes (`COPY --from=test`), so no
-  image exists unless they passed. An unchanged component reuses its last
+  tests in a `test` stage that a later stage consumes, so no image exists
+  unless they passed. An unchanged component reuses its last
   successful result: a fingerprint tag is written only after a successful
   `docker build`, so promoting from it (`applyIncrementalPromotion`) is reuse
   of a tested result, and a BuildKit layer-cache hit on byte-identical inputs
@@ -178,11 +210,47 @@ demonstrated:
   it RECORDED with its version.
 - `dockerfileDeclaresTestStage` scopes the host-network entitlement to
   Dockerfiles with a `test` stage. Keep the stage name exact (`AS test`, not a
-  `test-` prefix); `build_test_stage_test.go` and
-  `dockerfile_copy_contract_test.go` pin that the erun-cli and
-  erun-backend-api Dockerfiles consume their test stage. A component's test
-  stage only calls the module's own commands (`go tool golangci-lint run`,
-  `go test`); it holds no test logic of its own.
+  `test-` prefix). A declared `test` stage must be consumed by a later stage
+  (`FROM test`, `COPY`/`ADD --from=test`, or `RUN --mount=...from=test`):
+  `checkDockerfileTestStageConsumed` (`build_order.go`) refuses one that is not
+  when the build spec resolves (`newDockerBuildSpec`), so `erun build`, `erun
+  push` and a component deploy's build all refuse it before anything builds.
+  erun does not trace which stages the final image reaches; the repository's
+  own stricter shape (runtime copies only from `test` or stages `FROM test`) is
+  pinned by `dockerfile_copy_contract_test.go`, not imposed on tenants.
+  `build_component_boundary_test.go` locks the consumer forms and the refusal.
+- After each successful real build, every component reports one outcome line,
+  `<component>: test: passed`, `test: reused (fingerprint fp-<hash>)` or
+  `test: none declared` (`dockerBuildTestOutcome`), keeping a fresh run
+  distinct from a promotion. A promote that falls back to a rebuild reports
+  `passed`; failed builds and dry runs report nothing. Never collapse those
+  outcomes into one.
+- A Linux package component keeps no image to promote, so a plain build
+  records its pass in `~/.erun/package-tests/<name>.json`, keyed by a
+  fingerprint of the stages that ran (same hashing as images) and the platform
+  the docker daemon builds for (`docker version`, asked once per build; never
+  the host's CPU, which a remote `DOCKER_HOST` need not share), and the next
+  plain build with that fingerprint reports `test: reused`
+  (`linux_package_reuse.go`). A package with only a `build` stage reports
+  `test: none declared` on every build, reused or not. An unreadable daemon
+  platform reuses and records nothing. Only a successful real build records;
+  `--release` never reuses and `--no-incremental` neither reuses nor records.
+- `checkNotE2ESuiteDockerfile` refuses a Dockerfile under `*-devops/e2e/` for
+  build and push, pointing at `erun e2e --component <suite>`; project-wide
+  discovery walks only `docker/` and never reaches it. An e2e suite must never
+  be fingerprinted, promoted or pushed.
+- `RunE2E` (`e2e.go`, discovery in `e2e_discovery.go`) runs each
+  `<tenant>-devops/e2e/<suite>/Dockerfile` as `docker build --target e2e
+  --no-cache-filter e2e --output type=cacheonly` from the project root, with
+  `ERUN_E2E_VERSION`, `ERUN_E2E_BASE_URL` and `ERUN_E2E_URL_<SERVICE>` build
+  args and the `e2e.secrets` list. Keep those secrets separate from
+  `docker.secrets`, which reach every component build. Build, deploy, release
+  and the merge gate must never call it; it reports a failure bug-ready and
+  files nothing. The contract is `erun-docs/docs/agent-reference/dockerfile-stages.md`
+  § "The `e2e` stage"; the CLI goldens under `erun-integration/testdata/e2e/`
+  lock it.
+- A component's test stage only calls the module's own commands (`go tool
+  golangci-lint run`, `go test`); it holds no test logic of its own.
 - Long validation inside an agent pod runs as a detached `erun exec job start`
   awaited with bounded `job await` calls (root § "One Agent Job Is One Run").
   A wait expiring is the caller's own deadline, never the job's outcome: read
@@ -404,8 +472,13 @@ yet, and should not be assumed to hold until it has.
 ## Validation
 
 - After Go changes run `go tool golangci-lint run` and
-  `go test -count=1 -race ./...`. The erun-cli image's test stage runs both;
+  `go test -count=1 -race ./...`. The erun-devops image's `cli-test` stage runs both;
   race coverage is essential for leases, job supervisors, and workspace sync.
+- While iterating, use plain `go build` / `go test -run` on the package you
+  touched. `-race` and the darwin/windows cross-builds each compile a separate
+  copy of this package into the Go build cache; leave them to `erun build`, whose
+  `cli-test` stage runs both. Go evicts a cache entry only after 5 days unused and
+  has no size cap, so the cache grows with every edit; `erun trim-cache` caps it.
 - Exercise binary-reachable behavior through integration scenarios; remove unit
   tests duplicating those scenarios. Keep focused tests for otherwise unreachable
   behavior and concurrency. See `erun-integration/AGENTS.md` § "Known integration

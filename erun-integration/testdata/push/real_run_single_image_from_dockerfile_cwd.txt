@@ -3,6 +3,7 @@ audit: erun push --version <VERSION>
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/cwd:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/cwd:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cwd: test: none declared
 ==> Pushed in <ELAPSED>
 step timing (ordered by duration):
   push [<ELAPSED>]

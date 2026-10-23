@@ -32,8 +32,8 @@ import (
 // GatewayBaseURLEnv is the container environment variable the runtime chart
 // renders once a gateway is configured for the environment. Its presence is the
 // pod-side signal that the deployed template consumed the gateway values; the
-// image's own config relay keys off the same variable (initialize_claude_config
-// computes configureGateway from it), so there is no separate flag to add here.
+// runtime boot's settings relay keys off the same variable
+// (newClaudeSettingsRelay), so there is no separate flag to add here.
 const GatewayBaseURLEnv = "ANTHROPIC_BASE_URL"
 
 // RuntimeAgentCredentialState is the resolved verdict on whether an

@@ -766,6 +766,8 @@ type ProjectConfig struct {
 	// docker/k8s root (e.g. harnesses/<name>/{docker,k8s}). Empty keeps paths: as
 	// the project's only root. See project_components_config.go for selection.
 	Components map[string]ProjectPathsConfig `yaml:"components,omitempty"`
+	// E2E holds erun e2e's own settings; see ProjectE2EConfig.
+	E2E ProjectE2EConfig `yaml:"e2e,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given

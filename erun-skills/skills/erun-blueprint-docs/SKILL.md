@@ -7,7 +7,7 @@ description: Scaffold a product documentation site following ERun's blueprint �
 
 Produce a product documentation site following ERun's blueprint — the
 same shape `erun-docs` captures: a Docusaurus 3.x static site published
-to **Cloudflare Pages** by a two-stage container image run as a
+to **Cloudflare Pages** by a container image run as a
 Kubernetes **Job** (a Helm `post-install,post-upgrade` hook), with the
 deploy chart living under `erun-devops/k8s/<name>-docs/`.
 
@@ -67,7 +67,7 @@ Ask once, then proceed. Do not invent these.
 └── erun-devops/
     ├── docker/<module-name>/
     │   ├── Dockerfile                      # build site → wrangler image
-    │   └── entrypoint.sh                   # wrangler pages deploy $SITE_DIR
+    │   └── entrypoint.sh                   # wrangler pages project create + deploy
     └── k8s/<module-name>/
         ├── Chart.yaml
         ├── values.local.yaml               # agent-env overlay (docs.enabled: false)
@@ -91,10 +91,13 @@ This is the load-bearing part of the blueprint. It mirrors
   container image, then a Job pushes it to Cloudflare Pages. There is no
   in-cluster Service, Ingress, or Deployment. Cloudflare Pages owns CDN,
   TLS, the custom domain, and per-deploy preview URLs.
-- **Two-stage image.** Stage 1 (`node:20-alpine`) runs
+- **`build` → `test` → `runtime` image.** `build` (`node:20-alpine`) runs
   `yarn install --frozen-lockfile` then `yarn build` to produce
-  `/build`. Stage 2 installs a pinned `wrangler` and bakes the built
-  site at `$SITE_DIR=/site`. The entrypoint ensures the Direct-Upload
+  `/build`; `test` (`FROM build`) runs the site's own `yarn typecheck`;
+  `runtime` installs a pinned `wrangler` and copies the built site from
+  `test` to `$SITE_DIR=/site`. Copying from `test`, never `build`, is what
+  makes BuildKit run the checks, and `erun build` refuses a `test` stage
+  nothing uses (see `erun-docs/docs/agent-reference/dockerfile-stages.md`). The entrypoint ensures the Direct-Upload
   Pages project exists (`wrangler pages project create`, tolerating
   "already exists") then runs
   `wrangler pages deploy "$SITE_DIR" --project-name="$CF_PAGES_PROJECT" --branch="$CF_PAGES_BRANCH" --commit-dirty=true`.

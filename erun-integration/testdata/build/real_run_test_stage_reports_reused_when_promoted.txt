@@ -1,0 +1,24 @@
+audit: erun build
+==> Building
+build: docker root free disk space is not observable from this process (docker reported no root directory); skipping the headroom check
+test-stage daemon endpoint <LOOPBACK>:2375: nothing answers, forwarding this build's daemon there
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+api: test: reused (fingerprint fp-<HEX16>)
+base: test: none declared
+==> Packaging api <VERSION>
+==> Packaging base <VERSION>
+==> Built in <ELAPSED>
+step timing (ordered by duration):
+  build [<ELAPSED>]
+    api (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+    base (cache hit) [<ELAPSED>]
+      linux/amd64 (cache hit) [<ELAPSED>]
+      linux/arm64 (cache hit) [<ELAPSED>]
+timing record written to <TMP>

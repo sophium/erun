@@ -30,9 +30,11 @@ stage: publish
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
 promoting from cached fingerprint image: ghcr.io/sophium/api:<VERSION>
+api: test: none declared
 fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
 promoting from cached fingerprint image: ghcr.io/sophium/base:<VERSION>
+base: test: none declared
 ==> Publishing api <VERSION> to oci://ghcr.io/sophium/charts
 ==> Verified published chart api <VERSION>
 ==> Publishing base <VERSION> to oci://ghcr.io/sophium/charts
@@ -52,6 +54,7 @@ To <TMP>
  + <SHORTSHA>...<SHORTSHA> <VERSION> -> <VERSION> (forced update)
 To <TMP>
    <SHORTSHA>..<SHORTSHA>  main -> main
+stage: upload-linux-packages
 release version: <VERSION>
 ==> Built in <ELAPSED>
 step timing (ordered by duration):
@@ -66,6 +69,8 @@ step timing (ordered by duration):
         linux/arm64 (cache hit) [<ELAPSED>]
       chart api [<ELAPSED>]
       chart base [<ELAPSED>]
+      erun-cli linux/amd64 [<ELAPSED>]
+      erun-cli linux/arm64 [<ELAPSED>]
     push [<ELAPSED>]
     release [<ELAPSED>]
     sync-remote [<ELAPSED>]

@@ -70,7 +70,7 @@ const (
 )
 
 // DefaultRuntimeDindCPU/Memory size the erun-dind sidecar's own resource
-// limits (erun-devops/k8s/erun-devops/templates/service.yaml). Until #1061 the
+// limits (erun-devops/k8s/erun-devops/templates/service.yaml). Originally the
 // sidecar declared no resources of its own, so a namespace ResourceQuota's
 // LimitRange silently defaulted it to the *entire* configured quota width
 // (namespaceResourceQuotaManifest in kubernetes_resource_quota.go) — doubling
@@ -91,7 +91,7 @@ const (
 // overrides DefaultRuntimePodCPU/Memory.
 //
 // Note the two axes are not in the same state. CPU *is* now a real ceiling on
-// build work: dind-entrypoint.sh mirrors the sidecar's own kubelet-enforced
+// build work: `erun dind-entrypoint` mirrors the sidecar's own kubelet-enforced
 // cpu.max into a dedicated /docker/erun-build-cpu-cap-<pod> cgroup, and
 // buildContainerCPUCapCgroupParent has every `docker build` nest its
 // RUN-instruction containers there via `--cgroup-parent`, so the

@@ -178,6 +178,10 @@ func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot
 		}
 	}
 
+	if err := checkImageDockerfile(buildContext.DockerfilePath); err != nil {
+		return DockerBuildSpec{}, err
+	}
+
 	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot, selectedComponent)
 	if err != nil {
 		return DockerBuildSpec{}, err
@@ -210,6 +214,18 @@ func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot
 	}
 	build.CgroupParent = buildContainerCPUCapCgroupParent()
 	return build, nil
+}
+
+// checkImageDockerfile refuses a Dockerfile that is not an image component's:
+// an e2e suite, a linux package, or one whose test stage nothing consumes.
+func checkImageDockerfile(dockerfilePath string) error {
+	if err := checkNotE2ESuiteDockerfile(dockerfilePath); err != nil {
+		return err
+	}
+	if err := checkNotLinuxPackageDockerfile(dockerfilePath); err != nil {
+		return err
+	}
+	return checkDockerfileTestStageConsumed(dockerfilePath)
 }
 
 func (b DockerBuildSpec) traceCommands() []commandSpec {

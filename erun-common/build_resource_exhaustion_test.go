@@ -42,7 +42,7 @@ internal/provision/awssdk.go:18:2: could not import github.com/aws/aws-sdk-go-v2
 * typecheck: 1
 lint failed in: erun-backend/erun-backend-api
 ... 25 lines later ...
-ERROR: failed to solve: ResourceExhausted: process "/bin/sh -c make check && touch /test-ok" did not complete successfully: cannot allocate memory`
+ERROR: failed to solve: ResourceExhausted: process "/bin/sh -c make check" did not complete successfully: cannot allocate memory`
 
 	getenvOffPod := func(string) string { return "" }
 	diagnosis, ok := dockerBuildResourceExhaustionDiagnosisWithRunner(output, errExitedNormally, getenvOffPod, nil)
@@ -79,7 +79,7 @@ func TestDockerBuildResourceExhaustionDiagnosisDeclinesWhenSignalKilledIsTheCode
 #68 96.59 >> running integration suite (cover dir: /tmp/erun-integration-cover.PPczQS, parallel: 8) [92s]
 #68 96.74 make[1]: *** [Makefile:617: integration-test-gate] Error 1
 #68 96.74 make: *** [Makefile:674: check] Error 2
-#68 ERROR: process "/bin/sh -c make check && touch /test-ok" did not complete successfully: exit code: 2`
+#68 ERROR: process "/bin/sh -c make check" did not complete successfully: exit code: 2`
 
 	diagnosis, ok := dockerBuildResourceExhaustionDiagnosisWithRunner(output, errExitedNormally, func(string) string { return "" }, nil)
 	if ok {
@@ -93,7 +93,7 @@ func TestDockerBuildResourceExhaustionDiagnosisDeclinesWhenSignalKilledIsTheCode
 // exited normally did not run out of memory.
 func TestDockerBuildResourceExhaustionDiagnosisDeclinesWhenAMemoryMarkerIsTheCodesOwnOutput(t *testing.T) {
 	output := `#68 12.34 client_test.go:40: got code = ResourceExhausted, want OK; cannot allocate memory in test fixture
-#68 ERROR: process "/bin/sh -c make check && touch /test-ok" did not complete successfully: exit code: 2`
+#68 ERROR: process "/bin/sh -c make check" did not complete successfully: exit code: 2`
 
 	if diagnosis, ok := dockerBuildResourceExhaustionDiagnosisWithRunner(output, errExitedNormally, func(string) string { return "" }, nil); ok {
 		t.Fatalf("diagnosis = %q, want the classifier to decline: the step's own output is not BuildKit's word for a memory fault", diagnosis)
@@ -106,7 +106,7 @@ func TestDockerBuildResourceExhaustionDiagnosisDeclinesWhenAMemoryMarkerIsTheCod
 // 137) rather than returning a status of its own choosing.
 func TestDockerBuildResourceExhaustionDiagnosisTrustsBuildKitReportingASignalledStep(t *testing.T) {
 	output := `#12 30.10 /usr/local/go/pkg/tool/linux_amd64/compile: signal: killed
-#12 ERROR: process "/bin/sh -c make check && touch /test-ok" did not complete successfully: exit code: 137`
+#12 ERROR: process "/bin/sh -c make check" did not complete successfully: exit code: 137`
 
 	diagnosis, ok := dockerBuildResourceExhaustionDiagnosisWithRunner(output, errExitedNormally, func(string) string { return "" }, nil)
 	if !ok {
@@ -185,7 +185,7 @@ const gateFailureLogWithSelfCancelledTest = `cat <<'EOF'
 #68 96.59 >> running integration suite (cover dir: /tmp/erun-integration-cover.PPczQS, parallel: 8) [92s]
 #68 96.74 make[1]: *** [Makefile:617: integration-test-gate] Error 1
 #68 96.74 make: *** [Makefile:674: check] Error 2
-#68 ERROR: process "/bin/sh -c make check && touch /test-ok" did not complete successfully: exit code: 2
+#68 ERROR: process "/bin/sh -c make check" did not complete successfully: exit code: 2
 EOF
 exit 2`
 

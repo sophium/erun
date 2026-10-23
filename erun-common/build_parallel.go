@@ -196,6 +196,11 @@ func runBuildDependencies(ctx Context, builds []DockerBuildSpec, dependencies ma
 
 	dispatch := newBuildDispatch(ctx, builds, dependencies, build, jobs)
 	dispatch.run()
+	for i, buildInput := range builds {
+		if dispatch.outcomes[i] != "" {
+			reportDockerBuildTestOutcome(ctx, buildInput, dispatch.outcomes[i])
+		}
+	}
 	return dispatch.firstFailure()
 }
 
@@ -214,6 +219,9 @@ type buildDispatch struct {
 	// closes, so a dependent reads it through the close with no further locking.
 	finished []chan struct{}
 	failures []error
+	// outcomes[i] is image i's test outcome, set only when it built; it is
+	// reported after the run, in build order.
+	outcomes []string
 	running  sync.WaitGroup
 }
 
@@ -227,6 +235,7 @@ func newBuildDispatch(ctx Context, builds []DockerBuildSpec, dependencies map[st
 		slots:       make(chan struct{}, jobs),
 		finished:    make([]chan struct{}, len(builds)),
 		failures:    make([]error, len(builds)),
+		outcomes:    make([]string, len(builds)),
 	}
 	for i := range dispatch.finished {
 		dispatch.finished[i] = make(chan struct{})
@@ -290,7 +299,11 @@ func (d *buildDispatch) buildImage(index int) {
 	}
 	d.slots <- struct{}{}
 	defer func() { <-d.slots }()
-	d.failures[index] = executeDockerBuild(d.ctx, d.builds[index], d.build, d.output.stdoutWriter(index), d.output.stderrWriter(index))
+	outcome, err := runDockerBuildStep(d.ctx, d.builds[index], d.build, d.output.stdoutWriter(index), d.output.stderrWriter(index))
+	if err == nil {
+		d.outcomes[index] = outcome
+	}
+	d.failures[index] = err
 }
 
 // baseFailed waits for every base this image FROMs and reports whether one of

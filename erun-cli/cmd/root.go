@@ -187,11 +187,16 @@ func (d rootDependencies) commands() []*cobra.Command {
 		newIdleCmd(d.configStore, d.resolveOpen),
 		newWhipCmd(d.configStore, d.resolveOpen),
 		deprecatedTopLevelJobCmd(d.resolveOpen),
-		newReleaseCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.BuildScriptRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
+		newReleaseCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.GitCommandRunner, common.DockerImageBuilder, d.dockerRegistryLogin, runSelect, d.push),
 		newVersionCmd(func() (versionCommandInfo, error) {
 			return resolveVersionCommandBuildInfo(common.FindProjectRoot)
 		}, common.ResolveDefaultRuntimeRegistryVersions),
 		newActivityCmd(d.configStore, d.resolveOpen),
+		newAdoptWorktreeCmd(),
+		newDindEntrypointCmd(),
+		newRuntimeInitCmd(),
+		newTrimCacheCmd(),
+		newInstallSkillsCmd(),
 	}
 }
 

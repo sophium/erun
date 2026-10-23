@@ -6,11 +6,11 @@ import (
 )
 
 // build_failure_classifier.go holds erun's own known infrastructure failure
-// signatures -- a registry or the network giving up, never a verdict about the
-// change under test. A failed build whose failure detail names one is not
-// recorded against a review: `builds.successful` is a plain boolean with no
-// non-verdict, so recording it would move the review to FAILED for a
-// network or registry blip.
+// signatures -- a registry, the network, or the Docker daemon giving up, never
+// a verdict about the change under test. A failed build whose failure detail
+// names one is not recorded against a review: `builds.successful` is a plain
+// boolean with no non-verdict, so recording it would move the review to FAILED
+// for a network, registry, or daemon blip.
 
 // buildInconclusiveSignatures are BuildKit's own clauses for a base image
 // pull that never even resolved, e.g. "failed to solve: failed to resolve
@@ -19,10 +19,19 @@ import (
 // net/http: TLS handshake timeout" -- any one clause below is sufficient on
 // its own, since each already names a transport or registry failure rather
 // than anything about the code under test.
+//
+// The last two are a loaded Docker daemon failing a test stage's
+// Testcontainers startup before any test ran, e.g. "reaper: new reaper: wait
+// for reaper 1a2b3c4d: unexpected container status \"created\"". Both are
+// tied to the Testcontainers reaper: a bare "failed to create network" is not a
+// signature, because a test that creates its own network can fail with it for
+// a reason of its own, such as a subnet overlapping an existing one.
 var buildInconclusiveSignatures = []string{
 	"failed to resolve source metadata",
 	"failed to fetch oauth token",
 	"tls handshake timeout",
+	"wait for reaper",
+	"reaper:",
 }
 
 // BuildInconclusiveSignatures returns a copy of erun's own known
@@ -63,7 +72,7 @@ func ensureNotKnownInfrastructureBuildFailure(successful bool, failureDetail str
 	}
 	return fmt.Errorf(
 		"refusing to record a failed build: --failure-detail %q matches a known erun infrastructure "+
-			"failure signature (%q) -- this is a statement about the network or registry, not the change; "+
+			"failure signature (%q) -- this is a statement about the network, registry, or Docker daemon, not the change; "+
 			"re-run the build once the signature clears and record that result instead",
 		failureDetail, signature)
 }

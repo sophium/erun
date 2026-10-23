@@ -29,7 +29,7 @@ func ResolveCurrentDockerBuildSpecs(ctx Context, store DockerStore, findProjectR
 }
 
 // ErrBuildPlanEmpty reports a build that resolved no work at all: no docker
-// images, no linux package builds, no project build script, no charts, no
+// images, no linux packages, no project build script, no charts, no
 // release. Nothing about such a plan is a result -- running it builds nothing
 // and tests nothing -- so both the resolution and execution boundaries refuse it
 // rather than letting the caller's exit code read as a successful build.
@@ -58,7 +58,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
 	}
 
-	linuxBuilds, hadLinuxBuilds, err := resolveLinuxBuildsForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
+	linuxPackages, err := resolveLinuxPackagesForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
@@ -68,11 +68,11 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		return BuildExecutionSpec{}, err
 	}
 
-	if buildExecutionHasNoBuilds(linuxBuilds, builds, releaseSpec) {
-		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target, hadLinuxBuilds)
+	if buildExecutionHasNoBuilds(linuxPackages, builds, releaseSpec) {
+		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target)
 	}
 
-	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
+	execution := BuildExecutionSpec{linuxPackages: linuxPackages, dockerBuilds: builds}
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
@@ -85,7 +85,7 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 func buildExecutionPlansWork(execution BuildExecutionSpec) bool {
 	return execution.release != nil ||
 		execution.script != nil ||
-		len(execution.linuxBuilds) > 0 ||
+		len(execution.linuxPackages) > 0 ||
 		len(execution.dockerBuilds) > 0 ||
 		len(execution.dockerPushes) > 0 ||
 		len(execution.componentCharts) > 0
@@ -206,33 +206,41 @@ func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, tar
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxBuilds []scriptSpec, builds []DockerBuildSpec, releaseSpec *ReleaseSpec) bool {
-	return len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil
+func buildExecutionHasNoBuilds(linuxPackages []LinuxPackageSpec, builds []DockerBuildSpec, releaseSpec *ReleaseSpec) bool {
+	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
-func resolveLinuxBuildsForExecution(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, releaseSpec *ReleaseSpec) ([]scriptSpec, bool, error) {
+// resolveLinuxPackagesForExecution resolves the linux packages a plain build
+// tests, and which of them reuse a recorded pass (none with --no-incremental,
+// which also records none). A release resolves its own from the release root instead (see
+// discoverReleaseLinuxPackages), because it exports them rather than testing
+// them.
+func resolveLinuxPackagesForExecution(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, releaseSpec *ReleaseSpec) ([]LinuxPackageSpec, error) {
 	if releaseSpec != nil {
-		return nil, false, nil
+		return nil, nil
 	}
-	linuxBuilds, err := ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
-	if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
-		return nil, false, err
+	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	if errors.Is(err, ErrLinuxPackageBuildNotFound) {
+		return nil, nil
 	}
-	hadLinuxBuilds := len(linuxBuilds) > 0
-	if hadLinuxBuilds && !LinuxPackageBuildsSupported() {
-		return nil, true, nil
+	if err != nil {
+		return nil, err
 	}
-	return linuxBuilds, hadLinuxBuilds, nil
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	packages := newLinuxPackageSpecs(projectRoot, contexts)
+	if err := checkLinuxPackagesBuildable(packages); err != nil {
+		return nil, err
+	}
+	if target.NoIncremental {
+		return packages, nil
+	}
+	return applyLinuxPackageReuse(packages), nil
 }
 
-func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget, hadLinuxBuilds bool) (BuildExecutionSpec, error) {
-	if hadLinuxBuilds {
-		// The project does have linux package builds, but this host cannot run
-		// them and nothing else resolved either. Exiting zero here is the same
-		// false green as an empty image plan: the host was asked to build and
-		// built nothing. Name the cause instead of reporting success.
-		return BuildExecutionSpec{}, newEmptyBuildPlanError("this project's linux package builds need a Linux host with dpkg-deb, and no docker images resolved")
-	}
+func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err

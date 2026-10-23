@@ -1,0 +1,13 @@
+audit: erun runtime-init --dry-run
+runtime-init: ssh permissions: restore private modes under <TMP>
+runtime-init: outputs directory: create <TMP>
+runtime-init: git safe directory: mark <TMP> as a git safe.directory
+runtime-init: sshd: start sshd on <LOOPBACK>:17023 behind the activity ssh-proxy on <VERSION>.0:17022
+runtime-init: environment monitor: sample resident activity every 30s and stop the cloud host once the idle policy fires
+runtime-init: go build cache bound: bound the go build cache at <TMP> to 8589934592 bytes now and every 30m0s
+runtime-init: release link: link <TMP> to /opt/erun/release when the image bakes one
+runtime-init: erun config: write the erun config for team/dev under <TMP>
+runtime-init: agent configuration: configure Codex (<TMP> and Claude Code (<TMP> instructions, skills from /etc/erun/skills, agents from /etc/erun/agents, the erun MCP server at http://<LOOPBACK>:17000/mcp
+runtime-init: shell hook: write <TMP> and source it from <TMP> <TMP>
+runtime-init: MCP edge: serve the MCP edge, restarting it whenever it exits: emcp --host <VERSION>.0 --port 17000 --path /mcp --metrics-host <VERSION>.0 --metrics-port 9100 --metrics-enabled=true --tenant team --environment dev --repo-path <TMP> --kubernetes-context in-cluster
+runtime-init: serve until the container is stopped, reaping orphans and forwarding termination signals

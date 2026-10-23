@@ -5,21 +5,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
-// consumedTestStageDockerfileContent is a Dockerfile whose final image is only
-// produced once its `test` stage passed: the builder copies the stage's marker.
+// consumedTestStageDockerfileContent is the repository's component shape:
+// build -> test -> dist -> runtime. The `runtime` image takes its artifact from
+// `dist`, which is built FROM test, so the image is only produced once the
+// tests passed, and a version stamp in `dist` leaves `test` cached.
 const consumedTestStageDockerfileContent = "" +
-	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test\n" +
-	"RUN make check && touch /test-ok\n" +
+	"FROM --platform=$BUILDPLATFORM golang:1.26.0 AS build\n" +
+	"RUN go build -o /out/app ./...\n" +
 	"\n" +
-	"FROM golang:1.26.0 AS builder\n" +
-	"COPY --from=test /test-ok /tmp/erun-test-ok\n" +
-	"RUN go build ./...\n"
+	"FROM build AS test\n" +
+	"RUN go test ./...\n" +
+	"\n" +
+	"FROM test AS dist\n" +
+	"ARG TARGETARCH\n" +
+	"RUN GOARCH=$TARGETARCH go build -o /dist/app ./...\n" +
+	"\n" +
+	"FROM scratch AS runtime\n" +
+	"COPY --from=dist /dist/app /app\n"
 
 func writeTestDockerfile(t *testing.T, dir, content string) string {
 	t.Helper()
@@ -33,25 +40,10 @@ func writeTestDockerfile(t *testing.T, dir, content string) string {
 	return path
 }
 
-var dockerfileCopyFromTestPattern = regexp.MustCompile(`(?im)^\s*COPY\s+--from=test(?:\s|$)`)
-
-// dockerfileHasConsumedTestStage reports whether a Dockerfile declares a
-// `test` stage that a later stage consumes via `COPY --from=test`, which is
-// what makes BuildKit run the tests as part of building the image: no image is
-// produced when they fail. It is a structural contract the Dockerfile tests
-// pin, not a build decision.
-func dockerfileHasConsumedTestStage(dockerfilePath string) bool {
-	data, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return false
-	}
-	return dockerfileTestStagePattern.Match(data) && dockerfileCopyFromTestPattern.Match(data)
-}
-
-func TestDockerfileHasConsumedTestStageDetectsTheMarkerConvention(t *testing.T) {
+func TestDockerfileHasConsumedTestStageDetectsTheComponentShape(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), consumedTestStageDockerfileContent)
 	if !dockerfileHasConsumedTestStage(path) {
-		t.Fatal("expected a Dockerfile with AS test + COPY --from=test to be detected as consuming its test stage")
+		t.Fatal("expected a Dockerfile whose dist stage is built FROM test to be detected as consuming its test stage")
 	}
 }
 
@@ -62,10 +54,9 @@ func TestDockerfileHasConsumedTestStageIgnoresOrdinaryDockerfiles(t *testing.T) 
 	}
 }
 
-// A stage merely *prefixed* with `test` is a different stage, and the
-// erun-backend-api Dockerfile carries exactly such a stage beside its real one.
-// Reading it as a test stage would grant the build the host-network
-// entitlement for nothing.
+// A stage merely *prefixed* with `test` is a different stage: naming a stage
+// after the toolchain it installs is ordinary. Reading it as a test stage would
+// grant the build the host-network entitlement for nothing.
 func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T) {
 	path := writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20 AS test-toolchain\nRUN apk add curl\n\n"+
 		"FROM golang:1.26.0 AS builder\nCOPY --from=test-toolchain /usr/bin/curl /usr/bin/curl\n")
@@ -83,7 +74,7 @@ func TestDockerfileTestStagePredicatesIgnoreATestPrefixedStageName(t *testing.T)
 func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) {
 	declared := writeTestDockerfile(t, t.TempDir(), "FROM golang:1.26.0 AS test\nRUN make check\n\nFROM scratch\nCOPY . /app\n")
 	if dockerfileHasConsumedTestStage(declared) {
-		t.Fatal("a test stage with no COPY --from=test dependent was read as consumed")
+		t.Fatal("a test stage with no FROM test or COPY --from=test dependent was read as consumed")
 	}
 	if !dockerfileDeclaresTestStage(declared) {
 		t.Fatal("expected a Dockerfile declaring AS test to be detected as declaring a test stage even when no later stage consumes it")
@@ -94,19 +85,20 @@ func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) 
 	}
 }
 
-// TestRealCLIDockerfileStillConsumesItsTestStage pins the real artefact the
-// synthetic cases only model: the erun-cli image must be produced only once
-// its test stage has passed, so a successful build of it -- and the fp tag
-// written after one -- means its tests ran and passed.
+// TestRealDevopsDockerfileStillConsumesItsTestStage pins the real artefact the
+// synthetic cases only model: the erun-devops image, which ships erun and
+// emcp, must be produced only once its test stage has passed, so a successful
+// build of it -- and the fp tag written after one -- means its tests ran and
+// passed.
 //
 // Reads a sibling module, so it must run uncached (go test -count=1).
-func TestRealCLIDockerfileStillConsumesItsTestStage(t *testing.T) {
-	const path = "../erun-devops/docker/erun-cli/Dockerfile"
+func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
+	const path = "../erun-devops/docker/erun-devops/Dockerfile"
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("the erun-cli Dockerfile is not readable at %s: %v", path, err)
+		t.Fatalf("the erun-devops Dockerfile is not readable at %s: %v", path, err)
 	}
 	if !dockerfileHasConsumedTestStage(path) {
-		t.Fatalf("%s no longer declares a stage `AS test` consumed by a later `COPY --from=test`, so its image would build and publish with its tests never run", path)
+		t.Fatalf("%s no longer declares a stage `AS test` that a later stage consumes (`FROM test` or `COPY --from=test`), so its image would build and publish with its tests never run", path)
 	}
 }
 

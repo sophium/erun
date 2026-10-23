@@ -1,0 +1,2 @@
+audit: erun e2e --dry-run
+erun e2e: <TMP> is a host-run Playwright suite, which erun e2e no longer runs: move each suite to <tenant>-devops/e2e/<component>/Dockerfile, whose `AS e2e` stage installs the suite's dependencies and runs it (for example `npx playwright test`) against the ERUN_E2E_BASE_URL build arg

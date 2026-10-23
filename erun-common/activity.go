@@ -551,11 +551,10 @@ func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, 
 // at the console, and only that. "ssh" is unambiguous — no agent job opens an
 // interactive shell into its own pod as part of normal work. "codex" and
 // "process" were deliberately left out despite naming an AI session, because
-// they are not unambiguous the way the issue's description assumed: the
-// codex-wrapper touches the "codex" marker for *any* invocation of the
-// codex/claude binaries, including the one a detached orchestrator job starts
-// (job_agent.go execs the same wrapped "claude"/"codex" on PATH), and the
-// resident sampler's "process" marker fires for that same resident process.
+// they are not unambiguous: the "codex" marker names any invocation of the AI
+// tools, including the one a detached orchestrator job starts (job_agent.go
+// execs the same "claude"/"codex" on PATH), and the resident sampler's
+// "process" marker fires for that same resident process.
 // Both are environment-wide, not scoped to a worktree, so gating on either
 // would make an orchestrator refuse itself, and would make a second
 // legitimate job in a *different* clone of the same pod refuse against the

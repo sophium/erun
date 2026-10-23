@@ -133,16 +133,8 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ignored, err := loadContextIgnoreSet(contextDir, sources)
-	if err != nil {
-		return "", err
-	}
 	hasher := sha256.New()
-	files, err := collectFingerprintFiles(contextDir, sources, ignored)
-	if err != nil {
-		return "", err
-	}
-	if err := hashFingerprintFiles(hasher, contextDir, files); err != nil {
+	if err := hashContextSourcesInto(hasher, contextDir, sources); err != nil {
 		return "", err
 	}
 	if err := hashComponentChartInto(hasher, buildInput); err != nil {
@@ -153,6 +145,21 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	}
 	digest := hex.EncodeToString(hasher.Sum(nil))
 	return digest[:16], nil
+}
+
+// hashContextSourcesInto hashes every file the sources name in the context,
+// less what the context's ignore files exclude: the same input set for an
+// image and for a linux package component.
+func hashContextSourcesInto(hasher io.Writer, contextDir string, sources []string) error {
+	ignored, err := loadContextIgnoreSet(contextDir, sources)
+	if err != nil {
+		return err
+	}
+	files, err := collectFingerprintFiles(contextDir, sources, ignored)
+	if err != nil {
+		return err
+	}
+	return hashFingerprintFiles(hasher, contextDir, files)
 }
 
 // hashFingerprintFiles separates entries with a NUL byte so distinct file lists

@@ -114,8 +114,11 @@ type ReleaseSpec struct {
 	DockerImages      []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
 	Stages            []ReleaseStage           `json:"stages,omitempty"`
 	PostPublishStages []ReleaseStage           `json:"postPublishStages,omitempty"`
-	LinuxReleases     []scriptSpec
-	SkippedLinux      bool `json:"-"`
+	// LinuxPackages are the linux package components the release exports
+	// (their `dist` stage, every release platform) into LinuxPackageDir during
+	// the publish, and attaches to the GitHub release once the tag is public.
+	LinuxPackages   []LinuxPackageSpec `json:"linuxPackages,omitempty"`
+	LinuxPackageDir string             `json:"linuxPackageDir,omitempty"`
 
 	// ArtifactsPublished records that this run built, pushed and verified the
 	// version's images and charts, so the push-stage failures that come after
@@ -143,8 +146,7 @@ type releaseArtifacts struct {
 	Images        []ReleaseDockerImageSpec
 	FileUpdates   []ReleaseFileUpdate
 	PackagingSync *ReleasePackagingSyncSpec
-	LinuxReleases []scriptSpec
-	SkippedLinux  bool
+	LinuxPackages []LinuxPackageSpec
 }
 
 func ResolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
@@ -182,8 +184,8 @@ func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProj
 		DockerImages:      artifacts.Images,
 		Stages:            stages,
 		PostPublishStages: postPublishStages,
-		LinuxReleases:     artifacts.LinuxReleases,
-		SkippedLinux:      artifacts.SkippedLinux,
+		LinuxPackages:     artifacts.LinuxPackages,
+		LinuxPackageDir:   linuxPackageDirForRelease(inputs, artifacts.LinuxPackages),
 	}, nil
 }
 
@@ -225,7 +227,7 @@ func traceReleaseUmbrella(ctx Context, version string) (Context, func(*error)) {
 	}
 }
 
-func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	if runGit == nil {
 		runGit = GitCommandRunner
 	}
@@ -239,7 +241,7 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 	defer release()
 
-	return runClaimedReleaseSpec(ctx, spec, runGit, runScript, syncPackagingChecksums, publisher)
+	return runClaimedReleaseSpec(ctx, spec, runGit, syncPackagingChecksums, publisher)
 }
 
 // RunReleaseSpec marks a release in source control and nothing else. It
@@ -255,8 +257,8 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 // corruption: a tag whose artifacts never landed names a dead version, and
 // because `erun deploy` never builds, a dead version is not deployable by
 // accident. If the release's source is wrong, fix it and release again.
-func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
-	return runReleaseSpec(ctx, spec, runGit, runScript, nil, nil)
+func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+	return runReleaseSpec(ctx, spec, runGit, nil, nil)
 }
 
 // runClaimedReleaseSpec is the release's actual work, run only once
@@ -268,7 +270,7 @@ func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 // would not publish, the pre-spend base-branch and disk-headroom checks, and
 // the build+publish itself. That is why a release's tag is a record of the
 // source it points at and never a claim that artifacts exist for it.
-func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
 		return err
@@ -297,11 +299,17 @@ func runClaimedReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunne
 	if err := runReleaseStages(ctx, spec, spec.PostPublishStages, runGit, syncPackagingChecksums); err != nil {
 		return err
 	}
-	if spec.SkippedLinux {
-		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
-	}
+	return uploadPublishedLinuxPackages(ctx, spec, publisher)
+}
 
-	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
+// uploadPublishedLinuxPackages attaches the linux packages only for a run that
+// published, which is the run that exported them; the GitHub release they
+// attach to needs the tag the post-publish stages pushed.
+func uploadPublishedLinuxPackages(ctx Context, spec ReleaseSpec, publisher *ReleasePublisher) error {
+	if publisher == nil || publisher.Publish == nil {
+		return nil
+	}
+	return uploadReleaseLinuxPackages(ctx, spec)
 }
 
 // ensureReleaseHasDiskHeadroom runs the release's disk preflight before the
@@ -1047,12 +1055,11 @@ func discoverReleaseArtifacts(ctx Context, inputs releaseInputs) (releaseArtifac
 		return releaseArtifacts{}, err
 	}
 	artifacts.Images = images
-	linuxReleases, skippedLinux, err := discoverSupportedReleaseLinuxScripts(inputs.ReleaseRoot, inputs.Version)
+	linuxPackages, err := discoverReleaseLinuxPackages(inputs.ProjectRoot, inputs.ReleaseRoot)
 	if err != nil {
 		return releaseArtifacts{}, err
 	}
-	artifacts.LinuxReleases = linuxReleases
-	artifacts.SkippedLinux = skippedLinux
+	artifacts.LinuxPackages = linuxPackages
 	return artifacts, nil
 }
 
@@ -1130,17 +1137,6 @@ func checkScoopManifestInvariants(scoopPath string) error {
 		return fmt.Errorf("scoop manifest %s is invalid: %s", scoopPath, strings.Join(problems, "; "))
 	}
 	return nil
-}
-
-func discoverSupportedReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, bool, error) {
-	linuxReleases, err := discoverReleaseLinuxScripts(releaseRoot, version)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(linuxReleases) > 0 && !LinuxPackageBuildsSupported() {
-		return nil, true, nil
-	}
-	return linuxReleases, false, nil
 }
 
 // resolveReleaseStages splits the plan at the publish: the local commit and tag
@@ -1407,24 +1403,28 @@ func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, 
 	}, true, nil
 }
 
-func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, error) {
-	linuxDir := filepath.Join(releaseRoot, "linux")
-	contexts, err := ResolveLinuxPackageContextsAtDir(linuxDir)
+// discoverReleaseLinuxPackages resolves the linux package components under
+// <release root>/linux. Each must declare the `dist` stage a release exports.
+func discoverReleaseLinuxPackages(projectRoot, releaseRoot string) ([]LinuxPackageSpec, error) {
+	contexts, err := ResolveLinuxPackageContextsAtDir(filepath.Join(releaseRoot, "linux"))
 	if err != nil {
-		if errors.Is(err, ErrLinuxPackageBuildNotFound) || errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, ErrLinuxPackageBuildNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-
-	scripts := make([]scriptSpec, 0, len(contexts))
-	for _, context := range contexts {
-		if strings.TrimSpace(context.ReleaseScriptPath) == "" {
-			continue
-		}
-		scripts = append(scripts, newScriptSpec(context.Dir, "./release.sh", version))
+	packages := newLinuxPackageSpecs(projectRoot, contexts)
+	if err := checkLinuxPackagesReleasable(packages); err != nil {
+		return nil, err
 	}
-	return scripts, nil
+	return packages, nil
+}
+
+func linuxPackageDirForRelease(inputs releaseInputs, packages []LinuxPackageSpec) string {
+	if len(packages) == 0 {
+		return ""
+	}
+	return releaseLinuxPackageDir(inputs.ProjectRoot, inputs.Version)
 }
 
 func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, *ReleasePackagingSyncSpec, error) {

@@ -1016,15 +1016,6 @@ func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) er
 	return run(script.Dir, script.Path, script.Env, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }
 
-func runScriptSpecs(ctx Context, scripts []scriptSpec, run BuildScriptRunnerFunc) error {
-	for _, script := range scripts {
-		if err := runScriptSpec(ctx, script, run); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func buildScriptEnv(version string) []string {
 	version = strings.TrimSpace(version)
 	if version == "" {

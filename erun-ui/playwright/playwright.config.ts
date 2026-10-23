@@ -10,8 +10,8 @@ import {
 } from './fixtures/artifacts.js';
 import { backendEnv, e2eK3dEnabled, isolatedRoot } from './fixtures/seedRoot.js';
 
-// run.sh and this config share ERUN_PLAYWRIGHT_PORT so an overridden port
-// reaches both; the default stays clear of wails dev's 34115. It is the port
+// ERUN_PLAYWRIGHT_PORT overrides the preferred port for this config and the
+// worker fixture alike; the default stays clear of wails dev's 34115. It is the port
 // the one shared e2e-k3d backend is asked for; each worker in the default mode
 // prefers BASE_PORT + its own parallelIndex (see fixtures/workerBackend.ts)
 // instead of every spec sharing this one port, and serves whatever address its
@@ -25,8 +25,8 @@ const E2E_K3D = e2eK3dEnabled();
 // (fixtures/artifacts.ts owns the check and the message).
 assertArtifactDirectoriesUsable();
 
-// Resolve (and, without run.sh, create) the isolated root at config-load
-// time, before workers fork, so every process in the run agrees on the same
+// Resolve (and, unless ERUN_PLAYWRIGHT_HOME names one, create) the isolated
+// root at config-load time, before workers fork, so every process in the run agrees on the same
 // starting point. In the default parallel mode this is the PARENT directory
 // each worker mints its own subdirectory under (fixtures/workerBackend.ts —
 // one headless backend per worker, replacing the old shared singleton). In
@@ -81,10 +81,12 @@ function defaultWorkers(): number {
 const DEFAULT_WORKERS = defaultWorkers();
 
 export default defineConfig({
-  testDir: './tests',
   // The k3d e2e specs need a real cluster and the un-stubbed backend, so they
-  // must never run in the default inert mode. Excluding the dir here (not
-  // per-spec test.skip) keeps the default suite from ever collecting them.
+  // must never run in the default inert mode, and the inert specs assume stubs,
+  // so they must never run against the real-tool backend. Choosing the
+  // directory here (not per-spec test.skip) keeps each mode from ever
+  // collecting the other's specs.
+  testDir: E2E_K3D ? './tests/e2e' : './tests',
   testIgnore: E2E_K3D ? [] : ['**/tests/e2e/**'],
   globalSetup: './global-setup',
   globalTeardown: './global-teardown',

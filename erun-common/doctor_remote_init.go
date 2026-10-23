@@ -226,7 +226,7 @@ func bakedSkillsRoot(env func(string) string) string {
 			return override
 		}
 	}
-	return "/etc/erun/skills"
+	return RuntimeBakedSkillsDir
 }
 
 // inspectSkills reports whether every baked agent skill is installed into

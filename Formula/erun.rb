@@ -38,12 +38,10 @@ class Erun < Formula
     end
 
     cd "erun-ui" do
-      wails_bin = buildpath/"bin/wails"
-      wails_version = shell_output("go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2").strip
-      mkdir_p wails_bin.dirname
-      ENV["GOBIN"] = wails_bin.dirname
-      system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"
-      system wails_bin, "generate", "module"
+      # The binding generator compiles this package, whose production assets
+      # embed frontend/dist, so the directory has to exist before the bundle.
+      mkdir_p "frontend/dist"
+      system "go", "tool", "wails", "generate", "module"
 
       cd "frontend" do
         system "yarn", "install", "--frozen-lockfile"

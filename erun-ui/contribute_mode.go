@@ -158,7 +158,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	// the user sees build progress and can Ctrl-C it in the terminal they
 	// already have open. Best-effort: if that tab is gone, the port-forward
 	// below still reaches a manually-launched headless on the same port.
-	a.sendCommandToContributeERunSession(selection, fmt.Sprintf("erun app --headless --port %d\n", port))
+	a.sendCommandToContributeERunSession(selection, contributeAppLaunchCommand(port))
 
 	if a.contributeApps == nil {
 		a.contributeApps = newContributeAppForwards()
@@ -201,6 +201,14 @@ func (a *App) stopContributeAppForward(selection uiSelection) {
 	// 0x03 (Ctrl-C) interrupts the foreground headless process in the
 	// interactive contribute shell without killing the shell itself.
 	a.sendCommandToContributeERunSession(selection, "\x03")
+}
+
+// contributeAppLaunchCommand is what the contribute tab runs for "Open
+// contribute app": rebuild the desktop from the clone, then serve it headless.
+// The rebuild is explicit because the CLI's development wrapper only builds
+// erun; `erun app` then launches the copy build.sh just wrote to erun-ui/bin.
+func contributeAppLaunchCommand(port int) string {
+	return fmt.Sprintf("\"$HOME/git/erun/erun-ui/build.sh\" && erun app --headless --port %d\n", port)
 }
 
 func (a *App) sendCommandToContributeERunSession(selection uiSelection, command string) {

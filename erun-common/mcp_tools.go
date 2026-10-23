@@ -261,7 +261,7 @@ var mcpToolDescriptors = map[string]MCPToolDescriptor{
 	// deliberate, temporary scope decision for this feature's CLI/MCP-first
 	// delivery, not a claim that no human ever runs it. A follow-up issue tracks adding a desktop "Run e2e" surface;
 	// remove AgentFacing once it exists.
-	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's Playwright suite against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
+	"e2e": {Family: "", CLIPath: []string{"e2e"}, Title: "Run the project's e2e suites against a deployed environment", ReadOnly: false, Destructive: false, Idempotent: false, OpenWorld: true, AgentFacing: true},
 	// job_start has no working handler: it is a removed-tool stub (see
 	// mcpRemovedTools) whose only behavior is to name the tool that took over
 	// its capability.

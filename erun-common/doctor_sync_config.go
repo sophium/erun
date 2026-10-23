@@ -14,7 +14,7 @@ import (
 // In-pod config reconciliation (`erun doctor --sync-config`).
 //
 // The runtime pod's on-disk erun config is a projection of the env's
-// EnvConfig, written by the entrypoint from the ERUN_* env vars the chart
+// EnvConfig, written by the runtime boot from the ERUN_* env vars the chart
 // injects. `--sync-config` rebuilds the canonical intent from those same env
 // vars (injected env wins) and rewrites the on-disk files to match — the
 // inverse of laptop-side doctor, where the on-disk root config is
@@ -50,7 +50,7 @@ type ConfigDriftField struct {
 }
 
 // InjectedRuntimeConfig is the canonical config the chart-injected ERUN_* env
-// vars describe — the Go twin of the entrypoint's initialize_erun_config.
+// vars describe; the runtime boot writes it (writeRuntimeBootConfig).
 type InjectedRuntimeConfig struct {
 	Tenant      string
 	Environment string
@@ -77,7 +77,7 @@ func (c ConfigSyncInspection) InSync() bool {
 
 // ResolveInjectedRuntimeConfig builds the canonical config from the chart's
 // ERUN_* env vars. It returns ok=false when tenant or environment are unset
-// (the entrypoint's own guard) so the caller can report "nothing to reconcile".
+// (the runtime boot's own guard) so the caller can report "nothing to reconcile".
 func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfig, bool) {
 	if env == nil {
 		env = os.Getenv
@@ -136,7 +136,7 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	}
 	// Route through NormalizeCloudContextConfig so an unset ERUN_CLOUD_CONTEXT_NAME
 	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
-	// the entrypoint's shell twin) already defaults it — otherwise the injected ""
+	// the runtime boot) already defaults it — otherwise the injected ""
 	// never matches the on-disk default and drift never clears.
 	contexts := []CloudContextConfig{NormalizeCloudContextConfig(CloudContextConfig{
 		Name:               contextName,
@@ -149,8 +149,8 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	return providers, contexts
 }
 
-// injectedManagedCloud mirrors the entrypoint's managedcloud computation and
-// must stay in sync with it.
+// injectedManagedCloud reports whether the injected env describes a
+// cloud-managed environment.
 func injectedManagedCloud(get func(string) string, provider, alias, region string) bool {
 	if strings.EqualFold(get("ERUN_CLOUD_ENVIRONMENT"), "true") {
 		return true
@@ -194,7 +194,7 @@ func parseInjectedContainerRegistries(value string) ContainerRegistries {
 	return registries
 }
 
-// ResolveRuntimeConfigHome mirrors the entrypoint's config-home precedence so
+// ResolveRuntimeConfigHome follows the runtime boot's config-home precedence so
 // every transport reads and writes the same tree the pod's config was written to.
 func ResolveRuntimeConfigHome(homeDir string) string {
 	if configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configHome != "" {

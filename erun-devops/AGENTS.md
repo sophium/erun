@@ -25,44 +25,75 @@ composition and release invariants belong to root/shared logic, not chart policy
   published content. A changed base requires a new tag because `IfNotPresent`
   may retain the old digest. For dind, advance the trailing revision, update the
   chart default, and clear/recompute the fingerprint. Bumping `VERSION` alone
-  builds an image nothing deploys; `image-version_test.sh` fails the render gate
-  when a chart default and its `docker/<image>/VERSION` disagree, so the bump and
-  the default move together or neither lands.
+  builds an image nothing deploys; `TestChartImageTagsMatchTheirVersionPins`
+  (erun-common) fails the build when a chart template's image tag and its
+  `docker/<image>/VERSION` disagree, so the bump and the default move together
+  or neither lands.
+- The runtime image's entrypoint is `erun runtime-init`
+  (erun-common/runtime_entrypoint*.go), and it is the container's init: it reaps
+  orphaned zombies (the daemonised sshd's per-connection children), forwards
+  termination signals to what it started and exits with that work's code, or
+  128 + the signal. Keep those duties in Go and locked by
+  `runtime_supervisor_linux_test.go`; the image runs no tini and no shell
+  entrypoint. Every boot step is best-effort and logged, so a partly configured
+  pod stays reachable. No product logic lives in shell here: `bash_prompt.sh` is
+  a sourced prompt snippet only.
 - Keep `ERUN_OUTPUTS_DIR` creation/export aligned in Dockerfile, chart, and
   entrypoint. Deliverables persist on the home PVC, separate from git work and
   paste attachments.
-- Skills come from `erun-skills/skills`, copied as whole trees. Both assistant
-  config initializers use the single `skills-install.sh` helper: install absent,
-  refresh unchanged/legacy copies, preserve operator edits using the baked-hash
-  marker. Test all four cases; source and marketplace rules live in
-  `erun-skills/AGENTS.md`.
-- Prune stale dtach sockets/owners only at container boot, never on shell entry.
-  Keep sockets in the container-lifetime directory, not the home PVC, and keep
-  its path distinct from the desktop process name. Preserve live sockets and
-  validate pruning plus boot/shell routing with their script tests.
-- Worktree adoption runs only from the chart init container, while both volumes
-  are visible off the live home path. Copy a real legacy repo only into an empty
-  claim; prove the copy before setting aside the original. Ignore the partial-copy
-  marker when deciding whether retry is safe. Never relocate adoption to entrypoint.
+- Skills come from `erun-skills/skills`, copied as whole trees. The boot, `erun
+  install-skills` and the desktop orchestrator share one install-or-refresh
+  (`InstallOrRefreshSkills`/`InstallOrRefreshAgents`): install absent, refresh
+  unchanged/legacy copies, preserve operator edits using the baked-hash marker.
+  `agent_assets_install_test.go` tests all four cases; source and marketplace
+  rules live in `erun-skills/AGENTS.md`.
+- Keep dtach sockets in the container-lifetime directory (`/tmp/erun-sessions`),
+  not the home PVC, so a container starts with none, and keep its path distinct
+  from the desktop process name.
+- The runtime chart's init containers and dind sidecar run the runtime image's
+  own erun (`adopt-worktree`, `dind-entrypoint`), so the image must be at least
+  as new as the chart. `erun deploy` refuses a stock `erun-devops` image older
+  than the stock chart (`guardRuntimeImageNotOlderThanChart`); a tenant image's
+  erun base is re-pinned with the chart (`erun-build-env`, `erun-pin-version`).
+- Worktree adoption (`erun adopt-worktree`, erun-common/worktree_adopt.go) runs
+  only from the chart init container, while both volumes are visible off the live
+  home path. Copy a real legacy repo only into an empty claim; prove the copy before
+  setting aside the original. Ignore the partial-copy marker when deciding whether
+  retry is safe. Never relocate adoption to entrypoint.
 - Run one activity-monitor loop in every pod. Sample resident CPU activity before
   sleeping; gate only auto-stop on cloud environment type, not sampling.
 - Terraform modules are published, version-pinned source references, not baked
   copies. Keep modules provider-free; callers supply provider configuration.
   OCI module distribution remains a proposal, not the current contract.
 - Bake tenant artifacts under `/opt/erun/release`, never under the home PVC mount.
-  For sourceless runtime environments, `release-link.sh` exposes this tree via the
-  repo-path symlink. Preserve populated worktrees, agent environments, and
+  For sourceless runtime environments, the boot (`LinkRuntimeRelease`) exposes
+  this tree via the repo-path symlink. Preserve populated worktrees, agent environments, and
   mount-source clones. Keep mutable Terraform state, plans, and provider data on
   the home PVC, outside the read-only baked tree. Test adoption/linking preservation
   and interrupted-run recovery.
-- Agent MCP configuration is reconciled once per container boot, never per shell.
-  The shell hook is sourced by every interactive shell and every `sh -lc` remote
-  exec, so run each configure script under one container-lifetime claim
-  (`/tmp/erun-agent-config`, tests via `ERUN_AGENT_CONFIG_STATE_DIR`), never the
-  home PVC. `entrypoint_test.sh` locks exactly-once structurally, not by wall clock.
-- The IMDS region probe pays one timeout, not two. Where nothing answers the
-  link-local address the probe drains curl's whole budget; skip the IMDSv1 fallback
-  on that timeout and bound the connect phase. Keep both halves.
+- Agent configuration (instructions, skills, Claude settings relay and hooks,
+  Codex config, MCP wiring) is reconciled once per container boot by the
+  entrypoint, never per shell: the shell hook is sourced by every interactive
+  shell and every `sh -lc` remote exec, so it only records CLI activity. The
+  Claude settings relay removes only what its `settings.json.erun-relayed.json`
+  record says it wrote.
+- The boot writes the erun config from `ResolveInjectedRuntimeConfig`, the same
+  projection `erun doctor --sync-config` reconciles against, so a booted pod is
+  in sync by construction. Region and instance id come from the chart's
+  `ERUN_CLOUD_REGION`/`ERUN_CLOUD_INSTANCE_ID`; a deploy from a host without
+  the environment's cloud context renders them empty, so on AWS the boot fills
+  an empty one from IMDS once (`runtime_cloud_metadata.go`: v2 token, 2s
+  timeout, no v1 retry after a timeout).
+- Idle stop asks the real AI clients to quit before the host powers off: match
+  them by executable path inside their npm packages (`@anthropic-ai/claude-code`,
+  `@openai/codex`) or by program name, never by a wrapper name the image no
+  longer has (`isRuntimeAIClient`).
+- `/usr/local/bin/claude` is a symlink to `erun`, made after the npm install
+  so the install cannot replace it; erun dispatches on that argv[0] and execs
+  the real binary in the npm package (`ERUN_CLAUDE_REAL` overrides it), adding
+  `--continue` when the directory has a conversation and no argument picks a
+  mode or subcommand of its own (`erun-common/claude_resume.go`,
+  `claude_resume_test.go`; `devops_dockerfile_contract_test.go`).
 
 ## Runtime Chart Rules
 
@@ -98,8 +129,12 @@ composition and release invariants belong to root/shared logic, not chart policy
   `prepare-volumes` chowns only home/worktree PVC mount points before adoption,
   never contents, host worktrees, Docker storage, or the socket volume.
 - For PVC worktrees, stage legacy home and new claim outside `/home/erun`.
-  If adoption is needed but the image lacks its helper, refuse startup rather than
-  masking the repo with an empty mount. Keep deploy's relocation preview aligned.
+  An image whose erun lacks `adopt-worktree` fails the init container and so
+  refuses startup rather than masking the repo with an empty mount. Keep deploy's
+  relocation preview aligned.
+- The erun-dind sidecar runs `erun dind-entrypoint` from the `erun-bin` emptyDir,
+  which `prepare-volumes` fills with the runtime image's own `erun`; the stock dind
+  image carries none, and the shared binary keeps the sidecar on the pod's version.
 - MCP runs supervised inside the runtime container so it uses the tenant toolchain,
   not a stock sidecar. Share argument construction with standalone MCP startup;
   preserve enable/disable compatibility and restart logging.
@@ -163,9 +198,9 @@ composition and release invariants belong to root/shared logic, not chart policy
   `--cgroup-parent` derived from the pod's own hostname
   (erun-common/build_cpu_cap.go), so a roll re-executes them while only the
   steps before the first one still replay. Do not anchor a worker id in
-  `dind-entrypoint.sh`: `<buildkit>/workerid` is read only by standalone
+  `erun dind-entrypoint`: `<buildkit>/workerid` is read only by standalone
   buildkitd's runc/containerd workers, so writing one changes no key.
-  `dind-entrypoint.sh` carries the measured detail beside the wrapper.
+  erun-common/dind_entrypoint.go carries the measured detail beside the code.
 - Report killed/resource-exhausted builds as resource failures, not lint verdicts.
 - Size the dind CPU cap from the node, never as a flat safe-looking constant:
   a CPU limit is a ceiling, not a reservation, so a build capped well under the
@@ -177,14 +212,16 @@ composition and release invariants belong to root/shared logic, not chart policy
   `DefaultRuntimeDindCPU` and the chart's `runtime.dind.resources.limits.cpu`
   fallback are two copies of one number that move together
   (`runtime_dind_default_mirrors_test.go`).
-- CPU enforcement uses a distinct, tested mechanism: `dind-entrypoint.sh` mirrors
+- CPU enforcement uses a distinct, tested mechanism: `erun dind-entrypoint` mirrors
   its live `cpu.max` into a per-pod capped parent and in-pod builds pass that parent
   per invocation. Do not apply this to host builds or change daemon placement.
   Preserve unlimited/unreadable fallbacks and test actual flag selection.
 - Derive Docker bridge MTU from the pod's default-route interface. Do not hardcode
   it or add an operator-maintained chart value. Keep resolution failure non-fatal.
   Diagnose TLS stalls with comparable pod/container network paths, not architecture
-  alone; test route selection, argument order, jumbo MTUs, and fallback behavior.
+  alone; test route selection, argument order, jumbo MTUs, and fallback behavior
+  (erun-common/dind_entrypoint_test.go). The Linux-only wiring (procfs, sysfs,
+  execve) sits behind build tags; elsewhere the command refuses.
 
 ### Component-specific invariants
 
@@ -217,8 +254,8 @@ composition and release invariants belong to root/shared logic, not chart policy
   pods forever — noise a real regression hides behind. Size the TTL from the
   schedule: long enough that a live break always has a fresh failure to read, and
   that a failing daily sweep outlives the 24h to its next attempt, but short
-  enough that a stale failure stops reading as current state.
-  `erun-backend-db-chart_test.sh` sweeps every rendered CronJob for one.
+  enough that a stale failure stops reading as current state. No render test
+  sweeps for it, so review every CronJob template for the pair.
 - API consumes the PostgreSQL secret and follows migrations. Registry bearer auth
   is delegated to the API token service: require token realm and an existing public
   signing-key Secret; expose the destructive retention window as an explicit value.
@@ -265,22 +302,74 @@ composition and release invariants belong to root/shared logic, not chart policy
   deploy installs an explicit published version. Build defaults to both supported
   architectures; non-release builds may explicitly select a platform. Releases
   require the full platform set. Do not describe deploy as a build or push path.
-- Every component tests itself as part of its own build: its Dockerfile declares
-  `AS test`, which only calls the component's own plain commands (`go tool
-  golangci-lint run`, `go test ./...`, `yarn test`, a `*_test.sh`), and a later
-  stage takes `COPY --from=test /test-ok` before its heavy work, so no image is
-  produced when they fail. Test logic belongs to the component, never to this
-  module.
+- Every component tests itself as part of its own build, in the stage chain
+  `erun-docs/docs/agent-reference/dockerfile-stages.md` specifies: `build`
+  (toolchain, deps, source, native compile; no version stamp, no `TARGET*`
+  args) -> `test` (`FROM build`; only the component's own plain commands: `go
+  tool golangci-lint run`, `go test ./...`, `yarn test`) ->
+  optional helpers `FROM test` (`dist`: version stamp and target-arch compile)
+  -> `runtime`, the last stage. `runtime` copies what it ships from `test` or a
+  helper built `FROM test`, never from `build`, so BuildKit cannot prune `test`
+  and no image exists when it fails. There is no marker file. Download-only
+  stages that read no other stage (a target-arch tool fetch) may feed
+  `runtime`, and context files may be copied straight in. A part with nothing
+  to compile has a standalone test stage that COPYs what it tests. Test logic
+  belongs to the component, never to this module.
+- A Dockerfile with several parts prefixes each part's stages
+  (`<part>-build` -> `<part>-test`) and joins every `<part>-test` in the one
+  stage named `test`, which is what erun detects. The `erun-devops` image
+  keeps that shape with one part: `cli-build` -> `cli-test` lints and tests
+  `erun-common`, `erun-mcp`, `erun-cli` and `erun-integration`, and builds
+  `erun-cli` and `erun-mcp` for darwin and windows so the Homebrew and Scoop
+  source builds are proven to compile
+  (`devops_dockerfile_contract_test.go`); `test` is FROM
+  `cli-test`; `dist` (FROM test) stamps `ERUN_VERSION` into `erun` and `emcp`
+  for the target arch; `runtime` takes them from `dist`. There is no
+  `erun-cli` image and no scripts stage: the image bakes no product scripts,
+  and the Terraform modules' `terraform test` suites have no build runner
+  (run them by hand with `terraform test` in the module). `cli-test` copies
+  only the Dockerfile from `docker/erun-devops/` (what the Go suites read),
+  every other `docker/<image>/` directory whole and `linux/` whole;
+  `TestCLITestStageCopiesEveryDockerDirectory` fails when a new image
+  directory is missing from that list.
+- `linux/<name>/Dockerfile` is a package component: it builds a `.deb`, never
+  an image. Same chain, ending in `dist`, which is `FROM scratch` and holds
+  only the `.deb` copied from a packing helper (`package`), so
+  `--target dist --output type=local,dest=<dir>` exports the package alone.
+  `linux/erun-ui` (package `erun-desktop`: `erun-app`, its `.desktop` entry
+  and icon) generates the Wails bindings and builds the bundle and a native
+  `erun-app` in `build`, and runs the frontend checks and unit tests, the Go
+  lint, `go test -race`, the Windows cross-compile, the Playwright package's
+  checks and the full Playwright suite in `test` — plain commands, no module
+  script; `package` (FROM test) compiles erun-app for
+  `TARGETARCH` (a foreign arch through Debian multiarch: crossbuild-essential
+  plus that arch's gtk/webkit `-dev` packages) and takes `Depends` from
+  `dpkg-shlibdeps`, so the package names its libraries as the build image's
+  Debian release does (Debian 13 / Ubuntu 24.04 and later). A `package` stage
+  runs only plain `go -C /src/erun-common run ./cmd/debpkg` commands with
+  flags: `cross-deps` installs a foreign target's toolchain and `-dev`
+  libraries (nothing for a native one), and `build` compiles the Go binaries,
+  copies `--file`s, writes `DEBIAN/control` (Depends from `--shlibdeps`) and
+  runs `dpkg-deb`; packaging logic goes there, tested, never into shell in the
+  Dockerfile. `linux/erun-cli`
+  (package `erun`: `erun`, `emcp`, `eapi`, the control fields and copyright
+  the former `build-deb.sh` produced) has no test stage: its code is tested
+  in this image's `cli-test` and in `erun-backend-api`. A plain `erun build`
+  runs a package through `test` only; `erun build --release` builds `dist`
+  per architecture and uploads the `.deb`s to the GitHub release.
+- `erun-common/dockerfile_copy_contract_test.go` pins this shape for the named
+  component Dockerfiles (`componentDockerfiles`) and package Dockerfiles
+  (`linuxPackageDockerfiles`), and requires every other
+  Dockerfile here to stay a single-stage wrapper of an upstream image (the
+  postgres, dind, oci-registry, powerdns, zitadel, zitadel-login and
+  erun-ubuntu images), whose last stage is its runtime by position; renaming
+  their stages would change pinned fingerprints.
 - Pin native tests, cross-compilers, and architecture-independent builders to
   `BUILDPLATFORM`. Do not pin final target layers or stages executing target
   binaries. Copy target toolchains from an unpinned, copy-only stage when needed.
 - A test stage COPYs its component plus exactly what its tests read and installs the
   pinned toolchain they run with; a path its tests open that the stage does not
-  COPY fails in the build while a full checkout passes. The `erun-devops` image's
-  own test stage runs its baked scripts' tests (`docker/erun-devops/*_test.sh`), the
-  chart tests (`k8s/*_test.sh`) and each Terraform module's `terraform test`; it
-  takes `erun` and `emcp` from the `erun-cli` image built in the same run
-  (`FROM ghcr.io/sophium/erun-cli:${ERUN_VERSION}`), its only use of `ERUN_VERSION`.
+  COPY fails in the build while a full checkout passes.
 - Use sequential per-platform plain `docker build`, local arch tags, and fingerprint
   tags. Push assembles the per-arch images into a manifest list; preserve
   `--provenance=false`. Validate required binfmt support before building.
@@ -294,7 +383,8 @@ composition and release invariants belong to root/shared logic, not chart policy
   do not silently reuse an incomplete platform set.
 - **An unchanged component's fingerprint promotion is its last successful
   build, tests included, and is a valid result.** A Dockerfile with a consumed
-  test stage (`AS test` plus a later `COPY --from=test`) promotes from its fp tag
+  test stage (`AS test` plus a later `FROM test` or `COPY --from=test`)
+  promotes from its fp tag
   like any other image, because fp tags are written only after a successful
   build, and a BuildKit cache hit on the test stage reuses a tested layer the same
   way. `build_test_stage_test.go` locks promotion and rebuild for such a
@@ -338,21 +428,28 @@ composition and release invariants belong to root/shared logic, not chart policy
   classes never belong in a `test` stage.** In scope: a Testcontainers-style
   ephemeral dependency (a postgres, a compose-style sidecar) via
   `RUN --network=host` + `DOCKER_HOST=tcp://127.0.0.1:2375` — it needs a daemon, not
-  a deployment, and the build already has one. A test needing a built binary builds
-  it inside the test stage, which cannot depend on the `builder` stage it gates
-  without inverting the marker order. Out of scope permanently: a test asserting a
-  deployed version (that runs after `deploy`, per the `/pipeline` convention, never
-  during build).
+  a deployment, and the build already has one. A test needing a built binary
+  uses the one `build` produced for the build platform; the shipped target-arch
+  binary comes later, from a helper built `FROM test`. Out of scope permanently:
+  a test asserting a deployed version or driving a deployment — that is an e2e
+  suite (below), run after `deploy`, never during build.
 - **`erun-backend-api` is the template for that venue.** Its test stage runs
   `go test ./...` in a `RUN --network=host` step against
   `DOCKER_HOST=tcp://127.0.0.1:2375`; its database suites start PostgreSQL
   themselves through Testcontainers, so nothing in this module decides which
   suites run. The retention and schema drift checks are among those Go suites.
-- Two real-daemon script tests are not in any build and run by hand before merging
-  a change to the behavior they cover — `sh <path>` directly, or via `erun exec
-  job`: `docker/erun-backend-db/migrate_test.sh` (reset/migration/recovery; also
-  needs the atlas CLI) and `docker/erun-console/nginx_test.sh` (shipped nginx
-  behavior).
+- **Deployed-environment suites live in `e2e/<service>/`**, one Dockerfile each
+  with a `deps` stage and an exact `AS e2e` stage, the directory named after the
+  exposed service it targets (`e2e/console/`, see its `AGENTS.md`). Only `erun
+  e2e` builds them (`--target e2e --no-cache-filter e2e --output
+  type=cacheonly`), against the exposed HTTPS URL with the certificate
+  verified; `erun build` and `push` refuse them and discovery never walks
+  `e2e/`. They are never part of a build, release, or the merge gate. A suite
+  receives its URLs and deployed version as `ERUN_E2E_*` build args and its
+  credentials as `e2e.secrets` BuildKit secrets; it must not set
+  `ignoreHTTPSErrors` or a literal `baseURL`. A suite that needs only a built
+  bundle or a local API is not an e2e suite: it belongs in the component's
+  `test` stage or its own local Playwright package.
 
 ## Release Workflow
 
@@ -374,10 +471,12 @@ composition and release invariants belong to root/shared logic, not chart policy
 
 - Test Docker dependency/cache/version contracts and shared plus tenant chart
   behavior. Keep release-sensitive common, CLI, and MCP suites aligned.
-- Chart tests under `k8s` are render-only, need no cluster, and are discovered by
-  the `erun-devops` test stage's glob, as are the baked scripts' tests under
-  `docker/erun-devops`. Keep real-daemon tests separate and explicit (see Build
-  Workflow).
+- Charts under `k8s` have no render-test suite. Cross-file contracts a chart
+  shares with Go live in erun-common's structural tests
+  (`runtime_dind_default_mirrors_test.go`,
+  `TestChartImageTagsMatchTheirVersionPins`); render a changed chart with `helm
+  template` for both a runtime and a build-capable environment before merging.
+  Keep real-daemon tests separate and explicit (see Build Workflow).
 - Live RBAC, resource isolation, and restart guarantees need corresponding real
   probes when changed; render tests alone cannot establish them.
 - Guidance-only edits use root's consistency/reference validation exemption.

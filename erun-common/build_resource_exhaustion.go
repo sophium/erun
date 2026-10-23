@@ -42,7 +42,7 @@ const dockerBuildStepSigkillExitCode = 137
 
 // buildkitStepExitCodePattern pulls the exit status out of the failure framing
 // BuildKit prints for the step that stopped the build, which reads
-// `ERROR: process "/bin/sh -c go test ./... && touch /test-ok" did not
+// `ERROR: process "/bin/sh -c go test ./..." did not
 // complete successfully: exit code: 2` under BuildKit's own step-number prefix.
 var buildkitStepExitCodePattern = regexp.MustCompile(`exit code: (\d+)`)
 

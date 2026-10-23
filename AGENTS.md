@@ -36,8 +36,9 @@ operators may interact directly with in-pod agents without an orchestrator.
 - `erun-backend` — API and database modules. See `erun-backend/AGENTS.md`,
   `erun-backend/erun-backend-api/AGENTS.md`, and
   `erun-backend/erun-backend-db/AGENTS.md`.
-- `erun-devops` — images, packaging, and Kubernetes assets. See
-  `erun-devops/AGENTS.md`.
+- `erun-devops` — images, Linux packages, Kubernetes assets, and
+  deployed-environment e2e suites. See `erun-devops/AGENTS.md` and
+  `erun-devops/e2e/console/AGENTS.md`.
 - `erun-kit` — shared frontend foundation. See `erun-kit/AGENTS.md`.
 - `erun-ui` — Wails desktop app. See `erun-ui/AGENTS.md` and
   `erun-ui/playwright/AGENTS.md`.
@@ -318,11 +319,29 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
   `erun-mcp`, including each module's tests and configured lint checks. Include
   `erun-ui` when desktop wiring, consumed shared code, package-manager integration,
   or launcher integration changes.
-- Each component tests itself as part of its build: its Dockerfile's `test`
-  stage runs the component's own plain commands (`go tool golangci-lint run`,
-  `go test ./...`, `yarn test`, ...), and `erun build` runs that stage. There is
-  no repository-wide Makefile or gate script. Before pushing, run the same
-  commands in each module you changed; see its `AGENTS.md`.
+- Each component tests itself as part of its build. Its Dockerfile chains
+  `build` -> `test` (`FROM build`) -> optional helpers built `FROM test`
+  (version stamping, target-arch compile) -> `runtime`, the last stage, which
+  copies what it ships from `test` or a helper, never from `build`. `test` runs
+  only the component's own plain commands (`go tool golangci-lint run`,
+  `go test ./...`, `yarn test`, ...); because what ships passes through it,
+  BuildKit cannot skip it, and `erun build` refuses a `test` stage nothing
+  uses. A Dockerfile with several parts prefixes their stages (`cli-build`,
+  `cli-test`) and joins them in the one stage named `test` (`erun-devops`,
+  which also builds and tests `erun` and `emcp`; there is no `erun-cli`
+  image). A package component under `erun-devops/linux/<name>/` ends in a
+  `FROM scratch` `dist` holding only its `.deb` (`erun-ui` ships
+  `erun-desktop`, `erun-cli` ships `erun`); `erun build` runs it through
+  `test` and `--release` publishes its `.deb`s. The standard is
+  `erun-docs/docs/agent-reference/dockerfile-stages.md`; how this repository
+  applies it is in `erun-devops/AGENTS.md` § "Build Workflow". There is no repository-wide Makefile or gate script. Before
+  pushing, run the same commands in each module you changed; see its
+  `AGENTS.md`.
+- Tests that need a deployed environment are e2e suites under
+  `erun-devops/e2e/<service>/`, run only by `erun e2e` after a deploy. `erun
+  e2e` is never part of `erun build`, a release, or the merge gate; a failing
+  suite exits non-zero and changes nothing, and whoever ran it files the bug
+  (`erun-file-issue`).
 - `erun build` is the gate a review and the merge queue record. An unchanged
   component reuses its last successful build instead of re-running its tests,
   which is a valid result. This repository uses its own build and merge queue;
@@ -336,10 +355,6 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
   file a tracking issue and land that fix before merging anything else that
   touches the suite. "Some tests were already broken" is not a licence to add
   more.
-- `erun-devops/docker/erun-backend-db/migrate_test.sh` (postgres restart and
-  migrations) and `erun-devops/docker/erun-console/nginx_test.sh` (console nginx
-  routing) need a real docker daemon, which a `docker build` step lacks, so they
-  run by hand (`sh <path>`) before merging a change to what they cover.
 - Structural tests that read sibling modules, directory trees, or generated
   artifacts outside their compiled inputs must run uncached (`go test -count=1`)
   in their component's test stage. Add that wiring with the test; a cached pass cannot
@@ -348,9 +363,22 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
   checks. They do not require deploying or rebuilding unchanged app behavior;
   changes to embedded instruction templates also run their provisioning tests.
 
-### Regression-suite gating strategy for `erun build` (#2086 — under discussion, do not implement)
+### Regression-suite gating strategy for `erun build` (#2086 — scoping and tiers under discussion, do not implement)
 
-- **This is not a decision.** #2086 proposes change-scoped suites on the merge gate and the unconditional full suite (including the Playwright suite) on the release gate only. Its own author commented fourteen minutes after filing it: the design was still being worked through with the operator, "the trigger model, the stage vocabulary, and where each suite belongs are all open," and no implementation should start until the operator confirms the plan. Read every "Recommendation" and "Rejected" line in #2086 as a position in an open discussion, not settled guidance. Do not wire a path→suite map, split the Playwright suite off the merge gate, or otherwise implement from that issue without first checking whether the operator has since confirmed a plan.
+- **The stage vocabulary is decided; nothing else in #2086 is.** The operator
+  confirmed the component stage standard (`build` -> `test` -> helpers ->
+  `runtime`, plus deployed-environment `e2e` suites run only by `erun e2e`; see
+  § "Integration Test Gate") and that `erun e2e` is never part of the merge or
+  release gate. The rest of #2086 is still open: the trigger model, change-scoped
+  suites on the merge gate, a release-only tier, and where each suite belongs.
+  Its author commented fourteen minutes after filing it that the design was
+  still being worked through with the operator and no implementation should
+  start until the operator confirms the plan. Read every "Recommendation" and
+  "Rejected" line in #2086 about scoping or tiers as a position in an open
+  discussion, not settled guidance. Do not wire a path→suite map, split the
+  Playwright suite off the merge gate, or otherwise implement scoping or tiers
+  from that issue without first checking whether the operator has since
+  confirmed a plan.
 - **The specific rationale #2086 gives against running everything unconditionally ("Option A" in its own vocabulary) was already stale the day it was filed.** #2086 rejects Option A because it "puts four known flakes on every merge" (#1786, #1772, #1945, #2045). All four are closed (#1786, #1772: 2026-08-31; #1945, #2045: 2026-09-03), and separately — not as a response to #2086 — the then-current gate gained the Playwright suite unconditionally the same day #2086 was filed (`c446e9fc`, merged 2026-09-04T06:13Z, ~2 hours after the issue). That landing was not casual: #2021's own review thread measured the suite honestly before merging it (2/5 clean → 4/5 after four specs were fixed with real root causes → the residual filed as #2045 rather than papered over → #2045 turned out to be a genuine application bug, not a test problem → 5/5, then re-measured 3/3 at 517/517 against the actual tree it would gate). So Option A is not a hypothetical being weighed against the issue's proposed C/D; it is what `erun build` runs today (the `erun-ui` test stage runs the full suite), on the strength of a measured, not assumed, stability record. That does not retroactively decide #2086 — the time the full Playwright suite adds to every build that changes `erun-ui` is a real, separate cost change-scoping or a release-only tier would still reduce — but whoever resumes this discussion should argue from latency, not from a flake count that has since been fixed.
 - **Two constraints bind whatever the operator eventually decides, because they come from measured failure modes, not preference:**
   - A change-scoped or tiered gate must keep three outcomes visibly distinct per suite: "ran and passed," "skipped because the diff didn't match the suite's mapped paths," and "promoted from a cached fingerprint image without rebuilding" (#2090's caching leg: a fingerprint promotion now reuses the component's last successful build, whose test stage ran, so it is a valid result — but the trace must still name it a promotion rather than a fresh run; the scoping leg still binds). Collapsing any two of those into the same green checkmark reintroduces #2090's exact failure mode — a gate that reports success without having verified anything — in the shape of scoping instead of caching. #2086's own design already defaults an unmapped path to "run" (fail-slow, not fail-blind); the same discipline has to extend to the trace output, not just the routing decision.
@@ -423,6 +451,12 @@ The gate cannot decide whether the named test genuinely reproduces the reported 
 - Preserve dependency direction: shared logic may move into `erun-common`;
   transport-specific logic must not. Keep moved symbols package-private unless
   an existing external caller requires them to be exported.
+- The layered split of `erun-common`, `erun-cli` and `erun-mcp` in
+  https://github.com/sophium/erun/issues/2741 is the declared intended design
+  for those package boundaries (layer map in `erun-common/AGENTS.md`). Until it
+  lands, add no new upward coupling: orchestration goes in orchestration-shaped
+  files, never in a primitive's files, and types/config code never calls into
+  build, deploy or release.
 - Reuse matching shared interfaces from `erun-common` directly rather than
   duplicating them locally. Move meaningful coverage to the module that now owns
   the behavior and remove test-only production shims where possible.

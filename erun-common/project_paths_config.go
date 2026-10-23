@@ -37,9 +37,13 @@ type ProjectPathsConfig struct {
 	// Version is the path to the VERSION file that mints the build version. A
 	// directory is accepted and resolves to <dir>/VERSION.
 	Version string `yaml:"version,omitempty"`
-	// Playwright is the directory (named "playwright") holding the project's
-	// e2e suite -- either a Playwright project directly, or per-component
-	// subdirectories mirroring docker/ and k8s/. Default <tenant>-devops/playwright.
+	// E2E is the directory whose subdirectories are the project's e2e suites,
+	// one Dockerfile with an `e2e` stage per suite, mirroring docker/ and k8s/.
+	// Default <tenant>-devops/e2e. Read under paths: only; erun e2e refuses it
+	// under components:.
+	E2E string `yaml:"e2e,omitempty"`
+	// Playwright is retired: it named a host-run Playwright suite, and erun e2e
+	// refuses it with the migration to E2E rather than silently ignore it.
 	Playwright string `yaml:"playwright,omitempty"`
 }
 
@@ -51,6 +55,7 @@ func (c ProjectPathsConfig) IsZero() bool {
 		strings.TrimSpace(c.K8s) == "" &&
 		strings.TrimSpace(c.Terraform) == "" &&
 		strings.TrimSpace(c.Version) == "" &&
+		strings.TrimSpace(c.E2E) == "" &&
 		strings.TrimSpace(c.Playwright) == ""
 }
 

@@ -96,7 +96,8 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 }
 
 // newActivityStopReadyCmd drives the idle grace-period decision. Its
-// exit code is a contract with the in-pod monitor's entrypoint.sh:
+// exit code is a contract with the runtime boot's idle monitor
+// (startRuntimeEnvironmentMonitor):
 // exit 0 only on Fire, meaning the caller may now stop the instance;
 // every other grace state (Skip/Arm/Wait) exits non-zero so the env
 // stays running.

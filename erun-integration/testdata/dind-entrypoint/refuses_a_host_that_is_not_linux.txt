@@ -1,0 +1,2 @@
+audit: erun dind-entrypoint --insecure-registry registry.cluster.local:5000
+erun dind-entrypoint runs only inside the erun-dind sidecar, which is Linux; this host is darwin

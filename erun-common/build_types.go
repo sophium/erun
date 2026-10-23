@@ -11,7 +11,7 @@ const localSnapshotTimestampFormat = "20060102150405"
 var (
 	ErrVersionFileNotFound        = errors.New("version file not found for current module")
 	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
-	ErrLinuxPackageBuildNotFound  = errors.New("linux package build script not found in current directory")
+	ErrLinuxPackageBuildNotFound  = errors.New("linux package Dockerfile not found in current directory")
 	multiPlatformDockerBuilds     = []string{"linux/amd64", "linux/arm64"}
 )
 
@@ -174,16 +174,17 @@ type scriptSpec struct {
 }
 
 type BuildExecutionSpec struct {
-	release      *ReleaseSpec
-	script       *scriptSpec
-	linuxBuilds  []scriptSpec
-	dockerBuilds []DockerBuildSpec
-	dockerPushes []DockerPushSpec
+	release *ReleaseSpec
+	script  *scriptSpec
+	// linuxPackages are the linux package components a plain build runs
+	// through their test stage. A release exports them from its ReleaseSpec.
+	linuxPackages []LinuxPackageSpec
+	dockerBuilds  []DockerBuildSpec
+	dockerPushes  []DockerPushSpec
 	// componentCharts are the Helm charts under <tenant>-devops/k8s/*, resolved as
 	// first-class build source independent of images. A plain build packages them
 	// (validate); a build that pushes publishes them.
 	componentCharts []HelmChartPublishSpec
-	skippedLinux    bool
 }
 
 type DockerPushExecutionSpec struct {
@@ -206,12 +207,6 @@ type DockerCommandTarget struct {
 	// caller — the shared resolvers never read it. See root AGENTS.md § "Command
 	// primitives vs orchestration".
 	Build bool
-	// E2E is the `erun build --e2e` operator shortcut: implies Deploy, and after
-	// the deploy completes runs the project's discovered playwright/ suite
-	// against the environment just deployed. Orchestration policy owned by the
-	// CLI caller — the shared resolvers never read it. See root AGENTS.md §
-	// "Command primitives vs orchestration".
-	E2E bool
 	// NoIncremental disables the default fingerprint-based incremental build cache.
 	NoIncremental bool
 	// DisableBuildScriptDiscovery skips project build.sh discovery so builds
@@ -239,7 +234,6 @@ type DockerRegistryAuthError struct {
 }
 
 type LinuxPackageContext struct {
-	Dir               string
-	BuildScriptPath   string
-	ReleaseScriptPath string
+	Dir            string
+	DockerfilePath string
 }

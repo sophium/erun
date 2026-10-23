@@ -1,0 +1,34 @@
+Prepares the runtime container from the environment the runtime chart injects and
+then runs as its init: it reaps orphaned processes, forwards termination signals to
+what it started, and exits with the code of the work it was running.
+
+Every mode writes the kubeconfig for the pod's service account, restores private modes
+under ~/.ssh, creates the outputs directory, adds the provisioned registry credential
+to ~/.docker/config.json where it has none, starts sshd and its activity proxy when
+ERUN_SSHD_ENABLED is set, and starts the activity monitor (which stops a cloud host
+once its idle policy fires).
+
+devops (the default) then bounds the go build cache, clones mounted source or links
+the baked release tree, writes the erun config and the platform alias, configures
+Codex and Claude Code (instructions, skills, agents, settings, MCP server), installs
+the shell hook, serves the MCP edge, and keeps running until the container is stopped.
+Any other COMMAND runs after the common preparation, and the container exits with its
+code. Runs only on Linux, as the container's init; --dry-run lists what this container
+would do without changing anything.
+
+Usage:
+  erun runtime-init [devops | COMMAND [ARGS...]] [flags]
+
+Examples:
+  erun runtime-init --dry-run
+  erun runtime-init devops
+  erun runtime-init -- bash -lc 'erun doctor'
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for runtime-init
+
+Global Flags:
+      --output string   Result format: text (default, human stream) or json (structured result on stdout for orchestrators). (default "text")
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

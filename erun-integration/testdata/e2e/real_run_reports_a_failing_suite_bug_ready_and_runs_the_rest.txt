@@ -1,0 +1,30 @@
+audit: erun e2e
+e2e: deployed version <VERSION>
+e2e: suite erun-backend-api: <TMP>
+e2e: base url https://api.team-dev.invalid (resolved from the expose-erun-backend-api ingress)
+e2e: api.team-dev.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+e2e: suite erun-console: <TMP>
+e2e: base url https://console.team-dev.invalid (resolved from the expose-erun-console ingress)
+e2e: console.team-dev.invalid does not resolve from this machine; not checked for a loopback address
+e2e: log <TMP>
+e2e: running erun-backend-api against https://api.team-dev.invalid
+#9 3.10   4 passed
+e2e: running erun-console against https://console.team-dev.invalid
+#9 12.40   1) [chromium] > signin.spec.ts:8:3 > signs in through the issuer
+#9 12.41   1 failed
+ERROR: failed to solve: process "/bin/sh -c npx playwright test" did not complete successfully: exit code: 1
+e2e: passed erun-backend-api against https://api.team-dev.invalid (version <VERSION>)
+e2e: FAILED erun-console
+  suite:     <TMP>
+  component: erun-console
+  target:    https://console.team-dev.invalid
+  version:   <VERSION> (deployed to team/dev)
+  step:      docker build --target e2e failed: exit status 1
+  log:       <TMP>
+  last lines of the log:
+    #9 12.40   1) [chromium] > signin.spec.ts:8:3 > signs in through the issuer
+    #9 12.41   1 failed
+    ERROR: failed to solve: process "/bin/sh -c npx playwright test" did not complete successfully: exit code: 1
+e2e: 1 of 2 suites failed. erun e2e is not a release gate: nothing was blocked or rolled back, and nothing was filed. File each failure above as a bug against version <VERSION>.
+erun e2e: 1 of 2 suites failed against team/dev at version <VERSION>: erun-console

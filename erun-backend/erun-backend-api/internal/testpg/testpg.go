@@ -12,6 +12,7 @@ package testpg
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	neturl "net/url"
@@ -62,11 +63,49 @@ func URL(t testing.TB) string {
 	if external := strings.TrimSpace(os.Getenv(ExternalURLEnv)); external != "" {
 		return external
 	}
-	once.Do(func() { url, startErr = start(context.Background()) })
+	once.Do(func() { url, startErr = startWithRetry(context.Background(), start, startupRetryBackoff) })
 	if startErr != nil {
 		t.Fatalf("testpg: %v", startErr)
 	}
 	return url
+}
+
+// startupRetryBackoff is how long a failed Docker startup waits before its one
+// fresh attempt.
+const startupRetryBackoff = 3 * time.Second
+
+// dockerStartupError marks a failure to bring up the Docker side of the
+// database -- the network, Testcontainers' reaper, the postgres container --
+// before any migration ran. A loaded daemon produces these on its own (the
+// reaper left in status "created", a network create refused), so they say
+// nothing about the code under test.
+type dockerStartupError struct{ err error }
+
+func (e dockerStartupError) Error() string { return e.err.Error() }
+func (e dockerStartupError) Unwrap() error { return e.err }
+
+// startWithRetry runs attempt, and runs it once more after backoff when the
+// first failure is a Docker startup error. A migration or any other error is
+// returned as is: retrying it would only hide a real defect.
+func startWithRetry(ctx context.Context, attempt func(context.Context) (string, error), backoff time.Duration) (string, error) {
+	url, err := attempt(ctx)
+	var startup dockerStartupError
+	if err == nil || !errors.As(err, &startup) {
+		return url, err
+	}
+	if ctx.Err() != nil {
+		return "", errors.Join(err, ctx.Err())
+	}
+	select {
+	case <-ctx.Done():
+		return "", errors.Join(err, ctx.Err())
+	case <-time.After(backoff):
+	}
+	url, retryErr := attempt(ctx)
+	if retryErr != nil {
+		return "", fmt.Errorf("%w (a first attempt failed too: %v)", retryErr, err)
+	}
+	return url, nil
 }
 
 func start(ctx context.Context) (string, error) {
@@ -79,7 +118,7 @@ func start(ctx context.Context) (string, error) {
 	}
 	net, err := network.New(ctx)
 	if err != nil {
-		return "", fmt.Errorf("create a Docker network (the database suites need a Docker daemon): %w", err)
+		return "", dockerStartupError{fmt.Errorf("create a Docker network (the database suites need a Docker daemon): %w", err)}
 	}
 	pg, err := postgres.Run(ctx, postgresImage,
 		postgres.WithDatabase(database), postgres.WithUsername(user), postgres.WithPassword(password),
@@ -87,7 +126,7 @@ func start(ctx context.Context) (string, error) {
 		network.WithNetwork([]string{postgresAlias}, net),
 	)
 	if err != nil {
-		return "", fmt.Errorf("start %s: %w", postgresImage, err)
+		return "", dockerStartupError{fmt.Errorf("start %s: %w", postgresImage, err)}
 	}
 	url, err := pg.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {

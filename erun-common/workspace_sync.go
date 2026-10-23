@@ -153,9 +153,7 @@ func syncOutputsArtifacts(ctx context.Context, hostAlias, outputsRemote, artifac
 		// Fetch only what actually changed by content: outputs are agent
 		// deliverables, and an agent can rewrite one byte-for-byte identical to
 		// what is already mirrored (e.g. rerunning a cross-compile) — that still
-		// bumps mtime, the same effect a Docker COPY has on a build context (see
-		// the content-addressed-vs-mtime precedent in
-		// erun-ui/playwright/run.sh's ERUN_PLAYWRIGHT_LINT_CACHE_DIR comment), so
+		// bumps mtime, the same effect a Docker COPY has on a build context, so
 		// mtime cannot tell "rewritten" from "identical" the way it can for the
 		// source lane's own tar-preserved fetch.
 		remoteHashes := remoteOutputsFileHashes(ctx, hostAlias, outputsRemote, remote)

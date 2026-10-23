@@ -68,7 +68,7 @@ A **component** is a deployable unit — typically a service, a migration job, a
 | Source module | `<projectRoot>/<component>/` (top-level) or nested inside another module |
 | Docker build context | `<projectRoot>/<tenant>-devops/docker/<component>/` |
 | Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/` |
-| e2e suite (optional) | `<projectRoot>/<tenant>-devops/playwright/<component>/` |
+| e2e suite (optional) | `<projectRoot>/<tenant>-devops/e2e/<component>/` |
 | Deploy plan entry | `environments.<env>.k8s.deployments[]` in `.erun/config.yaml` |
 | Image tag | `<registry>/<component>:<version>` |
 | Kubernetes resources | Deployment / Service named `<component>`, pod label `app: <component>` |
@@ -111,11 +111,11 @@ For the validation regex, the reserved `<tenant>-devops` name, and the full fail
 
 The **project root** is the directory containing `.git`. ERun finds it by walking up from the current working directory. It's the Docker build context for standard-layout builds, the boundary for VERSION-file walks, and the location of `.erun/config.yaml`.
 
-## Multi-stage builder pattern
+## Build, test, runtime stages
 
-ERun expects Dockerfiles to use a multi-stage builder pattern — a **builder** stage that provisions the toolchain and produces an artefact, then a **runtime** stage that ships only the artefact. Single-stage Dockerfiles aren't rejected, but the cache, image-size, and security benefits don't apply.
+A component tests itself as part of its own build. Its Dockerfile chains three stages: **build** compiles the component, **test** runs the component's own lint and tests on top of it, and **runtime** ships the artefacts it copies from test. Because what ships passes through test, no image exists unless the tests passed — under `erun build` and under a plain `docker build` alike. A component that stamps its version or compiles for each architecture does that in a helper stage after test, so a version bump doesn't rerun the tests.
 
-The language-specific [skills](/concepts/skills) the runtime image ships (`go-service`, `node-service`, `python-service`, `java-service`, …) teach the Agent the conformant Dockerfile shape for each language. For the pattern's spec (full skeleton, why the pattern, behaviour around `COPY` paths), see [Agent reference · Conventions spec](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation).
+The [skills](/concepts/skills) that scaffold a component (`erun-blueprint-service`, `erun-blueprint-docs`, …) write Dockerfiles in this shape. For the stage contract, why runtime copies from test, and what `erun build` checks, see [Agent reference · Dockerfile stages](/agent-reference/dockerfile-stages).
 
 ## Docker build contexts
 
@@ -123,11 +123,11 @@ Each image lives at `<tenant>-devops/docker/<component>/Dockerfile`. In the stan
 
 If a Dockerfile sits somewhere else, ERun degrades to a flat layout (context = Dockerfile's directory). For the exact decision rule and the trade-offs, see [Conventions spec · Docker build context resolution](/agent-reference/conventions-spec#docker-build-context-resolution).
 
-These default locations — the `docker/`, `k8s/`, and `playwright/` folders, the `terraform-<tenant>` folder, and the `VERSION` file — are overridable per project via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`, for repos that don't nest them under a `<tenant>-devops/` module.
+These default locations — the `docker/`, `k8s/`, and `e2e/` folders, the `terraform-<tenant>` folder, and the `VERSION` file — are overridable per project via the [`paths:` block](/reference/configuration#paths-block) in `.erun/config.yaml`, for repos that don't nest them under a `<tenant>-devops/` module.
 
 ## e2e suites
 
-`erun e2e` discovers a `playwright/` folder the same way `build` discovers `docker/`: either `<tenant>-devops/playwright/playwright.config.ts` directly (one suite), or per-component subdirectories (`<tenant>-devops/playwright/<component>/playwright.config.ts`) mirroring the Docker/Helm layout. It runs the suite once against an already-deployed environment, with the resolved HTTPS URL and the deployed version injected — never declared by the suite itself. A project with no `playwright/` folder makes `erun e2e` a clean no-op. See [`erun e2e`](/cli/e2e) and [Delivery pipeline](/pipeline).
+`erun e2e` discovers an `e2e/` folder the same way `build` discovers `docker/`: each `<tenant>-devops/e2e/<component>/` holds one suite, a Dockerfile whose `e2e` stage runs it, mirroring the Docker/Helm layout. The directory name is the exposed service the suite checks. `erun e2e` runs every suite against an already-deployed environment, with the services' HTTPS URLs and the deployed version passed in — never declared by the suite itself. `erun build` never builds a suite. A project with no `e2e/` folder makes `erun e2e` a clean no-op. See [`erun e2e`](/cli/e2e) and [Delivery pipeline](/pipeline).
 
 ## VERSION files
 
@@ -184,7 +184,7 @@ For the full Job chart skeleton and the rationale, see [Conventions spec · Helm
 | `<projectRoot>/<tenant>-devops/` | every image / every chart | same — act on the full module |
 | `<projectRoot>/<tenant>-devops/docker/<image>/` | one image | act on just that image (build / push only) |
 | `<projectRoot>/<tenant>-devops/k8s/<component>/` | one chart | act on just that component (deploy only) |
-| `<projectRoot>/<tenant>-devops/playwright/<component>/` | one suite | act on just that component (`erun e2e` only) |
+| `<projectRoot>/<tenant>-devops/e2e/<component>/` | one e2e suite | `build` / `push` refuse it and point to `erun e2e --component <component>`; `erun e2e` selects suites by `--component`, not by directory |
 | anywhere else | walks up until a context resolves; errors if nothing matches | — |
 
 The **env type** then determines what each command actually does:

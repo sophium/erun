@@ -1,8 +1,13 @@
 ARG ERUN_VERSION=1.0.0
 
-# Pinned to the build host's platform: the site it emits is static assets with
-# no architecture, so it is built (and checked) once natively.
-FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS deps
+# Stages: `build` installs the site's dependencies and runs `yarn build`,
+# `test` runs the site's own check on top of that, and `runtime` publishes the
+# built site, taken from `test`, with wrangler. Because the site comes through
+# `test`, no image exists unless the check passed.
+#
+# Pinned to the build host's platform: the site is static assets with no
+# architecture, so it is built (and checked) once natively.
+FROM --platform=$BUILDPLATFORM node:20.18.1-alpine AS build
 
 WORKDIR /src/erun-docs
 
@@ -17,20 +22,14 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn \
 
 COPY erun-docs /src/erun-docs
 
-# The site's own check is this image's gate: the builder depends on this stage
-# through `COPY --from=test`, so no image is produced when it fails.
-FROM deps AS test
-
-RUN yarn typecheck && touch /test-ok
-
-FROM deps AS builder
-
-COPY --from=test /test-ok /tmp/erun-test-ok
-
 RUN yarn build
 
-# Stage 2: tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
-FROM node:20.18.1-alpine
+FROM build AS test
+
+RUN yarn typecheck
+
+# A tiny image with pinned wrangler that pushes /site/ to Cloudflare Pages.
+FROM node:20.18.1-alpine AS runtime
 
 ARG WRANGLER_VERSION=3.87.0
 
@@ -39,7 +38,7 @@ RUN apk add --no-cache ca-certificates tini && \
     addgroup -S erun && \
     adduser -S -G erun -h /home/erun erun
 
-COPY --from=builder --chown=erun:erun /src/erun-docs/build /site
+COPY --from=test --chown=erun:erun /src/erun-docs/build /site
 COPY --chmod=0755 erun-devops/docker/erun-docs/entrypoint.sh /usr/local/bin/erun-docs-entrypoint
 
 # Stamps the build actually being published, read back at GET /version.json once

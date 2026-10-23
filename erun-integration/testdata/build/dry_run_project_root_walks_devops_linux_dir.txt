@@ -1,5 +1,7 @@
 audit: erun build --dry-run
 docker info -f '{{.DockerRootDir}}'
+erun-ui: running its test stage: no recorded pass for fingerprint fp-<HEX16>
+cd <TMP> && docker build --progress=plain --target test --output type=cacheonly -f <TMP> .
 docker image inspect ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/team-devops:fp-<HEX16>-arm64

@@ -1,0 +1,2 @@
+audit: erun e2e --dry-run
+erun e2e: <TMP> declares no `e2e` stage: erun e2e builds `--target e2e`, so the stage that runs the suite must be named exactly e2e (`FROM <base> AS e2e`)

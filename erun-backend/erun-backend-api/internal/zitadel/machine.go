@@ -94,7 +94,7 @@ func (c *Client) EnsureMachineIdentity(ctx context.Context, params EnsureMachine
 	if err != nil {
 		return MachineIdentity{}, err
 	}
-	appID, err := c.findMachineIdentityAppID(ctx, params.OrgID, projectID, loginName)
+	appID, err := c.findAppID(ctx, params.OrgID, projectID, loginName)
 	if err != nil {
 		return MachineIdentity{}, err
 	}
@@ -110,7 +110,14 @@ type zitadelProject struct {
 }
 
 func (c *Client) ensureMachineIdentityProject(ctx context.Context, orgID string) (string, error) {
-	projectID, err := c.findMachineIdentityProjectID(ctx, orgID)
+	return c.ensureProject(ctx, orgID, machineIdentityProjectName)
+}
+
+// ensureProject returns the id of the project named name in orgID, creating
+// it when the organization holds none. Find-first, so a second call converges
+// on the project the first one created.
+func (c *Client) ensureProject(ctx context.Context, orgID string, name string) (string, error) {
+	projectID, err := c.findProjectID(ctx, orgID, name)
 	if err != nil {
 		return "", err
 	}
@@ -121,12 +128,12 @@ func (c *Client) ensureMachineIdentityProject(ctx context.Context, orgID string)
 		ID string `json:"id"`
 	}
 	if err := c.callInOrg(ctx, orgID, http.MethodPost, "/management/v1/projects", map[string]any{
-		"name": machineIdentityProjectName,
+		"name": name,
 	}, &created); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(created.ID) == "" {
-		return "", fmt.Errorf("zitadel created project %q but returned no id", machineIdentityProjectName)
+		return "", fmt.Errorf("zitadel created project %q but returned no id", name)
 	}
 	return created.ID, nil
 }
@@ -137,6 +144,12 @@ func (c *Client) ensureMachineIdentityProject(ctx context.Context, orgID string)
 // asking "where is the project" wants one to exist, while revoking asking the
 // same question must not conjure the very thing it was trying to find.
 func (c *Client) findMachineIdentityProjectID(ctx context.Context, orgID string) (string, error) {
+	return c.findProjectID(ctx, orgID, machineIdentityProjectName)
+}
+
+// findProjectID returns the id of the project named name in orgID, or "" when
+// there is none.
+func (c *Client) findProjectID(ctx context.Context, orgID string, name string) (string, error) {
 	var search struct {
 		Result []zitadelProject `json:"result"`
 	}
@@ -144,14 +157,16 @@ func (c *Client) findMachineIdentityProjectID(ctx context.Context, orgID string)
 		return "", err
 	}
 	for _, project := range search.Result {
-		if project.Name == machineIdentityProjectName {
+		if project.Name == name {
 			return project.ID, nil
 		}
 	}
 	return "", nil
 }
 
-func (c *Client) findMachineIdentityAppID(ctx context.Context, orgID string, projectID string, loginName string) (string, error) {
+// findAppID returns the id of the application named name in projectID, or ""
+// when the project holds none.
+func (c *Client) findAppID(ctx context.Context, orgID string, projectID string, name string) (string, error) {
 	var search struct {
 		Result []struct {
 			ID   string `json:"id"`
@@ -163,7 +178,7 @@ func (c *Client) findMachineIdentityAppID(ctx context.Context, orgID string, pro
 		return "", err
 	}
 	for _, app := range search.Result {
-		if app.Name == loginName {
+		if app.Name == name {
 			return app.ID, nil
 		}
 	}
@@ -279,7 +294,7 @@ func (c *Client) DeleteMachineIdentity(ctx context.Context, params DeleteMachine
 	if err != nil || projectID == "" {
 		return false, err
 	}
-	appID, err := c.findMachineIdentityAppID(ctx, params.OrgID, projectID, loginName)
+	appID, err := c.findAppID(ctx, params.OrgID, projectID, loginName)
 	if err != nil || appID == "" {
 		return false, err
 	}

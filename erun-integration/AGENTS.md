@@ -62,7 +62,7 @@ cross-repository structural gates, not production helpers.
 - `stub_ordering_test.go::TestFixtureStubsAssignBeforeServing` is the gate that
   reds for that invariant: an AST sweep of the whole module's source, so the
   ordering is a property of the source rather than of a schedule, and the
-  ordinary `go test ./...` the erun-cli image's test stage runs fails on the
+  ordinary `go test ./...` the erun-devops image's `cli-test` stage runs fails on the
   pre-fix tree with no `-race` anywhere. It reports the handler's
   read, the offending assignment and the line serving began. It also carries its
   own fixture test, so the shapes it must catch and the legitimate ones it must
@@ -99,7 +99,7 @@ cross-repository structural gates, not production helpers.
   alias analysis. It is a floor under the invariant, not a proof of it.
 - The **behavioral half is still not gated**: only `-race` reports the actual
   read/write pair, and **no gated venue runs `-race` for this module** -- the
-  erun-cli image's test stage passes it `-count=1` and `-timeout` and nothing
+  erun-devops image's `cli-test` stage passes it `-count=1` and `-timeout` and nothing
   else, and wires `-race` for `erun-common` alone. The ordering probes below are
   therefore green in the gate on the pre-fix tree too; they are evidence that
   the pair is real, and the sweep above is the gate. Run the probes explicitly
@@ -145,6 +145,14 @@ cross-repository structural gates, not production helpers.
   only it leaves processes behind that outlive it. A child meant to outlive its
   caller -- the emcp server, a port holder a scenario keeps alive on purpose --
   is ended by its own test cleanup.
+- A process left behind can also outlive the test rather than the pipe: git
+  detaches `git maintenance run --auto` after commits, fetches and pushes (for
+  a local push, in the bare remote too), and under load it can still be writing
+  when `t.TempDir` cleanup runs, failing the scenario with "directory not
+  empty". `harnessexec` runs git children with maintenance off through
+  `GIT_CONFIG_GLOBAL` (including the developer's own global config), and
+  `env.New` writes the same settings into the scenario HOME the CLI's git
+  reads (`TestGitChildrenDetachNoMaintenance`).
 - Both bounds are driven at test speed in `internal/harnessexec`, including a
   fixture that reproduces the unbounded wait through a bare `exec.Command` and
   requires it to still be blocked. That fixture is why the guard's refusal is a
@@ -169,7 +177,7 @@ cross-repository structural gates, not production helpers.
   starved producer. Keep their current parallel execution, but investigate real
   failures through resource evidence and width/heartbeat calibration, not retries
   until green or reflexive whole-suite serialization.
-- The suite's `go test -timeout` (the erun-cli image's test stage passes 45m)
+- The suite's `go test -timeout` (the erun-devops image's `cli-test` stage passes 45m)
   must stay below `harnessexec.HangNet`: the backstop is sized to outlast the
   deadline so it cannot fail a healthy child, and a deadline past it reorders
   the two. Go's ten-minute default is what failed a correct tree on a contended
@@ -286,8 +294,8 @@ with synthetic inputs independently of the repository wiring.
 - Keep chart-value assertions beside the chart renderer (e.g. retention controls),
   not a duplicate rendering mechanism here. Do not build a generic prose-truth checker.
 - All structural tests reading external files must run with `go test -count=1`.
-  Add each new external input to the erun-cli image test stage's COPY set
-  (`erun-devops/docker/erun-cli/Dockerfile`) in the same change.
+  Add each new external input to the `cli-test` stage's COPY set in
+  `erun-devops/docker/erun-devops/Dockerfile` in the same change.
 
 ## CLI help drift gate
 
