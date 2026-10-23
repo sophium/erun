@@ -22,7 +22,7 @@ import { publishTerminalActivation } from './terminalActivationReadModel';
 import {
   bufferCursorVisibility,
   type CursorVisibilityState,
-  filterTerminalDisplayData,
+  filterTerminalDisplay,
   MAX_RETAINED_BYTES,
   MAX_RETAINED_LINES,
   scanCursorVisibility,
@@ -38,7 +38,7 @@ import { installTerminalLinkHandling } from './terminalLinkHandling';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalReattachRepaint } from './terminalReattachRepaint';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
-import { decodeTerminalOutput } from './terminalStatus';
+import { plainTerminalText } from './terminalStatus';
 import { TerminalSwitchQueue } from './TerminalSwitchQueue';
 import { TerminalWailsEvents } from './terminalWailsEvents';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
@@ -409,8 +409,13 @@ export class TerminalController {
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
-    store.dispatch(updateOpenStatusFromOutput(payload.sessionId, decodeTerminalOutput(data)));
-    const displayData = filterTerminalDisplayData(data);
+    // Decoded once here and handed to every step that reads the chunk as text.
+    const text = new TextDecoder().decode(data);
+    if (this.sessions.isOpenSession(payload.sessionId)) {
+      store.dispatch(updateOpenStatusFromOutput(payload.sessionId, plainTerminalText(text)));
+    }
+    const display = filterTerminalDisplay(data, text);
+    const displayData = display.data;
     this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
     // Not rendered, not lost: only the store's active session is on screen
     // (the middleware in terminalDisplayMiddleware pairs every change of it
@@ -425,7 +430,7 @@ export class TerminalController {
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
     this.writeToTerminal(payload.sessionId, displayData);
-    this.liveCursorState = scanCursorVisibility(this.liveCursorState, displayData);
+    this.liveCursorState = scanCursorVisibility(this.liveCursorState, display.text);
     this.scheduleCursorRestoreIfStuck();
   }
 

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import { bufferCursorVisibility, trimChunksToBudget } from './terminalBuffers';
+import {
+  bufferCursorVisibility,
+  countNewlines,
+  trimChunksToBudget,
+  trimChunksWithinBudget,
+} from './terminalBuffers';
 
 const ALT_ENTER = '\x1B[?1049h';
 
@@ -18,10 +23,31 @@ test('trimChunksToBudget keeps only the tail once the line budget is exceeded', 
   assert.deepEqual(trimmed, ['4\n', '5\n']);
 });
 
+// What is kept stays within the budget: a chunk that would cross it is
+// dropped, not kept as the one that reached it.
 test('trimChunksToBudget keeps only the tail once the byte budget is exceeded', () => {
   const chunks = ['aaaa', 'bbbb', 'cccc'];
   const trimmed = trimChunksToBudget(chunks, 1_000_000, 5);
-  assert.deepEqual(trimmed, ['bbbb', 'cccc']);
+  assert.deepEqual(trimmed, ['cccc']);
+});
+
+test('trimChunksToBudget always keeps the newest chunk, however large', () => {
+  const chunks = ['a', 'x'.repeat(10)];
+  assert.deepEqual(trimChunksToBudget(chunks, 1_000_000, 5), ['x'.repeat(10)]);
+});
+
+test('trimChunksWithinBudget reports the totals of what it kept', () => {
+  const kept = trimChunksWithinBudget(['1\n', '22\n', '333\n'], 2, 1_000_000);
+  assert.deepEqual(kept.chunks, ['22\n', '333\n']);
+  assert.equal(kept.lines, 2);
+  assert.equal(kept.bytes, 7);
+});
+
+test('countNewlines counts the same newlines in a string and its bytes', () => {
+  for (const text of ['', 'no newline', '\n', 'a\nb\n\nc', '\n\n\n', 'é\nü\n']) {
+    assert.equal(countNewlines(text), (text.match(/\n/g) ?? []).length, JSON.stringify(text));
+    assert.equal(countNewlines(new TextEncoder().encode(text)), countNewlines(text));
+  }
 });
 
 test('trimChunksToBudget returns the original array reference when nothing is trimmed', () => {
