@@ -61,6 +61,11 @@ export class TerminalSessionRegistry {
   // history) (#1322). Absent for a session that has never been switched away
   // from yet; that session still replays its buffer from scratch once.
   private readonly sessionSnapshots = new Map<number, string>();
+  // Sessions forgotten for good. The pane can still be on a forgotten session
+  // when it is released -- the switch away is queued behind xterm's writes --
+  // and that switch's capture would otherwise store a whole serialized screen
+  // for a session nothing will ever show again.
+  private readonly forgottenSessions = new Set<number>();
 
   knownSelectionSession(key: string): number {
     return store.getState().sessions.selectionToSessionId[key] ?? 0;
@@ -77,6 +82,9 @@ export class TerminalSessionRegistry {
   // Bounded by the display buffer's byte budget: an exit report needs the tail
   // of the output, and a session that runs for a day must not keep all of it.
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
+    if (this.forgottenSessions.has(sessionId)) {
+      return;
+    }
     const existing = this.sessionBuffers.get(sessionId) ?? { chunks: [], bytes: 0 };
     existing.chunks.push(data);
     existing.bytes += data.length;
@@ -102,9 +110,11 @@ export class TerminalSessionRegistry {
   }
 
   // forgetSession drops everything retained for a session no tab shows any
-  // more. Go mints session ids monotonically and never reuses one, so nothing
-  // can ask for this session's output again.
+  // more, and refuses anything retained for it later. Go mints session ids
+  // monotonically and never reuses one, so nothing can ask for this session's
+  // output again.
   forgetSession(sessionId: number): void {
+    this.forgottenSessions.add(sessionId);
     this.sessionBuffers.delete(sessionId);
     this.sessionDisplayBuffers.delete(sessionId);
     this.sessionSnapshots.delete(sessionId);
@@ -122,6 +132,9 @@ export class TerminalSessionRegistry {
   // O(retained size) rescan runs once per quarter-budget of new output rather
   // than on every chunk after the first crossing.
   appendDisplayBuffer(sessionId: number, data: TerminalWriteData): void {
+    if (this.forgottenSessions.has(sessionId)) {
+      return;
+    }
     const existing = this.sessionDisplayBuffers.get(sessionId) ?? {
       chunks: [],
       lines: 0,
@@ -210,7 +223,7 @@ export class TerminalSessionRegistry {
     serialized: string,
     appendedAtDispatch = Number.POSITIVE_INFINITY,
   ): void {
-    if (serialized === '') {
+    if (serialized === '' || this.forgottenSessions.has(sessionId)) {
       return;
     }
     this.sessionSnapshots.set(sessionId, serialized);

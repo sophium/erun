@@ -212,3 +212,21 @@ test('forgetSession drops every buffer retained for the session, and only for it
   assert.deepEqual(sessions.displayBuffer(2), ['after\n']);
   assert.equal(sessions.snapshot(2), 'SCREEN');
 });
+
+// The pane can still be on a session when it is forgotten: the switch away is
+// queued behind xterm's writes, and its capture of the outgoing screen arrives
+// after the release. Storing it would keep a whole serialized scrollback for a
+// session nothing will show again, once per respawn of the tab on screen.
+test('a forgotten session retains nothing captured or appended after it was forgotten', () => {
+  const sessions = new TerminalSessionRegistry();
+  sessions.appendDisplayBuffer(1, 'shown\n');
+
+  sessions.forgetSession(1);
+  sessions.captureSnapshot(1, 'SERIALIZED_SCREEN');
+  sessions.appendDisplayBuffer(1, 'late\n');
+  sessions.appendSessionBuffer(1, new TextEncoder().encode('late\n'));
+
+  assert.equal(sessions.snapshot(1), undefined);
+  assert.deepEqual(sessions.displayBuffer(1), []);
+  assert.deepEqual(sessions.sessionBuffer(1), []);
+});
