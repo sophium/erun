@@ -74,7 +74,7 @@ func run(args []string, out io.Writer) error {
 	if _, _, err := m.gate(); err != nil {
 		return fmt.Errorf("warming the cache: %w", err)
 	}
-	_, _ = fmt.Fprintf(out, "%-36s %-60s %10s %10s\n", "edit", "file", "cache MB", "wall s")
+	_, _ = fmt.Fprintf(out, "%-36s %-56s %9s %8s  %s\n", "edit", "file", "cache MB", "wall s", "cache MB per module")
 	for _, name := range edits {
 		if err := m.measure(out, name); err != nil {
 			return err
@@ -123,7 +123,11 @@ func (m measurer) measure(out io.Writer, name string) error {
 		return fmt.Errorf("after editing %s: %w", name, err)
 	}
 	rel, _ := filepath.Rel(m.repo, file)
-	_, _ = fmt.Fprintf(out, "%-36s %-60s %10.1f %10.1f\n", name, rel, float64(grew)/1e6, took.Seconds())
+	parts := make([]string, 0, len(modules))
+	for i, mod := range modules {
+		parts = append(parts, fmt.Sprintf("%s %.1f", filepath.Base(mod), float64(grew.byModule[i])/1e6))
+	}
+	_, _ = fmt.Fprintf(out, "%-36s %-56s %9.1f %8.1f  %s\n", name, rel, float64(grew.total)/1e6, took.Seconds(), strings.Join(parts, ", "))
 	if err := os.WriteFile(file, original, 0o644); err != nil {
 		return err
 	}
@@ -153,24 +157,35 @@ func (m measurer) declaringFile(name string) (string, error) {
 	return found, err
 }
 
+// growth is how much the cache grew in all, and in each module's gate.
+type growth struct {
+	total    int64
+	byModule []int64
+}
+
 // gate runs every module's gate commands and reports how much the cache grew
 // and how long it took.
-func (m measurer) gate() (int64, time.Duration, error) {
-	before, err := dirSize(m.cache)
-	if err != nil {
-		return 0, 0, err
-	}
+func (m measurer) gate() (growth, time.Duration, error) {
+	g := growth{byModule: make([]int64, len(modules))}
 	start := time.Now()
-	for _, mod := range modules {
+	for i, mod := range modules {
+		before, err := dirSize(m.cache)
+		if err != nil {
+			return g, 0, err
+		}
 		for _, args := range gate {
 			if err := m.goCmd(filepath.Join(m.repo, mod), args); err != nil {
-				return 0, 0, err
+				return g, 0, err
 			}
 		}
+		after, err := dirSize(m.cache)
+		if err != nil {
+			return g, 0, err
+		}
+		g.byModule[i] = after - before
+		g.total += after - before
 	}
-	took := time.Since(start)
-	after, err := dirSize(m.cache)
-	return after - before, took, err
+	return g, time.Since(start), nil
 }
 
 func (m measurer) goCmd(dir string, args []string) error {
