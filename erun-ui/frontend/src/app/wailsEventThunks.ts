@@ -53,7 +53,7 @@ import {
 import { envClosing, recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import { recordSSHDInitOutcome } from './slices/sshdInitSlice';
 import type { AppDispatch, AppThunk } from './store';
-import { removeTab } from './tabsThunks';
+import { releaseExitedSession, removeTab } from './tabsThunks';
 import { failedTerminalOutput } from './terminalBuffers';
 import {
   classifiedTerminalFailure,
@@ -532,6 +532,7 @@ export const handleTerminalExit =
     const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
+    dispatch(releaseExitedSession(payload.sessionId));
 
     // Nothing to report either way: this exit is not the pane's, or the
     // desktop caused it. A deliberate teardown — an env close, a tab close, an
