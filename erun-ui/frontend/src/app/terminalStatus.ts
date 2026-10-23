@@ -132,10 +132,9 @@ export function statusForTerminalOutput(output: string): string {
   return rule?.message(output) ?? '';
 }
 
-// decodeTerminalOutput yields plain text so the open-status parser's substring matches aren't thrown off by ANSI escapes.
-export function decodeTerminalOutput(data: Uint8Array): string {
-  return new TextDecoder()
-    .decode(data)
+// plainTerminalText strips ANSI escapes from a decoded chunk so the open-status parser's substring matches aren't thrown off by them.
+export function plainTerminalText(text: string): string {
+  return text
     .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');

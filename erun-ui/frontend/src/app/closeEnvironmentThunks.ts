@@ -8,6 +8,7 @@ import { setSelected } from './slices/selectionSlice';
 import { clearEnvClosing, clearEnvOpening, markEnvClosing } from './slices/sessionsSlice';
 import { clearSelectedSessionForEnv, clearTabsForEnv, setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
+import { forgetSessionIfDone } from './tabsThunks';
 import { selectionKey } from './versionSuggestions';
 
 // closeEnvironment tears down an env's desktop tabs and session
@@ -39,7 +40,11 @@ export const closeEnvironment =
       dispatch(showTerminalError(readError(error)));
       return;
     }
+    const closedSessions = (getState().terminal.tabsByEnv[key] ?? []).map((tab) => tab.sessionId);
     dispatch(clearTabsForEnv(key));
+    for (const sessionId of closedSessions) {
+      dispatch(forgetSessionIfDone(sessionId));
+    }
     dispatch(clearEnvClosing(key));
     // Close is a definitive teardown of the desktop view; clear the AI-busy
     // latch so the sidebar row stops spinning even if the backend's busy=false

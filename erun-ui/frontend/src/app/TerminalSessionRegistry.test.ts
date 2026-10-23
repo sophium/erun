@@ -117,14 +117,15 @@ test('captureSnapshot keeps output that arrived after the switch was dispatched'
   assert.deepEqual(sessions.displayBuffer(1), ['still queued\n']);
 });
 
-// A session at its retention budget trims the head of its retained array on
-// every later append -- which is the standing state of a long-running build
-// log, and the one where a boundary taken as a length points at output the
-// snapshot does not carry, or past the end of an array that got shorter.
+// An append that crosses the retention budget trims the head of the retained
+// array -- which a long-running build log does over and over, and the case
+// where a boundary taken as a length points at output the snapshot does not
+// carry, or past the end of an array that got shorter.
 test('captureSnapshot keeps that output across a trim of the head', () => {
   const sessions = new TerminalSessionRegistry();
   const chunk = 'x'.repeat(1000);
-  for (let i = 0; i < Math.ceil(MAX_RETAINED_BYTES / chunk.length) + 10; i++) {
+  // Just under the budget, so the post-dispatch append below is the crossing.
+  for (let i = 0; i < Math.floor(MAX_RETAINED_BYTES / chunk.length) - 1; i++) {
     sessions.appendDisplayBuffer(3, chunk);
   }
   const atDispatch = sessions.displayAppendedCount(3);
@@ -151,4 +152,63 @@ test('snapshots and buffers are independent per session', () => {
   assert.equal(sessions.snapshot(1), 'ONE');
   assert.equal(sessions.snapshot(2), undefined);
   assert.deepEqual(sessions.displayBuffer(2), ['two\n']);
+});
+
+// The reproduction of the reported hang: once a session had filled its budget,
+// the trim kept a tail sitting exactly at the budget, so the very next chunk
+// crossed it again and every chunk paid an O(retained) rescan -- the renderer
+// spent seconds per burst of output inside them. A trim leaves a fresh array
+// behind (an append alone pushes onto the same one), so counting how often the
+// retained array is replaced counts the rescans.
+test('appendDisplayBuffer does not rescan on every chunk once the budget is full', () => {
+  const sessions = new TerminalSessionRegistry();
+  for (let i = 0; i < MAX_RETAINED_LINES + 1; i++) {
+    sessions.appendDisplayBuffer(1, `fill ${String(i)}\n`);
+  }
+  let retained = sessions.displayBuffer(1);
+  let rescans = 0;
+  const steadyAppends = 2_000;
+  for (let i = 0; i < steadyAppends; i++) {
+    sessions.appendDisplayBuffer(1, `line ${String(i)}\n`);
+    if (sessions.displayBuffer(1) !== retained) {
+      rescans++;
+      retained = sessions.displayBuffer(1);
+    }
+  }
+  assert.ok(
+    rescans <= 1,
+    `expected at most one rescan across ${String(steadyAppends)} appends, got ${String(rescans)}`,
+  );
+  const lines = retained.reduce((sum, chunk) => sum + (String(chunk).match(/\n/g) ?? []).length, 0);
+  assert.ok(lines <= MAX_RETAINED_LINES, `retained ${String(lines)} lines`);
+});
+
+test('the raw session buffer stays bounded under sustained output', () => {
+  const sessions = new TerminalSessionRegistry();
+  const chunk = new Uint8Array(8_192).fill(120);
+  for (let i = 0; i < Math.ceil((MAX_RETAINED_BYTES * 3) / chunk.length); i++) {
+    sessions.appendSessionBuffer(1, chunk);
+  }
+  const bytes = sessions.sessionBuffer(1).reduce((sum, c) => sum + c.length, 0);
+  assert.ok(bytes <= MAX_RETAINED_BYTES, `retained ${String(bytes)} raw bytes`);
+  assert.ok(bytes > 0);
+});
+
+test('forgetSession drops every buffer retained for the session, and only for it', () => {
+  const sessions = new TerminalSessionRegistry();
+  for (const id of [1, 2]) {
+    sessions.appendSessionBuffer(id, new TextEncoder().encode('raw\n'));
+    sessions.appendDisplayBuffer(id, 'shown\n');
+    sessions.captureSnapshot(id, 'SCREEN');
+    sessions.appendDisplayBuffer(id, 'after\n');
+  }
+
+  sessions.forgetSession(1);
+
+  assert.deepEqual(sessions.sessionBuffer(1), []);
+  assert.deepEqual(sessions.displayBuffer(1), []);
+  assert.equal(sessions.snapshot(1), undefined);
+  assert.equal(sessions.sessionBuffer(2).length, 1);
+  assert.deepEqual(sessions.displayBuffer(2), ['after\n']);
+  assert.equal(sessions.snapshot(2), 'SCREEN');
 });

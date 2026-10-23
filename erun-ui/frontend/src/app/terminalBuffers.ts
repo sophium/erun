@@ -15,45 +15,78 @@ export const TERMINAL_SCROLLBACK = 5000;
 export const MAX_RETAINED_LINES = TERMINAL_SCROLLBACK * 2;
 export const MAX_RETAINED_BYTES = 2_000_000;
 
+// Retention trims down to this fraction of the budget rather than to the
+// budget itself, so a session that has filled its budget absorbs a quarter of
+// a budget's worth of new output before the next trim. Trimming only back to
+// the budget left the retained tail at it, and the very next chunk crossed it
+// again: every chunk paid an O(retained) rescan. Three quarters of
+// MAX_RETAINED_LINES is still above TERMINAL_SCROLLBACK, so a replay still
+// fills xterm's scrollback.
+export const RETAINED_TRIM_TARGET = 0.75;
+
 // Exported so TerminalSessionRegistry can maintain a running per-session
 // line/byte total incrementally (O(1) per append) instead of re-summing the
 // whole retained array on every single output chunk -- see appendDisplayBuffer.
+// indexOf, not for...of: iterating a Uint8Array goes through the typed-array
+// iterator, which costs a length and detached check per byte in JSC.
 export function countNewlines(chunk: TerminalWriteData): number {
   let count = 0;
+  let from = 0;
   if (typeof chunk === 'string') {
-    for (const ch of chunk) {
-      if (ch === '\n') count++;
+    for (let at = chunk.indexOf('\n'); at !== -1; at = chunk.indexOf('\n', from)) {
+      count++;
+      from = at + 1;
     }
     return count;
   }
-  for (const byte of chunk) {
-    if (byte === 10) count++;
+  for (let at = chunk.indexOf(10); at !== -1; at = chunk.indexOf(10, from)) {
+    count++;
+    from = at + 1;
   }
   return count;
 }
 
+export interface TrimmedChunks<T extends TerminalWriteData> {
+  chunks: T[];
+  lines: number;
+  bytes: number;
+}
+
+// trimChunksWithinBudget keeps the newest chunks whose totals stay within the
+// budget -- always at least the newest chunk, however large -- and reports the
+// totals of what it kept, so a caller tracking running totals need not rescan.
+// Returns the original array reference when everything fits.
+export function trimChunksWithinBudget<T extends TerminalWriteData>(
+  chunks: T[],
+  maxLines: number,
+  maxBytes: number,
+): TrimmedChunks<T> {
+  let lines = 0;
+  let bytes = 0;
+  let start = chunks.length;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const chunk = chunks[i];
+    if (chunk === undefined) continue;
+    const chunkLines = countNewlines(chunk);
+    const withinBudget = lines + chunkLines <= maxLines && bytes + chunk.length <= maxBytes;
+    if (!withinBudget && start < chunks.length) break;
+    lines += chunkLines;
+    bytes += chunk.length;
+    start = i;
+  }
+  return { chunks: start === 0 ? chunks : chunks.slice(start), lines, bytes };
+}
+
 // trimChunksToBudget keeps only the tail of a chunk array worth keeping --
 // enough to fill xterm's scrollback, not the whole session history. Returns
-// the original array reference when nothing needs trimming. Used both to
-// bound retention as chunks are appended and (for a session with no snapshot
-// yet) to bound a cold-start replay.
+// the original array reference when nothing needs trimming. Used to bound a
+// cold-start replay of a session that has no snapshot yet.
 export function trimChunksToBudget(
   chunks: TerminalWriteData[],
   maxLines: number,
   maxBytes: number,
 ): TerminalWriteData[] {
-  let lines = 0;
-  let bytes = 0;
-  let start = 0;
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    start = i;
-    const chunk = chunks[i];
-    if (chunk === undefined) continue;
-    lines += countNewlines(chunk);
-    bytes += chunk.length;
-    if (lines >= maxLines || bytes >= maxBytes) break;
-  }
-  return start === 0 ? chunks : chunks.slice(start);
+  return trimChunksWithinBudget(chunks, maxLines, maxBytes).chunks;
 }
 
 export function failedTerminalOutput(
@@ -85,17 +118,16 @@ const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
   /(?:\x1BP)?[01]\$r[^\x1B]*\x1B\\/g,
 ];
 
-function stripTerminalResponses(input: Uint8Array): Uint8Array {
-  const decoder = new TextDecoder();
-  const text = decoder.decode(input);
+// Takes the chunk already decoded, so the output path decodes each chunk once.
+function stripTerminalResponses(input: Uint8Array, text: string): TerminalDisplayData {
   let cleaned = text;
   for (const pattern of TERMINAL_RESPONSE_PATTERNS) {
     cleaned = cleaned.replace(pattern, '');
   }
   if (cleaned === text) {
-    return input;
+    return { data: input, text };
   }
-  return new TextEncoder().encode(cleaned);
+  return { data: new TextEncoder().encode(cleaned), text: cleaned };
 }
 
 // A spinner inside a subprocess (helm, kubectl, git over SSH, the deploy
@@ -179,6 +211,13 @@ export function bufferCursorVisibility(buffer: TerminalWriteData[]): CursorVisib
   return state;
 }
 
-export function filterTerminalDisplayData(data: Uint8Array): TerminalWriteData {
-  return stripTerminalResponses(data);
+// The bytes to display and the same content as text, so a caller that also
+// scans the displayed output need not decode it again.
+export interface TerminalDisplayData {
+  data: Uint8Array;
+  text: string;
+}
+
+export function filterTerminalDisplay(data: Uint8Array, text: string): TerminalDisplayData {
+  return stripTerminalResponses(data, text);
 }

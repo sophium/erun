@@ -12,9 +12,17 @@ import {
   countNewlines,
   MAX_RETAINED_BYTES,
   MAX_RETAINED_LINES,
-  trimChunksToBudget,
+  RETAINED_TRIM_TARGET,
+  trimChunksWithinBudget,
 } from './terminalBuffers';
 import { selectionKey } from './versionSuggestions';
+
+// The raw output of a session, kept only for failedTerminalOutput to report
+// the tail of a tracked session that exits.
+interface RetainedRawBuffer {
+  chunks: Uint8Array[];
+  bytes: number;
+}
 
 interface RetainedDisplayBuffer {
   chunks: TerminalWriteData[];
@@ -44,7 +52,7 @@ function totals(chunks: TerminalWriteData[]): { lines: number; bytes: number } {
 // write, so keeping them in the store would be a perf sink. All other
 // per-session metadata lives in the slice.
 export class TerminalSessionRegistry {
-  private readonly sessionBuffers = new Map<number, Uint8Array[]>();
+  private readonly sessionBuffers = new Map<number, RetainedRawBuffer>();
   private readonly sessionDisplayBuffers = new Map<number, RetainedDisplayBuffer>();
   // The last serialized screen+scrollback xterm captured for a session when
   // it was switched away from (see TerminalController.snapshotSession). A
@@ -66,14 +74,40 @@ export class TerminalSessionRegistry {
     return store.getState().sessions.openSelections[sessionId] !== undefined;
   }
 
+  // Bounded by the display buffer's byte budget: an exit report needs the tail
+  // of the output, and a session that runs for a day must not keep all of it.
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
-    const existing = this.sessionBuffers.get(sessionId) ?? [];
-    existing.push(data);
+    const existing = this.sessionBuffers.get(sessionId) ?? { chunks: [], bytes: 0 };
+    existing.chunks.push(data);
+    existing.bytes += data.length;
+    if (existing.bytes > MAX_RETAINED_BYTES) {
+      const trimmed = trimChunksWithinBudget(
+        existing.chunks,
+        Number.POSITIVE_INFINITY,
+        MAX_RETAINED_BYTES * RETAINED_TRIM_TARGET,
+      );
+      existing.chunks = trimmed.chunks;
+      existing.bytes = trimmed.bytes;
+    }
     this.sessionBuffers.set(sessionId, existing);
   }
 
   sessionBuffer(sessionId: number): Uint8Array[] {
-    return this.sessionBuffers.get(sessionId) ?? [];
+    return this.sessionBuffers.get(sessionId)?.chunks ?? [];
+  }
+
+  // Once a session's exit has been reported, nothing reads its raw output.
+  forgetSessionBuffer(sessionId: number): void {
+    this.sessionBuffers.delete(sessionId);
+  }
+
+  // forgetSession drops everything retained for a session no tab shows any
+  // more. Go mints session ids monotonically and never reuses one, so nothing
+  // can ask for this session's output again.
+  forgetSession(sessionId: number): void {
+    this.sessionBuffers.delete(sessionId);
+    this.sessionDisplayBuffers.delete(sessionId);
+    this.sessionSnapshots.delete(sessionId);
   }
 
   // Bounded at append time, not only at replay time: an inactive session (an
@@ -84,8 +118,9 @@ export class TerminalSessionRegistry {
   //
   // The budget check itself is O(1) on the common under-budget path (a
   // running total, not a re-scan of the whole array on every single output
-  // chunk); trimChunksToBudget's O(retained size) rescan only runs on the
-  // rarer occasions the running total actually crosses the budget.
+  // chunk). Crossing the budget trims to RETAINED_TRIM_TARGET of it, so the
+  // O(retained size) rescan runs once per quarter-budget of new output rather
+  // than on every chunk after the first crossing.
   appendDisplayBuffer(sessionId: number, data: TerminalWriteData): void {
     const existing = this.sessionDisplayBuffers.get(sessionId) ?? {
       chunks: [],
@@ -101,11 +136,15 @@ export class TerminalSessionRegistry {
     // shows the tail of.
     existing.appended += 1;
     if (existing.lines > MAX_RETAINED_LINES || existing.bytes > MAX_RETAINED_BYTES) {
-      const trimmed = trimChunksToBudget(existing.chunks, MAX_RETAINED_LINES, MAX_RETAINED_BYTES);
-      if (trimmed !== existing.chunks) {
-        existing.chunks = trimmed;
-        ({ lines: existing.lines, bytes: existing.bytes } = totals(trimmed));
-      }
+      ({
+        chunks: existing.chunks,
+        lines: existing.lines,
+        bytes: existing.bytes,
+      } = trimChunksWithinBudget(
+        existing.chunks,
+        MAX_RETAINED_LINES * RETAINED_TRIM_TARGET,
+        MAX_RETAINED_BYTES * RETAINED_TRIM_TARGET,
+      ));
     }
     this.sessionDisplayBuffers.set(sessionId, existing);
   }
