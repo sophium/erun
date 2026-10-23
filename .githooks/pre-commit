@@ -9,9 +9,29 @@ cd "$REPO_ROOT"
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -n "$STAGED" ] || exit 0
 
+# gofmt's alignment differs between Go releases, and each component lints
+# under the toolchain its go.mod pins, so each file is formatted by the gofmt
+# of the go version its own module declares rather than whatever go is first
+# on PATH.
+module_gofmt() {
+  dir=$(dirname "$1")
+  while [ "$dir" != "." ] && [ "$dir" != "/" ] && [ ! -f "$dir/go.mod" ]; do
+    dir=$(dirname "$dir")
+  done
+  version=$(sed -n 's/^go \([0-9][0-9.]*\)$/\1/p' "$dir/go.mod" 2>/dev/null | head -n 1)
+  if [ -n "$version" ] && root=$(GOTOOLCHAIN="go$version" go env GOROOT 2>/dev/null); then
+    printf '%s\n' "$root/bin/gofmt"
+    return
+  fi
+  echo "note: could not resolve the go$version toolchain for $1; formatting with the gofmt on PATH" >&2
+  printf '%s\n' gofmt
+}
+
 STAGED_GO=$(printf '%s\n' "$STAGED" | grep -E '\.go$' || true)
 if [ -n "$STAGED_GO" ]; then
-  printf '%s\n' "$STAGED_GO" | tr '\n' '\0' | xargs -0 gofmt -w
+  printf '%s\n' "$STAGED_GO" | while IFS= read -r file; do
+    "$(module_gofmt "$file")" -w "$file"
+  done
   printf '%s\n' "$STAGED_GO" | tr '\n' '\0' | xargs -0 git add
 fi
 

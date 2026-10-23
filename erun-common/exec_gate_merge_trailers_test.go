@@ -24,7 +24,7 @@ func gateMergeTrailerSeam(body string, committed *string) GateMergeWorkingTreeDe
 				_, _ = fmt.Fprint(stdout, body+"\x00")
 			}
 			if len(args) >= 3 && args[0] == "commit" {
-				*committed = args[2]
+				*committed = args[len(args)-1]
 			}
 			return nil
 		},

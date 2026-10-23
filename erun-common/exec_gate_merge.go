@@ -476,7 +476,7 @@ func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, tar
 	for _, source := range sources {
 		ctx.TraceCommand(root, "git", "merge", "--squash", gateMergeFetchRef(source.Branch))
 		ctx.TraceCommand(root, "git", gateMergeTrailerLogArgs(targetRef, gateMergeFetchRef(source.Branch))...)
-		ctx.TraceCommand(root, "git", "commit", "-m", "<message + the branch trailers>")
+		ctx.TraceCommand(root, "git", commitVerbArgs(true, "<message + the branch trailers>")...)
 	}
 	return fetchArgs
 }
@@ -596,7 +596,11 @@ func commitGateMergeSource(ctx Context, root string, source GateMergeSource, sou
 	if skipped, err := refuseGateMergeSourceOnPolicy(root, source, sourceCommit, bodies, staged, deps); skipped != nil || err != nil {
 		return nil, skipped, err
 	}
-	if output, err := runGitCapturingOutput(root, deps, "commit", "-m", gateMergeCommitMessage(source.Message, trailers)); err != nil {
+	// The squash lands content its source branch already authored and built,
+	// so the repository's own hooks are skipped: a formatter hook running
+	// under a different toolchain than the build rewrote a staged file, and
+	// the merge commit failed the lint its source had passed.
+	if output, err := runGitCapturingOutput(root, deps, commitVerbArgs(true, gateMergeCommitMessage(source.Message, trailers))...); err != nil {
 		return nil, nil, fmt.Errorf("git commit %s: %w: %s", source.Branch, err, output)
 	}
 

@@ -32,7 +32,9 @@ type CommitWorkingTreeParams struct {
 	// SkipHooks commits with `git commit --no-verify`, so the repository's own
 	// pre-commit and commit-msg hooks cannot veto it. Reserve it for a
 	// machine-authored commit whose whole purpose is to preserve work that no
-	// other mechanism would save — a job supervisor's checkpoint. A hook is
+	// other mechanism would save — a job supervisor's checkpoint — or that
+	// lands content another commit already authored and built, as gate-merge's
+	// squash does (commitGateMergeSource). A hook is
 	// authored to police a human's commit; when it rejects a checkpoint it does
 	// not merely refuse one commit, it destroys the in-flight work of a run that
 	// has already ended. A human-authored commit leaves this false, so hook
