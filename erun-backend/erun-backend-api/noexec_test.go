@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -130,19 +131,24 @@ func checkBannedCommonCalls(t *testing.T, rel string, file *ast.File) {
 	})
 }
 
-// erunCommonLocalNames returns every name erun-common is bound to in this file,
-// so the ban holds under any import alias.
+// erunCommonLocalNames returns every name an erun-common package is bound to in
+// this file, so the ban holds under any import alias and whichever of the
+// module's packages a helper lives in.
 func erunCommonLocalNames(file *ast.File) map[string]bool {
 	locals := map[string]bool{}
 	for _, spec := range file.Imports {
-		if strings.Trim(spec.Path.Value, `"`) != erunCommonImportPath {
+		importPath := strings.Trim(spec.Path.Value, `"`)
+		if importPath != erunCommonImportPath && !strings.HasPrefix(importPath, erunCommonImportPath+"/") {
 			continue
 		}
-		if spec.Name != nil {
+		switch {
+		case spec.Name != nil:
 			locals[spec.Name.Name] = true
-			continue
+		case importPath == erunCommonImportPath:
+			locals["eruncommon"] = true
+		default:
+			locals[path.Base(importPath)] = true
 		}
-		locals["eruncommon"] = true
 	}
 	return locals
 }
@@ -163,27 +169,28 @@ func TestBannedCommonFuncsStillExist(t *testing.T) {
 	}
 }
 
-// erunCommonFuncNames collects erun-common's package-level function names.
+// erunCommonFuncNames collects the package-level function names of every
+// erun-common package.
 func erunCommonFuncNames(t *testing.T) map[string]bool {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(erunCommonDir, "*.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	declared := map[string]bool{}
-	for _, path := range paths {
-		if strings.HasSuffix(path, "_test.go") {
-			continue
+	err := filepath.WalkDir(erunCommonDir, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return err
 		}
-		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		file, parseErr := parser.ParseFile(token.NewFileSet(), name, nil, parser.SkipObjectResolution)
 		if parseErr != nil {
-			t.Fatal(parseErr)
+			return parseErr
 		}
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
 				declared[fn.Name.Name] = true
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return declared
 }

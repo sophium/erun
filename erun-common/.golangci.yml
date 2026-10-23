@@ -21,7 +21,37 @@ linters:
     - funlen
     - gocyclo
     - cyclop
+    - depguard
   settings:
+    # The package layers of #2741 (AGENTS.md "Package layers"): every package
+    # may import only the layers below it. Each rule denies the whole module
+    # and allows what lies beneath, so a new package is held to the table the
+    # moment its directory exists.
+    depguard:
+      rules:
+        base-model:
+          list-mode: lax
+          files: ["**/erun-common/base/model/*.go"]
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/model is plain data and imports nothing else of erun-common
+        base-core:
+          list-mode: lax
+          files: ["**/erun-common/base/core/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/core may import only base/model
+        base-config:
+          list-mode: lax
+          files: ["**/erun-common/base/config/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+            - github.com/sophium/erun/erun-common/base/core
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/config may import only base/core and base/model
     funlen:
       lines: 100
       statements: 50

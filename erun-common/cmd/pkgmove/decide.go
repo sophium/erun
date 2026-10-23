@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"os"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -149,6 +150,25 @@ func (w *world) duplicateTestHelpers(d decisions) {
 		}
 		if w.dupMethods(d) {
 			changed = true
+		}
+	}
+	w.relocateUnusedTestHelpers(d)
+}
+
+// relocateUnusedTestHelpers moves, rather than copies, a test-only helper its
+// own package no longer uses: every test that used it went elsewhere, so the
+// original would be left behind unused.
+func (w *world) relocateUnusedTestHelpers(d decisions) {
+	usedAtHome := w.testHelpersUsedAtHome(d)
+	for _, decls := range d.decls {
+		for i := range decls {
+			od := &decls[i]
+			if len(od.dups) == 0 || usedAtHome[od] {
+				continue
+			}
+			home := sortedKeys(od.dups)[0]
+			delete(od.dups, home)
+			od.dir = home
 		}
 	}
 }
@@ -479,3 +499,23 @@ func sharesOS(a, b *object) bool {
 
 // debugName, when set, explains why that identifier is exported.
 var debugName = os.Getenv("PKGMOVE_DEBUG")
+
+// testHelpersUsedAtHome are the duplicated test-only declarations some code in
+// their own package still refers to.
+func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
+	used := map[*declTarget]bool{}
+	for _, s := range w.sites {
+		o := w.objects[s.objKey]
+		if s.def || !strings.HasSuffix(o.file, "_test.go") {
+			continue
+		}
+		od := d.declAt(o.file, offsetOf(s.objKey))
+		if od == nil || len(od.dups) == 0 || d.declAt(s.file, s.start) == od {
+			continue
+		}
+		if slices.Contains(w.siteDirs(s, d), od.dir) {
+			used[od] = true
+		}
+	}
+	return used
+}
