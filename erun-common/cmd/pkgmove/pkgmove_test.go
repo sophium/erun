@@ -133,3 +133,29 @@ func TestFileDirFollowsTheFirstMatchingRuleAndTestsFollowTheirSource(t *testing.
 		t.Errorf("rename not parsed: %v", m.renames)
 	}
 }
+
+// TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt is the reproduction of
+// a move that lost tests: a test moved back into its file's own package and a
+// helper copied into that package both wrote that one path, so the second
+// write erased the test. Both have to survive, in source order.
+func TestApplyKeepsAMovedTestBesideTheHelpersCopiedWithIt(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"root.go":       "package fixture\n\nfunc Root() int { return 1 }\n",
+		"thing.go":      "package fixture\n\nfunc Thing() int { return 2 }\n",
+		"thing_test.go": "package fixture\n\nimport \"testing\"\n\nfunc fixtureValue() int { return 2 }\n\nfunc TestThing(t *testing.T) {\n\tif Thing() != fixtureValue() {\n\t\tt.Fatal()\n\t}\n}\n\nfunc TestThingBesideRoot(t *testing.T) {\n\tif Root()+Thing() != fixtureValue()+1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub thing.go\n. thing_test.go:TestThingBesideRoot\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	root := readFile(t, filepath.Join(dir, "thing_test.go"))
+	for _, want := range []string{"func fixtureValue() int", "func TestThingBesideRoot"} {
+		if !strings.Contains(root, want) {
+			t.Errorf("the root package's thing_test.go lost %q:\n%s", want, root)
+		}
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "sub", "thing_test.go")), "func TestThing(") {
+		t.Error("the moved package lost TestThing")
+	}
+	goIn(t, dir, "test", "./...")
+}

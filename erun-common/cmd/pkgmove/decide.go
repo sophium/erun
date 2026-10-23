@@ -159,16 +159,31 @@ func (w *world) duplicateTestHelpers(d decisions) {
 // own package no longer uses: every test that used it went elsewhere, so the
 // original would be left behind unused.
 func (w *world) relocateUnusedTestHelpers(d decisions) {
-	usedAtHome := w.testHelpersUsedAtHome(d)
-	for _, decls := range d.decls {
-		for i := range decls {
-			od := &decls[i]
-			if len(od.dups) == 0 || usedAtHome[od] {
-				continue
+	for moved := true; moved; {
+		moved = false
+		usedAtHome := w.testHelpersUsedAtHome(d)
+		for _, decls := range d.decls {
+			for i := range decls {
+				od := &decls[i]
+				if len(od.dups) == 0 || usedAtHome[od] {
+					continue
+				}
+				home := sortedKeys(od.dups)[0]
+				delete(od.dups, home)
+				od.dir = home
+				w.redirectDeclObjects(od, d)
+				moved = true
 			}
-			home := sortedKeys(od.dups)[0]
-			delete(od.dups, home)
-			od.dir = home
+		}
+	}
+}
+
+// redirectDeclObjects records a relocated declaration's new directory for
+// every object it declares.
+func (w *world) redirectDeclObjects(od *declTarget, d decisions) {
+	for key, o := range w.objects {
+		if d.declAt(o.file, offsetOf(key)) == od {
+			d.dir[key] = od.dir
 		}
 	}
 }

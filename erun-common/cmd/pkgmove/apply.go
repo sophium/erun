@@ -92,9 +92,11 @@ func (r *rewriter) planFragments() {
 
 func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 	home := r.m.fileDir(sf.rel)
+	// One fragment per package: a declaration that moves there and a test
+	// helper copied there end up in the same file, never two that overwrite
+	// each other.
 	byDir := map[string]*fragment{}
-	dupByDir := map[string]*fragment{}
-	var order, dups []*fragment
+	var order []*fragment
 	prev := r.bodyStart(sf)
 	for _, decl := range r.d.decls[sf.path] {
 		if genImport(sf, decl.start) {
@@ -104,7 +106,7 @@ func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 		prev = decl.end
 		order = addRange(byDir, order, decl.dir, rg, false)
 		for _, dir := range sortedKeys(decl.dups) {
-			dups = addRange(dupByDir, dups, dir, rg, true)
+			order = addRange(byDir, order, dir, rg, true)
 		}
 	}
 	primary := byDir[home]
@@ -118,7 +120,10 @@ func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 	}
 	primary.primary = true
 	primary.ranges = append(primary.ranges, [2]int{prev, len(sf.src)})
-	return append(order, dups...)
+	for _, f := range order {
+		sort.Slice(f.ranges, func(i, j int) bool { return f.ranges[i][0] < f.ranges[j][0] })
+	}
+	return order
 }
 
 func addRange(byDir map[string]*fragment, order []*fragment, dir string, rg [2]int, dup bool) []*fragment {
@@ -128,6 +133,7 @@ func addRange(byDir map[string]*fragment, order []*fragment, dir string, rg [2]i
 		byDir[dir] = f
 		order = append(order, f)
 	}
+	f.dup = f.dup && dup
 	f.ranges = append(f.ranges, rg)
 	return order
 }
@@ -254,6 +260,7 @@ func (r *rewriter) otherImport(sf *sourceFile, name string) bool {
 // originals that moved away.
 func (r *rewriter) write() (int, error) {
 	written := 0
+	targets := map[string]string{}
 	for _, name := range sortedKeys(r.frags) {
 		sf := r.w.files[name]
 		frags := r.frags[name]
@@ -263,22 +270,35 @@ func (r *rewriter) write() (int, error) {
 		if usesCgo(sf) {
 			return written, fmt.Errorf("%s uses cgo, whose import preamble a rewrite would drop; move its references by hand", sf.path)
 		}
-		moved := false
-		for _, f := range frags {
-			target := r.targetPath(sf, f)
-			if target != sf.path {
-				moved = true
-			}
-			if err := r.writeFragment(sf, f, target); err != nil {
-				return written, err
-			}
-			written++
+		n, err := r.writeFile(sf, frags, targets)
+		written += n
+		if err != nil {
+			return written, err
 		}
-		if moved && !r.keepsOriginal(sf, frags) {
-			if err := os.Remove(sf.path); err != nil {
-				return written, err
-			}
+	}
+	return written, nil
+}
+
+// writeFile writes every fragment of one source file and removes the source
+// when none of them stays at its path. targets records every path written in
+// this run, so two fragments can never land on one file.
+func (r *rewriter) writeFile(sf *sourceFile, frags []*fragment, targets map[string]string) (int, error) {
+	written := 0
+	moved := false
+	for _, f := range frags {
+		target := r.targetPath(sf, f)
+		if from, ok := targets[target]; ok {
+			return written, fmt.Errorf("%s and %s would both be written to %s; add a rename to the map", from, sf.path, target)
 		}
+		targets[target] = sf.path
+		moved = moved || target != sf.path
+		if err := r.writeFragment(sf, f, target); err != nil {
+			return written, err
+		}
+		written++
+	}
+	if moved && !r.keepsOriginal(sf, frags) {
+		return written, os.Remove(sf.path)
 	}
 	return written, nil
 }
