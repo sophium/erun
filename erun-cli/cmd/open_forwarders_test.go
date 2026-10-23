@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestActivateForwardersBestEffort locks the contract that the laptop-side
@@ -24,15 +25,15 @@ func TestActivateForwardersBestEffort(t *testing.T) {
 	var out bytes.Buffer
 	var sshdCalled, mcpCalled, apiCalled bool
 	runner := &resolvedOpenRunner{
-		ctx: common.Context{Logger: common.NewLoggerWithWriters(0, &out, &out)},
-		result: common.OpenResult{
+		ctx: core.Context{Logger: core.NewLoggerWithWriters(0, &out, &out)},
+		result: config.OpenResult{
 			Tenant:      "team",
 			Environment: "dev",
-			EnvConfig:   common.EnvConfig{Name: "dev", SSHD: common.SSHDConfig{Enabled: true}},
+			EnvConfig:   config.EnvConfig{Name: "dev", SSHD: config.SSHDConfig{Enabled: true}},
 		},
-		activateSSHD: func(common.Context, common.OpenResult) error { sshdCalled = true; return fmt.Errorf("sshd boom") },
-		activateMCP:  func(common.Context, common.OpenResult) error { mcpCalled = true; return fmt.Errorf("mcp boom") },
-		activateAPI:  func(common.Context, common.OpenResult) error { apiCalled = true; return fmt.Errorf("api boom") },
+		activateSSHD: func(core.Context, config.OpenResult) error { sshdCalled = true; return fmt.Errorf("sshd boom") },
+		activateMCP:  func(core.Context, config.OpenResult) error { mcpCalled = true; return fmt.Errorf("mcp boom") },
+		activateAPI:  func(core.Context, config.OpenResult) error { apiCalled = true; return fmt.Errorf("api boom") },
 	}
 
 	err := runner.activateForwarders()

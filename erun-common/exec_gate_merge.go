@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // GateMergeSource is one branch to squash into the prospective merge, in the
@@ -100,14 +102,14 @@ type GateMergeWorkingTreeResult struct {
 // GateMergeWorkingTreeDependencies lets tests replace the git plumbing
 // without a real remote, mirroring MergeWorkingTreeBranchDependencies.
 type GateMergeWorkingTreeDependencies struct {
-	WorkingTreeClean func(ctx Context, root string) (bool, error)
-	ResolveRef       func(ctx Context, root, ref string) (string, error)
+	WorkingTreeClean func(ctx core.Context, root string) (bool, error)
+	ResolveRef       func(ctx core.Context, root, ref string) (string, error)
 	RunGit           GitCommandRunnerFunc
 	ConflictedFiles  func(root string, runGit GitCommandRunnerFunc) ([]string, error)
 	// StagedPaths reads back what a squash actually staged. A source that
 	// stages nothing contributes nothing to the prospective merge, so it is
 	// skipped rather than committed — see gateMergeOneSource.
-	StagedPaths func(ctx Context, root string) ([]string, error)
+	StagedPaths func(ctx core.Context, root string) ([]string, error)
 	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
 	// for a human to resolve. See resolveAtlasSumConflicts.
 	RunAtlasHash AtlasMigrateHashRunnerFunc
@@ -158,7 +160,7 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // branch than whatever the tree is currently on, so an in-progress change
 // left uncommitted there would otherwise be silently carried onto the
 // prospective merge or lost.
-func GateMergeWorkingTree(ctx Context, root string, params GateMergeWorkingTreeParams, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
+func GateMergeWorkingTree(ctx core.Context, root string, params GateMergeWorkingTreeParams, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("target branch is required")
@@ -321,7 +323,7 @@ func gateMergeTrailerLogArgs(base, sourceRef string) []string {
 // silently absent: the whole point of reading these is that their absence is
 // invisible on the target, so a read that failed must not be swallowed into
 // the same empty result as a branch that declared nothing.
-func gateMergeCarriedTrailers(ctx Context, root, base, sourceRef string, deps GateMergeWorkingTreeDependencies) ([]string, []string, error) {
+func gateMergeCarriedTrailers(ctx core.Context, root, base, sourceRef string, deps GateMergeWorkingTreeDependencies) ([]string, []string, error) {
 	args := gateMergeTrailerLogArgs(base, sourceRef)
 	ctx.TraceCommand(root, "git", args...)
 	output, err := runGitCapturingOutput(root, deps, args...)
@@ -466,7 +468,7 @@ func gateMergeFetchSpec(branch string) string {
 // each source's squash-merge + commit pair, and returns the fetch argv so
 // the real run doesn't have to rebuild it. Traced unconditionally (not only
 // under --dry-run), matching every other exec primitive's audit contract.
-func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, target, remote, targetRef string) []string {
+func traceGateMergePlan(ctx core.Context, root string, sources []GateMergeSource, target, remote, targetRef string) []string {
 	fetchArgs := []string{"fetch", remote, gateMergeFetchSpec(target)}
 	for _, source := range sources {
 		fetchArgs = append(fetchArgs, gateMergeFetchSpec(source.Branch))
@@ -484,7 +486,7 @@ func traceGateMergePlan(ctx Context, root string, sources []GateMergeSource, tar
 // fetchAndGateMergeWorkingTree runs the mutating half of GateMergeWorkingTree,
 // isolated so the validation and dry-run branching above it don't inflate
 // that function's complexity.
-func fetchAndGateMergeWorkingTree(ctx Context, root string, sources []GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
+func fetchAndGateMergeWorkingTree(ctx core.Context, root string, sources []GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
 	if output, err := runGitCapturingOutput(root, deps, fetchArgs...); err != nil {
 		return GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, output)
 	}
@@ -542,7 +544,7 @@ func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, a
 // a conflict (refuseGateMergeSourceOnPolicy). Any other git
 // failure (a bad ref, a real I/O error) is fatal for the whole batch, since
 // it says something is wrong beyond this one branch.
-func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+func gateMergeOneSource(ctx core.Context, root string, source GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
 	sourceRef := gateMergeFetchRef(source.Branch)
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
 	if err != nil {
@@ -588,7 +590,7 @@ func gateMergeOneSource(ctx Context, root string, source GateMergeSource, remote
 // commitGateMergeSource commits a squash that staged something, under the
 // caller's message plus the branch's carried trailers — unless the branch
 // fails the regression-test policy, when it is backed out and skipped.
-func commitGateMergeSource(ctx Context, root string, source GateMergeSource, sourceCommit, sourceRef, targetRef string, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource, sourceCommit, sourceRef, targetRef string, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
 	trailers, bodies, err := gateMergeCarriedTrailers(ctx, root, targetRef, sourceRef, deps)
 	if err != nil {
 		return nil, nil, err
@@ -670,9 +672,9 @@ func skipConflictedGateMergeSource(root string, source GateMergeSource, remote, 
 }
 
 // gitResolveRef resolves ref to its full commit hash.
-func gitResolveRef(ctx Context, root, ref string) (string, error) {
+func gitResolveRef(ctx core.Context, root, ref string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", root, "rev-parse", ref)
-	output, err := Command("git", "-C", root, "rev-parse", ref).Output()
+	output, err := core.Command("git", "-C", root, "rev-parse", ref).Output()
 	if err != nil {
 		if stderr := stderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)

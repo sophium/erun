@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestBuildKitProgressPhasesParsesDockerfileSteps(t *testing.T) {
@@ -18,25 +20,25 @@ func TestBuildKitProgressPhasesParsesDockerfileSteps(t *testing.T) {
 #4 0.10 running tests
 #4 DONE 200.25s`
 
-	phases := buildKitProgressPhases(output)
+	phases := core.BuildKitProgressPhases(output)
 	if len(phases) != 3 {
 		t.Fatalf("expected 3 phases (internal, COPY, RUN — the CACHED FROM has no DONE), got %d: %+v", len(phases), phases)
 	}
 
-	byName := map[string]buildProgressPhase{}
+	byName := map[string]core.BuildProgressPhase{}
 	for _, p := range phases {
-		byName[p.name] = p
+		byName[p.Name] = p
 	}
 	if _, ok := byName["FROM docker.io/library/golang:1.26.0"]; ok {
 		t.Fatalf("a cached step with no DONE line must not be reported as a zero-duration phase, got: %+v", phases)
 	}
-	if got := byName["load build definition from Dockerfile"].duration; got != 0 {
+	if got := byName["load build definition from Dockerfile"].Duration; got != 0 {
 		t.Fatalf("expected 0s for the internal step, got %v", got)
 	}
-	if got := byName["COPY . ."].duration; got != 1500*time.Millisecond {
+	if got := byName["COPY . ."].Duration; got != 1500*time.Millisecond {
 		t.Fatalf("expected 1.5s for the COPY step, got %v", got)
 	}
-	if got := byName["RUN make check"].duration; got != 200250*time.Millisecond {
+	if got := byName["RUN make check"].Duration; got != 200250*time.Millisecond {
 		t.Fatalf("expected 200.25s for the RUN step, got %v", got)
 	}
 }
@@ -52,16 +54,16 @@ func TestBuildKitProgressPhasesNestsMakefilePhaseMarkersUnderTheirStep(t *testin
 #8 90.20 >> go test erun-backend-api
 #8 DONE 107.50s`
 
-	phases := buildKitProgressPhases(output)
+	phases := core.BuildKitProgressPhases(output)
 	if len(phases) != 1 {
 		t.Fatalf("expected the one RUN step, got %d: %+v", len(phases), phases)
 	}
 	step := phases[0]
-	if step.name != "RUN make check" || step.duration != 107500*time.Millisecond {
+	if step.Name != "RUN make check" || step.Duration != 107500*time.Millisecond {
 		t.Fatalf("unexpected top-level step: %+v", step)
 	}
-	if len(step.children) != 4 {
-		t.Fatalf("expected 4 make-phase children, got %d: %+v", len(step.children), step.children)
+	if len(step.Children) != 4 {
+		t.Fatalf("expected 4 make-phase children, got %d: %+v", len(step.Children), step.Children)
 	}
 
 	want := []struct {
@@ -74,22 +76,22 @@ func TestBuildKitProgressPhasesNestsMakefilePhaseMarkersUnderTheirStep(t *testin
 		{"go test erun-backend-api", (10750 - 9020) * 10 * time.Millisecond},
 	}
 	for i, w := range want {
-		if step.children[i].name != w.name {
-			t.Fatalf("child %d: name = %q, want %q (children: %+v)", i, step.children[i].name, w.name, step.children)
+		if step.Children[i].Name != w.name {
+			t.Fatalf("child %d: name = %q, want %q (children: %+v)", i, step.Children[i].Name, w.name, step.Children)
 		}
 		// Floating-point subtraction of the offsets can land a few
 		// nanoseconds off an exact decimal value; a millisecond of slack is
 		// well below anything that would matter to a reader of the table.
-		diff := step.children[i].duration - w.dur
+		diff := step.Children[i].Duration - w.dur
 		if diff < -time.Millisecond || diff > time.Millisecond {
-			t.Fatalf("child %d (%s): duration = %v, want ~%v", i, w.name, step.children[i].duration, w.dur)
+			t.Fatalf("child %d (%s): duration = %v, want ~%v", i, w.name, step.Children[i].Duration, w.dur)
 		}
 	}
 }
 
 func TestBuildKitProgressPhasesBoundsToTopNAndFoldsTheRest(t *testing.T) {
 	var b strings.Builder
-	for i := 1; i <= buildProgressPhasesTopN+5; i++ {
+	for i := 1; i <= core.BuildProgressPhasesTopN+5; i++ {
 		b.WriteString("#")
 		b.WriteString(strconv.Itoa(i))
 		b.WriteString(" [1/1] RUN step")
@@ -101,57 +103,57 @@ func TestBuildKitProgressPhasesBoundsToTopNAndFoldsTheRest(t *testing.T) {
 		b.WriteString(".0s\n")
 	}
 
-	phases := buildKitProgressPhases(b.String())
-	if len(phases) != buildProgressPhasesTopN+1 {
+	phases := core.BuildKitProgressPhases(b.String())
+	if len(phases) != core.BuildProgressPhasesTopN+1 {
 		t.Fatalf("expected top-N phases plus one synthetic row, got %d: %+v", len(phases), phases)
 	}
 	last := phases[len(phases)-1]
-	if !strings.Contains(last.name, "smaller steps") {
+	if !strings.Contains(last.Name, "smaller steps") {
 		t.Fatalf("expected a trailing synthetic 'smaller steps' row, got: %+v", last)
 	}
 	// The 5 smallest (durations 1s..5s) fold into the synthetic row: 1+2+3+4+5=15s.
-	if last.duration != 15*time.Second {
-		t.Fatalf("expected the folded row to keep the real total (15s), got %v", last.duration)
+	if last.Duration != 15*time.Second {
+		t.Fatalf("expected the folded row to keep the real total (15s), got %v", last.Duration)
 	}
 }
 
 func TestBuildKitProgressPhasesIsEmptyForUnrecognisableOutput(t *testing.T) {
-	if phases := buildKitProgressPhases("just some chatter\nand more chatter\n"); len(phases) != 0 {
+	if phases := core.BuildKitProgressPhases("just some chatter\nand more chatter\n"); len(phases) != 0 {
 		t.Fatalf("unrecognisable output should yield no phases, got %+v", phases)
 	}
-	if phases := buildKitProgressPhases(""); len(phases) != 0 {
+	if phases := core.BuildKitProgressPhases(""); len(phases) != 0 {
 		t.Fatalf("empty output should yield no phases, got %+v", phases)
 	}
 }
 
 func TestAttachBuildProgressPhasesAttachesUnderThePlatformStep(t *testing.T) {
 	clock := newFakeClock()
-	root := newStepTiming("build", clock.now)
-	image := root.child("erun-devops")
+	root := core.NewStepTiming("build", clock.now)
+	image := root.Child("erun-devops")
 	clock.advance(200 * time.Second)
-	platform := image.addFinishedChild("linux/amd64", 200*time.Second, nil, nil, nil)
+	platform := image.AddFinishedChild("linux/amd64", 200*time.Second, nil, nil, nil)
 
 	output := `#4 [3/3] RUN make check
 #4 0.10 >> lint
 #4 150.30 >> playwright
 #4 DONE 200.00s`
-	attachBuildProgressPhases(platform, output)
+	core.AttachBuildProgressPhases(platform, output)
 
-	if len(platform.children) != 1 {
-		t.Fatalf("expected 1 Dockerfile-step child under the platform step, got %d", len(platform.children))
+	if len(platform.Children) != 1 {
+		t.Fatalf("expected 1 Dockerfile-step child under the platform step, got %d", len(platform.Children))
 	}
-	stage := platform.children[0]
-	if stage.name != "RUN make check" {
-		t.Fatalf("expected the RUN step as a child, got %q", stage.name)
+	stage := platform.Children[0]
+	if stage.Name != "RUN make check" {
+		t.Fatalf("expected the RUN step as a child, got %q", stage.Name)
 	}
-	if len(stage.children) != 2 {
-		t.Fatalf("expected 2 make-phase grandchildren, got %d", len(stage.children))
+	if len(stage.Children) != 2 {
+		t.Fatalf("expected 2 make-phase grandchildren, got %d", len(stage.Children))
 	}
-	if stage.children[0].name != "lint" || stage.children[1].name != "playwright" {
-		t.Fatalf("unexpected make-phase children: %+v", stage.children)
+	if stage.Children[0].Name != "lint" || stage.Children[1].Name != "playwright" {
+		t.Fatalf("unexpected make-phase children: %+v", stage.Children)
 	}
 
-	rows := renderStepTimingRows(root, 0)
+	rows := core.RenderStepTimingRows(root, 0)
 	joined := strings.Join(rows, "\n")
 	for _, want := range []string{"RUN make check", "lint", "playwright"} {
 		if !strings.Contains(joined, want) {
@@ -162,12 +164,12 @@ func TestAttachBuildProgressPhasesAttachesUnderThePlatformStep(t *testing.T) {
 
 func TestAttachBuildProgressPhasesIsANoOpForUnparseableOutput(t *testing.T) {
 	clock := newFakeClock()
-	root := newStepTiming("build", clock.now)
-	platform := root.addFinishedChild("linux/amd64", 5*time.Second, nil, nil, nil)
+	root := core.NewStepTiming("build", clock.now)
+	platform := root.AddFinishedChild("linux/amd64", 5*time.Second, nil, nil, nil)
 
-	attachBuildProgressPhases(platform, "docker: not enough disk space\n")
-	if len(platform.children) != 0 {
-		t.Fatalf("expected no children attached from unparseable output, got %d", len(platform.children))
+	core.AttachBuildProgressPhases(platform, "docker: not enough disk space\n")
+	if len(platform.Children) != 0 {
+		t.Fatalf("expected no children attached from unparseable output, got %d", len(platform.Children))
 	}
 }
 
@@ -177,18 +179,18 @@ func TestAttachBuildProgressPhasesIsANoOpForUnparseableOutput(t *testing.T) {
 // running, so a reader who sums those rows concludes the wrong step is
 // expensive. The sentinel itself is consumed, never rendered as a phase.
 func TestMarkerPhasesLabelsConcurrentSpansAndDropsSentinel(t *testing.T) {
-	markers := []buildKitPhaseMarker{
-		{offsetSecs: 0, name: "concurrent-phase-spans: check-gate runs 10 targets at -j10"},
-		{offsetSecs: 1, name: "lint"},
-		{offsetSecs: 5, name: "test-frontend"},
+	markers := []core.BuildKitPhaseMarker{
+		{OffsetSecs: 0, Name: "concurrent-phase-spans: check-gate runs 10 targets at -j10"},
+		{OffsetSecs: 1, Name: "lint"},
+		{OffsetSecs: 5, Name: "test-frontend"},
 	}
-	phases := markerPhases(markers, 9)
+	phases := core.MarkerPhases(markers, 9)
 	if len(phases) != 2 {
 		t.Fatalf("expected the sentinel to be consumed, got %d phases: %+v", len(phases), phases)
 	}
 	for _, p := range phases {
-		if !strings.HasSuffix(p.name, buildProgressConcurrentSuffix) {
-			t.Errorf("phase %q is not marked as an elapsed window", p.name)
+		if !strings.HasSuffix(p.Name, core.BuildProgressConcurrentSuffix) {
+			t.Errorf("phase %q is not marked as an elapsed window", p.Name)
 		}
 	}
 }
@@ -197,10 +199,10 @@ func TestMarkerPhasesLabelsConcurrentSpansAndDropsSentinel(t *testing.T) {
 // one at a time still reports real per-phase cost, and suffixing those would
 // be a lie in the other direction.
 func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
-	phases := markerPhases([]buildKitPhaseMarker{{offsetSecs: 0, name: "lint"}, {offsetSecs: 4, name: "test"}}, 10)
+	phases := core.MarkerPhases([]core.BuildKitPhaseMarker{{OffsetSecs: 0, Name: "lint"}, {OffsetSecs: 4, Name: "test"}}, 10)
 	for _, p := range phases {
-		if strings.Contains(p.name, buildProgressConcurrentSuffix) {
-			t.Errorf("serial phase %q must not be marked concurrent", p.name)
+		if strings.Contains(p.Name, core.BuildProgressConcurrentSuffix) {
+			t.Errorf("serial phase %q must not be marked concurrent", p.Name)
 		}
 	}
 }
@@ -211,19 +213,19 @@ func TestMarkerPhasesLeavesSerialSpansUnlabelled(t *testing.T) {
 // its markers measures the replay. The self-reported figure is the job's own
 // wall clock and is the only honest number available for those rows.
 func TestMarkerPhasesPrefersSelfReportedDuration(t *testing.T) {
-	markers := []buildKitPhaseMarker{
-		{offsetSecs: 0, name: "concurrent-phase-spans: check-gate runs 11 targets at -j11"},
-		{offsetSecs: 10, name: "golangci-lint erun-ui [83s]"},
-		{offsetSecs: 11, name: "helm-chart-tests [7s]"},
+	markers := []core.BuildKitPhaseMarker{
+		{OffsetSecs: 0, Name: "concurrent-phase-spans: check-gate runs 11 targets at -j11"},
+		{OffsetSecs: 10, Name: "golangci-lint erun-ui [83s]"},
+		{OffsetSecs: 11, Name: "helm-chart-tests [7s]"},
 	}
-	phases := markerPhases(markers, 200)
+	phases := core.MarkerPhases(markers, 200)
 	if len(phases) != 2 {
 		t.Fatalf("expected 2 phases, got %d: %+v", len(phases), phases)
 	}
-	if phases[0].name != "golangci-lint erun-ui" || phases[0].duration != 83*time.Second {
-		t.Errorf("phase 0 = %q/%s, want golangci-lint erun-ui/83s", phases[0].name, phases[0].duration)
+	if phases[0].Name != "golangci-lint erun-ui" || phases[0].Duration != 83*time.Second {
+		t.Errorf("phase 0 = %q/%s, want golangci-lint erun-ui/83s", phases[0].Name, phases[0].Duration)
 	}
-	if phases[1].name != "helm-chart-tests" || phases[1].duration != 7*time.Second {
-		t.Errorf("phase 1 = %q/%s, want helm-chart-tests/7s", phases[1].name, phases[1].duration)
+	if phases[1].Name != "helm-chart-tests" || phases[1].Duration != 7*time.Second {
+		t.Errorf("phase 1 = %q/%s, want helm-chart-tests/7s", phases[1].Name, phases[1].Duration)
 	}
 }

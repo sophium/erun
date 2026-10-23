@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The embedded Chart.yaml exists only to migrate legacy scaffolded tenant
@@ -20,7 +23,7 @@ var defaultDevopsChartFiles embed.FS
 // their own local chart pick up the current version. It only ever rewrites the
 // legacy shape, never hand-customised charts, and emits only trace lines so it
 // stays safe on the dry-run open path.
-func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVersion string) error {
+func MigrateDefaultDevopsChartAppVersion(ctx core.Context, projectRoot, tenant, appVersion string) error {
 	projectRoot = strings.TrimSpace(projectRoot)
 	tenant = strings.TrimSpace(tenant)
 	if projectRoot == "" || tenant == "" {
@@ -61,7 +64,7 @@ func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target config.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	// This is the baseline resolution before any --runtime-image `erun open`
 	// flag is applied (applyRuntimeDeployImageOverride re-resolves through the
 	// always-explicit ResolvePublishedDevopsDeploySpec when one is passed), so
@@ -107,7 +110,7 @@ func isHelmChartNotFoundForComponent(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "helm chart not found for component ")
 }
 
-func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {
+func ensureDefaultDevopsFile(ctx core.Context, path string, mode os.FileMode, content []byte) error {
 	replace, err := shouldWriteDefaultDevopsFile(path, content)
 	if err != nil || !replace {
 		return err

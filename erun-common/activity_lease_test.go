@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // These cover what the CLI subprocess cannot reach deterministically: expiry and
@@ -239,7 +240,7 @@ func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
 	// This is AC6 of the stop work: idle-stop must not stop an environment that
 	// is holding a live lease, and must say which lease is deferring it.
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	config := EnvironmentIdleConfig{Timeout: "5m", WorkingHours: "00:00-23:59"}
+	config := configpkg.EnvironmentIdleConfig{Timeout: "5m", WorkingHours: "00:00-23:59"}
 
 	idle, err := ResolveEnvironmentIdleStatus(config, nil, nil, now)
 	if err != nil {
@@ -530,7 +531,7 @@ func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {
 		t.Fatalf("expected the exclusive claim visible to a read-only caller, got %+v", held)
 	}
 
-	status, err := ResolveEnvironmentIdleStatus(EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}, nil, held, now.Add(time.Minute))
+	status, err := ResolveEnvironmentIdleStatus(configpkg.EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}, nil, held, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("resolve idle status: %v", err)
 	}
@@ -547,7 +548,7 @@ func TestEnvironmentOperatorPresenceReason(t *testing.T) {
 		t.Error("no markers at all must not report an operator present")
 	}
 
-	sshBusy := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(ActivityKindSSH)}}
+	sshBusy := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(configpkg.ActivityKindSSH)}}
 	reason, present := EnvironmentOperatorPresenceReason(sshBusy)
 	if !present || reason == "" {
 		t.Fatalf("a busy ssh marker must report an operator present, got present=%v reason=%q", present, reason)
@@ -560,8 +561,8 @@ func TestEnvironmentOperatorPresenceReason(t *testing.T) {
 	// would make a second legitimate job in a different clone of the same pod
 	// refuse against the first job's resident process. Only ssh is
 	// unambiguous. See the comment on environmentOperatorPresenceMarkers.
-	for _, kind := range []string{ActivityKindProcess, ActivityKindCodex, ActivityKindMCP, ActivityKindCLI, ActivityKindAPI} {
-		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(ActivityKindSSH)}}
+	for _, kind := range []string{ActivityKindProcess, configpkg.ActivityKindCodex, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindAPI} {
+		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
 		if _, present := EnvironmentOperatorPresenceReason(status); present {
 			t.Errorf("marker %q must not by itself report an operator present", kind)
 		}

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	erunmcp "github.com/sophium/erun/erun-mcp"
 )
 
@@ -19,9 +19,9 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stderr, erunmcp.CurrentBuildInfo(), erunmcp.RunHTTP))
 }
 
-type serverRunner func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error
+type serverRunner func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error
 
-func run(args []string, stderr io.Writer, info eruncommon.BuildInfo, runServer serverRunner) int {
+func run(args []string, stderr io.Writer, info model.BuildInfo, runServer serverRunner) int {
 	flags := flag.NewFlagSet("emcp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 

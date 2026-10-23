@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestE2EServiceURLBuildArgFoldsTheServiceName(t *testing.T) {
@@ -50,7 +52,7 @@ func TestRefuseLoopbackE2ETarget(t *testing.T) {
 		{"https://console.example", false},
 		{"https://unresolvable.invalid", false},
 	} {
-		err := refuseLoopbackE2ETarget(Context{}, tc.url, lookup(answers))
+		err := refuseLoopbackE2ETarget(core.Context{}, tc.url, lookup(answers))
 		if tc.refused != (err != nil) {
 			t.Errorf("%s: refused=%v, want %v (err %v)", tc.url, err != nil, tc.refused, err)
 		}
@@ -110,7 +112,7 @@ func TestAFailureAgainstABaseURLAndVersionNamesTheURL(t *testing.T) {
 		Version:     "1.0.305",
 		TargetNamed: true,
 	}
-	result, err := runE2E(Context{Stderr: io.Discard}, params, deps)
+	result, err := runE2E(core.Context{Stderr: io.Discard}, params, deps)
 	if err == nil {
 		t.Fatal("expected a failing suite to fail the run")
 	}

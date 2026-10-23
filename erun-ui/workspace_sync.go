@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 const defaultWorkspaceSyncInterval = 2 * time.Second
@@ -101,7 +102,7 @@ func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 // now, and whether that picture is complete. Incomplete matters: a tenant that
 // could not be read says nothing about its envs, and reading silence as "not
 // wanted" would tear down healthy workers.
-func (a *App) desiredWorkspaceSyncSelections(tenants []eruncommon.TenantConfig) (map[string]uiSelection, bool) {
+func (a *App) desiredWorkspaceSyncSelections(tenants []config.TenantConfig) (map[string]uiSelection, bool) {
 	desired := map[string]uiSelection{}
 	complete := true
 	for _, tenant := range tenants {
@@ -159,7 +160,7 @@ func (a *App) stopWorkspaceSyncForKey(key string) {
 	}
 }
 
-func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uiSelection, result eruncommon.OpenResult, localPath string) {
+func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uiSelection, result config.OpenResult, localPath string) {
 	params := eruncommon.WorkspaceSyncParams{
 		HostAlias:  eruncommon.SSHConnectionInfoForResult(result).HostAlias,
 		RemotePath: eruncommon.SSHConnectionInfoForResult(result).WorkspacePath,
@@ -204,8 +205,8 @@ const (
 
 // prepareWorkspaceSyncPass sleeps one interval itself before signalling retry, so
 // the sync loop's continue does not busy-spin on an unreachable SSHD.
-func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result eruncommon.OpenResult, params eruncommon.WorkspaceSyncParams) workspaceSyncPassOutcome {
-	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(eruncommon.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
+func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result config.OpenResult, params eruncommon.WorkspaceSyncParams) workspaceSyncPassOutcome {
+	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(config.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {
 			a.setWorkspaceSyncError(key, result.Tenant, result.EnvConfig.Name, err)
 			if !sleepWorkspaceSyncInterval(ctx, a.deps.workspaceSyncInterval) {

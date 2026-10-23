@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // job_report.go lets an agent or orchestrator record the work it is doing to
@@ -48,7 +50,7 @@ type ReportJobStartParams struct {
 // Like ReportBuildOutcome it degrades completely silently with no alias
 // configured (the overwhelming majority of invocations) and records every
 // other reason as a trace. It never warns, never errors, and never blocks.
-func ReportJobStart(ctx Context, store CloudReadStore, deps CloudDependencies, params ReportJobStartParams) string {
+func ReportJobStart(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportJobStartParams) string {
 	if !hasAnyErunPlatformAlias(store) {
 		return ""
 	}
@@ -111,7 +113,7 @@ type ReportJobOutcomeParams struct {
 // never a propagated error. An empty JobID means the start was never
 // recorded, so there is nothing to close and nothing is said about it -- the
 // caller that had no id already saw why.
-func ReportJobOutcome(ctx Context, store CloudReadStore, deps CloudDependencies, params ReportJobOutcomeParams) {
+func ReportJobOutcome(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportJobOutcomeParams) {
 	if strings.TrimSpace(params.JobID) == "" {
 		return
 	}

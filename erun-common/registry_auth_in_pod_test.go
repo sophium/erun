@@ -9,13 +9,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // inPodTestContext is a Context that can trace, so the resolver's trace lines
 // are exercised rather than panicking on a nil logger.
-func inPodTestContext(dryRun bool) Context {
+func inPodTestContext(dryRun bool) core.Context {
 	var trace bytes.Buffer
-	return Context{Logger: NewLoggerWithWriters(0, &trace, &trace), DryRun: dryRun}
+	return core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace), DryRun: dryRun}
 }
 
 // stubDeclaredImagePullSecrets replaces the cluster read with a static auths
@@ -52,11 +55,11 @@ func ghcrDeclaredAuths(userPass string) map[string]dockerConfigJSONAuthEntry {
 	}
 }
 
-func frsProdRuntimeTarget() OpenResult {
-	return OpenResult{
+func frsProdRuntimeTarget() config.OpenResult {
+	return config.OpenResult{
 		Tenant:      "frs",
 		Environment: "prod",
-		EnvConfig:   EnvConfig{ImagePullSecrets: []string{"ghcr-pull"}},
+		EnvConfig:   config.EnvConfig{ImagePullSecrets: []string{"ghcr-pull"}},
 	}
 }
 
@@ -192,7 +195,7 @@ func ghcrPrivateRegistryServer(t *testing.T, version string) *httptest.Server {
 func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (RuntimeRegistryVersions, error) {
 	t.Helper()
 	server := ghcrPrivateRegistryServer(t, version)
-	return ResolveConfiguredRuntimeRegistryVersions(context.Background(), RuntimeRegistryConfig{
+	return ResolveConfiguredRuntimeRegistryVersions(context.Background(), config.RuntimeRegistryConfig{
 		Namespace:  "ghcr.io/sophium",
 		Repository: "charts/frs-devops",
 		BaseURL:    server.URL,

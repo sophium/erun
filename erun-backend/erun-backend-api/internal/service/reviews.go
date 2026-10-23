@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 type ReviewRepository interface {
@@ -311,7 +311,7 @@ func (s *ReviewService) PrepareCreate(review model.Review) (model.Review, error)
 		return model.Review{}, err
 	}
 	review.Repository = repositoryIdentity
-	issueRef, err := eruncommon.NormalizeIssueRef(review.DeclaredIssueRef, repositoryIdentity)
+	issueRef, err := modelpkg.NormalizeIssueRef(review.DeclaredIssueRef, repositoryIdentity)
 	if err != nil {
 		return model.Review{}, &InvalidIssueRefError{Reason: err.Error()}
 	}
@@ -325,7 +325,7 @@ func canonicalRepository(repository string) (string, error) {
 	if strings.TrimSpace(repository) == "" {
 		return "", nil
 	}
-	identity, err := eruncommon.RepositoryIdentity(repository)
+	identity, err := modelpkg.RepositoryIdentity(repository)
 	if err != nil {
 		return "", &InvalidRepositoryError{Reason: err.Error()}
 	}
@@ -561,7 +561,7 @@ func (s *ReviewService) UpdateStatus(ctx context.Context, reviewID string, statu
 // The identity is canonicalized first, so the SSH remote a checkout reports
 // verifies against the HTTPS one the review recorded.
 func resolveReportedRepository(review model.Review, remoteURL string) (string, error) {
-	reported, err := eruncommon.RepositoryIdentity(remoteURL)
+	reported, err := modelpkg.RepositoryIdentity(remoteURL)
 	if err != nil {
 		return "", &MergeNotVerifiedError{Reason: err.Error()}
 	}

@@ -6,7 +6,8 @@ import (
 	"io"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -42,8 +43,8 @@ func (a *App) IsContributeEligible(selection uiSelection) bool {
 	if err != nil {
 		return false
 	}
-	switch eruncommon.EnvironmentType(envConfig.Type) {
-	case eruncommon.EnvironmentTypeLocalAgent, eruncommon.EnvironmentTypeRemoteAgent:
+	switch config.EnvironmentType(envConfig.Type) {
+	case config.EnvironmentTypeLocalAgent, config.EnvironmentTypeRemoteAgent:
 		return true
 	default:
 		return false
@@ -106,7 +107,7 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable; open the environment first", mcpPort))
 	}
@@ -137,7 +138,7 @@ func (a *App) resolveContributeAppPort(selection uiSelection) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("resolve environment: %w", err)
 	}
-	port := eruncommon.ContributeAppPortForResult(result)
+	port := config.ContributeAppPortForResult(result)
 	if port <= 0 {
 		return 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
 	}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // noticeStaleRuntimePortForwards tells the operator when a runtime rollout left
@@ -13,7 +14,7 @@ import (
 // port-forward lifecycle — `erun open` starts, adopts, and tracks the forwards —
 // so this reports the condition and names the command that repairs it instead of
 // silently starting background processes for an env the operator never opened.
-func noticeStaleRuntimePortForwards(ctx common.Context, specs []common.DeploySpec) {
+func noticeStaleRuntimePortForwards(ctx core.Context, specs []common.DeploySpec) {
 	if ctx.DryRun {
 		return
 	}

@@ -9,11 +9,12 @@ import (
 	"io"
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ProvisionInput is the workflow input DBOS checkpoints. Because the checkpoint
@@ -132,8 +133,8 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 	if err != nil {
 		return bootstrapResult{}, fmt.Errorf("cloud provider alias %q: %w", input.CloudProviderAlias, err)
 	}
-	ectx := eruncommon.Context{
-		Logger: eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard),
+	ectx := core.Context{
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard),
 		DryRun: false,
 		Stdout: io.Discard,
 		Stderr: io.Discard,
@@ -148,7 +149,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 	}
 	status, err := eruncommon.InitCloudContext(ectx, store, params, eruncommon.CloudContextDependencies{
 		RunAWS:     runner.runAWS(c),
-		RunKubectl: func(eruncommon.Context, []string) error { return nil },
+		RunKubectl: func(core.Context, []string) error { return nil },
 		// Deterministic token from the context id: a crash-resumed re-run (reusing
 		// the existing tagged instance) re-derives the SAME token the instance
 		// already baked, so custody stays idempotent. Domain-separated from
@@ -190,10 +191,10 @@ type aliasStore struct {
 	provider string
 }
 
-func (s aliasStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{
-		CloudProviders: []eruncommon.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
+func (s aliasStore) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{
+		CloudProviders: []config.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
 	}, "", nil
 }
 
-func (s aliasStore) SaveERunConfig(eruncommon.ERunConfig) error { return nil }
+func (s aliasStore) SaveERunConfig(config.ERunConfig) error { return nil }

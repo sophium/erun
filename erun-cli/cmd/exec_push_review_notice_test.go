@@ -11,6 +11,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The push itself is stubbed at the git layer so the whole command body runs:
@@ -21,10 +23,10 @@ import (
 const execPushNoticeAlias = "dev@erun"
 
 type execPushNoticeStore struct {
-	config common.ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s execPushNoticeStore) LoadERunConfig() (common.ERunConfig, string, error) {
+func (s execPushNoticeStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.config, "", nil
 }
 
@@ -47,10 +49,10 @@ func (s execPushNoticeSecrets) DeleteCloudSecret(ref string) error {
 }
 
 func execPushNoticeStoreWithAlias(apiURL string) execPushNoticeStore {
-	return execPushNoticeStore{config: common.ERunConfig{CloudProviders: []common.CloudProviderConfig{{
+	return execPushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:    execPushNoticeAlias,
-		Provider: common.CloudProviderERun,
-		ERun:     &common.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
+		Provider: configpkg.CloudProviderERun,
+		ERun:     &configpkg.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
 	}}}}
 }
 
@@ -75,8 +77,8 @@ func execPushNoticeDependencies(t *testing.T) common.CloudDependencies {
 // the command body reaches the notice with a real result.
 func execPushNoticePushDependencies(branch string) common.PushWorkingTreeBranchDependencies {
 	return common.PushWorkingTreeBranchDependencies{
-		CurrentBranch: func(common.Context, string) (string, error) { return branch, nil },
-		CurrentCommit: func(common.Context, string) (string, error) { return "0123456789abcdef", nil },
+		CurrentBranch: func(core.Context, string) (string, error) { return branch, nil },
+		CurrentCommit: func(core.Context, string) (string, error) { return "0123456789abcdef", nil },
 		RunGit:        func(string, io.Writer, io.Writer, ...string) error { return nil },
 	}
 }
@@ -88,10 +90,10 @@ func execPushNoticeFinder(projectRoot string) common.ProjectFinderFunc {
 // execPushNoticeContext mirrors the CLI's own wiring: a push's diagnostics --
 // including the warning -- reach the operator on stderr, which is where the
 // logger's writers point.
-func execPushNoticeContext(out *bytes.Buffer) common.Context {
-	return common.Context{
-		Logger: common.NewLoggerWithWriters(common.VerbosityInfo, out, out),
-		Output: common.OutputText,
+func execPushNoticeContext(out *bytes.Buffer) core.Context {
+	return core.Context{
+		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out),
+		Output: core.OutputText,
 		Stdout: out,
 		Stderr: out,
 	}

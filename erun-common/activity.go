@@ -6,38 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-const (
-	DefaultEnvironmentIdleTimeout      = 5 * time.Minute
-	DefaultEnvironmentWorkingHours     = "08:00-20:00"
-	DefaultEnvironmentIdleTrafficBytes = 0
-
-	ActivityKindSSH   = "ssh"
-	ActivityKindAPI   = "api"
-	ActivityKindMCP   = "mcp"
-	ActivityKindCLI   = "cli"
-	ActivityKindCodex = "codex"
-)
-
-var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindAPI, ActivityKindMCP, ActivityKindCLI, ActivityKindCodex, ActivityKindProcess}
-
-type EnvironmentIdleConfig struct {
-	Timeout          string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	WorkingHours     string `yaml:"workinghours,omitempty" json:"workingHours,omitempty"`
-	Timezone         string `yaml:"timezone,omitempty" json:"timezone,omitempty"`
-	IdleTrafficBytes int64  `yaml:"idletrafficbytes,omitempty" json:"idleTrafficBytes,omitempty"`
-}
-
-type EnvironmentIdlePolicy struct {
-	Timeout          time.Duration `json:"timeout"`
-	WorkingHours     string        `json:"workingHours"`
-	Timezone         string        `json:"timezone,omitempty"`
-	IdleTrafficBytes int64         `json:"idleTrafficBytes"`
-}
+var environmentActivityKinds = []string{configpkg.ActivityKindSSH, configpkg.ActivityKindAPI, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindCodex, ActivityKindProcess}
 
 type EnvironmentActivityParams struct {
 	Tenant        string
@@ -59,7 +35,7 @@ type EnvironmentActivityClientUpdate struct {
 
 type EnvironmentIdleStore interface {
 	CloudReadStore
-	LoadEnvConfig(tenant, environment string) (EnvConfig, string, error)
+	LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error)
 }
 
 // Every timestamp below carries omitzero rather than omitempty: a value
@@ -111,7 +87,7 @@ type EnvironmentIdleMarkerClient struct {
 const environmentActivityClientCap = 8
 
 type EnvironmentIdleStatus struct {
-	Policy              EnvironmentIdlePolicy                  `json:"policy"`
+	Policy              configpkg.EnvironmentIdlePolicy        `json:"policy"`
 	OutsideWorkingHours bool                                   `json:"outsideWorkingHours"`
 	ManagedCloud        bool                                   `json:"managedCloud"`
 	StopEligible        bool                                   `json:"stopEligible"`
@@ -133,48 +109,7 @@ type EnvironmentIdleStatus struct {
 	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
 }
 
-func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
-	timeout := strings.TrimSpace(c.Timeout)
-	if timeout == "" {
-		timeout = DefaultEnvironmentIdleTimeout.String()
-	}
-	duration, err := time.ParseDuration(timeout)
-	if err != nil {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timeout %q", timeout)
-	}
-	if duration <= 0 {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("environment idle timeout must be greater than zero")
-	}
-
-	workingHours := strings.TrimSpace(c.WorkingHours)
-	if workingHours == "" {
-		workingHours = DefaultEnvironmentWorkingHours
-	}
-	if err := validateWorkingHours(workingHours); err != nil {
-		return EnvironmentIdlePolicy{}, err
-	}
-
-	timezone := strings.TrimSpace(c.Timezone)
-	if timezone != "" {
-		if _, err := time.LoadLocation(timezone); err != nil {
-			return EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
-		}
-	}
-
-	idleTrafficBytes := c.IdleTrafficBytes
-	if idleTrafficBytes < 0 {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("environment idle traffic threshold must not be negative")
-	}
-
-	return EnvironmentIdlePolicy{
-		Timeout:          duration,
-		WorkingHours:     workingHours,
-		Timezone:         timezone,
-		IdleTrafficBytes: idleTrafficBytes,
-	}, nil
-}
-
-func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, now time.Time) (EnvironmentIdleStatus, error) {
+func ResolveEnvironmentIdleStatus(config configpkg.EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, now time.Time) (EnvironmentIdleStatus, error) {
 	policy, err := config.Resolve()
 	if err != nil {
 		return EnvironmentIdleStatus{}, err
@@ -207,7 +142,7 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 	}, nil
 }
 
-func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, policy EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
+func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, policy configpkg.EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
 	markers := []EnvironmentIdleMarker{{
 		Name:             "working-hours",
 		Idle:             outsideWorkingHours,
@@ -259,7 +194,7 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 	if store == nil {
 		return EnvironmentIdleStatus{}, fmt.Errorf("store is required")
 	}
-	if err := errMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
 		return EnvironmentIdleStatus{}, err
 	}
 	config, _, err := store.LoadEnvConfig(tenant, environment)
@@ -355,7 +290,7 @@ func environmentIdleStopLogPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, ".erun", tenant, environment, "idle-stop.log")
 }
 
-func managedCloudEnvironment(store CloudReadStore, env EnvConfig) (bool, error) {
+func managedCloudEnvironment(store CloudReadStore, env configpkg.EnvConfig) (bool, error) {
 	if env.ManagedCloud {
 		return true, nil
 	}
@@ -376,7 +311,7 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	kind := strings.TrimSpace(params.Kind)
-	if err := errMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
 		return err
 	}
 	if !validEnvironmentActivityKind(kind) {
@@ -414,7 +349,7 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	data = append(data, '\n')
 	// Replaced, never rewritten in place: every idle-status read parses every
 	// snapshot, and one truncated mid-write fails that whole read.
-	return replaceFileAtomically(path, data, 0o644)
+	return configpkg.ReplaceFileAtomically(path, data, 0o644)
 }
 
 func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, updates []EnvironmentActivityClientUpdate, now time.Time) {
@@ -483,13 +418,13 @@ func LoadEnvironmentActivity(tenant, environment string) (map[string]Environment
 func EnvironmentActivityDir(tenant, environment string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
 		return "", err
 	}
-	return resolveCacheFilePath(filepath.Join("erun", "activity", tenant, environment))
+	return configpkg.ResolveCacheFilePath(filepath.Join("erun", "activity", tenant, environment))
 }
 
-func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, policy EnvironmentIdlePolicy, now time.Time) EnvironmentIdleMarker {
+func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, policy configpkg.EnvironmentIdlePolicy, now time.Time) EnvironmentIdleMarker {
 	marker := EnvironmentIdleMarker{
 		Name:         kind,
 		LastActivity: snapshot.LastActivity,
@@ -504,7 +439,7 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 	}
 	if now.Sub(snapshot.LastActivity) > policy.Timeout {
 		marker.Idle = true
-		if kind == ActivityKindCodex && !snapshot.LastSeen.IsZero() && now.Sub(snapshot.LastSeen) <= policy.Timeout {
+		if kind == configpkg.ActivityKindCodex && !snapshot.LastSeen.IsZero() && now.Sub(snapshot.LastSeen) <= policy.Timeout {
 			marker.Reason = "codex is open but idle"
 		} else {
 			marker.Reason = "last activity exceeded timeout"
@@ -563,7 +498,7 @@ func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, 
 // the issue's description: SSH presence only. Codex/claude session presence
 // remains visible (the marker is unchanged and still surfaces on `idle` and
 // the sidebar) but does not by itself refuse an exclusive take.
-var environmentOperatorPresenceMarkers = []string{ActivityKindSSH}
+var environmentOperatorPresenceMarkers = []string{configpkg.ActivityKindSSH}
 
 // EnvironmentOperatorPresenceReason reports why an environment reads as having
 // an operator physically present at an interactive shell, in the same words
@@ -593,15 +528,15 @@ func EnvironmentActivityMarkerDetail(marker string) string {
 	switch marker {
 	case ActivityKindProcess:
 		return "running build or agent processes"
-	case ActivityKindMCP:
+	case configpkg.ActivityKindMCP:
 		return "an agent is driving it over MCP"
-	case ActivityKindCodex:
+	case configpkg.ActivityKindCodex:
 		return "an AI session is working"
-	case ActivityKindSSH:
+	case configpkg.ActivityKindSSH:
 		return "an SSH session is active"
-	case ActivityKindAPI:
+	case configpkg.ActivityKindAPI:
 		return "serving API traffic"
-	case ActivityKindCLI:
+	case configpkg.ActivityKindCLI:
 		return "running erun commands"
 	default:
 		return "working"
@@ -647,17 +582,6 @@ func validEnvironmentActivityKind(kind string) bool {
 	return false
 }
 
-func validateWorkingHours(value string) error {
-	start, end, err := parseWorkingHours(value)
-	if err != nil {
-		return err
-	}
-	if start == end {
-		return fmt.Errorf("environment working hours start and end must differ")
-	}
-	return nil
-}
-
 // lastMinuteOfDay is the highest minute-of-day parseClockMinute can produce
 // (23:59). HH:MM has no way to spell midnight/24:00, so a window declared
 // 00:00-23:59 is the only literal all-day span an operator can write.
@@ -676,7 +600,7 @@ func applyWorkingHoursTimezone(now time.Time, timezone string) (time.Time, error
 }
 
 func workingHoursStatus(value string, timezone string, now time.Time) (bool, int64, error) {
-	start, end, err := parseWorkingHours(value)
+	start, end, err := configpkg.ParseWorkingHours(value)
 	if err != nil {
 		return false, 0, err
 	}
@@ -709,41 +633,6 @@ func evaluateWorkingHoursWindow(start, end int, now time.Time) (bool, int64) {
 		remainingMinutes += 24 * 60
 	}
 	return false, int64(remainingMinutes*60 - now.Second())
-}
-
-func parseWorkingHours(value string) (int, int, error) {
-	parts := strings.Split(strings.TrimSpace(value), "-")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("environment working hours must use HH:MM-HH:MM")
-	}
-	start, err := parseClockMinute(parts[0])
-	if err != nil {
-		return 0, 0, err
-	}
-	end, err := parseClockMinute(parts[1])
-	if err != nil {
-		return 0, 0, err
-	}
-	return start, end, nil
-}
-
-func parseClockMinute(value string) (int, error) {
-	parts := strings.Split(strings.TrimSpace(value), ":")
-	if len(parts) != 2 {
-		return 0, fmt.Errorf("environment working hours must use HH:MM-HH:MM")
-	}
-	hour, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, fmt.Errorf("invalid environment working hour %q", value)
-	}
-	minute, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, fmt.Errorf("invalid environment working minute %q", value)
-	}
-	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-		return 0, fmt.Errorf("environment working hours must use valid 24-hour times")
-	}
-	return hour*60 + minute, nil
 }
 
 func workingHoursReason(outside bool, workingHours string) string {

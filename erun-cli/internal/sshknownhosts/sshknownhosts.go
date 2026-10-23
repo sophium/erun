@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 var userHomeDir = os.UserHomeDir
@@ -61,7 +61,7 @@ func UpsertKnownHost(path, alias, host string, port int) error {
 }
 
 func scanHostKeys(host string, port int) ([]string, error) {
-	cmd := eruncommon.Command("ssh-keyscan", "-p", fmt.Sprintf("%d", port), host)
+	cmd := core.Command("ssh-keyscan", "-p", fmt.Sprintf("%d", port), host)
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	cmd.Stdout = stdout

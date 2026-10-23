@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // mcpChannelReattachTimeout bounds an automatic reattach. `erun open
@@ -23,7 +23,7 @@ const mcpChannelReattachTimeout = 60 * time.Second
 // from a channel drop without the trap a naive retry loop falls into: a bare
 // `erun open` would silently start an environment the operator deliberately
 // stopped and clear the recorded stop, where --reconnect refuses instead.
-func reattachEnvironmentMCPChannel(commandCtx common.Context, tenant, environment string) error {
+func reattachEnvironmentMCPChannel(commandCtx core.Context, tenant, environment string) error {
 	executable, err := erunExecutablePath()
 	if err != nil {
 		return err
@@ -31,7 +31,7 @@ func reattachEnvironmentMCPChannel(commandCtx common.Context, tenant, environmen
 	ctx, cancel := context.WithTimeout(context.Background(), mcpChannelReattachTimeout)
 	defer cancel()
 	commandCtx.Trace(fmt.Sprintf("mcp: %s/%s channel unreachable, reattaching with `erun open --reconnect`", tenant, environment))
-	cmd := common.CommandContext(ctx, executable, "open", tenant, environment, "--reconnect", "--no-shell", "--no-alias-prompt")
+	cmd := core.CommandContext(ctx, executable, "open", tenant, environment, "--reconnect", "--no-shell", "--no-alias-prompt")
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output

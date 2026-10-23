@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -290,12 +290,12 @@ func exitForStalledRestartQuit(reason string) {
 // background agent, so nothing is left behind by the restart itself; what can
 // still go wrong is a launch the next desktop would refuse, and that is the
 // one thing worth saying before the restart rather than after it.
-func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []eruncommon.DesktopRestartReopen {
+func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []core.DesktopRestartReopen {
 	entries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
 	ids := restartPreviewOrchestratorIDs(entries, strings.TrimSpace(returnToOrchestratorID))
-	out := make([]eruncommon.DesktopRestartReopen, 0, len(ids))
+	out := make([]core.DesktopRestartReopen, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, eruncommon.DesktopRestartReopen{
+		out = append(out, core.DesktopRestartReopen{
 			OrchestratorID: id,
 			Notice:         a.restartLaunchRefusal(id),
 		})
@@ -357,7 +357,7 @@ func relaunchDesktopAppDetached() error {
 	if err != nil {
 		return err
 	}
-	cmd := eruncommon.DesktopAppCommand(goruntime.GOOS, resolveDesktopSelfPath(executable), nil)
+	cmd := core.DesktopAppCommand(goruntime.GOOS, resolveDesktopSelfPath(executable), nil)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -35,7 +37,7 @@ var reattachMCPChannel = reattachEnvironmentMCPChannel
 // hand-rolled retry loop falls into — probing the port binding is worthless
 // (a stale forward still accepts the connection), and a bare `erun open`
 // would silently start an environment the operator deliberately stopped.
-func callMCPToolWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
+func callMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
 	call := func() (common.MCPToolCallResult, error) {
 		return common.CallMCPTool(ctx, common.MCPToolCallParams{
 			Endpoint:      target.endpoint,
@@ -168,7 +170,7 @@ type mcpTokenResult struct {
 	Token       string `json:"token"`
 }
 
-func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.OpenParams, tool, arguments string) error {
+func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.OpenParams, tool, arguments string) error {
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
 		return fmt.Errorf("--tool is required; run `erun mcp tools` to list the environment's tools")
@@ -198,13 +200,13 @@ func runMCPCallCommand(ctx context.Context, commandCtx common.Context, resolveOp
 		}
 		return mcpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == common.OutputJSON {
+	if commandCtx.Output == core.OutputJSON {
 		return commandCtx.WriteResult(result)
 	}
 	return writeMCPCallText(commandCtx, result)
 }
 
-func runMCPToolsCommand(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.OpenParams) error {
+func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.OpenParams) error {
 	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -219,7 +221,7 @@ func runMCPToolsCommand(ctx context.Context, commandCtx common.Context, resolveO
 	if err != nil {
 		return mcpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == common.OutputJSON {
+	if commandCtx.Output == core.OutputJSON {
 		return commandCtx.WriteResult(list)
 	}
 	return writeMCPToolsText(commandCtx, target, list)
@@ -228,7 +230,7 @@ func runMCPToolsCommand(ctx context.Context, commandCtx common.Context, resolveO
 // listMCPToolsWithReattach is listMCPTools's counterpart to
 // callMCPToolWithReattach: the same one-shot reattach-then-retry for a
 // dropped or stale channel.
-func listMCPToolsWithReattach(ctx context.Context, commandCtx common.Context, target mcpEdgeTarget) (common.MCPToolListResult, error) {
+func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget) (common.MCPToolListResult, error) {
 	list := func() (common.MCPToolListResult, error) {
 		return common.ListMCPTools(ctx, common.MCPToolListParams{
 			Endpoint:      target.endpoint,
@@ -246,7 +248,7 @@ func listMCPToolsWithReattach(ctx context.Context, commandCtx common.Context, ta
 	return result, err
 }
 
-func runMCPTokenCommand(commandCtx common.Context, resolveOpen OpenResolver, params common.OpenParams) error {
+func runMCPTokenCommand(commandCtx core.Context, resolveOpen OpenResolver, params common.OpenParams) error {
 	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -258,18 +260,18 @@ func runMCPTokenCommand(commandCtx common.Context, resolveOpen OpenResolver, par
 	}
 
 	now := time.Now()
-	token, err := common.MintDesktopMCPToken(common.DefaultDesktopIdentityDir(), target.tenant, target.environment, now)
+	token, err := common.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, now)
 	if err != nil {
 		return err
 	}
-	if commandCtx.Output == common.OutputJSON {
+	if commandCtx.Output == core.OutputJSON {
 		return commandCtx.WriteResult(mcpTokenResult{
 			Tenant:      target.tenant,
 			Environment: target.environment,
 			Endpoint:    target.endpoint,
 			Issuer:      common.DesktopMCPIssuer(),
 			Audience:    common.MCPTokenAudience(target.tenant, target.environment),
-			ExpiresAt:   now.Add(common.DesktopMCPTokenTTL).UTC().Format(time.RFC3339),
+			ExpiresAt:   now.Add(core.DesktopMCPTokenTTL).UTC().Format(time.RFC3339),
 			Token:       token,
 		})
 	}
@@ -277,12 +279,12 @@ func runMCPTokenCommand(commandCtx common.Context, resolveOpen OpenResolver, par
 	return err
 }
 
-func resolveMCPEdgeTarget(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams) (mcpEdgeTarget, error) {
+func resolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams) (mcpEdgeTarget, error) {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return mcpEdgeTarget{}, err
 	}
-	port := common.MCPPortForResult(result)
+	port := config.MCPPortForResult(result)
 	if port <= 0 {
 		return mcpEdgeTarget{}, fmt.Errorf("no local MCP port is configured for %s/%s", result.Tenant, result.Environment)
 	}
@@ -300,7 +302,7 @@ func resolveMCPEdgeTarget(ctx common.Context, resolveOpen OpenResolver, params c
 // call that runs longer than the token's lifetime still starts with a fresh one.
 func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
 	return func() (string, error) {
-		return common.MintDesktopMCPToken(common.DefaultDesktopIdentityDir(), target.tenant, target.environment, time.Now())
+		return common.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, time.Now())
 	}
 }
 
@@ -352,7 +354,7 @@ func compactMCPArguments(arguments map[string]any) string {
 	return string(encoded)
 }
 
-func writeMCPCallText(ctx common.Context, result common.MCPToolCallResult) error {
+func writeMCPCallText(ctx core.Context, result common.MCPToolCallResult) error {
 	if text := strings.TrimRight(result.Text, "\n"); text != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, text); err != nil {
 			return err
@@ -367,7 +369,7 @@ func writeMCPCallText(ctx common.Context, result common.MCPToolCallResult) error
 	return err
 }
 
-func writeMCPToolsText(ctx common.Context, target mcpEdgeTarget, list common.MCPToolListResult) error {
+func writeMCPToolsText(ctx core.Context, target mcpEdgeTarget, list common.MCPToolListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Tools on %s/%s (%s):\n", target.tenant, target.environment, target.endpoint); err != nil {
 		return err
 	}

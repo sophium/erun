@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestDeployRuntimeHealsPersistedVersionOnCachedNoOp guards a real gotcha: a
@@ -22,21 +24,21 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 
-	newRunner := func(resolver common.HelmReleaseVersionResolverFunc, save func(string, common.EnvConfig) error) *resolvedOpenRunner {
+	newRunner := func(resolver common.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
 		return &resolvedOpenRunner{
-			ctx: common.Context{Logger: common.NewLoggerWithWriters(0, io.Discard, io.Discard)},
-			result: common.OpenResult{
+			ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
+			result: config.OpenResult{
 				Tenant:    tenant,
-				EnvConfig: common.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
+				EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 			},
 			options:                openOptions{SaveEnvConfig: save},
 			resolveDeployedVersion: resolver,
 		}
 	}
 	skipHelmExecution := common.DeploySpec{
-		Target: common.OpenResult{
+		Target: config.OpenResult{
 			Tenant:    tenant,
-			EnvConfig: common.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
+			EnvConfig: config.EnvConfig{Name: "local", RuntimeVersion: stalePersisted, RuntimeRegistry: registry},
 		},
 		SkipHelm: true,
 		Deploy: common.HelmDeploySpec{
@@ -50,8 +52,8 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	t.Run("heals to the running version, never the minted one", func(t *testing.T) {
 		var savedVersion string
 		runner := newRunner(
-			func(common.Context, string, string, string) (string, error) { return runningVersion, nil },
-			func(_ string, cfg common.EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil },
+			func(core.Context, string, string, string) (string, error) { return runningVersion, nil },
+			func(_ string, cfg config.EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil },
 		)
 		if err := runner.deployRuntime(skipHelmExecution); err != nil {
 			t.Fatalf("deployRuntime: %v", err)
@@ -63,8 +65,8 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 
 	t.Run("unreadable running version leaves the persisted value unchanged", func(t *testing.T) {
 		runner := newRunner(
-			func(common.Context, string, string, string) (string, error) { return "", nil },
-			func(string, common.EnvConfig) error {
+			func(core.Context, string, string, string) (string, error) { return "", nil },
+			func(string, config.EnvConfig) error {
 				t.Fatalf("must not persist when the running version can't be read (would be a phantom)")
 				return nil
 			},
@@ -89,25 +91,25 @@ func TestDeployRuntimeHealsPersistedRuntimeImage(t *testing.T) {
 	const tenant = "frs"
 	const version = "1.0.86"
 
-	var saved *common.EnvConfig
+	var saved *config.EnvConfig
 	runner := &resolvedOpenRunner{
-		ctx: common.Context{Logger: common.NewLoggerWithWriters(0, io.Discard, io.Discard)},
-		result: common.OpenResult{
+		ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
+		result: config.OpenResult{
 			Tenant:    tenant,
-			EnvConfig: common.EnvConfig{Name: "build"},
+			EnvConfig: config.EnvConfig{Name: "build"},
 		},
-		options: openOptions{SaveEnvConfig: func(_ string, cfg common.EnvConfig) error {
+		options: openOptions{SaveEnvConfig: func(_ string, cfg config.EnvConfig) error {
 			c := cfg
 			saved = &c
 			return nil
 		}},
-		resolveDeployedVersion: func(common.Context, string, string, string) (string, error) { return version, nil },
+		resolveDeployedVersion: func(core.Context, string, string, string) (string, error) { return version, nil },
 	}
 	// SkipHelm bypasses RunDeploySpec's real helm/kubectl work (as the cached-
 	// no-op test above does) so this stays a persistence-only unit test; the
 	// resolver above stands in for the running release's own reported version.
 	execution := common.DeploySpec{
-		Target:   common.OpenResult{Tenant: tenant, EnvConfig: common.EnvConfig{Name: "build"}},
+		Target:   config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "build"}},
 		SkipHelm: true,
 		Deploy: common.HelmDeploySpec{
 			ReleaseName:          common.RuntimeReleaseName(tenant),

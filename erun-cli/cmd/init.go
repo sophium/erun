@@ -8,6 +8,8 @@ import (
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +18,7 @@ const (
 	enterKubernetesContextManuallyOption = "Enter Kubernetes context manually"
 )
 
-func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) *cobra.Command {
+func newInitCmd(runInit func(core.Context, common.BootstrapInitParams) error) *cobra.Command {
 	params := common.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
@@ -116,7 +118,7 @@ func applyClusterRegistryFlag(runParams *common.BootstrapInitParams, clusterRegi
 	}
 	// The in-cluster erun-registry is plain HTTP, so mark it insecure; the
 	// rest (service/namespace/port) fill from the erun-registry convention.
-	runParams.ClusterRegistry = &common.ClusterRegistry{Insecure: true}
+	runParams.ClusterRegistry = &config.ClusterRegistry{Insecure: true}
 	return nil
 }
 
@@ -139,7 +141,7 @@ func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams
 	if envType == "" {
 		return nil
 	}
-	parsed := common.EnvironmentType(envType)
+	parsed := config.EnvironmentType(envType)
 	if !parsed.IsValid() {
 		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, runtime, or host", envType)
 	}
@@ -171,7 +173,7 @@ func validateInitRunParams(params common.BootstrapInitParams) error {
 func containerRegistryPrompt(run PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label:   label,
-		Default: common.DefaultContainerRegistry,
+		Default: config.DefaultContainerRegistry,
 	}
 
 	result, err := run(prompt)
@@ -187,7 +189,7 @@ func containerRegistryPrompt(run PromptRunner, label string) (string, error) {
 
 	result = strings.TrimSpace(result)
 	if result == "" {
-		return common.DefaultContainerRegistry, nil
+		return config.DefaultContainerRegistry, nil
 	}
 	return result, nil
 }
@@ -374,13 +376,13 @@ func normalizeKubernetesContexts(contexts []string) []string {
 }
 
 func listKubernetesContexts() ([]string, error) {
-	output, err := common.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	output, err := core.Command("kubectl", "config", "get-contexts", "-o=name").Output()
 	if err != nil {
 		return nil, err
 	}
 	contexts := strings.Split(string(output), "\n")
 
-	currentOutput, err := common.Command("kubectl", "config", "current-context").Output()
+	currentOutput, err := core.Command("kubectl", "config", "current-context").Output()
 	if err == nil {
 		contexts = preferCurrentKubernetesContext(contexts, string(currentOutput))
 	}
@@ -426,7 +428,7 @@ func tenantSelectionUnavailable() bool {
 	return !stdinIsTerminal() && !tenantPromptHasAnswer()
 }
 
-func selectTenantPrompt(run SelectRunner, tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
+func selectTenantPrompt(run SelectRunner, tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)

@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testing.T) {
@@ -381,18 +382,18 @@ func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]configpkg.EnvConfig{
 			"frs/dev": {
 				Name:              "dev",
 				LocalRepoPath:     "/home/erun/git/frs",
 				KubernetesContext: "cluster-dev",
-				Type:              eruncommon.EnvironmentTypeRuntime,
-				SSHD: eruncommon.SSHDConfig{
+				Type:              configpkg.EnvironmentTypeRuntime,
+				SSHD: configpkg.SSHDConfig{
 					Enabled: true,
-					WorkspaceSync: eruncommon.SSHDWorkspaceSyncConfig{
+					WorkspaceSync: configpkg.SSHDWorkspaceSyncConfig{
 						Enabled:   enabled,
 						LocalPath: "/tmp/frs-local",
 					},

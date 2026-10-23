@@ -10,7 +10,8 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // orchestratorMCPServer is one Claude Code MCP server entry: a linked env's erun
@@ -46,7 +47,7 @@ type mcpReachabilityProber func(port int) bool
 // port-forward can ever reach one. A seam rather than a field on
 // eruncommon.OrchestratorEnvConfig, which records where an orchestrator reviews
 // an environment, not what the environment is.
-type mcpEnvTypeResolver func(tenant, environment string) eruncommon.EnvironmentType
+type mcpEnvTypeResolver func(tenant, environment string) configpkg.EnvironmentType
 
 // orchestratorMCPSkip is one linked environment that produced no MCP server
 // entry, and why. Carried out of the builder rather than dropped: an
@@ -137,7 +138,7 @@ type orchestratorMCPWiredEnv struct {
 // and never will. It is still reported — as an informational line, not a
 // warning — because an environment absent from the toolset otherwise reads as
 // "not linked".
-func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver, envType mcpEnvTypeResolver, reachable mcpReachabilityProber) (orchestratorMCPConfig, []orchestratorMCPSkip, []orchestratorMCPUnreachable) {
+func buildOrchestratorMCPConfig(envs []configpkg.OrchestratorEnvConfig, executable string, mcpPort mcpPortResolver, envType mcpEnvTypeResolver, reachable mcpReachabilityProber) (orchestratorMCPConfig, []orchestratorMCPSkip, []orchestratorMCPUnreachable) {
 	servers := map[string]orchestratorMCPServer{}
 	var skipped []orchestratorMCPSkip
 	executable = strings.TrimSpace(executable)
@@ -161,7 +162,7 @@ func buildOrchestratorMCPConfig(envs []eruncommon.OrchestratorEnvConfig, executa
 		// port, so it would otherwise be wired and then reported as merely
 		// unreachable — naming a deploy-or-reopen recovery that a host env
 		// refuses outright.
-		if envType != nil && envType(tenant, environment) == eruncommon.EnvironmentTypeHost {
+		if envType != nil && envType(tenant, environment) == configpkg.EnvironmentTypeHost {
 			skipped = append(skipped, orchestratorMCPSkip{
 				Label:   orchestratorEnvLabel(tenant, environment),
 				Reason:  "it is a host environment, which has no pod and so no MCP edge to reach",
@@ -390,7 +391,7 @@ const orchestratorEdgeRepairBudget = 20 * time.Second
 // the probe that follows (see wireOrchestratorMCP). Environments with no edge
 // to open — a host env, or one whose MCP port does not resolve — are left to
 // the builder, which reports them on their own terms.
-func (a *App) repairOrchestratorMCPEdges(envs []eruncommon.OrchestratorEnvConfig) {
+func (a *App) repairOrchestratorMCPEdges(envs []configpkg.OrchestratorEnvConfig) {
 	dead := a.orchestratorEdgesNotAnswering(envs)
 	if len(dead) == 0 {
 		return
@@ -414,7 +415,7 @@ func (a *App) repairOrchestratorMCPEdges(envs []eruncommon.OrchestratorEnvConfig
 // same round trip the builder uses, and a missing probe answers "cannot tell",
 // which must not be read as "not answering": repairing on a probe that never
 // ran would restart a forward on no evidence.
-func (a *App) orchestratorEdgesNotAnswering(envs []eruncommon.OrchestratorEnvConfig) []uiSelection {
+func (a *App) orchestratorEdgesNotAnswering(envs []configpkg.OrchestratorEnvConfig) []uiSelection {
 	var dead []uiSelection
 	for _, ref := range envs {
 		tenant := strings.TrimSpace(ref.Tenant)
@@ -435,7 +436,7 @@ func (a *App) orchestratorEdgesNotAnswering(envs []eruncommon.OrchestratorEnvCon
 // none resolves. Shared with the builder so the environment a launch opens a
 // forward for is the one it is about to wire.
 func (a *App) orchestratorMCPPort(tenant, environment string) int {
-	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
+	ports, err := configpkg.ResolveEnvironmentLocalPorts(a.deps.store, tenant, environment)
 	if err != nil {
 		return 0
 	}
@@ -446,7 +447,7 @@ func (a *App) orchestratorMCPPort(tenant, environment string) int {
 // value when the environment no longer resolves. An environment whose config
 // will not load has no known type, so it falls through to the port path and is
 // reported as the wiring failure it is — never silently excused as a host env.
-func (a *App) orchestratorMCPEnvType(tenant, environment string) eruncommon.EnvironmentType {
+func (a *App) orchestratorMCPEnvType(tenant, environment string) configpkg.EnvironmentType {
 	env, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
 	if err != nil {
 		return ""
@@ -463,7 +464,7 @@ func (a *App) orchestratorMCPEnvType(tenant, environment string) eruncommon.Envi
 // working configuration and returns no error. Because a host env is a skip like
 // any other, the caller gets every skip either way, host ones included, and can
 // name what is absent instead of leaving it to read as "not linked".
-func (a *App) writeOrchestratorMCPConfig(id string, envs []eruncommon.OrchestratorEnvConfig) (string, []orchestratorMCPSkip, []orchestratorMCPUnreachable, error) {
+func (a *App) writeOrchestratorMCPConfig(id string, envs []configpkg.OrchestratorEnvConfig) (string, []orchestratorMCPSkip, []orchestratorMCPUnreachable, error) {
 	// An orchestrator with no linked envs has nothing to wire, and that is normal.
 	if len(envs) == 0 {
 		return "", nil, nil, nil

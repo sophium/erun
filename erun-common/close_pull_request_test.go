@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The wire shape of the GitHub requests (list/comment/close) and GitHub's own
@@ -70,7 +72,7 @@ func TestClosePullRequestClosesAndCommentsWhenHeadMatches(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	result, err := ClosePullRequest(Context{}, ClosePullRequestParams{
+	result, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
 		RemoteURL:     "git@github.com:sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",
@@ -113,7 +115,7 @@ func TestClosePullRequestNoOpsWhenBranchHasNoOpenPullRequest(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	result, err := ClosePullRequest(Context{}, ClosePullRequestParams{
+	result, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
 		RemoteURL:     "https://github.com/sophium/erun.git",
 		Branch:        "chore/no-pr",
 		TargetBranch:  "main",
@@ -146,7 +148,7 @@ func TestClosePullRequestRefusesWhenHeadHasMoved(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	_, err := ClosePullRequest(Context{}, ClosePullRequestParams{
+	_, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
 		RemoteURL:     "https://github.com/sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",
@@ -183,7 +185,7 @@ func TestClosePullRequestSurfacesAGitHubFailureResponse(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	_, err := ClosePullRequest(Context{}, ClosePullRequestParams{
+	_, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
 		RemoteURL:     "https://github.com/sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",

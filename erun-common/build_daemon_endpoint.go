@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // buildDaemonEndpointAddr is where a Dockerfile test stage's
@@ -39,7 +41,7 @@ var buildDaemonEndpointAnswers = func() bool {
 }
 
 var runBuildDaemonCommand = func(args ...string) (string, error) {
-	output, err := Command("docker", args...).CombinedOutput()
+	output, err := core.Command("docker", args...).CombinedOutput()
 	return strings.TrimSpace(string(output)), err
 }
 
@@ -53,7 +55,7 @@ var runBuildDaemonCommand = func(args ...string) (string, error) {
 // daemon connection error. Here the build's own daemon is forwarded to that
 // address on the daemon host's loopback -- the network a `RUN --network=host`
 // step joins -- and the forwarder is removed when the build ends.
-func ensureBuildDaemonEndpoint(ctx Context, builds []DockerBuildSpec) (func(), error) {
+func ensureBuildDaemonEndpoint(ctx core.Context, builds []DockerBuildSpec) (func(), error) {
 	noop := func() {}
 	if !anyBuildDeclaresTestStage(builds) {
 		return noop, nil

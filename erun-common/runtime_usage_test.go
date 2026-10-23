@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
@@ -570,7 +572,7 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
 
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
 			return RemoteCommandResult{Stdout: busyDindReading}, nil
@@ -578,7 +580,7 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}
@@ -606,7 +608,7 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 // been unable to see anyway.
 func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
 			return RemoteCommandResult{}, errors.New("container not found")
@@ -614,7 +616,7 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
 	}
@@ -676,14 +678,14 @@ func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 // some unrelated warning cannot pass as silent about throttling.
 func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 	t.Helper()
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: EnvironmentTypeLocalAgent}
+	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
 	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
 			return RemoteCommandResult{Stdout: dindReading}, nil
 		}
 		return RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
-	usage, err := RunRuntimeUsage(Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}

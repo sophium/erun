@@ -3,7 +3,8 @@ package main
 import (
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestIdleStatusToUICarriesFromPodProvenance is the regression for
@@ -14,7 +15,7 @@ import (
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
 	status := eruncommon.EnvironmentIdleStatus{StopEligible: true}
-	result := eruncommon.OpenResult{}
+	result := config.OpenResult{}
 
 	if ui := app.idleStatusToUI(result, status, true); !ui.FromPod {
 		t.Fatalf("a pod-backed reading must report FromPod=true, got %+v", ui)
@@ -28,11 +29,11 @@ func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 // that is always host-only: the local fallback path never claims a live pod
 // observation.
 func TestLoadLocalIdleStatusReportsHostOnlyProvenance(t *testing.T) {
-	store := stubUIStore{envs: map[string]eruncommon.EnvConfig{
+	store := stubUIStore{envs: map[string]config.EnvConfig{
 		"acme/dev": {Name: "dev"},
 	}}
 	app := &App{deps: erunUIDeps{store: store}}
-	result := eruncommon.OpenResult{Tenant: "acme", Environment: "dev"}
+	result := config.OpenResult{Tenant: "acme", Environment: "dev"}
 
 	resolved, err := app.loadLocalIdleStatus(result)
 	if err != nil {

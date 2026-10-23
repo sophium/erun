@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const runtimeMCPRestartDelay = 2 * time.Second
@@ -68,18 +70,18 @@ func describeRuntimeMCP(boot runtimeBoot) string {
 	if !boot.runtimeMCPEnabled() {
 		return ""
 	}
-	return "serve the MCP edge, restarting it whenever it exits: " + formatShellCommand("", "emcp", boot.runtimeMCPArgs()...)
+	return "serve the MCP edge, restarting it whenever it exits: " + core.FormatShellCommand("", "emcp", boot.runtimeMCPArgs()...)
 }
 
 // startRuntimeMCP serves the environment's MCP edge from the runtime container
 // itself, so every MCP-driven command runs with the environment's own toolchain.
 // A crashed server is restarted and each restart is logged, so a crash loop stays
 // visible in the container log.
-func startRuntimeMCP(ctx Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func startRuntimeMCP(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	attempt := 1
 	supervisor.goLoop(func() bool {
 		ctx.Info(boot.runtimeMCPStartLine())
-		cmd := Command("emcp", boot.runtimeMCPArgs()...)
+		cmd := core.Command("emcp", boot.runtimeMCPArgs()...)
 		cmd.Stdout, cmd.Stderr = ctx.Stdout, ctx.Stderr
 		_ = supervisor.run(cmd)
 		if supervisor.stopping() {

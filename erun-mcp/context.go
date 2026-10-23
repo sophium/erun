@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ContextListInput struct {
@@ -104,7 +105,7 @@ func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 	}
 }
 
-func contextPowerTool(runtime RuntimeConfig, run func(eruncommon.Context, eruncommon.CloudContextStore, eruncommon.CloudContextParams, eruncommon.CloudContextDependencies) (eruncommon.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
+func contextPowerTool(runtime RuntimeConfig, run func(core.Context, eruncommon.CloudContextStore, eruncommon.CloudContextParams, eruncommon.CloudContextDependencies) (eruncommon.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
 			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")

@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // seedPortForwardLogForTest writes the log a forward appends to, and the
@@ -57,8 +60,8 @@ func TestRunDeleteEnvironmentRemovesTheForwardLogBesideTheStateFile(t *testing.T
 		t.Fatalf("PortForwardStatePath: %v", err)
 	}
 
-	store := &deleteSSHConfigStore{envs: map[string][]EnvConfig{tenant: {{Name: environment}}}}
-	if _, err := RunDeleteEnvironment(Context{}, DeleteEnvironmentParams{
+	store := &deleteSSHConfigStore{envs: map[string][]config.EnvConfig{tenant: {{Name: environment}}}}
+	if _, err := RunDeleteEnvironment(core.Context{}, DeleteEnvironmentParams{
 		Tenant: tenant, Environment: environment,
 	}, store, nil); err != nil {
 		t.Fatalf("delete: %v", err)
@@ -88,7 +91,7 @@ func TestRemovePortForwardRecordKeepsTheLogOfAForwardThatIsStillRunning(t *testi
 	}
 	writePortForwardStateProcessID(t, statePath, os.Getpid())
 
-	if err := RemovePortForwardRecord(Context{}, "mcp", tenant, environment); err != nil {
+	if err := RemovePortForwardRecord(core.Context{}, "mcp", tenant, environment); err != nil {
 		t.Fatalf("remove record: %v", err)
 	}
 
@@ -116,7 +119,7 @@ func TestRemovePortForwardRecordKeepsALogSomeProcessStillHolds(t *testing.T) {
 	portForwardLogHeldByProcess = func(string) bool { return true }
 	t.Cleanup(func() { portForwardLogHeldByProcess = restore })
 
-	if err := RemovePortForwardRecord(Context{}, "mcp", tenant, environment); err != nil {
+	if err := RemovePortForwardRecord(core.Context{}, "mcp", tenant, environment); err != nil {
 		t.Fatalf("remove record: %v", err)
 	}
 
@@ -152,13 +155,13 @@ func writePortForwardStateProcessID(t *testing.T, statePath string, processID in
 // file was already reclaimed and only the log is left.
 func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t *testing.T) {
 	redirectConfigHomeForTest(t)
-	if err := SaveERunConfig(ERunConfig{}); err != nil {
+	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
 		t.Fatalf("save tool config: %v", err)
 	}
-	if err := SaveTenantConfig(TenantConfig{Name: "acme"}); err != nil {
+	if err := config.SaveTenantConfig(config.TenantConfig{Name: "acme"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := SaveEnvConfig("acme", EnvConfig{Name: "dev"}); err != nil {
+	if err := config.SaveEnvConfig("acme", config.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -176,7 +179,7 @@ func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t
 	// A tenant that is not configured at all, in another kind.
 	retiredLog := seedPortForwardLogForTest(t, "sshd", "sapiens", "poc")
 
-	if err := ReclaimOrphanedPortForwardRecords(Context{}); err != nil {
+	if err := ReclaimOrphanedPortForwardRecords(core.Context{}); err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
 
@@ -200,7 +203,7 @@ func TestReclaimOrphanedPortForwardRecordsLeavesTheTreeAloneWhenTheConfigIsUnrea
 	// resolving a different config home sees.
 	retiredLog := seedPortForwardLogForTest(t, "mcp", "sapiens", "poc")
 
-	if err := ReclaimOrphanedPortForwardRecords(Context{}); err != nil {
+	if err := ReclaimOrphanedPortForwardRecords(core.Context{}); err != nil {
 		t.Fatalf("reclaim: %v", err)
 	}
 

@@ -7,7 +7,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // newAIOccupancyTestApp isolates the activity-lease cache per test and returns
@@ -21,10 +22,10 @@ func newAIOccupancyTestApp(t *testing.T) (*App, *int) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -166,7 +167,7 @@ func TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable(t *te
 	if err != nil {
 		t.Fatalf("activity dir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, eruncommon.ActivityKindCLI+".json"), nil, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, config.ActivityKindCLI+".json"), nil, 0o644); err != nil {
 		t.Fatalf("stage a truncated snapshot: %v", err)
 	}
 	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "erun", Environment: "remote"}); err == nil {

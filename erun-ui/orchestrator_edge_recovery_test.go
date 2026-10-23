@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain is the pairing this defect asks
@@ -29,7 +29,7 @@ func TestEdgeRecoveryIsLoggedOnceTheEdgeAnswersAgain(t *testing.T) {
 	log.SetOutput(&logs)
 	restoreLogOutputAfter(t)
 
-	app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+	app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
 		{Tenant: "erun", Environment: "remote"},
 	})
 	if got := logs.String(); !strings.Contains(got, "orchestrator petios: wired erun/remote but its edge is not answering") {
@@ -90,7 +90,7 @@ func TestEdgeRecoveryPairsEveryEntryWhenTwoOrchestratorsShareTheEdge(t *testing.
 	log.SetOutput(&logs)
 	restoreLogOutputAfter(t)
 
-	envs := []eruncommon.OrchestratorEnvConfig{{Tenant: "erun", Environment: "remote"}}
+	envs := []config.OrchestratorEnvConfig{{Tenant: "erun", Environment: "remote"}}
 	app.wireOrchestratorMCP("petios", "Petios", envs)
 	app.wireOrchestratorMCP("atlas", "Atlas", envs)
 	for _, id := range []string{"petios", "atlas"} {
@@ -142,7 +142,7 @@ func TestEdgeOutageEntryWithNoRecoveryObservationStaysUnpaired(t *testing.T) {
 			log.SetOutput(&logs)
 			restoreLogOutputAfter(t)
 
-			app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+			app.wireOrchestratorMCP("petios", "Petios", []config.OrchestratorEnvConfig{
 				{Tenant: "erun", Environment: "remote"},
 			})
 			sealForwardForSweep(t)

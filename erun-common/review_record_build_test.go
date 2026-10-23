@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Every build recorded against a review is RECORDED and carries its version:
@@ -27,7 +29,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	build, err := RunReviewRecordBuild(Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
+	build, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
 		ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: true,
 	}, pushNoticeDeps(t))
 	if err != nil {
@@ -42,7 +44,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 }
 
 func TestRunReviewRecordBuildRequiresAVersionBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewRecordBuild(Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, CloudDependencies{})
+	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, CloudDependencies{})
 	if err == nil || !strings.Contains(err.Error(), "version is required") {
 		t.Fatalf("err = %v, want the missing-version refusal", err)
 	}
@@ -59,7 +61,7 @@ func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := RunReviewRecordBuild(Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
+	_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
 		ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: false,
 		FailureDetail: `failed to solve: failed to fetch oauth token: Post "https://ghcr.io/token": net/http: TLS handshake timeout`,
 	}, pushNoticeDeps(t))

@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type E2EInput struct {
@@ -28,9 +30,9 @@ func e2eTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 		component := strings.TrimSpace(input.Component)
 		baseURL := strings.TrimSpace(input.BaseURL)
 		version := strings.TrimSpace(input.Version)
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			runCtx.MCPTool = "e2e"
-			plan, err := eruncommon.ResolveE2EPlan(eruncommon.FindProjectRoot, component)
+			plan, err := eruncommon.ResolveE2EPlan(config.FindProjectRoot, component)
 			if err != nil {
 				return err
 			}

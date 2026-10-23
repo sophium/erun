@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // E2ESuite is one discovered erun e2e suite: a Dockerfile under
@@ -112,7 +114,7 @@ func e2eComponentNotFound(component string, suites []E2ESuite) error {
 // refuseRetiredE2EConfig refuses the playwright keys erun e2e no longer reads,
 // and an e2e key under components:, which it does not read, rather than let
 // either be silently ignored.
-func refuseRetiredE2EConfig(cfg ProjectConfig) error {
+func refuseRetiredE2EConfig(cfg config.ProjectConfig) error {
 	if strings.TrimSpace(cfg.Paths.Playwright) != "" {
 		return fmt.Errorf("erun e2e: .erun/config.yaml paths.playwright names a host-run Playwright suite, which erun e2e no longer runs: %s, then replace the key with paths.e2e", e2eMigrationRemedy)
 	}
@@ -164,7 +166,7 @@ func refuseHostRunPlaywrightSuites(projectRoot string) error {
 // configured paths.e2e must exist, or the misconfiguration fails loudly rather
 // than silently falling back to convention.
 func resolveE2EDir(projectRoot, override string) (string, error) {
-	if dir := resolveProjectPath(projectRoot, override); dir != "" {
+	if dir := config.ResolveProjectPath(projectRoot, override); dir != "" {
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
 			return "", fmt.Errorf("configured e2e path %q (.erun/config.yaml paths.e2e) is not a directory: expected one subdirectory per suite, each holding a Dockerfile with an `e2e` stage", strings.TrimSpace(override))

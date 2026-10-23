@@ -11,6 +11,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // An activity lease is how a long job says "I am the reason this environment is
@@ -423,7 +426,7 @@ func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) 
 	// Replaced, never rewritten in place: a reader that finds a lease it cannot
 	// parse reclaims it (readHeldEnvironmentActivityLease), so a renewal caught
 	// mid-write would delete the claim it was renewing.
-	if err := replaceFileAtomically(path, append(data, '\n'), 0o644); err != nil {
+	if err := config.ReplaceFileAtomically(path, append(data, '\n'), 0o644); err != nil {
 		return EnvironmentActivityLease{}, err
 	}
 	return lease, nil
@@ -867,7 +870,7 @@ func ProcessAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	if zombie, ok := platformProcessZombie(pid); ok {
+	if zombie, ok := core.PlatformProcessZombie(pid); ok {
 		return !zombie
 	}
 	proc, err := os.FindProcess(pid)

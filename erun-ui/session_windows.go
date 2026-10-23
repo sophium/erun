@@ -12,7 +12,7 @@ import (
 	"syscall"
 
 	"github.com/ActiveState/termtest/conpty"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type windowsTerminalSession struct {
@@ -144,7 +144,7 @@ func (s *windowsTerminalSession) Close() error {
 	// and closing it first would turn "did I kill it" into "I no longer know".
 	killErr := killProcessTree(s.pid, func() error {
 		killCmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(s.pid))
-		eruncommon.HideConsoleWindow(killCmd)
+		core.HideConsoleWindow(killCmd)
 		return killCmd.Run()
 	}, s.Alive)
 	if s.handle != 0 {

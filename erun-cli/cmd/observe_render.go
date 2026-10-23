@@ -7,9 +7,11 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func writeObserveResult(ctx common.Context, result common.ObserveResult) error {
+func writeObserveResult(ctx core.Context, result common.ObserveResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", valueOrNone(result.Namespace)); err != nil {
 		return err
 	}
@@ -40,7 +42,7 @@ func writeObserveResult(ctx common.Context, result common.ObserveResult) error {
 	return writeObserveDrift(ctx, result.Drift)
 }
 
-func writeObservePods(ctx common.Context, pods []common.ObservedPod) error {
+func writeObservePods(ctx core.Context, pods []common.ObservedPod) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Pods (%d):\n", len(pods)); err != nil {
 		return err
 	}
@@ -64,7 +66,7 @@ func writeObservePods(ctx common.Context, pods []common.ObservedPod) error {
 	return nil
 }
 
-func writeObserveResourceQuotas(ctx common.Context, quotas []common.ObservedResourceQuota) error {
+func writeObserveResourceQuotas(ctx core.Context, quotas []common.ObservedResourceQuota) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "ResourceQuotas (%d):\n", len(quotas)); err != nil {
 		return err
 	}
@@ -76,7 +78,7 @@ func writeObserveResourceQuotas(ctx common.Context, quotas []common.ObservedReso
 	return nil
 }
 
-func writeObserveLimitRanges(ctx common.Context, limitRanges []common.ObservedLimitRange) error {
+func writeObserveLimitRanges(ctx core.Context, limitRanges []common.ObservedLimitRange) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "LimitRanges (%d):\n", len(limitRanges)); err != nil {
 		return err
 	}
@@ -97,7 +99,7 @@ func writeObserveLimitRanges(ctx common.Context, limitRanges []common.ObservedLi
 // writeObserveServices lists what the namespace runs, with the port an Ingress
 // would route to. Services come before Ingresses because that is the order the
 // question is asked in: what is running, then what is published.
-func writeObserveServices(ctx common.Context, services []common.ObservedService) error {
+func writeObserveServices(ctx core.Context, services []common.ObservedService) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(services)); err != nil {
 		return err
 	}
@@ -118,7 +120,7 @@ func writeObserveServices(ctx common.Context, services []common.ObservedService)
 	return nil
 }
 
-func writeObserveIngresses(ctx common.Context, ingresses []common.ObservedIngress) error {
+func writeObserveIngresses(ctx core.Context, ingresses []common.ObservedIngress) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Ingresses (%d):\n", len(ingresses)); err != nil {
 		return err
 	}
@@ -140,7 +142,7 @@ func writeObserveIngresses(ctx common.Context, ingresses []common.ObservedIngres
 	return nil
 }
 
-func writeObserveCertificates(ctx common.Context, certificates []common.ObservedCertificate) error {
+func writeObserveCertificates(ctx core.Context, certificates []common.ObservedCertificate) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Certificates (%d):\n", len(certificates)); err != nil {
 		return err
 	}
@@ -165,7 +167,7 @@ func writeObserveCertificates(ctx common.Context, certificates []common.Observed
 	return nil
 }
 
-func writeObserveCertificateOrders(ctx common.Context, orders []common.ObservedCertificateOrder) error {
+func writeObserveCertificateOrders(ctx core.Context, orders []common.ObservedCertificateOrder) error {
 	for _, order := range orders {
 		if _, err := fmt.Fprintf(ctx.Stdout, "    order %s: state %s, reason %s\n", order.Name, valueOrNone(order.State), valueOrNone(order.Reason)); err != nil {
 			return err
@@ -180,7 +182,7 @@ func writeObserveCertificateOrders(ctx common.Context, orders []common.ObservedC
 	return nil
 }
 
-func writeObserveSecrets(ctx common.Context, secrets []common.ObservedSecretCheck) error {
+func writeObserveSecrets(ctx core.Context, secrets []common.ObservedSecretCheck) error {
 	if len(secrets) == 0 {
 		return nil
 	}
@@ -199,7 +201,7 @@ func writeObserveSecrets(ctx common.Context, secrets []common.ObservedSecretChec
 	return nil
 }
 
-func writeObserveHelmRelease(ctx common.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmRelease(ctx core.Context, release *common.ObservedHelmRelease) error {
 	if release == nil {
 		return nil
 	}
@@ -219,7 +221,7 @@ func writeObserveHelmRelease(ctx common.Context, release *common.ObservedHelmRel
 // writeObserveHelmReleaseNotFound distinguishes a confirmed absence (no
 // Error) from a read that failed (Error set): a caller must never see the
 // same "nothing here" line for both.
-func writeObserveHelmReleaseNotFound(ctx common.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmReleaseNotFound(ctx core.Context, release *common.ObservedHelmRelease) error {
 	if release.Error != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)
 		return err
@@ -228,7 +230,7 @@ func writeObserveHelmReleaseNotFound(ctx common.Context, release *common.Observe
 	return err
 }
 
-func writeObserveHelmReleaseDetails(ctx common.Context, release *common.ObservedHelmRelease) error {
+func writeObserveHelmReleaseDetails(ctx core.Context, release *common.ObservedHelmRelease) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
 		release.Name, release.Revision, valueOrNone(release.Status), valueOrNone(release.Chart), valueOrNone(release.ChartVersion), valueOrNone(release.AppVersion)); err != nil {
 		return err
@@ -238,7 +240,7 @@ func writeObserveHelmReleaseDetails(ctx common.Context, release *common.Observed
 			return err
 		}
 	}
-	if release.RuntimePod != (common.RuntimePodResources{}) {
+	if release.RuntimePod != (config.RuntimePodResources{}) {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  runtime pod limits: cpu %s, memory %s\n", release.RuntimePod.CPU, release.RuntimePod.Memory); err != nil {
 			return err
 		}
@@ -246,7 +248,7 @@ func writeObserveHelmReleaseDetails(ctx common.Context, release *common.Observed
 	return nil
 }
 
-func writeObserveDrift(ctx common.Context, drift []string) error {
+func writeObserveDrift(ctx core.Context, drift []string) error {
 	if len(drift) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "Drift: none detected")
 		return err

@@ -18,7 +18,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
@@ -2034,7 +2035,7 @@ func StartUnboundPortForwardProcess(t testing.TB) int {
 func ProcessStopped(pid int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !eruncommon.DesktopProcessAlive(pid) {
+		if !core.DesktopProcessAlive(pid) {
 			return true
 		}
 		time.Sleep(20 * time.Millisecond)

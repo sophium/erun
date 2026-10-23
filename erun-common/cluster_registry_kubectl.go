@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // forwardingLinePattern extracts the local port kubectl chose from its
@@ -30,14 +32,14 @@ func kubectlContextArgs(kubeContext, namespace string) []string {
 // lookupClusterIP resolves the registry Service's ClusterIP. On --dry-run it
 // traces the query and returns a placeholder so the resolved address stays
 // deterministic without touching the cluster.
-func lookupClusterIP(ctx Context, kubeContext, namespace, service string) (string, error) {
+func lookupClusterIP(ctx core.Context, kubeContext, namespace, service string) (string, error) {
 	args := append(kubectlContextArgs(kubeContext, namespace), "get", "svc", service, "-o", "jsonpath={.spec.clusterIP}")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return "<cluster-ip>", nil
 	}
 	capture := ctx.ToolCapture()
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stderr = capture.Stderr()
 	out, err := cmd.Output()
 	if err != nil {
@@ -56,13 +58,13 @@ type ClusterRegistryForwards struct {
 // Start forwards a free local port to svc/<service>:<remotePort> and returns the
 // port kubectl chose. On --dry-run it traces the command and returns the remote
 // port as a representative local port without forwarding.
-func (f *ClusterRegistryForwards) Start(ctx Context, kubeContext, namespace, service string, remotePort int) (int, error) {
+func (f *ClusterRegistryForwards) Start(ctx core.Context, kubeContext, namespace, service string, remotePort int) (int, error) {
 	args := append(kubectlContextArgs(kubeContext, namespace), "port-forward", "svc/"+service, fmt.Sprintf(":%d", remotePort))
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return remotePort, nil
 	}
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return 0, err
@@ -138,7 +140,7 @@ func drainPortForwardOutput(stdout io.Reader, result chan<- portForwardResult) {
 // ClusterRegistryDepsFor builds the live resolver dependencies: an in-cluster
 // build addresses the registry directly; a host build looks up the ClusterIP and
 // port-forwards through the given manager.
-func ClusterRegistryDepsFor(ctx Context, forwards RegistryForwarder) ClusterRegistryDeps {
+func ClusterRegistryDepsFor(ctx core.Context, forwards core.RegistryForwarder) ClusterRegistryDeps {
 	return ClusterRegistryDeps{
 		InCluster: RunningInCluster(),
 		LookupClusterIP: func(kubeContext, namespace, service string) (string, error) {

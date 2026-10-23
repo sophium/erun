@@ -9,6 +9,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimeOutputChunkBytes bounds how much payload one `kubectl exec` carries.
@@ -44,7 +46,7 @@ type runtimeOutputSource struct {
 // a series of bounded ranges rather than one stream, and the reassembled bytes
 // are checked against the pod's own digest. Dry-run returns a preview result
 // with no bytes and no transfer.
-func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func DownloadRuntimeOutput(ctx core.Context, req ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return RuntimeOutputResult{}, err
@@ -69,7 +71,7 @@ func DownloadRuntimeOutput(ctx Context, req ShellLaunchParams, params RuntimeOut
 
 // fetchRuntimeOutput asks the pod what it would send, reads it, and refuses a
 // payload the pod does not vouch for.
-func fetchRuntimeOutput(ctx Context, req ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func fetchRuntimeOutput(ctx core.Context, req ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
 	out, err := run(req, probe)
 	if err != nil {
 		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, formatRemoteCommandStderr(out.Stderr), err)
@@ -96,7 +98,7 @@ func fetchRuntimeOutput(ctx Context, req ShellLaunchParams, name, probe string, 
 // sent plus however many more it takes, and reports how far it got when a range
 // cannot be read: the size of the transfer is what makes it fail, so an operator
 // must never have to infer that from a bare stream error.
-func transferRuntimeOutput(ctx Context, req ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
+func transferRuntimeOutput(ctx core.Context, req ShellLaunchParams, name string, source runtimeOutputSource, head []byte, run RuntimeOutputsRunner) ([]byte, error) {
 	if source.Size > MaxRuntimeOutputBytes {
 		return nil, fmt.Errorf("runtime output %q is too large (%d bytes); the limit is %d bytes", name, source.Size, MaxRuntimeOutputBytes)
 	}
@@ -125,7 +127,7 @@ func transferRuntimeOutput(ctx Context, req ShellLaunchParams, name string, sour
 // readRuntimeOutputRange reads one range, retrying a failed or short read. A
 // range whose decoded length is not the requested one is treated as a failed
 // read, so a truncated stream can never be assembled into a plausible file.
-func readRuntimeOutputRange(ctx Context, req ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
+func readRuntimeOutputRange(ctx core.Context, req ShellLaunchParams, sourcePath string, offset, length int64, run RuntimeOutputsRunner) ([]byte, error) {
 	script := runtimeOutputRangeScript(sourcePath, offset, length)
 	var last error
 	for attempt := 1; attempt <= runtimeOutputChunkAttempts; attempt++ {
@@ -194,7 +196,7 @@ func gunzipRuntimeOutputChunk(data []byte) ([]byte, error) {
 // directory download. A leftover staging file is the pod's problem to carry, so
 // it is removed even when the transfer failed — and a failed removal is only
 // traced, because the bytes the caller asked for have already arrived.
-func discardRuntimeOutputStagedArchive(ctx Context, req ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
+func discardRuntimeOutputStagedArchive(ctx core.Context, req ShellLaunchParams, stagedPath string, run RuntimeOutputsRunner) {
 	script := "rm -f " + shellQuote(stagedPath)
 	ctx.TraceBlock("outputs discard staged archive", script)
 	if _, err := run(req, script); err != nil {

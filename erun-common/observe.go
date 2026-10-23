@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ObserveParams configures which named Secrets to check for key presence.
@@ -60,7 +62,7 @@ type ObserveResult struct {
 // itself. It is read-only by construction: every kubectl call below is a
 // literal `get` against a fixed resource kind, and the one helm call is a
 // literal `status`, never a caller-supplied verb.
-func RunObservation(ctx Context, req ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
+func RunObservation(ctx core.Context, req ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
 	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
 	podArgs := observeGetArgs(req, "pods")
@@ -140,7 +142,7 @@ func observeGetArgs(req ShellLaunchParams, resource string, name ...string) []st
 // any error so callers can distinguish "not found" and "unknown resource
 // type" from a real failure without re-parsing a wrapped error string.
 func runObserveKubectl(args []string) (stdout []byte, stderr string, err error) {
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	var errBuf bytes.Buffer
 	cmd.Stderr = &errBuf
 	out, runErr := cmd.Output()

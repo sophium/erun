@@ -6,24 +6,26 @@ import (
 	"os"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func quietOutputsContext() eruncommon.Context {
-	return eruncommon.Context{
-		Logger: eruncommon.NewLoggerWithWriters(0, io.Discard, io.Discard),
+func quietOutputsContext() core.Context {
+	return core.Context{
+		Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard),
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}
 }
 
-func listAgentOutputsViaRuntime(result eruncommon.OpenResult, params eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
+func listAgentOutputsViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
 	return eruncommon.ResolveRuntimeOutputs(quietOutputsContext(), req, params, eruncommon.RunRemoteCommand)
 }
 
-func downloadAgentOutputViaRuntime(result eruncommon.OpenResult, params eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error) {
+func downloadAgentOutputViaRuntime(result config.OpenResult, params eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error) {
 	req := eruncommon.ShellLaunchParamsFromResult(result)
 	return eruncommon.DownloadRuntimeOutput(quietOutputsContext(), req, params, eruncommon.RunRemoteCommand)
 }

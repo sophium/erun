@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestRemoteShellLaunchPersistentSession pins the reconnect contract: a desktop
@@ -111,8 +113,8 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 		RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}
 	for _, path := range paths {
-		if strings.Contains(path, DesktopAppName) {
-			t.Fatalf("session path %q contains the desktop binary's process name %q; a pkill aimed at the binary would match a live session", path, DesktopAppName)
+		if strings.Contains(path, core.DesktopAppName) {
+			t.Fatalf("session path %q contains the desktop binary's process name %q; a pkill aimed at the binary would match a live session", path, core.DesktopAppName)
 		}
 	}
 	// The dtach command line is what pkill actually matches, so the same
@@ -127,8 +129,8 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PreviewShellLaunch: %v", err)
 	}
-	if strings.Contains(script.Script, DesktopAppName) {
-		t.Fatalf("the session launch script names the desktop binary %q:\n%s", DesktopAppName, script.Script)
+	if strings.Contains(script.Script, core.DesktopAppName) {
+		t.Fatalf("the session launch script names the desktop binary %q:\n%s", core.DesktopAppName, script.Script)
 	}
 }
 

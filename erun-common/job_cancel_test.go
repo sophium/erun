@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The mirror image of a false clean exit: a job whose only started work is one it
@@ -70,7 +72,7 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 // finish, and asserts the finished record carries the cancel's provenance.
 func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string, done <-chan error) {
 	t.Helper()
-	result, err := CancelEnvironmentJob(Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
+	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
 	if err != nil {
 		t.Fatalf("CancelEnvironmentJob: %v", err)
 	}

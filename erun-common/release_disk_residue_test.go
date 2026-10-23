@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The reproduction this closes: `erun build --release` ran its
@@ -98,7 +100,7 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	refuseReleaseDiskHeadroom(t, t.TempDir())
 
 	logs := &strings.Builder{}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 
 	// A publisher is what makes this a build-and-publish release rather than
 	// `erun release` marking source control: it is the only caller that runs
@@ -106,8 +108,8 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 	// that got as far as the build is a different defect from this one.
 	published := false
 	publisher := ReleasePublisher{
-		Publish: func(Context) error { published = true; return nil },
-		Verify:  func(Context) error { return nil },
+		Publish: func(core.Context) error { published = true; return nil },
+		Verify:  func(core.Context) error { return nil },
 	}
 
 	spec := ReleaseSpec{
@@ -178,7 +180,7 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	repo := newAgentJobTestRepo(t)
 	refuseReleaseDiskHeadroom(t, t.TempDir())
 
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 	spec := ReleaseSpec{
 		ProjectRoot: repo,
 		Branch:      "main",
@@ -198,8 +200,8 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	runGitForTest(t, repo, "tag", "-d", "v1.0.301")
 
 	publisher := ReleasePublisher{
-		Publish: func(Context) error { t.Fatal("the publish ran despite the refusal"); return nil },
-		Verify:  func(Context) error { return nil },
+		Publish: func(core.Context) error { t.Fatal("the publish ran despite the refusal"); return nil },
+		Verify:  func(core.Context) error { return nil },
 	}
 	if err := runClaimedReleaseSpec(ctx, spec, GitCommandRunner, nil, &publisher); err == nil {
 		t.Fatal("expected the disk-headroom preflight to refuse a build-and-publish release")

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // registryCredentialSecretName derives the per-release Secret `erun init`
@@ -118,7 +120,7 @@ stringData:
 // it. Host credential resolution is a local, read-only lookup (docker config /
 // gh session / GH_TOKEN), so it still runs under dry-run: the decision it
 // makes belongs in the trace either way.
-func provisionRegistryCredentialSecret(ctx Context, tenant, namespace, kubernetesContext string, registries []string) (string, error) {
+func provisionRegistryCredentialSecret(ctx core.Context, tenant, namespace, kubernetesContext string, registries []string) (string, error) {
 	if len(registries) == 0 {
 		return "", nil
 	}

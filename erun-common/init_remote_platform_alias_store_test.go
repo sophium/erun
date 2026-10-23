@@ -3,26 +3,28 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 type platformAliasEmptyBootstrapStore struct{}
 
-func (platformAliasEmptyBootstrapStore) LoadERunConfig() (ERunConfig, string, error) {
-	return ERunConfig{}, "", nil
+func (platformAliasEmptyBootstrapStore) LoadERunConfig() (config.ERunConfig, string, error) {
+	return config.ERunConfig{}, "", nil
 }
-func (platformAliasEmptyBootstrapStore) SaveERunConfig(ERunConfig) error { return nil }
-func (platformAliasEmptyBootstrapStore) ListTenantConfigs() ([]TenantConfig, error) {
+func (platformAliasEmptyBootstrapStore) SaveERunConfig(config.ERunConfig) error { return nil }
+func (platformAliasEmptyBootstrapStore) ListTenantConfigs() ([]config.TenantConfig, error) {
 	return nil, nil
 }
 
-func (platformAliasEmptyBootstrapStore) LoadTenantConfig(string) (TenantConfig, string, error) {
-	return TenantConfig{}, "", ErrNotInitialized
+func (platformAliasEmptyBootstrapStore) LoadTenantConfig(string) (config.TenantConfig, string, error) {
+	return config.TenantConfig{}, "", config.ErrNotInitialized
 }
-func (platformAliasEmptyBootstrapStore) SaveTenantConfig(TenantConfig) error { return nil }
-func (platformAliasEmptyBootstrapStore) LoadEnvConfig(string, string) (EnvConfig, string, error) {
-	return EnvConfig{}, "", ErrNotInitialized
+func (platformAliasEmptyBootstrapStore) SaveTenantConfig(config.TenantConfig) error { return nil }
+func (platformAliasEmptyBootstrapStore) LoadEnvConfig(string, string) (config.EnvConfig, string, error) {
+	return config.EnvConfig{}, "", config.ErrNotInitialized
 }
-func (platformAliasEmptyBootstrapStore) SaveEnvConfig(string, EnvConfig) error { return nil }
+func (platformAliasEmptyBootstrapStore) SaveEnvConfig(string, config.EnvConfig) error { return nil }
 
 // Init resolved the platform alias for a remote environment against the
 // default config store rather than the store it was given, so a caller with
@@ -32,9 +34,9 @@ func (platformAliasEmptyBootstrapStore) SaveEnvConfig(string, EnvConfig) error {
 // the injected store holds none, which is no alias to provision.
 func TestRemoteInitResolvesThePlatformAliasAgainstItsOwnStore(t *testing.T) {
 	redirectConfigHomeForTest(t)
-	if err := (ConfigStore{}).SaveERunConfig(ERunConfig{CloudProviders: []CloudProviderConfig{
-		{Alias: "one@erun", Provider: CloudProviderERun},
-		{Alias: "two@erun", Provider: CloudProviderERun},
+	if err := (config.ConfigStore{}).SaveERunConfig(config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: "one@erun", Provider: config.CloudProviderERun},
+		{Alias: "two@erun", Provider: config.CloudProviderERun},
 	}}); err != nil {
 		t.Fatalf("seed host config: %v", err)
 	}
@@ -42,7 +44,7 @@ func TestRemoteInitResolvesThePlatformAliasAgainstItsOwnStore(t *testing.T) {
 	runner := bootstrapRunner{
 		BootstrapInitDependencies: BootstrapInitDependencies{Store: platformAliasEmptyBootstrapStore{}},
 	}
-	name, err := runner.resolvePlatformAliasSecret(OpenResult{Tenant: "acme", Environment: "dev"})
+	name, err := runner.resolvePlatformAliasSecret(config.OpenResult{Tenant: "acme", Environment: "dev"})
 	if err != nil && strings.Contains(err.Error(), "multiple erun platform cloud provider aliases") {
 		t.Fatalf("alias resolved against the host's config instead of the injected store: %v", err)
 	}

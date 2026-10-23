@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // Sources a gateway credential can come from, as reported to the catalog.
@@ -89,7 +90,7 @@ func (a *App) ClearGatewayCredential() (uiGatewayCredentialStatus, error) {
 }
 
 // gatewayCatalog reads the erun-level gateway catalog, nil when none exists.
-func (a *App) gatewayCatalog() (*eruncommon.OpenRouterConfig, error) {
+func (a *App) gatewayCatalog() (*configpkg.OpenRouterConfig, error) {
 	config, _, err := a.deps.store.LoadERunConfig()
 	if err != nil {
 		return nil, err
@@ -99,11 +100,11 @@ func (a *App) gatewayCatalog() (*eruncommon.OpenRouterConfig, error) {
 
 // gatewayCredentialRef names the store ref this install's credential lives
 // under: the catalog's own ref, or the conventional default.
-func gatewayCredentialRef(catalog *eruncommon.OpenRouterConfig) string {
+func gatewayCredentialRef(catalog *configpkg.OpenRouterConfig) string {
 	if ref := catalog.AuthTokenRefName(); ref != "" {
 		return ref
 	}
-	return eruncommon.DefaultOpenRouterAuthTokenRef
+	return configpkg.DefaultOpenRouterAuthTokenRef
 }
 
 // gatewayCredentialStatus resolves the credential a deploy would deliver,
@@ -115,7 +116,7 @@ func gatewayCredentialRef(catalog *eruncommon.OpenRouterConfig) string {
 // host key as usable against a different gateway would be the crueller version
 // of that mistake: the operator would be told their key would be sent somewhere
 // it will not be, and cannot be.
-func gatewayCredentialStatus(catalog *eruncommon.OpenRouterConfig) uiGatewayCredentialStatus {
+func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) uiGatewayCredentialStatus {
 	status := uiGatewayCredentialStatus{Ref: gatewayCredentialRef(catalog)}
 	if saved, ok := savedGatewayCredential(status.Ref); ok {
 		status.Source = gatewayCredentialSourceSaved

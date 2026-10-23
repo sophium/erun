@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func newTestAppForActivityQueue(t *testing.T) *App {
@@ -888,7 +888,7 @@ func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 	// the deploy card renders with no container pills.
 	app := newTestAppForActivityQueue(t)
 	app.deps.store = stubUIStore{
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/ux": {Name: "ux", KubernetesContext: "erun"},
 		},
 	}
@@ -1261,8 +1261,8 @@ func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
 // separate in the first place.
 func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{"petios": {Name: "petios"}},
-		envs: map[string]eruncommon.EnvConfig{
+		tenants: map[string]config.TenantConfig{"petios": {Name: "petios"}},
+		envs: map[string]config.EnvConfig{
 			"petios/develop": {
 				Name:           "develop",
 				RuntimeVersion: "1.0.322-snapshot-20260813072257",

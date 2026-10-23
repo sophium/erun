@@ -10,24 +10,23 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type stubCapabilityResolver struct {
-	candidates []eruncommon.PlatformCapability
-	permit     func(eruncommon.PlatformCapability) bool
+	candidates []model.PlatformCapability
+	permit     func(model.PlatformCapability) bool
 	err        error
 }
 
-func (r *stubCapabilityResolver) PermittedRoutes(_ context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error) {
+func (r *stubCapabilityResolver) PermittedRoutes(_ context.Context, candidates []model.PlatformCapability) ([]model.PlatformCapability, error) {
 	r.candidates = candidates
 	if r.err != nil {
 		return nil, r.err
 	}
-	var permitted []eruncommon.PlatformCapability
+	var permitted []model.PlatformCapability
 	for _, candidate := range candidates {
 		if r.permit == nil || r.permit(candidate) {
 			permitted = append(permitted, candidate)
@@ -65,7 +64,7 @@ func undialedDatabase(t *testing.T) *sql.DB {
 	return db
 }
 
-func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformCapabilities {
+func whoamiCapabilities(t *testing.T, handler http.Handler) model.PlatformCapabilities {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
@@ -75,7 +74,7 @@ func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformC
 		t.Fatalf("unexpected status: %d body=%s", rec.Code, rec.Body.String())
 	}
 	var response struct {
-		Capabilities eruncommon.PlatformCapabilities `json:"capabilities"`
+		Capabilities model.PlatformCapabilities `json:"capabilities"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode whoami: %v", err)
@@ -88,7 +87,7 @@ func whoamiCapabilities(t *testing.T, handler http.Handler) eruncommon.PlatformC
 // role names.
 func TestWhoamiReportsTheCallersCapabilities(t *testing.T) {
 	resolver := &stubCapabilityResolver{
-		permit: func(candidate eruncommon.PlatformCapability) bool { return candidate.Method == http.MethodGet },
+		permit: func(candidate model.PlatformCapability) bool { return candidate.Method == http.MethodGet },
 	}
 	handler, err := NewHandler(capabilityHandlerOptions(resolver))
 	if err != nil {
@@ -106,7 +105,7 @@ func TestWhoamiReportsTheCallersCapabilities(t *testing.T) {
 // nothing here": the read succeeds and reports no capabilities.
 func TestWhoamiReportsAnEmptyCapabilitySetForAPermissionlessCaller(t *testing.T) {
 	resolver := &stubCapabilityResolver{
-		permit: func(eruncommon.PlatformCapability) bool { return false },
+		permit: func(model.PlatformCapability) bool { return false },
 	}
 	handler, err := NewHandler(capabilityHandlerOptions(resolver))
 	if err != nil {
@@ -148,7 +147,7 @@ func TestCapabilityCandidatesAreTheHandlersOwnRoutes(t *testing.T) {
 			t.Errorf("capability candidate %s %s is not a route this handler serves", candidate.Method, candidate.Path)
 		}
 	}
-	if !eruncommon.PlatformCapabilities(candidates).Allows(http.MethodGet, "/v1/whoami") {
+	if !model.PlatformCapabilities(candidates).Allows(http.MethodGet, "/v1/whoami") {
 		t.Errorf("expected the whoami route itself among the candidates, got %+v", candidates)
 	}
 }

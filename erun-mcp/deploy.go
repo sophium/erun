@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 var errMissingDeployVersion = errors.New("deploy requires a version: it installs a published version by reference (produced by `build` then `push`) and never builds — set the version input")
@@ -39,7 +41,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 		if strings.TrimSpace(input.Version) == "" {
 			return nil, JobEnvelopeOutput{}, errMissingDeployVersion
 		}
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			findProjectRoot := func() (string, string, error) {
 				return runtimeFindProjectRoot(runtime.Context, workDir)
 			}
@@ -62,7 +64,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				RolloutTimeout:       strings.TrimSpace(input.Timeout),
 				MCPAuthPublicKeyPath: strings.TrimSpace(input.MCPAuthPublicKey),
 				DisableMCPAuth:       input.NoMCPAuth,
-				NamespaceQuotaOverride: eruncommon.NamespaceResourceQuota{
+				NamespaceQuotaOverride: config.NamespaceResourceQuota{
 					CPU:     strings.TrimSpace(input.MaxCPU),
 					Memory:  strings.TrimSpace(input.MaxMemory),
 					Storage: strings.TrimSpace(input.MaxStorage),

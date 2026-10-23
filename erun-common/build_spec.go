@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func ResolveDockerImageReference(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (DockerImageReference, error) {
+func ResolveDockerImageReference(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (DockerImageReference, error) {
 	store, findProjectRoot, _, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
@@ -34,7 +36,7 @@ func ResolveDockerImageReference(ctx Context, store DockerStore, findProjectRoot
 // resolution stays on the project-global paths: block unless the project also
 // declares a matching components: entry, which FindComponentDockerBuildContext
 // (and currentComponentDockerBuildContext's own cwd match) already scope to.
-func ResolveDockerBuildForComponent(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*DockerBuildSpec, error) {
+func ResolveDockerBuildForComponent(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*DockerBuildSpec, error) {
 	store, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
@@ -99,7 +101,7 @@ func parseDockerImageReference(image string) (registry, imageName, version strin
 	return registry, imageName, version, true
 }
 
-func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildContext DockerBuildContext, target DockerCommandTarget) (DockerBuildSpec, error) {
+func resolveDockerBuildSpec(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildContext DockerBuildContext, target DockerCommandTarget) (DockerBuildSpec, error) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return DockerBuildSpec{}, err
@@ -113,7 +115,7 @@ func resolveDockerBuildSpec(ctx Context, store DockerStore, findProjectRoot Proj
 	return newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
 }
 
-func resolveDockerImageReferenceForProject(ctx Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (DockerImageReference, error) {
+func resolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (DockerImageReference, error) {
 	registry, insecure, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
 		return DockerImageReference{}, err
@@ -169,7 +171,7 @@ func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverri
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
-func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
+func newDockerBuildSpec(ctx core.Context, store DockerStore, now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = DockerBuildContextAtDir(buildContext.Dir)
@@ -212,7 +214,7 @@ func newDockerBuildSpec(ctx Context, store DockerStore, now NowFunc, projectRoot
 	if err := applyDockerSecrets(ctx, projectRoot, environment, &build); err != nil {
 		return DockerBuildSpec{}, err
 	}
-	build.CgroupParent = buildContainerCPUCapCgroupParent()
+	build.CgroupParent = core.BuildContainerCPUCapCgroupParent()
 	return build, nil
 }
 

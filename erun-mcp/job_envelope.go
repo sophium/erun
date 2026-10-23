@@ -3,7 +3,8 @@ package erunmcp
 import (
 	"io"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The tools converted here call shared erun-common logic directly in this
@@ -92,7 +93,7 @@ func runJobEnvelope(runtime RuntimeConfig, jobName string, envelope JobEnvelopeI
 
 // simpleJobExecute adapts a plain runRuntimeCommand call (no tool-specific
 // extra field to attach) into the execute shape runJobEnvelope wants.
-func simpleJobExecute(runtime RuntimeConfig, verbosity int, run func(eruncommon.Context, string) error) func(bool, io.Writer) (CommandOutput, error) {
+func simpleJobExecute(runtime RuntimeConfig, verbosity int, run func(core.Context, string) error) func(bool, io.Writer) (CommandOutput, error) {
 	return func(preview bool, log io.Writer) (CommandOutput, error) {
 		return runRuntimeCommand(runtime, preview, verbosity, log, run)
 	}

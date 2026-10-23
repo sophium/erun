@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +55,7 @@ func newJobsListCmd(store common.CloudReadStore, alias *string, deps common.Clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformJobList(ctx, jobs); err != nil {
 					return err
 				}
@@ -88,7 +89,7 @@ func newJobsShowCmd(store common.CloudReadStore, alias *string, deps common.Clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs show planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformJobDetail(ctx, job); err != nil {
 					return err
 				}
@@ -130,7 +131,7 @@ func newJobsStartCmd(store common.CloudReadStore, alias *string, deps common.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs start planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Started job %s (%s, %s).\n", job.JobID, job.JobType, job.Status); err != nil {
 					return err
 				}
@@ -176,7 +177,7 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs finish planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Updated job %s (%s).\n", job.JobID, job.Status); err != nil {
 					return err
 				}
@@ -191,7 +192,7 @@ func newJobsFinishCmd(store common.CloudReadStore, alias *string, deps common.Cl
 	return cmd
 }
 
-func writePlatformJobList(ctx common.Context, jobs []common.PlatformJob) error {
+func writePlatformJobList(ctx core.Context, jobs []common.PlatformJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -207,7 +208,7 @@ func writePlatformJobList(ctx common.Context, jobs []common.PlatformJob) error {
 // writePlatformJobLine renders one row: what is being done, by whom, and how long it
 // has been going. The summary is the row's whole point, so it leads; the job
 // id trails so it can be copied into `erun jobs show`.
-func writePlatformJobLine(ctx common.Context, job common.PlatformJob) error {
+func writePlatformJobLine(ctx core.Context, job common.PlatformJob) error {
 	suffix := ""
 	if strings.TrimSpace(job.IssueRef) != "" {
 		suffix += " issue=" + job.IssueRef
@@ -220,7 +221,7 @@ func writePlatformJobLine(ctx common.Context, job common.PlatformJob) error {
 	return err
 }
 
-func writePlatformJobDetail(ctx common.Context, job common.PlatformJob) error {
+func writePlatformJobDetail(ctx core.Context, job common.PlatformJob) error {
 	ended := "-"
 	if job.EndedAt != nil {
 		ended = job.EndedAt.UTC().Format("2006-01-02T15:04:05Z")

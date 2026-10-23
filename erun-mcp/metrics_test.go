@@ -14,7 +14,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // scrapeMetrics serves recorder's registry the same way runMetricsHTTP does
@@ -154,7 +155,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	// depend on the wall-clock hour it happens to run at: outside working hours,
 	// environmentStopEligibility ignores every marker except a lease, which
 	// would make the SSH-activity assertion below flaky.
-	envConfig := eruncommon.EnvConfig{Name: "dev", ManagedCloud: true, Idle: eruncommon.EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}}
+	envConfig := config.EnvConfig{Name: "dev", ManagedCloud: true, Idle: config.EnvironmentIdleConfig{WorkingHours: "00:00-23:59"}}
 	if err := runtime.Store.SaveEnvConfig("acme", envConfig); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 	// An SSH session started five seconds ago: eligibility must flip to
 	// ineligible and terminal-input must report a real elapsed time.
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "acme", Environment: "dev", Kind: eruncommon.ActivityKindSSH,
+		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH,
 		Now: time.Now().Add(-5 * time.Second),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity failed: %v", err)
@@ -199,12 +200,12 @@ func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 
 	now := time.Now()
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "acme", Environment: "dev", Kind: eruncommon.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
+		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(ssh) failed: %v", err)
 	}
 	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
-		Tenant: "acme", Environment: "dev", Kind: eruncommon.ActivityKindCLI, Now: now.Add(-2 * time.Second),
+		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI, Now: now.Add(-2 * time.Second),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(cli) failed: %v", err)
 	}

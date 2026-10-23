@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +50,7 @@ func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps commo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform whoami planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", quotedValueOrNone(whoami.Username), whoami.TenantID, quotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
 					return err
 				}
@@ -82,7 +84,7 @@ func newPlatformVersionCmd(store common.CloudReadStore, alias *string, deps comm
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform version lookup planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "erun platform version %s (%s)\n", info.Version, info.APIURL); err != nil {
 					return err
 				}
@@ -126,7 +128,7 @@ func newPlatformTenantCreateCmd(store common.CloudReadStore, alias *string, deps
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant creation planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "created tenant %s (%s)\n", tenant.Name, tenant.TenantID); err != nil {
 					return err
 				}
@@ -160,7 +162,7 @@ func newPlatformTenantListCmd(store common.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformTenantList(ctx, tenants); err != nil {
 					return err
 				}
@@ -172,7 +174,7 @@ func newPlatformTenantListCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func writePlatformTenantList(ctx common.Context, tenants []common.PlatformTenant) error {
+func writePlatformTenantList(ctx core.Context, tenants []common.PlatformTenant) error {
 	if len(tenants) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no tenants")
 		return err
@@ -237,7 +239,7 @@ func newPlatformTenantRepairOrgMappingCmd(store common.CloudReadStore, alias *st
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant org-mapping repair planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "repaired %s: org-field-value now %s\n", issuer.Issuer, issuer.OrgFieldValue); err != nil {
 					return err
 				}
@@ -293,7 +295,7 @@ func newPlatformIdentityOrgCreateCmd(store common.CloudReadStore, alias *string,
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform identity org creation planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "created org %s (%s) -- pass this id as --org-field-value\n", org.Name, org.ID); err != nil {
 					return err
 				}
@@ -341,7 +343,7 @@ func newPlatformUserGrantRoleCmd(store common.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user role grant planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				_, err := fmt.Fprintf(ctx.Stdout, "granted role %s to user %s\n", params.RoleID, params.UserID)
 				return err
 			}
@@ -383,7 +385,7 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user enrollment planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				message := fmt.Sprintf("enrolled user %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
 				if user.AlreadyEnrolled {
 					message = fmt.Sprintf("this identity is already enrolled, as %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
@@ -422,7 +424,7 @@ func newPlatformUserListCmd(store common.CloudReadStore, alias *string, deps com
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformUserList(ctx, users); err != nil {
 					return err
 				}
@@ -435,7 +437,7 @@ func newPlatformUserListCmd(store common.CloudReadStore, alias *string, deps com
 	return cmd
 }
 
-func writePlatformUserList(ctx common.Context, users []common.PlatformUser) error {
+func writePlatformUserList(ctx core.Context, users []common.PlatformUser) error {
 	if len(users) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no users")
 		return err
@@ -479,7 +481,7 @@ func newPlatformEnvListCmd(store common.CloudReadStore, alias *string, deps comm
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentList(ctx, environments); err != nil {
 					return err
 				}
@@ -491,7 +493,7 @@ func newPlatformEnvListCmd(store common.CloudReadStore, alias *string, deps comm
 	return cmd
 }
 
-func writePlatformEnvironmentList(ctx common.Context, environments []common.PlatformEnvironment) error {
+func writePlatformEnvironmentList(ctx core.Context, environments []common.PlatformEnvironment) error {
 	if len(environments) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no environments")
 		return err
@@ -504,7 +506,7 @@ func writePlatformEnvironmentList(ctx common.Context, environments []common.Plat
 	return nil
 }
 
-func writePlatformEnvironmentLine(ctx common.Context, environment common.PlatformEnvironment) error {
+func writePlatformEnvironmentLine(ctx core.Context, environment common.PlatformEnvironment) error {
 	line := fmt.Sprintf("  - %s (%s) type=%s status=%s", environment.Name, environment.EnvironmentID, environment.Type, environment.Status)
 	if strings.TrimSpace(environment.RuntimeVersion) != "" {
 		line += " runtime-version=" + environment.RuntimeVersion
@@ -535,7 +537,7 @@ func newPlatformEnvGetCmd(store common.CloudReadStore, alias *string, deps commo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment lookup planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -585,7 +587,7 @@ func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment registration planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -655,7 +657,7 @@ func newPlatformEnvPushCmd(store common.CloudReadStore, alias *string, deps comm
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition push planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "  uploaded %s/%s to %s (definition revision %d)\n",
 					args[0], args[1], result.Environment.EnvironmentID, result.Revision); err != nil {
 					return err
@@ -703,7 +705,7 @@ func newPlatformEnvPullCmd(store common.CloudReadStore, alias *string, promptRun
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition pull planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				verb := "updated"
 				if result.Created {
 					verb = "created"
@@ -747,7 +749,7 @@ func newPlatformEnvDeployCmd(store common.CloudReadStore, alias *string, deps co
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment deploy planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -780,7 +782,7 @@ func newPlatformEnvStopCmd(store common.CloudReadStore, alias *string, deps comm
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment stop planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -797,11 +799,11 @@ func newPlatformEnvStopCmd(store common.CloudReadStore, alias *string, deps comm
 // makes erun-common refuse a two-sided edit rather than resolve it silently —
 // the non-interactive transports' behaviour, reused here rather than
 // re-implemented.
-func pullConfirmation(ctx common.Context, promptRunner PromptRunner, tenant, environment string, yes bool) func(common.EnvDefinitionPlan) (bool, error) {
+func pullConfirmation(ctx core.Context, promptRunner PromptRunner, tenant, environment string, yes bool) func(config.EnvDefinitionPlan) (bool, error) {
 	if yes || promptRunner == nil {
 		return nil
 	}
-	return func(plan common.EnvDefinitionPlan) (bool, error) {
+	return func(plan config.EnvDefinitionPlan) (bool, error) {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  This environment and the platform have both changed since the last sync:"); err != nil {
 			return false, err
 		}
@@ -850,7 +852,7 @@ func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptR
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment deletion planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -896,7 +898,7 @@ func newPlatformContextCreateCmd(store common.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context creation planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformCreateContextResult(ctx, result); err != nil {
 					return err
 				}
@@ -915,7 +917,7 @@ func newPlatformContextCreateCmd(store common.CloudReadStore, alias *string, dep
 	return cmd
 }
 
-func writePlatformCreateContextResult(ctx common.Context, result common.PlatformCreateContextResult) error {
+func writePlatformCreateContextResult(ctx core.Context, result common.PlatformCreateContextResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err
@@ -944,7 +946,7 @@ func newPlatformContextListCmd(store common.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformContextList(ctx, contexts); err != nil {
 					return err
 				}
@@ -956,7 +958,7 @@ func newPlatformContextListCmd(store common.CloudReadStore, alias *string, deps 
 	return cmd
 }
 
-func writePlatformContextList(ctx common.Context, contexts []common.PlatformContext) error {
+func writePlatformContextList(ctx core.Context, contexts []common.PlatformContext) error {
 	if len(contexts) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no contexts")
 		return err
@@ -985,7 +987,7 @@ func newPlatformContextGetCmd(store common.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context lookup planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, quotedValueOrNone(cloudContext.Region)); err != nil {
 					return err
 				}
@@ -1021,7 +1023,7 @@ func newPlatformProvisionCmd(store common.CloudReadStore, alias *string, deps co
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform provision preview planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writePlatformProvisionResult(ctx, result); err != nil {
 					return err
 				}
@@ -1059,7 +1061,7 @@ func newPlatformProvisionCmd(store common.CloudReadStore, alias *string, deps co
 	return cmd
 }
 
-func writePlatformProvisionResult(ctx common.Context, result common.PlatformProvisionResult) error {
+func writePlatformProvisionResult(ctx core.Context, result common.PlatformProvisionResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err

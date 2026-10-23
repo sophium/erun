@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +20,7 @@ import (
 // It edits the source of truth and stops there. Realizing the new version —
 // terraform apply, deploy — stays a separate explicit step, so changing a pin is
 // never a rollout by accident.
-func newPinCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
 	target := common.OpenParams{}
@@ -84,7 +86,7 @@ type pinRequest struct {
 // version is recognition rather than recall. It reads erun's own published
 // registry, which is the same for every tenant and environment, so it needs
 // neither resolved — unlike a real re-pin, it never touches a project root.
-func runPinListCommand(ctx context.Context, cmdCtx common.Context) error {
+func runPinListCommand(ctx context.Context, cmdCtx core.Context) error {
 	versions, err := resolvePinRegistryVersions(ctx)
 	if err != nil {
 		return err
@@ -107,7 +109,7 @@ func orNone(value string) string {
 	return value
 }
 
-func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.OpenResult, request pinRequest, saveEnvConfig func(string, common.EnvConfig) error, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) error {
+func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) error {
 	projectRoot, viaCwdFallback, err := resolvePinProjectRoot(result, listEnvConfigs, findProjectRoot)
 	if err != nil {
 		return err
@@ -141,7 +143,7 @@ func runPinCommand(ctx context.Context, cmdCtx common.Context, result common.Ope
 // version, rewrites every file site, persists the env's own runtimeversion
 // when the plan carries that site, and refreshes any chart lock a rewritten
 // dependency left stale.
-func applyPinCommand(cmdCtx common.Context, projectRoot string, result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
+func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan common.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	// Recorded before anything moves, so a revert has somewhere to go even if the
 	// rewrite fails partway.
 	if err := common.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
@@ -168,7 +170,7 @@ func applyPinCommand(cmdCtx common.Context, projectRoot string, result common.Op
 // resolvePinTarget answers which version to pin to, and refuses a version that
 // is not actually published. Pinning to something unpublished produces a tree
 // that only fails later, at terraform init or a chart pull, far from the cause.
-func resolvePinTarget(ctx context.Context, cmdCtx common.Context, result common.OpenResult, request pinRequest, projectRoot string) (string, error) {
+func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, projectRoot string) (string, error) {
 	if request.Revert {
 		previous, ok := common.PinPrevious(projectRoot, result.Tenant, result.Environment)
 		if !ok {
@@ -238,13 +240,13 @@ func resolvePinRegistryVersions(ctx context.Context) (common.RuntimeRegistryVers
 // at all. viaCwdFallback reports which of those two ways the root was found,
 // so the caller can annotate the plan instead of presenting an unverified
 // tree as if it were known-good.
-func resolvePinProjectRoot(result common.OpenResult, listEnvConfigs func(string) ([]common.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) (string, bool, error) {
+func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot common.ProjectFinderFunc) (string, bool, error) {
 	if path := strings.TrimSpace(result.RepoPath); path != "" && !result.RemoteRepo() {
 		return path, false, nil
 	}
 	if listEnvConfigs != nil {
 		if envs, err := listEnvConfigs(result.Tenant); err == nil {
-			if root, ok := common.TenantLocalCheckoutRoot(envs); ok {
+			if root, ok := config.TenantLocalCheckoutRoot(envs); ok {
 				return root, false, nil
 			}
 		}
@@ -265,7 +267,7 @@ func resolvePinProjectRoot(result common.OpenResult, listEnvConfigs func(string)
 // that line's own release, not erun's, and ResolvePinPlan already decided to
 // leave those alone (plan.Skipped names why); writing them here regardless
 // would silently undo that decision.
-func savePinnedEnvConfig(result common.OpenResult, plan common.PinPlan, saveEnvConfig func(string, common.EnvConfig) error) error {
+func savePinnedEnvConfig(result config.OpenResult, plan common.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
 	}
@@ -279,7 +281,7 @@ func savePinnedEnvConfig(result common.OpenResult, plan common.PinPlan, saveEnvC
 // tracePinPlan renders every site and its old→new value. Emitted for a real run
 // too, not only a dry run: a re-pin edits files across a repo, and the operator
 // should see which without diffing afterwards.
-func tracePinPlan(cmdCtx common.Context, plan common.PinPlan) {
+func tracePinPlan(cmdCtx core.Context, plan common.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
 	if plan.ProjectRootNote != "" {
 		cmdCtx.Trace("  " + plan.ProjectRootNote)

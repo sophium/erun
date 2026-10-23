@@ -7,13 +7,16 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
 type rootStore interface {
 	common.BootstrapStore
-	common.OpenStore
+	config.OpenStore
 	common.DockerStore
 	common.DeployStore
 }
@@ -101,8 +104,8 @@ const tenantSelectionUnavailableExitCode = 128
 // a different outcome from "the command ran and failed", and from "the platform
 // alias cannot be resolved".
 func bootstrapInitExitError(err error) error {
-	if errors.Is(err, common.ErrNotInGitRepository) {
-		return internal.MarkReported(common.ErrNotInGitRepository)
+	if errors.Is(err, config.ErrNotInGitRepository) {
+		return internal.MarkReported(config.ErrNotInGitRepository)
 	}
 	var unavailable common.TenantSelectionUnavailableError
 	if errors.As(err, &unavailable) {
@@ -111,14 +114,14 @@ func bootstrapInitExitError(err error) error {
 	return err
 }
 
-func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
-	return func(ctx common.Context, params common.BootstrapInitParams) error {
+func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
+	return func(ctx core.Context, params common.BootstrapInitParams) error {
 		ctx = withCloudContextPreflight(ctx, store)
 		params.RuntimeVersionDefault = currentBuildInfo().Version
 		_, err := common.RunBootstrapInitWithDependencies(common.BootstrapInitDependencies{
 			Store:           common.TraceBootstrapStore(ctx, store),
 			FindProjectRoot: findProjectRoot,
-			SelectTenant: func(tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
+			SelectTenant: func(tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
 				return selectTenantPrompt(selectRunner, tenants)
 			},
 			TenantSelectionUnavailable: tenantSelectionUnavailable(),
@@ -138,8 +141,8 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 				return codeCommitSSHKeyIDPrompt(promptRunner, label)
 			},
 			EnsureKubernetesNamespace: common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
-			LoadProjectConfig:         common.LoadProjectConfig,
-			SaveProjectConfig:         common.TraceProjectConfigSaver(ctx, common.SaveProjectConfig),
+			LoadProjectConfig:         config.LoadProjectConfig,
+			SaveProjectConfig:         common.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
 			WaitForRemoteRuntime:      waitForRemoteRuntime,
 			RunRemoteCommand:          runRemoteCommand,
 			DeployHelmChart:           deployHelmChart,
@@ -165,19 +168,19 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 	}
 }
 
-func resolveRuntimeDeploySpecForOpen(ctx common.Context, store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+func resolveRuntimeDeploySpecForOpen(ctx core.Context, store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo model.BuildInfo, target config.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
 	spec, err := common.ResolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
 	if target.RemoteRepo() && strings.TrimSpace(spec.Deploy.Version) == "" {
-		spec.Deploy.Version = common.NormalizeBuildInfo(buildInfo).Version
+		spec.Deploy.Version = model.NormalizeBuildInfo(buildInfo).Version
 	}
 	return spec, nil
 }
 
-func newRunInitForArgs(store common.OpenStore, runInit func(common.Context, common.BootstrapInitParams) error) func(common.Context, []string) error {
-	return func(ctx common.Context, args []string) error {
+func newRunInitForArgs(store config.OpenStore, runInit func(core.Context, common.BootstrapInitParams) error) func(core.Context, []string) error {
+	return func(ctx core.Context, args []string) error {
 		params, err := common.InitParamsForOpenArgs(store, args)
 		if err != nil {
 			return err
@@ -186,8 +189,8 @@ func newRunInitForArgs(store common.OpenStore, runInit func(common.Context, comm
 	}
 }
 
-func newRunInitForOpen(store common.OpenStore, runInit func(common.Context, common.BootstrapInitParams) error) func(common.Context, common.OpenParams) error {
-	return func(ctx common.Context, params common.OpenParams) error {
+func newRunInitForOpen(store config.OpenStore, runInit func(core.Context, common.BootstrapInitParams) error) func(core.Context, common.OpenParams) error {
+	return func(ctx core.Context, params common.OpenParams) error {
 		initParams, err := common.InitParamsForOpenTarget(store, params)
 		if err != nil {
 			return err
@@ -197,11 +200,11 @@ func newRunInitForOpen(store common.OpenStore, runInit func(common.Context, comm
 }
 
 func newPushOperation(pushDockerImage common.DockerImagePusherFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner) common.DockerPushFunc {
-	return func(ctx common.Context, pushInput common.DockerPushSpec) error {
+	return func(ctx core.Context, pushInput common.DockerPushSpec) error {
 		return runDockerPushWithRetry(
 			ctx,
 			pushInput,
-			func(ctx common.Context, pushInput common.DockerPushSpec) error {
+			func(ctx core.Context, pushInput common.DockerPushSpec) error {
 				return common.RunDockerPush(ctx, pushInput, pushDockerImage)
 			},
 			loginToDockerRegistry,
@@ -344,11 +347,11 @@ func optionalPushCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuild
 
 func projectRootForHelp(findProjectRoot common.ProjectFinderFunc) (string, error) {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		findProjectRoot = config.FindProjectRoot
 	}
 	_, projectRoot, err := findProjectRoot()
 	if err != nil {
-		if errors.Is(err, common.ErrNotInGitRepository) {
+		if errors.Is(err, config.ErrNotInGitRepository) {
 			return "", nil
 		}
 		return "", err

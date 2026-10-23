@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -164,19 +165,19 @@ func TestThreeWaySecretMergePatchSendsOnlyWhatChanged(t *testing.T) {
 // doctor must be able to report it -- an operator who flipped it needs
 // confirmation it took, not faith.
 func TestSecretApplyExecutionModeDefaultsToSubprocessAndIsReported(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlSecretApplyExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("got %q, want %q", got, ExecutionModeSubprocess)
+	if got := configpkg.ExecutionModeFor(configpkg.ERunConfig{}, kubectlSecretApplyExecutionOperation); got != configpkg.ExecutionModeSubprocess {
+		t.Fatalf("got %q, want %q", got, configpkg.ExecutionModeSubprocess)
 	}
-	config := ERunConfig{Execution: ExecutionConfig{Modes: map[string]string{kubectlSecretApplyExecutionOperation: "library"}}}
-	if got := ExecutionModeFor(config, kubectlSecretApplyExecutionOperation); got != ExecutionModeLibrary {
-		t.Fatalf("got %q, want %q", got, ExecutionModeLibrary)
+	config := configpkg.ERunConfig{Execution: configpkg.ExecutionConfig{Modes: map[string]string{kubectlSecretApplyExecutionOperation: "library"}}}
+	if got := configpkg.ExecutionModeFor(config, kubectlSecretApplyExecutionOperation); got != configpkg.ExecutionModeLibrary {
+		t.Fatalf("got %q, want %q", got, configpkg.ExecutionModeLibrary)
 	}
 	var found bool
-	for _, status := range ExecutionModeReport(config) {
+	for _, status := range configpkg.ExecutionModeReport(config) {
 		if status.Operation == kubectlSecretApplyExecutionOperation {
 			found = true
-			if status.Mode != ExecutionModeLibrary {
-				t.Fatalf("doctor reports %q, want %q", status.Mode, ExecutionModeLibrary)
+			if status.Mode != configpkg.ExecutionModeLibrary {
+				t.Fatalf("doctor reports %q, want %q", status.Mode, configpkg.ExecutionModeLibrary)
 			}
 		}
 	}

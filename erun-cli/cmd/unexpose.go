@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +42,7 @@ func newUnexposeCmd(store common.ExposeStore, cloudStore common.CloudReadStore, 
 	return cmd
 }
 
-func runUnexposeCommand(ctx common.Context, store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
+func runUnexposeCommand(ctx core.Context, store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
@@ -52,7 +54,7 @@ func runUnexposeCommand(ctx common.Context, store common.ExposeStore, cloudStore
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
 		if findProjectRoot == nil {
-			findProjectRoot = common.FindProjectRoot
+			findProjectRoot = config.FindProjectRoot
 		}
 		_, root, err := findProjectRoot()
 		if err != nil {

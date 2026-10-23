@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // build_report.go lets an ordinary `erun build` self-report its own outcome
@@ -50,7 +52,7 @@ type ReportBuildOutcomeParams struct {
 	// Profile is the bounded per-step profile this build collected, when the
 	// caller has one -- nil for a build that collected none (see
 	// build_profile_summary.go).
-	Profile *BuildProfileSummary
+	Profile *core.BuildProfileSummary
 }
 
 // ReportBuildOutcome self-reports build's outcome to the erun platform,
@@ -66,7 +68,7 @@ type ReportBuildOutcomeParams struct {
 // Traces the intended call before checking ctx.DryRun, the same contract
 // tracePlatformCall's other callers already use, so --dry-run shows the
 // attempt without making it.
-func ReportBuildOutcome(ctx Context, store CloudReadStore, deps CloudDependencies, params ReportBuildOutcomeParams) {
+func ReportBuildOutcome(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportBuildOutcomeParams) {
 	if !hasAnyErunPlatformAlias(store) {
 		return
 	}
@@ -105,7 +107,7 @@ func ReportBuildOutcome(ctx Context, store CloudReadStore, deps CloudDependencie
 // `git rev-parse` (same case, seen through gitResolvedRef's own ok flag) both
 // report no commit rather than an error -- only a real git failure is an
 // error here.
-func resolveBuildReportCommitID(ctx Context, projectRoot string) (string, error) {
+func resolveBuildReportCommitID(ctx core.Context, projectRoot string) (string, error) {
 	if strings.TrimSpace(projectRoot) == "" {
 		return "", nil
 	}

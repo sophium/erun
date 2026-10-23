@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // control_plane_version_drift.go answers a question neither `erun exec
@@ -157,7 +160,7 @@ type ControlPlaneVersionDrift struct {
 // probing every configured one even when the caller only cares about a
 // single plane. An alias that is not configured, or that names a
 // non-erun-hosted provider, is an error rather than a silently empty report.
-func ResolveControlPlaneVersionDrift(ctx Context, result ListResult, alias string, deps CloudDependencies, resolvePublished RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
+func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps CloudDependencies, resolvePublished RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
 	deps = normalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
 	if err != nil {
@@ -206,7 +209,7 @@ func appendControlPlaneAlias(drift *ControlPlaneVersionDrift, byIdentity map[str
 func controlPlaneProviders(providers []CloudProviderStatus) []CloudProviderStatus {
 	planes := make([]CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
-		if provider.Provider == CloudProviderERun {
+		if provider.Provider == config.CloudProviderERun {
 			planes = append(planes, provider)
 		}
 	}
@@ -227,7 +230,7 @@ func selectControlPlaneProviders(providers []CloudProviderStatus, alias string) 
 		if provider.Alias != alias {
 			continue
 		}
-		if provider.Provider != CloudProviderERun {
+		if provider.Provider != config.CloudProviderERun {
 			return nil, fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider)
 		}
 		return []CloudProviderStatus{provider}, nil
@@ -242,7 +245,7 @@ func controlPlaneAPIURL(provider CloudProviderStatus) string {
 	return strings.TrimSpace(provider.ERun.APIURL)
 }
 
-func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStatus) {
+func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []CloudProviderStatus) {
 	ctx.Trace("list: would resolve the published version from erun's own registry")
 	for _, provider := range planes {
 		ctx.Trace("list: would GET " + controlPlaneAPIURL(provider) + "/v1/platform for control plane " + provider.Alias)
@@ -256,7 +259,7 @@ func traceControlPlaneVersionDriftDryRun(ctx Context, planes []CloudProviderStat
 // before the console is ever probed, so a duplicate alias costs one wasted
 // GET /v1/platform, not a second GET /version.json for a console already
 // checked under the first alias.
-func resolveOneControlPlaneVersionStatus(ctx Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(Context, string) (PlatformInfo, error), fetchVersionJSON func(Context, string) (string, error), resolveHostAddrs func(Context, string) ([]string, error), publishedSemver semver, publishedOK bool) {
+func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(core.Context, string) (PlatformInfo, error), fetchVersionJSON func(core.Context, string) (string, error), resolveHostAddrs func(core.Context, string) ([]string, error), publishedSemver semver, publishedOK bool) {
 	apiURL := controlPlaneAPIURL(provider)
 	if apiURL == "" {
 		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, ControlPlaneVersionStatus{
@@ -358,7 +361,7 @@ func normalizeControlPlaneIdentityURL(raw string) string {
 // address ("lookup <host> on 127.0.0.53:53: no such host"), which no golden
 // placeholder can stabilise across hosts, and the actionable part is which
 // hostname erun could not resolve, not how the local resolver phrased it.
-func detectAdvertisedAPIURLMismatch(ctx Context, alias, ownAPIURL, discoveredAPIURL string, resolveHostAddrs func(Context, string) ([]string, error)) string {
+func detectAdvertisedAPIURLMismatch(ctx core.Context, alias, ownAPIURL, discoveredAPIURL string, resolveHostAddrs func(core.Context, string) ([]string, error)) string {
 	discoveredAPIURL = strings.TrimRight(strings.TrimSpace(discoveredAPIURL), "/")
 	ownAPIURL = strings.TrimRight(strings.TrimSpace(ownAPIURL), "/")
 	if discoveredAPIURL == "" || discoveredAPIURL == ownAPIURL {
@@ -383,7 +386,7 @@ func detectAdvertisedAPIURLMismatch(ctx Context, alias, ownAPIURL, discoveredAPI
 // resolveControlPlaneEndpoints resolves an api url's host to its address:port
 // pairs -- what a mismatch check compares, since a benign canonical alias
 // shares these with the hostname erun dialed even though the two names differ.
-func resolveControlPlaneEndpoints(ctx Context, apiURL string, resolveHostAddrs func(Context, string) ([]string, error)) ([]string, error) {
+func resolveControlPlaneEndpoints(ctx core.Context, apiURL string, resolveHostAddrs func(core.Context, string) ([]string, error)) ([]string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(apiURL))
 	if err != nil {
 		return nil, fmt.Errorf("parse api url: %w", err)
@@ -431,7 +434,7 @@ func endpointsIntersect(a, b []string) bool {
 // ResolveHostAddrs. It ignores ctx.DryRun deliberately:
 // ResolveControlPlaneVersionDrift returns before probing any plane under
 // --dry-run, so there is no dry-run contract for it to honor here.
-func defaultResolveHostAddrs(_ Context, host string) ([]string, error) {
+func defaultResolveHostAddrs(_ core.Context, host string) ([]string, error) {
 	return net.DefaultResolver.LookupHost(context.Background(), host)
 }
 
@@ -443,7 +446,7 @@ const (
 	versionSurfaceDocs    = "docs site"
 )
 
-func resolveVersionSurfaceStatus(ctx Context, alias, surface, surfaceURL string, fetchVersionJSON func(Context, string) (string, error), publishedSemver semver, publishedOK bool) VersionSurfaceStatus {
+func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL string, fetchVersionJSON func(core.Context, string) (string, error), publishedSemver semver, publishedOK bool) VersionSurfaceStatus {
 	status := VersionSurfaceStatus{URL: surfaceURL}
 	ctx.Trace("list: GET " + surfaceURL + "/version.json (" + surface + " version check for " + alias + ")")
 	version, err := fetchVersionJSON(ctx, surfaceURL)
@@ -523,7 +526,7 @@ func (e *versionSurfaceUnexpectedContentError) Error() string {
 // answer) apart from a content failure (an answer arrived, but not the
 // expected JSON document): the two point an operator at completely different
 // first moves, and collapsing them into one "unreachable" verdict misdirects.
-func defaultFetchVersionJSON(ctx Context, surfaceURL string) (string, error) {
+func defaultFetchVersionJSON(ctx core.Context, surfaceURL string) (string, error) {
 	target := strings.TrimRight(strings.TrimSpace(surfaceURL), "/") + "/version.json"
 	ctx.Trace("GET " + target)
 	if ctx.DryRun {

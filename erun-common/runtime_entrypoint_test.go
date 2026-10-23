@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -180,7 +182,7 @@ func writeServiceAccount(t *testing.T, boot runtimeBoot) {
 func TestWriteRuntimeKubeconfigAliasesTheOuterCloudContext(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"KUBERNETES_SERVICE_HOST": "10.43.0.1", "ERUN_CLOUD_CONTEXT_NAME": "erun-001-eu-west-2"})
 	writeServiceAccount(t, boot)
-	if err := writeRuntimeKubeconfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeKubeconfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	var config struct {
@@ -208,7 +210,7 @@ func TestWriteRuntimeKubeconfigAliasesTheOuterCloudContext(t *testing.T) {
 
 func TestWriteRuntimeKubeconfigNeedsAServiceAccount(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"KUBERNETES_SERVICE_HOST": "10.43.0.1"})
-	if err := writeRuntimeKubeconfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeKubeconfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(boot.kubeconfigPath()); !os.IsNotExist(err) {
@@ -229,7 +231,7 @@ func TestNormalizeRuntimeSSHPermissions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := normalizeRuntimeSSHPermissions(Context{}, boot, nil); err != nil {
+	if err := normalizeRuntimeSSHPermissions(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]os.FileMode{key: 0o600, key + ".pub": 0o644, boot.path(".ssh"): 0o700} {
@@ -253,7 +255,7 @@ func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 	}
 	writeAssetFile(t, boot.registryCredentialPath, `{"auths":{"ghcr.io":{"auth":"cHJvdmlzaW9uZWQ="},"quay.io":{"auth":"cXVheQ=="}}}`)
 	writeAssetFile(t, boot.dockerConfigPath(), `{"auths":{"ghcr.io":{"auth":"b3BlcmF0b3I="},"docker.io":{"auth":"ZXhpc3Rpbmc="}},"credsStore":"keep"}`)
-	if err := syncRuntimeRegistryCredential(Context{}, boot, nil); err != nil {
+	if err := syncRuntimeRegistryCredential(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	config := readTestJSON(t, boot.dockerConfigPath())
@@ -270,7 +272,7 @@ func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 	}
 }
 
-func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) CloudProviderConfig {
+func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) configpkg.CloudProviderConfig {
 	t.Helper()
 	provider := testPlatformAliasProvider()
 	entry, err := renderPlatformAliasEntry(provider)
@@ -292,10 +294,10 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 		"ERUN_CLOUD_PROVIDER": "aws", "ERUN_CLOUD_PROVIDER_ALIAS": "dev-aws", "ERUN_CLOUD_REGION": "eu-west-1",
 	})
 	provider := writePlatformAliasSecret(t, boot)
-	if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncRuntimePlatformAlias(Context{}, boot, nil); err != nil {
+	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	rootPath := runtimeRootConfigPath(boot.configHome())
@@ -303,7 +305,7 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 	if strings.Count(string(data), "cloudproviders:") != 1 {
 		t.Fatalf("one cloudproviders key expected:\n%s", data)
 	}
-	var root ERunConfig
+	var root configpkg.ERunConfig
 	readTestYAML(t, rootPath, &root)
 	if root.DefaultTenant != "team" {
 		t.Fatalf("seeding the alias must not disturb the rest of the root config: %+v", root)
@@ -314,7 +316,7 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 	if _, found := findCloudProvider(root.CloudProviders, provider.Alias); !found {
 		t.Fatalf("the platform alias should be seeded: %+v", root.CloudProviders)
 	}
-	token := filepath.Join(boot.configHome(), configRoot, "cloud-secrets", cloudSecretFileName(provider.ERun.RefreshTokenRef))
+	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", cloudSecretFileName(provider.ERun.RefreshTokenRef))
 	info, err := os.Stat(token)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("the token should be written 0600 at the shipped name: %v %v", info, err)
@@ -325,17 +327,17 @@ func TestRuntimeBootSeedsThePlatformAliasBesideTheInfrastructureProvider(t *test
 func TestRuntimeBootKeepsAPlatformAliasAndTokenThePodAlreadyHolds(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev"})
 	provider := writePlatformAliasSecret(t, boot)
-	token := filepath.Join(boot.configHome(), configRoot, "cloud-secrets", cloudSecretFileName(provider.ERun.RefreshTokenRef))
+	token := filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets", cloudSecretFileName(provider.ERun.RefreshTokenRef))
 	writeAssetFile(t, token, "the pod's own newer token")
 	own := provider
 	own.Username = "pod-login"
-	if err := writeRuntimeBootYAML(runtimeRootConfigPath(boot.configHome()), ERunConfig{DefaultTenant: "team", CloudProviders: []CloudProviderConfig{own}}); err != nil {
+	if err := writeRuntimeBootYAML(runtimeRootConfigPath(boot.configHome()), configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []configpkg.CloudProviderConfig{own}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := syncRuntimePlatformAlias(Context{}, boot, nil); err != nil {
+	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
-	var root ERunConfig
+	var root configpkg.ERunConfig
 	readTestYAML(t, runtimeRootConfigPath(boot.configHome()), &root)
 	if got, _ := findCloudProvider(root.CloudProviders, provider.Alias); got.Username != "pod-login" {
 		t.Fatalf("an alias the pod already carries must be kept: %+v", got)
@@ -348,7 +350,7 @@ func TestRuntimeBootSeedsNoPlatformAliasWithoutAMountedSecret(t *testing.T) {
 	if describeRuntimePlatformAlias(boot) != "" {
 		t.Fatal("with nothing mounted the platform alias step has nothing to do")
 	}
-	if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(runtimeRootConfigPath(boot.configHome()))
@@ -379,10 +381,10 @@ func TestRuntimeBootConfigCloudContextDefaults(t *testing.T) {
 				"ERUN_CLOUD_PROVIDER": "aws", "ERUN_CLOUD_PROVIDER_ALIAS": "operator@aws", "ERUN_CLOUD_REGION": "us-east-1",
 				"ERUN_CLOUD_CONTEXT_NAME": tc.contextName, "ERUN_KUBERNETES_CONTEXT": tc.kubeContext,
 			})
-			if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+			if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 				t.Fatal(err)
 			}
-			var root ERunConfig
+			var root configpkg.ERunConfig
 			readTestYAML(t, runtimeRootConfigPath(boot.configHome()), &root)
 			if len(root.CloudContexts) != 1 || root.CloudContexts[0].Name != tc.wantName || root.CloudContexts[0].KubernetesContext != tc.wantKube {
 				t.Fatalf("got %+v, want name %q kubernetescontext %q", root.CloudContexts, tc.wantName, tc.wantKube)
@@ -404,20 +406,20 @@ func TestRuntimeBootConfigWritesTheEnvironmentAndKeepsUnknownKeys(t *testing.T) 
 	})
 	envPath := runtimeEnvConfigPath(boot.configHome(), "team", "dev")
 	writeAssetFile(t, envPath, "name: dev\nsshd:\n  enabled: true\nfuturekey: keep\n")
-	if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
-	var env EnvConfig
+	var env configpkg.EnvConfig
 	readTestYAML(t, envPath, &env)
-	if env.Type != EnvironmentTypeRemoteAgent || env.RuntimeRegistry != "10.43.0.10:5000" || env.LocalRepoPath != "/home/erun/git/team" || env.Idle.Timeout != "5m0s" {
+	if env.Type != configpkg.EnvironmentTypeRemoteAgent || env.RuntimeRegistry != "10.43.0.10:5000" || env.LocalRepoPath != "/home/erun/git/team" || env.Idle.Timeout != "5m0s" {
 		t.Fatalf("unexpected env config: %+v", env)
 	}
 	data, _ := os.ReadFile(envPath)
 	if !strings.Contains(string(data), "futurekey: keep") {
 		t.Fatalf("a key this binary does not know must survive the boot:\n%s", data)
 	}
-	var tenant TenantConfig
-	readTestYAML(t, filepath.Join(boot.configHome(), configRoot, "team", configFile), &tenant)
+	var tenant configpkg.TenantConfig
+	readTestYAML(t, filepath.Join(boot.configHome(), configpkg.ConfigRoot, "team", configpkg.ConfigFile), &tenant)
 	if tenant.Name != "team" || tenant.DefaultEnvironment != "dev" {
 		t.Fatalf("unexpected tenant config: %+v", tenant)
 	}
@@ -427,10 +429,10 @@ func TestRuntimeBootConfigReplacesAnUnparsableFile(t *testing.T) {
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev"})
 	envPath := runtimeEnvConfigPath(boot.configHome(), "team", "dev")
 	writeAssetFile(t, envPath, "name: [unterminated\n")
-	if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatal(err)
 	}
-	var env EnvConfig
+	var env configpkg.EnvConfig
 	readTestYAML(t, envPath, &env)
 	if env.Name != "dev" {
 		t.Fatalf("a corrupt env config should be rebuilt from the injected environment: %+v", env)
@@ -441,7 +443,7 @@ func TestRuntimeShellHookIsInstalledOnce(t *testing.T) {
 	boot := newTestRuntimeBoot(t, nil)
 	writeAssetFile(t, boot.path(".bashrc"), "alias ll='ls -l'\n")
 	for i := 0; i < 2; i++ {
-		if err := installRuntimeShellHook(Context{}, boot, nil); err != nil {
+		if err := installRuntimeShellHook(core.Context{}, boot, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

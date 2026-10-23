@@ -7,12 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The capability answer and the enforcement answer must agree exactly: a
@@ -101,7 +99,7 @@ func nullablePermissionValue(value string) any {
 // permissionsCandidateRoutes stands in for the handler's route catalog: a
 // realistic canonical route set, including path templates and the
 // method/path pairs the pattern roles are meant to straddle.
-var permissionsCandidateRoutes = []eruncommon.PlatformCapability{
+var permissionsCandidateRoutes = []model.PlatformCapability{
 	{Method: "GET", Path: "/v1/audit-events"},
 	{Method: "GET", Path: "/v1/environments"},
 	{Method: "POST", Path: "/v1/environments"},
@@ -161,7 +159,7 @@ func TestCapabilitySetAgreesWithEnforcement(t *testing.T) {
 
 			permitted, err := authorizer.PermittedRoutes(ctx, permissionsCandidateRoutes)
 			mustNoErr(t, err, "resolve capabilities")
-			capabilities := eruncommon.PlatformCapabilities(permitted)
+			capabilities := model.PlatformCapabilities(permitted)
 
 			for _, route := range permissionsCandidateRoutes {
 				claimed := capabilities.Allows(route.Method, route.Path)

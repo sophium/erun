@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Every agent task that clones the repo into a work directory leaves that
@@ -90,7 +92,7 @@ type WorkCloneReclaimDecision struct {
 // A missing answer is never read as safe. Every early return below keeps the
 // clone (Reclaim stays false) unless a specific, checked condition proves
 // deleting it loses nothing.
-func DecideWorkCloneReclaim(ctx Context, dir string) WorkCloneReclaimDecision {
+func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecision {
 	decision := WorkCloneReclaimDecision{Dir: dir}
 
 	info, err := os.Stat(dir)
@@ -134,7 +136,7 @@ func DecideWorkCloneReclaim(ctx Context, dir string) WorkCloneReclaimDecision {
 // only when the exact commit checked out is already reachable from some
 // remote-tracking ref, since a detached commit is unreachable (and therefore
 // as good as lost) the moment nothing else points at it.
-func decideDetachedWorkCloneReclaim(ctx Context, dir string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
+func decideDetachedWorkCloneReclaim(ctx core.Context, dir string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
 	sha, ok, err := gitResolvedRef(ctx, dir, "HEAD")
 	if err != nil || !ok {
 		decision.Reason = "detached HEAD and its commit could not be resolved"
@@ -158,7 +160,7 @@ func decideDetachedWorkCloneReclaim(ctx Context, dir string, decision WorkCloneR
 // only ever treated as safe when it can be proven (see findSquashMergeCommit);
 // otherwise the branch is kept exactly as an ordinary set of unpushed commits
 // would be.
-func decideBranchWorkCloneReclaim(ctx Context, dir, branch string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
+func decideBranchWorkCloneReclaim(ctx core.Context, dir, branch string, decision WorkCloneReclaimDecision) WorkCloneReclaimDecision {
 	upstream, hasUpstream := resolveBranchUpstreamCandidate(ctx, dir, branch)
 	if hasUpstream {
 		ahead, err := gitCommitsAhead(ctx, dir, upstream, branch)
@@ -198,7 +200,7 @@ func decideBranchWorkCloneReclaim(ctx Context, dir, branch string, decision Work
 // remote without ever configuring `@{u}`, so a missing upstream is not proof
 // nothing was pushed -- it is only proof that *if* something was pushed, it
 // was not pushed the way `-u` would have recorded it.
-func resolveBranchUpstreamCandidate(ctx Context, dir, branch string) (string, bool) {
+func resolveBranchUpstreamCandidate(ctx core.Context, dir, branch string) (string, bool) {
 	if upstream, ok := gitUpstreamRef(ctx, dir, branch); ok {
 		return upstream, true
 	}
@@ -219,7 +221,7 @@ func resolveBranchUpstreamCandidate(ctx Context, dir, branch string) (string, bo
 // be fooled by). Search is bounded to commits between the branches' merge
 // base and the default branch's tip, so a large history costs one bounded
 // walk rather than the whole repository log.
-func findSquashMergeCommit(ctx Context, dir, branch string) (sha, defaultBranch string, ok bool) {
+func findSquashMergeCommit(ctx core.Context, dir, branch string) (sha, defaultBranch string, ok bool) {
 	defaultBranch, hasDefault := resolveDefaultBranchForMerge(ctx, dir, "origin")
 	if !hasDefault {
 		return "", "", false
@@ -256,7 +258,7 @@ func findSquashMergeCommit(ctx Context, dir, branch string) (sha, defaultBranch 
 // layout this repository's own lanes use) never sets it, so the common
 // default names are checked directly against what actually exists on the
 // remote rather than guessed blindly.
-func resolveDefaultBranchForMerge(ctx Context, dir, remote string) (string, bool) {
+func resolveDefaultBranchForMerge(ctx core.Context, dir, remote string) (string, bool) {
 	if def, ok := gitRemoteDefaultBranch(ctx, dir, remote); ok {
 		return def, true
 	}
@@ -279,15 +281,15 @@ func shortSHA(sha string) string {
 // see recently landed merges rather than whatever the clone last observed.
 // Best-effort by design (see DecideWorkCloneReclaim): a failure here only
 // ever pushes the decision toward keeping a clone, never toward losing one.
-func gitFetchOrigin(ctx Context, dir string) {
+func gitFetchOrigin(ctx core.Context, dir string) {
 	ctx.TraceCommand("", "git", "-C", dir, "fetch", "origin", "--prune")
-	_ = Command("git", "-C", dir, "fetch", "origin", "--prune").Run()
+	_ = core.Command("git", "-C", dir, "fetch", "origin", "--prune").Run()
 }
 
-func gitUpstreamRef(ctx Context, dir, branch string) (string, bool) {
+func gitUpstreamRef(ctx core.Context, dir, branch string) (string, bool) {
 	ref := branch + "@{u}"
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--abbrev-ref", ref)
-	output, err := Command("git", "-C", dir, "rev-parse", "--abbrev-ref", ref).Output()
+	output, err := core.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", ref).Output()
 	if err != nil {
 		return "", false
 	}
@@ -298,10 +300,10 @@ func gitUpstreamRef(ctx Context, dir, branch string) (string, bool) {
 	return upstream, true
 }
 
-func gitCommitsAhead(ctx Context, dir, base, tip string) (int, error) {
+func gitCommitsAhead(ctx core.Context, dir, base, tip string) (int, error) {
 	rangeSpec := base + ".." + tip
 	ctx.TraceCommand("", "git", "-C", dir, "rev-list", "--count", rangeSpec)
-	output, err := Command("git", "-C", dir, "rev-list", "--count", rangeSpec).Output()
+	output, err := core.Command("git", "-C", dir, "rev-list", "--count", rangeSpec).Output()
 	if err != nil {
 		if stderr := stderrFromExitError(err); stderr != "" {
 			return 0, fmt.Errorf("%w: %s", err, stderr)
@@ -315,9 +317,9 @@ func gitCommitsAhead(ctx Context, dir, base, tip string) (int, error) {
 	return count, nil
 }
 
-func gitMergeBase(ctx Context, dir, a, b string) (string, bool) {
+func gitMergeBase(ctx core.Context, dir, a, b string) (string, bool) {
 	ctx.TraceCommand("", "git", "-C", dir, "merge-base", a, b)
-	output, err := Command("git", "-C", dir, "merge-base", a, b).Output()
+	output, err := core.Command("git", "-C", dir, "merge-base", a, b).Output()
 	if err != nil {
 		return "", false
 	}
@@ -325,7 +327,7 @@ func gitMergeBase(ctx Context, dir, a, b string) (string, bool) {
 	return sha, sha != ""
 }
 
-func gitTreeHash(ctx Context, dir, rev string) (string, bool) {
+func gitTreeHash(ctx core.Context, dir, rev string) (string, bool) {
 	sha, ok, err := gitResolvedRef(ctx, dir, rev+"^{tree}")
 	if err != nil || !ok {
 		return "", false
@@ -340,9 +342,9 @@ type gitCommitTree struct {
 	tree string
 }
 
-func gitCommitTreesInRange(ctx Context, dir, rangeSpec string) ([]gitCommitTree, error) {
+func gitCommitTreesInRange(ctx core.Context, dir, rangeSpec string) ([]gitCommitTree, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "log", "--format=%H %T", rangeSpec)
-	output, err := Command("git", "-C", dir, "log", "--format=%H %T", rangeSpec).Output()
+	output, err := core.Command("git", "-C", dir, "log", "--format=%H %T", rangeSpec).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -360,9 +362,9 @@ func gitCommitTreesInRange(ctx Context, dir, rangeSpec string) ([]gitCommitTree,
 // gitRemoteRefContainingCommit reports the first remote-tracking ref that
 // contains sha, skipping a remote's symbolic HEAD line (e.g.
 // "origin/HEAD -> origin/main") which names no ref of its own.
-func gitRemoteRefContainingCommit(ctx Context, dir, sha string) (string, bool) {
+func gitRemoteRefContainingCommit(ctx core.Context, dir, sha string) (string, bool) {
 	ctx.TraceCommand("", "git", "-C", dir, "branch", "-r", "--contains", sha)
-	output, err := Command("git", "-C", dir, "branch", "-r", "--contains", sha).Output()
+	output, err := core.Command("git", "-C", dir, "branch", "-r", "--contains", sha).Output()
 	if err != nil {
 		return "", false
 	}
@@ -398,7 +400,7 @@ func reclaimAgentJobWorkClone(job EnvironmentJob) (reclaimed bool, reason string
 		return false, ""
 	}
 
-	ctx := Context{Logger: NewLogger(VerbosityInfo)}
+	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 	decision := DecideWorkCloneReclaim(ctx, dir)
 	if !decision.Reclaim {
 		return false, decision.Reason

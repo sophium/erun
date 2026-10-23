@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -20,7 +22,7 @@ const (
 	openNoShellDialectPowerShell openNoShellDialect = "powershell"
 )
 
-var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
+var currentHostOS = func() core.HostOS { return core.DetectHost().OS }
 
 // stdinIsTerminal decides whether open may safely block on an interactive
 // shell. A var (like currentHostOS above) so tests can force the TTY branch
@@ -37,8 +39,8 @@ var stdinIsTerminal = func() bool { return writerIsTerminal(os.Stdin) }
 // host environment it never was. Checked before any other open side effect
 // (persisting the local port range, ensuring the kubernetes context) so a
 // refusal never partially applies one.
-func refuseOpenForHostEnvironment(result common.OpenResult) error {
-	if result.EnvConfig.ResolvedType() != common.EnvironmentTypeHost {
+func refuseOpenForHostEnvironment(result config.OpenResult) error {
+	if result.EnvConfig.ResolvedType() != config.EnvironmentTypeHost {
 		return nil
 	}
 	return fmt.Errorf("open %s/%s: %s is a host environment — it has no pod and no cluster to open a shell into; its worktree is already %s, so open that directory directly", result.Tenant, result.Environment, result.Environment, result.RepoPath)
@@ -50,40 +52,40 @@ func refuseOpenForHostEnvironment(result common.OpenResult) error {
 // done reports that init already handled the request, so the caller returns
 // without opening anything.
 func resolveOpenTarget(
-	ctx common.Context,
+	ctx core.Context,
 	args []string,
 	target common.OpenParams,
 	vscode bool,
 	intellij bool,
-	resolveOpen func(common.OpenParams) (common.OpenResult, error),
-	runInitForOpen func(common.Context, common.OpenParams) error,
-	saveEnvConfig func(string, common.EnvConfig) error,
-) (common.OpenResult, bool, error) {
+	resolveOpen func(common.OpenParams) (config.OpenResult, error),
+	runInitForOpen func(core.Context, common.OpenParams) error,
+	saveEnvConfig func(string, config.EnvConfig) error,
+) (config.OpenResult, bool, error) {
 	if vscode && intellij {
-		return common.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
+		return config.OpenResult{}, false, fmt.Errorf("--vscode and --intellij cannot be used together")
 	}
 	params, err := resolveOpenParams(ctx.Command, args, target)
 	if err != nil {
-		return common.OpenResult{}, false, err
+		return config.OpenResult{}, false, err
 	}
 	result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
 	if err != nil {
-		return common.OpenResult{}, false, err
+		return config.OpenResult{}, false, err
 	}
 	if initRan {
-		return common.OpenResult{}, true, nil
+		return config.OpenResult{}, true, nil
 	}
 	if err := refuseOpenForHostEnvironment(result); err != nil {
-		return common.OpenResult{}, false, err
+		return config.OpenResult{}, false, err
 	}
 	result, err = common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 	if err != nil {
-		return common.OpenResult{}, false, err
+		return config.OpenResult{}, false, err
 	}
 	return result, false, nil
 }
 
-func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func newOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(common.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -182,7 +184,7 @@ type openOptions struct {
 	VersionOverride  string
 	RuntimeImage     string
 	AllowLocalBuilds bool
-	SaveEnvConfig    func(string, common.EnvConfig) error
+	SaveEnvConfig    func(string, config.EnvConfig) error
 	AppSession       string
 	AI               bool
 	Deploy           bool
@@ -190,10 +192,10 @@ type openOptions struct {
 	Reconnect        bool
 }
 
-func resolveOpenArgs(command string, args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
+func resolveOpenArgs(command string, args []string, resolveOpen func(common.OpenParams) (config.OpenResult, error)) (common.OpenParams, config.OpenResult, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
-		return common.OpenParams{}, common.OpenResult{}, err
+		return common.OpenParams{}, config.OpenResult{}, err
 	}
 
 	params.Command = command
@@ -234,71 +236,71 @@ func resolveOpenParams(command string, args []string, overrides common.OpenParam
 	return params, nil
 }
 
-func runInitBeforeOpen(ctx common.Context, args []string, runInitForArgs func(common.Context, []string) error) error {
+func runInitBeforeOpen(ctx core.Context, args []string, runInitForArgs func(core.Context, []string) error) error {
 	ctx.Logger.Debug("running init before resolving open target")
 	return runInitForArgs(ctx, args)
 }
 
-func runInitBeforeOpenForParams(ctx common.Context, params common.OpenParams, runInitForOpen func(common.Context, common.OpenParams) error) error {
+func runInitBeforeOpenForParams(ctx core.Context, params common.OpenParams, runInitForOpen func(core.Context, common.OpenParams) error) error {
 	ctx.Logger.Debug("running init before resolving open target")
 	return runInitForOpen(ctx, params)
 }
 
-func resolveOpenWithInitStop(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
+func resolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
 	_, result, err := resolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
 	if initErr := runInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
-		return common.OpenResult{}, true, initErr
+		return config.OpenResult{}, true, initErr
 	}
 
-	return common.OpenResult{}, true, nil
+	return config.OpenResult{}, true, nil
 }
 
-func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
+func resolveOpenWithInitRetry(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
 	params, result, err := resolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
 	if initErr := runInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
-		return common.OpenResult{}, true, initErr
+		return config.OpenResult{}, true, initErr
 	}
 
 	result, err = resolveOpen(params)
 	return result, true, err
 }
 
-func resolveOpenWithInitStopForParams(ctx common.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForOpen func(common.Context, common.OpenParams) error) (common.OpenResult, bool, error) {
+func resolveOpenWithInitStopForParams(ctx core.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, common.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
 	if initErr := runInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
-		return common.OpenResult{}, true, initErr
+		return config.OpenResult{}, true, initErr
 	}
 
-	return common.OpenResult{}, true, nil
+	return config.OpenResult{}, true, nil
 }
 
-func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForOpen func(common.Context, common.OpenParams) error) (common.OpenResult, bool, error) {
+func resolveOpenWithInitRetryForParams(ctx core.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, common.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
 	}
 
 	if initErr := runInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
-		return common.OpenResult{}, true, initErr
+		return config.OpenResult{}, true, initErr
 	}
 
 	result, err = resolveOpen(params)
 	return result, true, err
 }
 
-func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func runResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -322,14 +324,14 @@ func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult,
 }
 
 type resolvedOpenRunner struct {
-	ctx                       common.Context
-	result                    common.OpenResult
+	ctx                       core.Context
+	result                    config.OpenResult
 	options                   openOptions
 	promptRunner              PromptRunner
 	openShell                 OpenShellRunner
-	runManagedDeploy          func(common.Context, common.OpenResult) error
+	runManagedDeploy          func(core.Context, config.OpenResult) error
 	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(common.Context, common.OpenResult, bool) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (common.DeploySpec, error)
 	deployHelmChart           common.HelmChartDeployerFunc
 	resolveDeployedVersion    common.HelmReleaseVersionResolverFunc
 	activateMCP               MCPForwarder
@@ -443,7 +445,7 @@ func (r *resolvedOpenRunner) recordActivity() {
 		_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
 			Tenant:      r.result.Tenant,
 			Environment: r.result.Environment,
-			Kind:        common.ActivityKindCLI,
+			Kind:        config.ActivityKindCLI,
 		})
 	}
 }
@@ -515,8 +517,8 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
 		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
-		ExpectedMCPPort:    common.MCPPortForResult(r.result),
-		ExpectedSSHPort:    common.SSHLocalPortForResult(r.result),
+		ExpectedMCPPort:    config.MCPPortForResult(r.result),
+		ExpectedSSHPort:    config.SSHLocalPortForResult(r.result),
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
 	if err != nil {
@@ -826,7 +828,7 @@ func ideOpenLabel(options openOptions) string {
 	return "the IDE"
 }
 
-func sshdExpectationForDeployment(result common.OpenResult) *bool {
+func sshdExpectationForDeployment(result config.OpenResult) *bool {
 	if !result.EnvConfig.SSHD.Enabled {
 		return nil
 	}
@@ -834,7 +836,7 @@ func sshdExpectationForDeployment(result common.OpenResult) *bool {
 	return &expected
 }
 
-func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
+func wrapOpenHelmDeployWithSpinner(ctx core.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
 	if deployHelmChart == nil {
 		return nil
 	}
@@ -853,7 +855,7 @@ func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deplo
 // applyRuntimeDeployImageOverride applies a runtime-image override only for
 // published-chart envs; envs on a repo-local chart ignore it because the local
 // chart's templates own their image references.
-func applyRuntimeDeployImageOverride(ctx common.Context, result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
+func applyRuntimeDeployImageOverride(ctx core.Context, result config.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
 		return execution, nil
@@ -874,7 +876,7 @@ func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverr
 	return execution
 }
 
-func emitLocalShellSetupForOpenResult(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {
+func emitLocalShellSetupForOpenResult(ctx core.Context, result config.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -912,7 +914,7 @@ func (w nopWriteCloser) UnwrapWriter() io.Writer { return w.Writer }
 // TTY as stdout), wrapped so promptui cannot close it.
 func promptStderr() io.WriteCloser { return nopWriteCloser{os.Stderr} }
 
-func maybeConfigureOpenNoShellAlias(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
+func maybeConfigureOpenNoShellAlias(ctx core.Context, result config.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
 	dialect := openNoShellDialectForShell(shellPath)
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
@@ -949,13 +951,13 @@ func maybeConfigureOpenNoShellAlias(ctx common.Context, result common.OpenResult
 	return nil
 }
 
-func writeOpenNoShellHintLines(stderr io.Writer, result common.OpenResult, shellPath string) {
+func writeOpenNoShellHintLines(stderr io.Writer, result config.OpenResult, shellPath string) {
 	for _, line := range openNoShellHintLines(result, shellPath) {
 		_, _ = fmt.Fprintln(stderr, line)
 	}
 }
 
-func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
+func openNoShellHintLines(result config.OpenResult, shellPath string) []string {
 	dialect := openNoShellDialectForShell(shellPath)
 	return []string{
 		openNoShellHintPrefix(dialect),
@@ -963,14 +965,14 @@ func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
 	}
 }
 
-func openNoShellAliasName(result common.OpenResult) string {
+func openNoShellAliasName(result config.OpenResult) string {
 	if strings.TrimSpace(result.Title) != "" {
 		return strings.TrimSpace(result.Title)
 	}
 	return strings.TrimSpace(result.Tenant) + "-" + strings.TrimSpace(result.Environment)
 }
 
-func openNoShellAliasCommand(result common.OpenResult, shellPath string) string {
+func openNoShellAliasCommand(result config.OpenResult, shellPath string) string {
 	aliasName := openNoShellAliasName(result)
 	command := fmt.Sprintf("erun open %s %s --no-shell", result.Tenant, result.Environment)
 	dialect := openNoShellDialectForShell(shellPath)
@@ -983,7 +985,7 @@ func openNoShellAliasCommand(result common.OpenResult, shellPath string) string 
 	return "alias " + aliasName + `='eval "$(` + command + `)"'`
 }
 
-func detectOpenNoShellAliasStartupFile(result common.OpenResult, shellPath string) (string, bool) {
+func detectOpenNoShellAliasStartupFile(result config.OpenResult, shellPath string) (string, bool) {
 	if openNoShellDialectForShell(shellPath) == openNoShellDialectPowerShell {
 		return "", false
 	}
@@ -1063,20 +1065,20 @@ func openNoShellDialectForShell(shellPath string) openNoShellDialect {
 	return detectOpenNoShellDialect(currentHostOS(), shellPath)
 }
 
-func detectOpenNoShellDialect(hostOS common.HostOS, shellPath string) openNoShellDialect {
+func detectOpenNoShellDialect(hostOS core.HostOS, shellPath string) openNoShellDialect {
 	switch strings.ToLower(filepath.Base(strings.TrimSpace(shellPath))) {
 	case "pwsh", "pwsh.exe", "powershell", "powershell.exe":
 		return openNoShellDialectPowerShell
 	case "bash", "bash.exe", "zsh", "zsh.exe", "sh", "sh.exe", "fish", "fish.exe":
 		return openNoShellDialectPOSIX
 	}
-	if hostOS == common.HostOSWindows {
+	if hostOS == core.HostOSWindows {
 		return openNoShellDialectPowerShell
 	}
 	return openNoShellDialectPOSIX
 }
 
-func localShellSetupScript(result common.OpenResult, dialect openNoShellDialect) string {
+func localShellSetupScript(result config.OpenResult, dialect openNoShellDialect) string {
 	switch dialect {
 	case openNoShellDialectPowerShell:
 		commands := []string{
@@ -1104,7 +1106,7 @@ func powerShellQuote(value string) string {
 func openerIsDefaultError(err error) bool {
 	return errors.Is(err, common.ErrDefaultTenantNotConfigured) ||
 		errors.Is(err, common.ErrDefaultEnvironmentNotConfigured) ||
-		errors.Is(err, common.ErrNotInitialized)
+		errors.Is(err, config.ErrNotInitialized)
 }
 
 func shouldInitOpenCommand(err error) bool {
@@ -1120,6 +1122,6 @@ func shouldRunInitForOpenCommand(err error) bool {
 func shouldInitRootCommand(err error) bool {
 	return openerIsDefaultError(err) ||
 		shouldInitOpenCommand(err) ||
-		errors.Is(err, common.ErrNotInGitRepository) ||
+		errors.Is(err, config.ErrNotInGitRepository) ||
 		internal.IsReported(err)
 }

@@ -6,9 +6,11 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
+func RunDockerBuild(ctx core.Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
 	traceDockerBuild(ctx, buildInput)
@@ -22,7 +24,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 // else. It is separate from execution because the trace is a public contract —
 // the dry-run goldens — and must stay in dependency order no matter how the
 // builds themselves are scheduled.
-func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
+func traceDockerBuild(ctx core.Context, buildInput DockerBuildSpec) {
 	buildInput.Verbosity = ctx.Verbosity
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
@@ -36,7 +38,7 @@ func traceDockerBuild(ctx Context, buildInput DockerBuildSpec) {
 // dispatch runs runDockerBuildStep instead and reports every outcome after the
 // builds, in build order, so the stream does not depend on which image
 // finished first.
-func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
+func executeDockerBuild(ctx core.Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) error {
 	outcome, err := runDockerBuildStep(ctx, buildInput, build, stdout, stderr)
 	if err == nil {
 		reportDockerBuildTestOutcome(ctx, buildInput, outcome)
@@ -57,32 +59,32 @@ func executeDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerIma
 // It is also where an image joins the run's heartbeat for as long as its build
 // takes, which is the only signal a run has that a long build is still working —
 // see build_heartbeat.go.
-func runDockerBuildStep(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) (string, error) {
+func runDockerBuildStep(ctx core.Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, stdout, stderr io.Writer) (string, error) {
 	if build == nil {
 		build = DockerImageBuilder
 	}
 	buildInput.Verbosity = ctx.Verbosity
-	stepCtx, finish := ctx.startTimingStep(dockerBuildStepName(buildInput))
-	var cache *cacheDecision
+	stepCtx, finish := ctx.StartTimingStep(dockerBuildStepName(buildInput))
+	var cache *core.CacheDecision
 	if hit, applicable, reason := incrementalCacheDecision(buildInput); applicable {
-		cache = &cacheDecision{hit: hit, missReason: reason}
-		stepCtx.recordTimingCache(cache)
+		cache = &core.CacheDecision{Hit: hit, MissReason: reason}
+		stepCtx.RecordTimingCache(cache)
 	}
 	// The same decision reaches the builder, which is the only place that learns
 	// a promote was unusable and rebuilt instead -- see settlePromoteFailure.
 	buildInput.cache = cache
-	buildInput.PlatformObserver = stepCtx.timingPlatformObserver(cache)
+	buildInput.PlatformObserver = stepCtx.TimingPlatformObserver(cache)
 	// The heartbeat goes to the run's own log stream, not to stdout/stderr: those
 	// are per-image buffers under a concurrent build, and a liveness line flushed
 	// after the build it describes finished would report nothing.
-	doneBuilding := ctx.progress.begin(dockerBuildStepName(buildInput))
+	doneBuilding := ctx.Progress.Begin(dockerBuildStepName(buildInput))
 	err := build(buildInput, stdout, stderr)
 	doneBuilding()
 	finish(err)
 	return dockerBuildTestOutcome(buildInput, cache), err
 }
 
-func reportDockerBuildTestOutcome(ctx Context, buildInput DockerBuildSpec, outcome string) {
+func reportDockerBuildTestOutcome(ctx core.Context, buildInput DockerBuildSpec, outcome string) {
 	ctx.Info(dockerBuildStepName(buildInput) + ": test: " + outcome)
 }
 
@@ -92,12 +94,12 @@ func reportDockerBuildTestOutcome(ctx Context, buildInput DockerBuildSpec, outco
 // settlePromoteFailure) reports the tests it really ran. "passed" means the
 // test stage was part of a successful docker build; BuildKit may have served
 // it from its layer cache on byte-identical inputs, which is equally valid.
-func dockerBuildTestOutcome(buildInput DockerBuildSpec, cache *cacheDecision) string {
+func dockerBuildTestOutcome(buildInput DockerBuildSpec, cache *core.CacheDecision) string {
 	if !dockerfileDeclaresTestStage(buildInput.DockerfilePath) {
 		return "none declared"
 	}
 	if cache != nil {
-		if hit, _ := cache.decision(); hit {
+		if hit, _ := cache.Decision(); hit {
 			return "reused (fingerprint " + fingerprintTagPrefix + buildInput.Fingerprint + ")"
 		}
 	}
@@ -109,7 +111,7 @@ func dockerBuildTestOutcome(buildInput DockerBuildSpec, cache *cacheDecision) st
 // trigger. The per-platform detail is deliberate: a single vague "missing or
 // stale" line could not tell a maintainer which fp-tag or dependency forced the
 // rebuild.
-func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
+func traceIncrementalDecision(ctx core.Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
 		return
 	}
@@ -169,7 +171,7 @@ func describeMissingPlatforms(platforms []string) string {
 // Two phases, and the split is the point: every trace line is emitted first, in
 // dependency order, before anything builds. That keeps dry-run output and the
 // decision lines identical whatever the scheduling, so only timing changes.
-func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
+func RunDockerBuilds(ctx core.Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ordered := markLocalBaseImageBuilds(orderedDockerBuildSpecs(builds))
 	dependencies, err := buildDependencies(ordered)
 	if err != nil {
@@ -215,7 +217,7 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 // assemble multi-arch manifests as they go, and the release path shares a single
 // in-pod docker daemon, so their concurrency is a separate question from this
 // one and is deliberately not answered here.
-func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
+func runDockerBuildsSequentially(ctx core.Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
 	ctx.BuildJobs = 1
 	return RunDockerBuilds(ctx, builds, build)
 }
@@ -225,27 +227,27 @@ func runDockerBuildsSequentially(ctx Context, builds []DockerBuildSpec, build Do
 // and starts the step-timing root reported (as a duration-ordered table plus
 // a JSON record) when the bracket closes. Skipped in dry-run, which does no
 // work and must keep the integration goldens stable.
-func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
+func traceBuildUmbrella(ctx core.Context) (core.Context, func(*error)) {
 	if ctx.DryRun {
 		return ctx, func(*error) {}
 	}
 	started := time.Now()
 	ctx.Info("==> Building")
-	root := newStepTiming("build", nil)
-	ctx.timing = root
+	root := core.NewStepTiming("build", nil)
+	ctx.Timing = root
 	return ctx, func(errp *error) {
 		var err error
 		if errp != nil {
 			err = *errp
 		}
-		root.finish(err)
+		root.Finish(err)
 		elapsed := time.Since(started).Round(time.Second)
 		if err != nil {
 			ctx.Info("==> Build failed after " + elapsed.String())
 		} else {
 			ctx.Info("==> Built in " + elapsed.String())
 		}
-		reportStepTiming(ctx, "build", root)
+		core.ReportStepTiming(ctx, "build", root)
 	}
 }
 
@@ -254,7 +256,7 @@ func traceBuildUmbrella(ctx Context) (Context, func(*error)) {
 // run to the erun platform, best-effort, once it finishes (erun#1954) --
 // pass a nil store from a caller that has none (build never fails or
 // changes its own output because reporting is unavailable).
-func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+func RunBuildExecution(ctx core.Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -263,7 +265,7 @@ func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript Buil
 
 // RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart;
 // see its doc comment for store/deps.
-func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+func RunBuildExecutionAndDeploy(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -279,7 +281,7 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 // benefit. `erun build --release` (a snapshot vs. stable version choice, not
 // a different command) still goes through RunBuildExecution above and does
 // get reported, same as any other build.
-func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, store CloudReadStore, deps CloudDependencies, err error) {
+func reportBuildExecutionOutcome(ctx core.Context, execution BuildExecutionSpec, store CloudReadStore, deps CloudDependencies, err error) {
 	if store == nil {
 		return
 	}
@@ -303,11 +305,11 @@ func reportBuildExecutionOutcome(ctx Context, execution BuildExecutionSpec, stor
 // shape ReportBuildOutcome carries to the platform. nil when no timing root
 // is active -- a dry run, or a build that hit an error before
 // traceBuildUmbrella started one.
-func buildExecutionProfile(ctx Context) *BuildProfileSummary {
-	if ctx.timing == nil {
+func buildExecutionProfile(ctx core.Context) *core.BuildProfileSummary {
+	if ctx.Timing == nil {
 		return nil
 	}
-	summary := SummarizeTimingRecordForProfile(ctx.timing.toRecord("build"))
+	summary := core.SummarizeTimingRecordForProfile(ctx.Timing.ToRecord("build"))
 	return &summary
 }
 
@@ -330,7 +332,7 @@ func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (stri
 // umbrella the desktop activity queue expects for a release rather than the
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
-func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
+func RunReleaseExecution(ctx core.Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
 	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
@@ -341,14 +343,14 @@ func RunReleaseExecution(ctx Context, execution BuildExecutionSpec, runGit GitCo
 // no chart -- runs no work and tests nothing, so reporting success for it turns
 // "not tested" into "tested and green" for every caller reading the exit code.
 // That precondition is checked here, before the execution it guards.
-func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if !buildExecutionPlansWork(execution) {
 		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
 	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }
 
-func runResolvedBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runResolvedBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
 		// The release owns the publish rather than following it: its stages run
 		// around the build+push so the version's images and charts exist, and
@@ -400,7 +402,7 @@ func releaseExecutionVersion(execution BuildExecutionSpec) string {
 	return execution.release.Version
 }
 
-func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {
+func runBuildExecutionBuilds(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {
 	pushedTags := make(map[string]struct{}, len(execution.dockerBuilds)+len(execution.dockerPushes))
 	if execution.script != nil {
 		if len(deploySpecs) > 0 {
@@ -418,7 +420,7 @@ func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySp
 	return runDockerBuildExecutionPhase(ctx, execution, deploySpecs, build, push, pushedTags)
 }
 
-func runDockerBuildExecutionPhase(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
+func runDockerBuildExecutionPhase(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
 	if len(execution.dockerPushes) > 0 {
 		err := RunDockerPushExecution(ctx, DockerPushExecutionSpec{builds: execution.dockerBuilds, pushes: execution.dockerPushes, componentCharts: execution.componentCharts}, build, push)
 		if err != nil {
@@ -447,7 +449,7 @@ func recordDockerPushTags(tags map[string]struct{}, pushes []DockerPushSpec) map
 	return tags
 }
 
-func buildAndPushDeployDockerImages(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) error {
+func buildAndPushDeployDockerImages(ctx core.Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) error {
 	if err := runDockerBuildsSequentially(ctx, builds, build); err != nil {
 		return err
 	}
@@ -488,28 +490,28 @@ func deployedVersionForSpecs(specs []DeploySpec) string {
 // op receives the timing-scoped context so the images and charts it pushes
 // attach their own step-timing children; dry-run does no work and skips
 // timing, same as the other three umbrellas.
-func RunPushCommand(ctx Context, op func(Context) error) (err error) {
+func RunPushCommand(ctx core.Context, op func(core.Context) error) (err error) {
 	if ctx.DryRun {
 		return op(ctx)
 	}
 	started := time.Now()
 	ctx.Info("==> Pushing")
-	root := newStepTiming("push", nil)
-	ctx.timing = root
+	root := core.NewStepTiming("push", nil)
+	ctx.Timing = root
 	defer func() {
-		root.finish(err)
+		root.Finish(err)
 		elapsed := time.Since(started).Round(time.Second)
 		if err != nil {
 			ctx.Info("==> Push failed after " + elapsed.String())
 		} else {
 			ctx.Info("==> Pushed in " + elapsed.String())
 		}
-		reportStepTiming(ctx, "push", root)
+		core.ReportStepTiming(ctx, "push", root)
 	}()
 	return op(ctx)
 }
 
-func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {
+func RunDockerPush(ctx core.Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {
 	if push == nil {
 		push = DockerImagePusher
 	}
@@ -522,7 +524,7 @@ func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusher
 	return push(pushInput.Image.Tag, ctx.Verbosity, ctx.Stdout, ctx.Stderr)
 }
 
-func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
+func RunDockerPushSpec(ctx core.Context, pushInput DockerPushSpec, buildInput *DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if buildInput != nil {
 		if err := RunDockerBuild(ctx, *buildInput, build); err != nil {
 			return err
@@ -534,7 +536,7 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 		}
 	}
 	if push == nil {
-		push = func(ctx Context, pushInput DockerPushSpec) error {
+		push = func(ctx core.Context, pushInput DockerPushSpec) error {
 			return RunDockerPush(ctx, pushInput, nil)
 		}
 	}
@@ -544,7 +546,7 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 	return publishComponentChart(ctx, pushInput.Image, pushInput.Image.Version)
 }
 
-func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
+func RunDockerPushExecution(ctx core.Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if err := preflightRegistryPushAccess(ctx, execution); err != nil {
 		return err
 	}
@@ -595,7 +597,7 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 //
 // Skipped in dry-run, which does no work and must keep the integration traces
 // stable.
-func preflightRegistryPushAccess(ctx Context, execution DockerPushExecutionSpec) error {
+func preflightRegistryPushAccess(ctx core.Context, execution DockerPushExecutionSpec) error {
 	if ctx.DryRun {
 		return nil
 	}
@@ -670,11 +672,11 @@ func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
 }
 
 // publishComponentCharts packages+pushes then verifies each resolved chart.
-func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
+func publishComponentCharts(ctx core.Context, specs []HelmChartPublishSpec) error {
 	published := make([]string, 0, len(specs))
 	for i, spec := range specs {
 		spec.Verbosity = ctx.Verbosity
-		stepCtx, finish := ctx.startTimingStep("chart " + spec.ChartName)
+		stepCtx, finish := ctx.StartTimingStep("chart " + spec.ChartName)
 		err := publishAndVerifyHelmChart(stepCtx, spec)
 		finish(err)
 		if err != nil {
@@ -685,7 +687,7 @@ func publishComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
 	return nil
 }
 
-func publishAndVerifyHelmChart(ctx Context, spec HelmChartPublishSpec) error {
+func publishAndVerifyHelmChart(ctx core.Context, spec HelmChartPublishSpec) error {
 	if err := RunHelmChartPublish(ctx, spec); err != nil {
 		return err
 	}
@@ -722,7 +724,7 @@ func describeChartNames(names []string) string {
 // packageComponentCharts packages each resolved chart locally (validate + record
 // identity) without publishing — the build-only counterpart of
 // publishComponentCharts.
-func packageComponentCharts(ctx Context, specs []HelmChartPublishSpec) error {
+func packageComponentCharts(ctx core.Context, specs []HelmChartPublishSpec) error {
 	for _, spec := range specs {
 		if err := PackageResolvedChart(ctx, spec); err != nil {
 			return err

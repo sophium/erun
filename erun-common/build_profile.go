@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TimingRecordSummary is one entry in a recent-builds listing -- lightweight
@@ -27,7 +29,7 @@ type TimingRecordSummary struct {
 // fails to parse is skipped rather than failing the whole listing -- a
 // half-written or corrupted record must not hide every other one.
 func ListTimingRecords(command string, limit int) ([]TimingRecordSummary, error) {
-	dir, err := timingRecordDir()
+	dir, err := core.TimingRecordDir()
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +40,7 @@ func ListTimingRecords(command string, limit int) ([]TimingRecordSummary, error)
 		}
 		return nil, err
 	}
-	names := timingRecordFileNamesForCommand(entries, command)
+	names := core.TimingRecordFileNamesForCommand(entries, command)
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	if limit > 0 && len(names) > limit {
 		names = names[:limit]
@@ -62,23 +64,23 @@ func ListTimingRecords(command string, limit int) ([]TimingRecordSummary, error)
 // LoadTimingRecord resolves id -- a record's ID as printed by
 // ListTimingRecords, with or without its .json suffix, or "" / "latest" for
 // command's most recent retained record -- and returns the parsed record.
-func LoadTimingRecord(command, id string) (TimingRecord, error) {
-	dir, err := timingRecordDir()
+func LoadTimingRecord(command, id string) (core.TimingRecord, error) {
+	dir, err := core.TimingRecordDir()
 	if err != nil {
-		return TimingRecord{}, err
+		return core.TimingRecord{}, err
 	}
 	id = strings.TrimSpace(id)
 	if id == "" || id == "latest" {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return TimingRecord{}, fmt.Errorf("no %s timing records found in %s", command, dir)
+				return core.TimingRecord{}, fmt.Errorf("no %s timing records found in %s", command, dir)
 			}
-			return TimingRecord{}, err
+			return core.TimingRecord{}, err
 		}
-		names := timingRecordFileNamesForCommand(entries, command)
+		names := core.TimingRecordFileNamesForCommand(entries, command)
 		if len(names) == 0 {
-			return TimingRecord{}, fmt.Errorf("no %s timing records found in %s", command, dir)
+			return core.TimingRecord{}, fmt.Errorf("no %s timing records found in %s", command, dir)
 		}
 		sort.Strings(names)
 		id = strings.TrimSuffix(names[len(names)-1], ".json")
@@ -89,14 +91,14 @@ func LoadTimingRecord(command, id string) (TimingRecord, error) {
 	return loadTimingRecordFile(filepath.Join(dir, id))
 }
 
-func loadTimingRecordFile(path string) (TimingRecord, error) {
+func loadTimingRecordFile(path string) (core.TimingRecord, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return TimingRecord{}, err
+		return core.TimingRecord{}, err
 	}
-	var record TimingRecord
+	var record core.TimingRecord
 	if err := json.Unmarshal(data, &record); err != nil {
-		return TimingRecord{}, err
+		return core.TimingRecord{}, err
 	}
 	return record, nil
 }
@@ -105,12 +107,12 @@ func loadTimingRecordFile(path string) (TimingRecord, error) {
 // duration-ordered, cgroup-annotated table reportStepTiming prints live
 // during a run, so `erun build profile <id>` reads identically to the
 // original run's own "step timing" output.
-func RenderTimingRecordRows(record TimingRecord) []string {
+func RenderTimingRecordRows(record core.TimingRecord) []string {
 	label := record.Command
 	if record.Failed {
 		label += " (failed)"
 	}
-	row := label + " [" + record.Duration + "]" + buildCgroupSummary(record.Cgroup)
+	row := label + " [" + record.Duration + "]" + core.BuildCgroupSummary(record.Cgroup)
 	if record.Failed && record.Error != "" {
 		row += " — " + record.Error
 	}
@@ -124,8 +126,8 @@ func RenderTimingRecordRows(record TimingRecord) []string {
 // orderedTimingStepJSONRows sorts a record's stably-ordered (insertion-order)
 // JSON children by duration descending, mirroring orderedTimingRows' live
 // equivalent -- the dominant cost is always the first line a reader sees.
-func orderedTimingStepJSONRows(steps []TimingStepJSON) []TimingStepJSON {
-	sorted := make([]TimingStepJSON, len(steps))
+func orderedTimingStepJSONRows(steps []core.TimingStepJSON) []core.TimingStepJSON {
+	sorted := make([]core.TimingStepJSON, len(steps))
 	copy(sorted, steps)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		return sorted[i].DurationSeconds > sorted[j].DurationSeconds
@@ -133,7 +135,7 @@ func orderedTimingStepJSONRows(steps []TimingStepJSON) []TimingStepJSON {
 	return sorted
 }
 
-func renderTimingStepJSONRows(step TimingStepJSON, depth int) []string {
+func renderTimingStepJSONRows(step core.TimingStepJSON, depth int) []string {
 	label := step.Name
 	if step.Failed {
 		label += " (failed)"
@@ -145,7 +147,7 @@ func renderTimingStepJSONRows(step TimingStepJSON, depth int) []string {
 			label += " (cache miss: " + step.CacheMissReason + ")"
 		}
 	}
-	row := strings.Repeat("  ", depth) + label + " [" + step.Duration + "]" + buildCgroupSummary(step.Cgroup)
+	row := strings.Repeat("  ", depth) + label + " [" + step.Duration + "]" + core.BuildCgroupSummary(step.Cgroup)
 	if step.Failed && step.Error != "" {
 		row += " — " + step.Error
 	}

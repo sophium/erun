@@ -1,6 +1,8 @@
 package main
 
-import eruncommon "github.com/sophium/erun/erun-common"
+import (
+	"github.com/sophium/erun/erun-common/base/model"
+)
 
 // buildVersion is replaced at build time via -ldflags (see
 // erun-devops/docker/erun-backend-api/Dockerfile), the same convention
@@ -9,5 +11,5 @@ import eruncommon "github.com/sophium/erun/erun-common"
 var buildVersion = "dev"
 
 func currentBuildVersion() string {
-	return eruncommon.NormalizeBuildInfo(eruncommon.BuildInfo{Version: buildVersion}).Version
+	return model.NormalizeBuildInfo(model.BuildInfo{Version: buildVersion}).Version
 }

@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // DefaultRuntimeOutputsDir is the canonical agent outputs directory inside the
@@ -130,7 +132,7 @@ func sanitizeOutputEntryName(name string) (string, error) {
 // ResolveRuntimeOutputs lists one directory in the env's runtime pod,
 // newest-first. A missing directory yields an empty result, not an error, and
 // dry-run returns an empty result without contacting the pod.
-func ResolveRuntimeOutputs(ctx Context, req ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
+func ResolveRuntimeOutputs(ctx core.Context, req ShellLaunchParams, params RuntimeOutputsParams, run RuntimeOutputsRunner) (RuntimeOutputsListResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
 		return RuntimeOutputsListResult{}, err
@@ -180,7 +182,7 @@ func newRuntimeOutputResult(name string, isDir bool, data []byte) RuntimeOutputR
 
 // traceRuntimeOutputsScript returns true when the context is in dry-run, in which
 // case the caller must not run the command.
-func traceRuntimeOutputsScript(ctx Context, req ShellLaunchParams, label, script string) bool {
+func traceRuntimeOutputsScript(ctx core.Context, req ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kubectlRemoteExecArgs(req, script)...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"

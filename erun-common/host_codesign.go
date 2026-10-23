@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // arm64 macOS refuses to exec a Mach-O that carries no code signature at all:
@@ -94,7 +96,7 @@ func (s HostArtifactSigning) Describe() string {
 // is on disk either way, and a diagnosable state beats the silent kill.
 func SignHostArtifact(path string) HostArtifactSigning {
 	signing := HostArtifactSigning{Path: path}
-	if DetectHost().OS != HostOSDarwin {
+	if core.DetectHost().OS != core.HostOSDarwin {
 		return signing
 	}
 	isMachO, err := fileIsMachO(path)
@@ -147,7 +149,7 @@ func signWhileWritable(path string) (string, string, error) {
 	if keychain := localCodesignKeychain(); keychain != "" {
 		// The keychain relocks across a reboot, and a locked one fails every
 		// signature. Its password is erun's own, so this needs no operator.
-		_, _ = Command("security", "unlock-keychain", "-p", LocalCodesignKeychainPassword, keychain).CombinedOutput()
+		_, _ = core.Command("security", "unlock-keychain", "-p", LocalCodesignKeychainPassword, keychain).CombinedOutput()
 		if output, err := runHostCodesign("-s", LocalCodesignIdentity, "--keychain", keychain, "-f", path); err == nil {
 			return LocalCodesignIdentity, output, nil
 		}
@@ -277,7 +279,7 @@ func hostArtifactIsSigned(path string) (bool, string, error) {
 }
 
 func runHostCodesign(args ...string) (string, error) {
-	output, err := Command("codesign", args...).CombinedOutput()
+	output, err := core.Command("codesign", args...).CombinedOutput()
 	return strings.TrimSpace(string(output)), err
 }
 

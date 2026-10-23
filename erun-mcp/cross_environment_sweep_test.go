@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestCrossEnvironmentToolsRefuseAForeignEnvironment sweeps every remaining
@@ -103,8 +103,8 @@ func TestExposeAndUnexposeAcceptTheirOwnScope(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{
-				"acme/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeRuntime, KubernetesContext: "test-context"},
+			envConfigs: map[string]config.EnvConfig{
+				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeRuntime, KubernetesContext: "test-context"},
 			},
 		},
 	}
@@ -169,8 +169,8 @@ func TestTerraformAcceptsItsOwnScope(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "acme", Environment: "dev", RepoPath: projectRoot},
 		Store: terraformTestStore{listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{
-				"acme/dev": {Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent},
+			envConfigs: map[string]config.EnvConfig{
+				"acme/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent},
 			},
 		}},
 	}

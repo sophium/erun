@@ -5,16 +5,17 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The MCP platform tools resolve their alias through the same shared resolver
 // the CLI uses, but the operator reaching them has no --erun-alias flag: the
 // tool's own `alias` input is the only way to select one. A remedy that spells
 // the CLI's flag is not something an MCP caller can act on.
-func mcpAliasMessageFor(t *testing.T, providers ...eruncommon.CloudProviderConfig) string {
+func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) string {
 	t.Helper()
-	runtime := RuntimeConfig{Store: listToolStore{toolConfig: eruncommon.ERunConfig{CloudProviders: providers}}}
+	runtime := RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
 	_, _, err := platformEnvListTool(runtime)(context.Background(), nil, PlatformEnvListInput{})
 	if err == nil {
 		t.Fatal("expected the unresolvable-alias error, got none")
@@ -25,11 +26,11 @@ func mcpAliasMessageFor(t *testing.T, providers ...eruncommon.CloudProviderConfi
 // erunTypeProvider is an alias the platform resolver counts as erun-type; its
 // token status is irrelevant here because resolution fails before any token is
 // minted.
-func erunTypeProvider(alias string) eruncommon.CloudProviderConfig {
-	return eruncommon.NormalizeCloudProviderConfig(eruncommon.CloudProviderConfig{
+func erunTypeProvider(alias string) config.CloudProviderConfig {
+	return eruncommon.NormalizeCloudProviderConfig(config.CloudProviderConfig{
 		Alias:    alias,
-		Provider: eruncommon.CloudProviderERun,
-		ERun:     &eruncommon.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
+		Provider: config.CloudProviderERun,
+		ERun:     &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
 	})
 }
 
@@ -70,7 +71,7 @@ func TestMCPPlatformEnvListDoesNotAssertASingleCauseWhenNoneIsSelected(t *testin
 func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		providers []eruncommon.CloudProviderConfig
+		providers []config.CloudProviderConfig
 		want      string
 	}{
 		{
@@ -79,12 +80,12 @@ func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 		},
 		{
 			name:      "several configured",
-			providers: []eruncommon.CloudProviderConfig{erunTypeProvider("one@erun"), erunTypeProvider("two@erun")},
+			providers: []config.CloudProviderConfig{erunTypeProvider("one@erun"), erunTypeProvider("two@erun")},
 			want:      "multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store := &listToolStore{toolConfig: eruncommon.ERunConfig{CloudProviders: tc.providers}}
+			store := &listToolStore{toolConfig: config.ERunConfig{CloudProviders: tc.providers}}
 			_, err := eruncommon.ResolveERunPlatformAlias(store, "")
 			if err == nil {
 				t.Fatal("expected the unresolvable-alias error, got none")

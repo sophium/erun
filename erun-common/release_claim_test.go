@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A test covering only "the first release claims it and nothing else races"
@@ -118,7 +120,7 @@ func runtimePodEnvForTest(tenant, environment string) func(string) string {
 
 // readReleaseRepoClaimForTest reads a claim blob back by its sha, failing the
 // test rather than returning an error it would only ever report the same way.
-func readReleaseRepoClaimForTest(t *testing.T, ctx Context, repo, sha string) releaseRepoClaimRecord {
+func readReleaseRepoClaimForTest(t *testing.T, ctx core.Context, repo, sha string) releaseRepoClaimRecord {
 	t.Helper()
 	record, err := readReleaseRepoClaimBlob(ctx, repo, sha)
 	if err != nil {

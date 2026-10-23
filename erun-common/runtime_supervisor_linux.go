@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimeInitSignals are the signals the init handles besides the terminating
@@ -20,7 +22,7 @@ func isRuntimeReapSignal(sig os.Signal) bool {
 // already PID 1, so a run outside a container behaves like one inside.
 func enableRuntimeSubreaper() {
 	if os.Getpid() != 1 {
-		enableEnvironmentJobSubreaper()
+		core.EnableEnvironmentJobSubreaper()
 	}
 }
 
@@ -30,16 +32,16 @@ func enableRuntimeSubreaper() {
 func (s *runtimeSupervisor) reapOrphans() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	procs, ok := environmentJobSessionProcessesFunc()
+	procs, ok := core.EnvironmentJobSessionProcessesFunc()
 	if !ok {
 		return
 	}
 	self := os.Getpid()
 	for _, proc := range procs {
-		if _, owned := s.owned[proc.pid]; owned || proc.pid <= 0 || !proc.zombie || proc.parent != self {
+		if _, owned := s.owned[proc.Pid]; owned || proc.Pid <= 0 || !proc.Zombie || proc.Parent != self {
 			continue
 		}
-		reapEnvironmentJobChild(proc.pid)
+		core.ReapEnvironmentJobChild(proc.Pid)
 	}
 }
 

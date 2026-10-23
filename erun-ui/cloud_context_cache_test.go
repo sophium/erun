@@ -4,7 +4,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestCloudContextCacheSmoothsATransientUnknown locks in the deliberate grace
@@ -13,10 +14,10 @@ import (
 func TestCloudContextCacheSmoothsATransientUnknown(t *testing.T) {
 	app := &App{}
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
-		{CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusRunning},
+		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusRunning},
 	})
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
-		{CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusUnknown},
+		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusUnknown},
 	})
 	if got := app.cloudContextStatus("ctx"); got != eruncommon.CloudContextStatusRunning {
 		t.Fatalf("a single transient Unknown must not blank a known-good status: got %q", got)
@@ -34,7 +35,7 @@ func TestCloudContextCacheHonoursUnknownPastTTL(t *testing.T) {
 		},
 	}
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
-		{CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusUnknown},
+		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusUnknown},
 	})
 	if got := app.cloudContextStatus("ctx"); got != eruncommon.CloudContextStatusUnknown {
 		t.Fatalf("a stale known-good status must downgrade to Unknown once its confirmation TTL has passed: got %q", got)
@@ -68,7 +69,7 @@ func TestCloudContextCacheRecoversImmediatelyOnAGoodReading(t *testing.T) {
 		},
 	}
 	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
-		{CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusRunning},
+		{CloudContextConfig: config.CloudContextConfig{Name: "ctx"}, Status: eruncommon.CloudContextStatusRunning},
 	})
 	if got := app.cloudContextStatus("ctx"); got != eruncommon.CloudContextStatusRunning {
 		t.Fatalf("a fresh good reading must apply immediately: got %q", got)

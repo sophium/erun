@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestWriteResultEmitsAnEmptySliceAsAnArray pins the serialiser half of the
@@ -35,7 +37,7 @@ func TestWriteResultEmitsAnEmptySliceAsAnArray(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ctx := Context{Output: OutputJSON, Stdout: &buf, Stderr: &buf}
+			ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 			if err := ctx.WriteResult(tc.value); err != nil {
 				t.Fatalf("write result: %v", err)
 			}
@@ -73,7 +75,7 @@ func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ctx := Context{Output: OutputJSON, Stdout: &buf, Stderr: &buf}
+	ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
 	if err := ctx.WriteResult(optional{}); err != nil {
 		t.Fatalf("write result: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 // structured writer must stay out of the way.
 func TestWriteResultKeepsTextModeSilent(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := Context{Output: OutputText, Stdout: &buf, Stderr: &buf}
+	ctx := core.Context{Output: core.OutputText, Stdout: &buf, Stderr: &buf}
 	if err := ctx.WriteResult([]string(nil)); err != nil {
 		t.Fatalf("write result: %v", err)
 	}

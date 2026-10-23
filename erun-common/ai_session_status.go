@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // AISessionState is what a caller actually wants to know about an AI CLI
@@ -114,7 +116,7 @@ func RecordAISessionEvent(params AISessionEventParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	sessionID := strings.TrimSpace(params.SessionID)
-	if err := errMissingTenantOrEnvironment("record AI session event", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("record AI session event", tenant, environment); err != nil {
 		return err
 	}
 	if err := validateAISessionID(sessionID); err != nil {
@@ -176,7 +178,7 @@ func LoadAISessionStatus(tenant, environment, sessionID string) (AISessionStatus
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	sessionID = strings.TrimSpace(sessionID)
-	if err := errMissingTenantOrEnvironment("resolve AI session status", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve AI session status", tenant, environment); err != nil {
 		return AISessionStatus{}, err
 	}
 	if err := validateAISessionID(sessionID); err != nil {
@@ -197,7 +199,7 @@ func LoadAISessionStatus(tenant, environment, sessionID string) (AISessionStatus
 func LoadAISessionStatuses(tenant, environment string) ([]AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("list AI session statuses", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("list AI session statuses", tenant, environment); err != nil {
 		return nil, err
 	}
 	dir, err := aiSessionDir(tenant, environment)

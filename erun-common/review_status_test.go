@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A status filter is operator input, and the listing it narrows is the review
@@ -59,7 +61,7 @@ func TestNormalizeReviewStatusNamesTheAcceptedValues(t *testing.T) {
 // The refusal must happen before the platform call, so a mistyped filter never
 // resolves an alias or reports a real-looking empty result.
 func TestRunReviewListRefusesAnUnknownStatusBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewList(Context{}, nil, "", ReviewListParams{Status: "BOGUS"}, CloudDependencies{})
+	_, err := RunReviewList(core.Context{}, nil, "", ReviewListParams{Status: "BOGUS"}, CloudDependencies{})
 	if err == nil {
 		t.Fatalf("RunReviewList with status %q succeeded, want a bad-argument error", "BOGUS")
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -100,7 +102,7 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func runExposeCommand(ctx common.Context, store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx core.Context, store common.ExposeStore, cloudStore common.CloudReadStore, deps common.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
@@ -111,7 +113,7 @@ func runExposeCommand(ctx common.Context, store common.ExposeStore, cloudStore c
 	projectRoot := ""
 	if servicesZone == "" && platformNamespace == "" {
 		if findProjectRoot == nil {
-			findProjectRoot = common.FindProjectRoot
+			findProjectRoot = config.FindProjectRoot
 		}
 		_, root, err := findProjectRoot()
 		if err != nil {

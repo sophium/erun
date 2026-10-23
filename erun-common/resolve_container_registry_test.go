@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // TestResolveContainerRegistryPrecedence pins the order resolveContainerRegistry
 // tries each source in, since that order is the thing most likely to regress
@@ -22,7 +26,7 @@ func TestResolveContainerRegistryPrecedence(t *testing.T) {
 	}{
 		{
 			name:         "cluster registry short-circuits everything else",
-			params:       BootstrapInitParams{ClusterRegistry: &ClusterRegistry{}, ContainerRegistry: "explicit"},
+			params:       BootstrapInitParams{ClusterRegistry: &config.ClusterRegistry{}, ContainerRegistry: "explicit"},
 			current:      "stored",
 			creating:     true,
 			wantRegistry: "",
@@ -56,7 +60,7 @@ func TestResolveContainerRegistryPrecedence(t *testing.T) {
 			name:         "a new environment with auto-approve falls back to the default",
 			creating:     true,
 			autoApprove:  true,
-			wantRegistry: DefaultContainerRegistry,
+			wantRegistry: config.DefaultContainerRegistry,
 		},
 		{
 			name:             "a new environment without auto-approve prompts",
@@ -71,10 +75,10 @@ func TestResolveContainerRegistryPrecedence(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			promptCalled := false
 			runner := bootstrapRunner{BootstrapInitDependencies: BootstrapInitDependencies{
-				LoadProjectConfig: func(string) (ProjectConfig, string, error) {
-					cfg := ProjectConfig{}
+				LoadProjectConfig: func(string) (config.ProjectConfig, string, error) {
+					cfg := config.ProjectConfig{}
 					if tt.projectRegistry != "" {
-						cfg.SetContainerRegistriesForEnvironment("dev", SingleContainerRegistries(tt.projectRegistry))
+						cfg.SetContainerRegistriesForEnvironment("dev", config.SingleContainerRegistries(tt.projectRegistry))
 					}
 					return cfg, "", nil
 				},

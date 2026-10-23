@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestLoadTenantDashboardRequiresATenant is the null-input case: an empty
@@ -31,12 +33,12 @@ func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 // instead reports every configured alias as a choice so the operator can
 // pick one, preselecting none until they do.
 func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T) {
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{
-		{Alias: "erun+a@erun", Provider: eruncommon.CloudProviderERun, ERun: &eruncommon.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
-		{Alias: "erun+b@erun", Provider: eruncommon.CloudProviderERun, ERun: &eruncommon.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
+	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
+		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
 	})
 
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
@@ -67,13 +69,13 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 // an erun alias is configured but never signed in, so the bearer mint fails
 // before any network call to the platform is made.
 func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{
-		{Alias: testERunAlias, Provider: eruncommon.CloudProviderERun, ERun: &eruncommon.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
+	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: eruncommon.CloudDependencies{
-			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
+			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
 				t.Fatal("must not fetch discovery with no refresh token and no cache to check")
 				return eruncommon.OIDCDiscovery{}, nil
 			},
@@ -109,7 +111,7 @@ func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *tes
 	defer server.Close()
 
 	app := testERunPlatformAliasAppWithTenants(t, server.URL,
-		map[string]eruncommon.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
+		map[string]config.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
 
 	dashboard := loadTenantDashboardFrom(t, app)
 	if dashboard.PlatformURL != server.URL || dashboard.APIURL != server.URL {
@@ -138,18 +140,18 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	defer server.Close()
 
 	jwt := testUIJWT("https://sts.aws.example")
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{
-		{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS, Profile: "team"},
-		{Alias: testERunAlias, Provider: eruncommon.CloudProviderERun, ERun: &eruncommon.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
+	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team"},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", CloudProviderAliases: []string{"team-cloud"}, PrimaryCloudProviderAlias: "team-cloud"},
 		}},
 		cloudDeps: eruncommon.CloudDependencies{
-			RunAWSBearerToken: func(eruncommon.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
+			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -188,20 +190,20 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 	const otherERunAlias = "erun+api.other.example@erun"
-	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{
-		{Alias: otherERunAlias, Provider: eruncommon.CloudProviderERun, ERun: &eruncommon.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
-		{Alias: testERunAlias, Provider: eruncommon.CloudProviderERun, Username: "erun", ERun: &eruncommon.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
+	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]eruncommon.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
 			"frs": {Name: "frs", CloudProviderAliases: []string{otherERunAlias, testERunAlias}, PrimaryCloudProviderAlias: testERunAlias},
 		}},
 		cloudDeps: eruncommon.CloudDependencies{
 			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
+			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
 				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
 			},
-			RefreshERunTokens: func(eruncommon.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
+			RefreshERunTokens: func(core.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
 				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
 			},
 		},

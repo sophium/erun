@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
 )
 
@@ -67,7 +69,7 @@ func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.Cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewList(ctx, reviews); err != nil {
 					return err
 				}
@@ -87,7 +89,7 @@ func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.Cl
 	return cmd
 }
 
-func writeReviewList(ctx common.Context, reviews []common.PlatformReview) error {
+func writeReviewList(ctx core.Context, reviews []common.PlatformReview) error {
 	if len(reviews) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no reviews")
 		return err
@@ -107,7 +109,7 @@ func writeReviewList(ctx common.Context, reviews []common.PlatformReview) error 
 // A review created before the platform recorded a repository says so rather
 // than printing nothing, which would read as an empty value rather than an
 // absent identity.
-func writeReviewLine(ctx common.Context, review common.PlatformReview) error {
+func writeReviewLine(ctx core.Context, review common.PlatformReview) error {
 	repository := review.Repository
 	if strings.TrimSpace(repository) == "" {
 		repository = "(no repository recorded)"
@@ -130,7 +132,7 @@ func reviewIssueSuffix(review common.PlatformReview) string {
 		return ""
 	}
 	source := "declared"
-	if review.IssueRefSource == common.IssueReferenceInferred {
+	if review.IssueRefSource == model.IssueReferenceInferred {
 		source = "inferred from branch"
 	}
 	return fmt.Sprintf(" issue=%s (%s)", review.IssueRef, source)
@@ -152,7 +154,7 @@ func newReviewShowCmd(store common.CloudReadStore, alias *string, deps common.Cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review show planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewDetail(ctx, detail); err != nil {
 					return err
 				}
@@ -164,7 +166,7 @@ func newReviewShowCmd(store common.CloudReadStore, alias *string, deps common.Cl
 	return cmd
 }
 
-func writeReviewDetail(ctx common.Context, detail common.ReviewDetail) error {
+func writeReviewDetail(ctx core.Context, detail common.ReviewDetail) error {
 	if err := writeReviewLine(ctx, detail.Review); err != nil {
 		return err
 	}
@@ -182,7 +184,7 @@ func writeReviewDetail(ctx common.Context, detail common.ReviewDetail) error {
 // writeReviewCommentLine renders one comment. A thread's status lives on its
 // root comment only (a reply's own status is never separately settable), so
 // only root lines carry status=.
-func writeReviewCommentLine(ctx common.Context, comment common.PlatformComment) error {
+func writeReviewCommentLine(ctx core.Context, comment common.PlatformComment) error {
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)
 		return err
@@ -226,7 +228,7 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review creation planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -281,7 +283,7 @@ func newReviewCommentCmd(store common.CloudReadStore, alias *string, deps common
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review comment planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -318,7 +320,7 @@ func newReviewResolveCmd(store common.CloudReadStore, alias *string, deps common
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review resolve planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -351,7 +353,7 @@ func newReviewUnresolveCmd(store common.CloudReadStore, alias *string, deps comm
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review unresolve planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -379,7 +381,7 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review close planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -444,7 +446,7 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review record-build planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewBuildLine(ctx, build); err != nil {
 					return err
 				}
@@ -504,7 +506,7 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review report-merged planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -542,7 +544,7 @@ func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review requeue planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -554,7 +556,7 @@ func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common
 	return cmd
 }
 
-func writeReviewBuildLine(ctx common.Context, build common.PlatformBuild) error {
+func writeReviewBuildLine(ctx core.Context, build common.PlatformBuild) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] successful=%t commit=%s version=%s\n",
 		build.BuildID, build.Successful, build.CommitID, build.Version)
 	return err
@@ -570,7 +572,7 @@ func newReviewReviewersCmd(store common.CloudReadStore, alias *string, deps comm
 	)
 }
 
-func writeReviewerLine(ctx common.Context, reviewer common.PlatformReviewer) error {
+func writeReviewerLine(ctx core.Context, reviewer common.PlatformReviewer) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  - %s\n", reviewer.UserID)
 	return err
 }
@@ -592,7 +594,7 @@ func newReviewReviewersListCmd(store common.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if len(reviewers) == 0 {
 					if _, err := fmt.Fprintln(ctx.Stdout, "no reviewers"); err != nil {
 						return err
@@ -634,7 +636,7 @@ func newReviewReviewersAddCmd(store common.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers add planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewerLine(ctx, reviewer); err != nil {
 					return err
 				}
@@ -665,7 +667,7 @@ func newReviewReviewersRemoveCmd(store common.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers remove planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "removed reviewer %s\n", userID); err != nil {
 					return err
 				}
@@ -713,7 +715,7 @@ func newReviewMergeQueueListCmd(store common.CloudReadStore, alias *string, deps
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue list planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewList(ctx, reviews); err != nil {
 					return err
 				}
@@ -755,7 +757,7 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue advance planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -795,7 +797,7 @@ func newReviewMergeQueueOverrideAdvanceCmd(store common.CloudReadStore, alias *s
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue override-advance planned.")
 				return err
 			}
-			if ctx.Output != common.OutputJSON {
+			if ctx.Output != core.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}

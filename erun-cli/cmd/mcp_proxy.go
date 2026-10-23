@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,7 @@ func newMCPProxyCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runMCPProxyCommand(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, params common.OpenParams) error {
+func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, params common.OpenParams) error {
 	target, err := resolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -110,8 +111,8 @@ func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) c
 			}
 			req := common.ShellLaunchParamsFromResult(result)
 			var trace bytes.Buffer
-			toolCtx := common.Context{
-				Logger: common.NewLoggerWithWriters(common.VerbosityTrace, &trace, &trace),
+			toolCtx := core.Context{
+				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),
 				DryRun: call.Preview,
 			}
 			out, err := common.UploadRuntimeInput(toolCtx, req, common.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, common.RunRemoteCommandWithStdin)

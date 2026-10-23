@@ -9,7 +9,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type DoctorInput struct {
@@ -57,7 +59,7 @@ func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var report *DoctorRootConfigReport
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, _ string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
 				r, runErr := runDoctorToolCommand(runtime, input, runCtx)
 				report = r
 				return runErr
@@ -72,7 +74,7 @@ func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 	}
 }
 
-func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) (*DoctorRootConfigReport, error) {
+func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx core.Context) (*DoctorRootConfigReport, error) {
 	if input.ClearPendingHelm && input.Rollback {
 		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
 	}
@@ -103,7 +105,7 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 
 // runDoctorEnvConfigRestore runs the backup-restore leg when one was asked for,
 // reporting whether it was the whole request and nothing else needs to run.
-func runDoctorEnvConfigRestore(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context, report *DoctorRootConfigReport) (bool, error) {
+func runDoctorEnvConfigRestore(runtime RuntimeConfig, input DoctorInput, runCtx core.Context, report *DoctorRootConfigReport) (bool, error) {
 	selector := strings.TrimSpace(input.RestoreEnvConfigFromBackup)
 	if selector == "" {
 		return false, nil
@@ -119,12 +121,12 @@ func runDoctorEnvConfigRestore(runtime RuntimeConfig, input DoctorInput, runCtx 
 // resolve through resolveLocalTarget so a backup restore, like every other
 // tenant/env action in this module, can never be pointed at an environment
 // this server's pod does not itself run.
-func restoreDoctorEnvConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.Context, input DoctorInput, selector string, report *DoctorRootConfigReport) error {
+func restoreDoctorEnvConfigFromBackup(runtime RuntimeConfig, runCtx core.Context, input DoctorInput, selector string, report *DoctorRootConfigReport) error {
 	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return err
 	}
-	livePath, err := eruncommon.EnvConfigPath(tenant, environment)
+	livePath, err := config.EnvConfigPath(tenant, environment)
 	if err != nil {
 		return err
 	}
@@ -139,7 +141,7 @@ func restoreDoctorEnvConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.C
 		return fmt.Errorf("no env config backup matches %q for %s/%s (no backups exist yet)", selector, tenant, environment)
 	}
 	if !runCtx.DryRun {
-		if err := eruncommon.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
+		if err := config.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
 			return err
 		}
 	}
@@ -149,7 +151,7 @@ func restoreDoctorEnvConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.C
 }
 
 func availableEnvBackupDates(tenant, environment string) string {
-	backups, err := eruncommon.ListEnvConfigBackups(tenant, environment)
+	backups, err := config.ListEnvConfigBackups(tenant, environment)
 	if err != nil || len(backups) == 0 {
 		return ""
 	}
@@ -160,11 +162,11 @@ func availableEnvBackupDates(tenant, environment string) string {
 	return strings.Join(dates, ", ")
 }
 
-func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (eruncommon.ConfigBackup, bool, error) {
+func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (config.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return eruncommon.ConfigBackup{Path: selector}, true, nil
+		return config.ConfigBackup{Path: selector}, true, nil
 	}
-	return eruncommon.FindEnvConfigBackupByDate(tenant, environment, selector)
+	return config.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
 
 func onlyEnvConfigRestoreInput(input DoctorInput) bool {
@@ -175,7 +177,7 @@ func onlyEnvConfigRestoreInput(input DoctorInput) bool {
 		!input.ClearPendingHelm && !input.Rollback
 }
 
-func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) error {
+func runDoctorTenantEnvActions(runtime RuntimeConfig, input DoctorInput, runCtx core.Context) error {
 	target, err := resolveDoctorOpenResult(runtime, input)
 	if err != nil {
 		return err
@@ -228,7 +230,7 @@ func onlyRootConfigDoctorInput(input DoctorInput) bool {
 // runDoctorRootConfigToolFlow returns fatal=true when the root config is in a
 // state that must stop the flow before tenant/env work even when more was
 // requested — for example, the file is corrupted and no repair input was supplied.
-func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) (*DoctorRootConfigReport, bool, error) {
+func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCtx core.Context) (*DoctorRootConfigReport, bool, error) {
 	inspection, err := eruncommon.InspectRootConfig(runtime.Store)
 	if err != nil {
 		return nil, false, err
@@ -260,7 +262,7 @@ func runDoctorRootConfigToolFlow(runtime RuntimeConfig, input DoctorInput, runCt
 	return report, false, nil
 }
 
-func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.Context, inspection eruncommon.RootConfigInspection, selector string, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
+func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx core.Context, inspection eruncommon.RootConfigInspection, selector string, report *DoctorRootConfigReport) (eruncommon.RootConfigInspection, error) {
 	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
 	if err != nil {
 		return inspection, err
@@ -269,7 +271,7 @@ func restoreDoctorRootConfigFromBackup(runtime RuntimeConfig, runCtx eruncommon.
 		return inspection, fmt.Errorf("no root config backup matches %q", selector)
 	}
 	if !runCtx.DryRun {
-		if err := eruncommon.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
+		if err := config.RestoreRootConfigFromBackup(backup.Path, inspection.ConfigPath); err != nil {
 			return inspection, err
 		}
 	}
@@ -294,7 +296,7 @@ func doctorRootConfigBlocks(inspection eruncommon.RootConfigInspection, input Do
 	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
-func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context, inspection eruncommon.RootConfigInspection, report *DoctorRootConfigReport) error {
+func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core.Context, inspection eruncommon.RootConfigInspection, report *DoctorRootConfigReport) error {
 	byAlias := make(map[string]eruncommon.OrphanedAlias, len(inspection.OrphanedAliases))
 	for _, orphan := range inspection.OrphanedAliases {
 		byAlias[orphan.Alias] = orphan
@@ -326,13 +328,13 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx erun
 	return nil
 }
 
-func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, selector string) (eruncommon.ConfigBackup, bool, error) {
+func resolveDoctorBackupSelector(inspection eruncommon.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return eruncommon.ConfigBackup{Path: selector}, true, nil
+		return config.ConfigBackup{Path: selector}, true, nil
 	}
-	backup, ok, err := eruncommon.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
+	backup, ok, err := config.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
 	if err != nil {
-		return eruncommon.ConfigBackup{}, false, err
+		return config.ConfigBackup{}, false, err
 	}
 	return backup, ok, nil
 }
@@ -363,7 +365,7 @@ func firstNonBlank(values ...string) string {
 // section that needs the runtime pod (git push access, docker storage) can
 // skip its own probe instead of independently rediscovering the same
 // unreachable cluster.
-func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
+func writeDoctorDeployDiagnosis(runCtx core.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
@@ -387,7 +389,7 @@ func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellL
 // another multi-minute kubectl timeout to rediscover the same fact. Mirrors
 // the CLI's reportPodSkippedUnreachable
 // (erun-cli/cmd/doctor_pod_diagnosis.go).
-func writeDoctorPodUnreachableSkip(runCtx eruncommon.Context, header string) error {
+func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 	_, err := fmt.Fprintf(runCtx.Stdout, "== %s ==\nskipped: the runtime pod is not reachable for this check; see the helm release status and pod state reported above for why, then retry once it is running.\n\n", header)
 	return err
 }
@@ -399,7 +401,7 @@ func writeDoctorPodUnreachableSkip(runCtx eruncommon.Context, header string) err
 // tool-call failure — nothing there is broken or transient, and the reason
 // carries the next step — unless the caller asked for a prune against it, which
 // cannot run at all: that one fails the call, the same as the CLI refusing it.
-func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams, pruneRequested bool) error {
+func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req eruncommon.ShellLaunchParams, pruneRequested bool) error {
 	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
 	var unavailable eruncommon.DoctorDockerDaemonUnavailableError
 	daemonUnavailable := errors.As(err, &unavailable)
@@ -423,7 +425,7 @@ func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResu
 
 // runDoctorRecoveryToolActions runs the caller-requested deploy-recovery actions
 // (clear pending helm / rollback). Mutates the live release.
-func runDoctorRecoveryToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
 	for _, action := range deployRecoveryActionsFromInput(input) {
 		if !runCtx.DryRun {
 			if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DeployRecoveryActionDescription(action)); err != nil {
@@ -454,7 +456,7 @@ func deployRecoveryActionsFromInput(input DoctorInput) []eruncommon.DeployRecove
 	return actions
 }
 
-func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+func runDoctorToolActions(runCtx core.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
 	for _, action := range doctorActionsFromInput(input) {
 		if err := writeDoctorAction(runCtx, req, action); err != nil {
 			return err
@@ -480,7 +482,7 @@ func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req erun
 // writeDoctorAction names the action and the daemon it acts on: an action run
 // against a daemon that does not hold this environment's build images reclaims
 // nothing, and the reader has to be able to tell which daemon ran.
-func writeDoctorAction(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams, action eruncommon.DoctorAction) error {
+func writeDoctorAction(runCtx core.Context, req eruncommon.ShellLaunchParams, action eruncommon.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
 	}
@@ -489,7 +491,7 @@ func writeDoctorAction(runCtx eruncommon.Context, req eruncommon.ShellLaunchPara
 	return err
 }
 
-func writeDoctorOutput(runCtx eruncommon.Context, stdout, stderr string) error {
+func writeDoctorOutput(runCtx core.Context, stdout, stderr string) error {
 	if trimmed := strings.TrimSpace(stdout); trimmed != "" {
 		if _, err := fmt.Fprintln(runCtx.Stdout, trimmed); err != nil {
 			return err
@@ -508,10 +510,10 @@ func writeDoctorOutput(runCtx eruncommon.Context, stdout, stderr string) error {
 // module applies -- before asking the store to resolve the rest of the
 // OpenResult, so doctor's tenant/env actions can never be pointed at a
 // different environment than the one this server's pod actually runs in.
-func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (eruncommon.OpenResult, error) {
+func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (config.OpenResult, error) {
 	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
-		return eruncommon.OpenResult{}, err
+		return config.OpenResult{}, err
 	}
 	return eruncommon.ResolveDoctorTarget(runtime.Store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 }
@@ -532,7 +534,7 @@ func doctorActionsFromInput(input DoctorInput) []eruncommon.DoctorAction {
 
 // runDoctorConfigSync reconciles the in-pod config from the injected env. The
 // request is itself the confirmation, so it applies without a further prompt.
-func runDoctorConfigSync(runCtx eruncommon.Context) error {
+func runDoctorConfigSync(runCtx core.Context) error {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return err

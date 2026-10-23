@@ -18,100 +18,102 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type initInteractionStore struct{}
 
-func (initInteractionStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return configpkg.ERunConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) SaveERunConfig(eruncommon.ERunConfig) error {
+func (initInteractionStore) SaveERunConfig(configpkg.ERunConfig) error {
 	return nil
 }
 
-func (initInteractionStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
+func (initInteractionStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
 	return nil, nil
 }
 
-func (initInteractionStore) LoadTenantConfig(string) (eruncommon.TenantConfig, string, error) {
-	return eruncommon.TenantConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadTenantConfig(string) (configpkg.TenantConfig, string, error) {
+	return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) SaveTenantConfig(eruncommon.TenantConfig) error {
+func (initInteractionStore) SaveTenantConfig(configpkg.TenantConfig) error {
 	return nil
 }
 
-func (initInteractionStore) LoadEnvConfig(string, string) (eruncommon.EnvConfig, string, error) {
-	return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
+func (initInteractionStore) LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error) {
+	return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) ListEnvConfigs(string) ([]eruncommon.EnvConfig, error) {
+func (initInteractionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig, error) {
 	return nil, nil
 }
 
-func (initInteractionStore) SaveEnvConfig(string, eruncommon.EnvConfig) error {
+func (initInteractionStore) SaveEnvConfig(string, configpkg.EnvConfig) error {
 	return nil
 }
 
 type listToolStore struct {
 	initInteractionStore
-	toolConfig    eruncommon.ERunConfig
-	tenantConfigs map[string]eruncommon.TenantConfig
-	envConfigs    map[string]eruncommon.EnvConfig
-	envsByTenant  map[string][]eruncommon.EnvConfig
+	toolConfig    configpkg.ERunConfig
+	tenantConfigs map[string]configpkg.TenantConfig
+	envConfigs    map[string]configpkg.EnvConfig
+	envsByTenant  map[string][]configpkg.EnvConfig
 }
 
-func (s listToolStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
+func (s listToolStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.toolConfig, "", nil
 }
 
-func (s listToolStore) LoadTenantConfig(tenant string) (eruncommon.TenantConfig, string, error) {
+func (s listToolStore) LoadTenantConfig(tenant string) (configpkg.TenantConfig, string, error) {
 	config, ok := s.tenantConfigs[tenant]
 	if !ok {
-		return eruncommon.TenantConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s listToolStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
-	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenantConfigs))
+func (s listToolStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
+	tenants := make([]configpkg.TenantConfig, 0, len(s.tenantConfigs))
 	for _, tenant := range s.tenantConfigs {
 		tenants = append(tenants, tenant)
 	}
 	return tenants, nil
 }
 
-func (s listToolStore) LoadEnvConfig(tenant, environment string) (eruncommon.EnvConfig, string, error) {
+func (s listToolStore) LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error) {
 	config, ok := s.envConfigs[tenant+"/"+environment]
 	if !ok {
-		return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
+		return configpkg.EnvConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s listToolStore) SaveEnvConfig(tenant string, config eruncommon.EnvConfig) error {
+func (s listToolStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) error {
 	if s.envConfigs == nil {
-		s.envConfigs = make(map[string]eruncommon.EnvConfig)
+		s.envConfigs = make(map[string]configpkg.EnvConfig)
 	}
 	s.envConfigs[tenant+"/"+config.Name] = config
 	return nil
 }
 
-func (s listToolStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, error) {
+func (s listToolStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
 	return s.envsByTenant[tenant], nil
 }
 
 func TestBuildVersionOutputDefaultsVersion(t *testing.T) {
-	got := buildVersionOutput(eruncommon.BuildInfo{})
+	got := buildVersionOutput(model.BuildInfo{})
 	if got.Version != "dev" || got.Commit != "" || got.Date != "" {
 		t.Fatalf("unexpected defaults: %+v", got)
 	}
 }
 
 func TestBuildVersionOutput(t *testing.T) {
-	got := buildVersionOutput(eruncommon.BuildInfo{
+	got := buildVersionOutput(model.BuildInfo{
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
@@ -185,7 +187,7 @@ var wantRegisteredTools = []string{
 // unauthenticated test client) and connects a client session to a freshly
 // built handler, so each caller gets a clean session without repeating the
 // setup and its own defer-cleanup.
-func connectTestMCPSession(t *testing.T, info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.ClientSession {
+func connectTestMCPSession(t *testing.T, info model.BuildInfo, runtime RuntimeConfig) *mcp.ClientSession {
 	t.Helper()
 	for _, key := range []string{envMCPTrustedIssuers, envMCPTrustedIssuer, envMCPAudience, envTenant} {
 		t.Setenv(key, "")
@@ -207,7 +209,7 @@ func connectTestMCPSession(t *testing.T, info eruncommon.BuildInfo, runtime Runt
 }
 
 func TestHTTPHandlerExposesVersionTool(t *testing.T) {
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{
+	session := connectTestMCPSession(t, model.BuildInfo{
 		Version: "1.2.3",
 		Commit:  "abcdef",
 		Date:    "2024-01-01",
@@ -246,7 +248,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 // fail as a tool error naming its replacements, not as a protocol-level
 // "unknown tool" that names a problem and no action the caller can take.
 func TestCallingARemovedToolNamesItsReplacement(t *testing.T) {
-	session := connectTestMCPSession(t, eruncommon.BuildInfo{}, RuntimeConfig{})
+	session := connectTestMCPSession(t, model.BuildInfo{}, RuntimeConfig{})
 
 	removed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "job_start",
@@ -371,7 +373,7 @@ func TestNewHTTPHandlerAnswersPreflightEvenWhenAuthIsConfigured(t *testing.T) {
 	t.Setenv(envTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{}, cfg, RuntimeConfig{}, nil))
 	defer httpServer.Close()
 
 	preflight, err := http.NewRequest(http.MethodOptions, httpServer.URL+cfg.Path, nil)
@@ -504,10 +506,10 @@ func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
 func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := &listToolStore{
-		tenantConfigs: map[string]eruncommon.TenantConfig{
+		tenantConfigs: map[string]configpkg.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
-		envConfigs: map[string]eruncommon.EnvConfig{
+		envConfigs: map[string]configpkg.EnvConfig{
 			"frs/dev": {
 				Name:               "dev",
 				LocalRepoPath:      projectRoot,
@@ -802,21 +804,21 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 			RepoPath:    projectRoot,
 		},
 		Store: listToolStore{
-			toolConfig: eruncommon.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]eruncommon.TenantConfig{
+			toolConfig: configpkg.ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]configpkg.TenantConfig{
 				"tenant-a": {
 					Name:               "tenant-a",
 					DefaultEnvironment: "dev",
 				},
 			},
-			envConfigs: map[string]eruncommon.EnvConfig{
+			envConfigs: map[string]configpkg.EnvConfig{
 				"tenant-a/dev": {
 					Name:              "dev",
 					LocalRepoPath:     projectRoot,
 					KubernetesContext: "cluster-dev",
 				},
 			},
-			envsByTenant: map[string][]eruncommon.EnvConfig{
+			envsByTenant: map[string][]configpkg.EnvConfig{
 				"tenant-a": {{
 					Name:              "dev",
 					LocalRepoPath:     projectRoot,
@@ -870,7 +872,7 @@ func TestReleaseToolPreview(t *testing.T) {
 	// docker with no cached tag would report.
 	t.Setenv("ERUN_DOCKER_BIN", "false")
 	projectRoot := createReleaseRuntimeRepo(t, "develop")
-	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
+	if err := configpkg.SaveProjectConfig(projectRoot, configpkg.ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
 
@@ -958,7 +960,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 
 	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{
-			Environment: eruncommon.DefaultEnvironment,
+			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    projectRoot,
 		},
 	}))
@@ -980,7 +982,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 func TestPushToolRequiresVersion(t *testing.T) {
 	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{
-			Environment: eruncommon.DefaultEnvironment,
+			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    t.TempDir(),
 		},
 	}))
@@ -1263,7 +1265,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		Environment:        "dev",
 		Remote:             true,
 		KubernetesContext:  "cluster-remote",
-		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
+		ContainerRegistry:  configpkg.DefaultContainerRegistry,
 		ConfirmTenant:      boolPtr(true),
 		ConfirmEnvironment: boolPtr(true),
 	})
@@ -1310,7 +1312,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 		Version:            "1.0.19-snapshot-20260418141901",
 		Remote:             true,
 		KubernetesContext:  "cluster-dev",
-		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
+		ContainerRegistry:  configpkg.DefaultContainerRegistry,
 		ConfirmTenant:      boolPtr(true),
 		ConfirmEnvironment: boolPtr(true),
 	})
@@ -1388,7 +1390,7 @@ func TestARefusedToolCallOnAnUnknownSessionIsLogged(t *testing.T) {
 	t.Cleanup(func() { mcpServerLogger = previous })
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
 	t.Cleanup(httpServer.Close)
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"version","arguments":{}}}`

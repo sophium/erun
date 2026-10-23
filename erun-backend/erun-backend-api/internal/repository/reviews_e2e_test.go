@@ -7,14 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Review authorship, reviewer assignment, and the one-live-review-per-branch
@@ -463,10 +460,10 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 
 	review := openReview(t, reviews, ctx, "build profile review", "feature/build-profile")
 
-	profile := &eruncommon.BuildProfileSummary{
+	profile := &core.BuildProfileSummary{
 		DurationSeconds: 42.5,
 		TotalStepCount:  2,
-		TopSteps: []eruncommon.BuildProfileStepSummary{
+		TopSteps: []core.BuildProfileStepSummary{
 			{Name: "erun-devops", DurationSeconds: 40},
 			{Name: "erun-devops > linux/amd64", DurationSeconds: 39},
 		},

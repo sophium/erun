@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // isolateJobsCache points the job store at a temp dir for one test, so a test
@@ -28,10 +30,10 @@ func isolateJobsCache(t *testing.T) {
 func jobsTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/ux": {
 				Name:              "ux",
 				LocalRepoPath:     t.TempDir(),
@@ -114,7 +116,7 @@ func TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty(t *testing.T) {
 // real (not a consolation) answer.
 func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 	isolateJobsCache(t)
-	if _, err := eruncommon.AttachEnvironmentJob(eruncommon.Context{}, eruncommon.AttachEnvironmentJobParams{
+	if _, err := eruncommon.AttachEnvironmentJob(core.Context{}, eruncommon.AttachEnvironmentJobParams{
 		Tenant:      "erun",
 		Environment: "ux",
 		Name:        "Investigate ux",

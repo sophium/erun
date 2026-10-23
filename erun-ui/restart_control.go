@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // restartControlServer is the loopback listener a CLI-triggered restart talks
@@ -47,8 +47,8 @@ func startRestartControlServer(app *App) (*restartControlServer, int) {
 		return nil, 0
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc(eruncommon.DesktopControlPath, handleRestartControl(app))
-	mux.HandleFunc(eruncommon.DesktopControlPlanPath, handleRestartPlanControl(app))
+	mux.HandleFunc(core.DesktopControlPath, handleRestartControl(app))
+	mux.HandleFunc(core.DesktopControlPlanPath, handleRestartPlanControl(app))
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
@@ -69,9 +69,9 @@ func handleRestartControl(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		resp := eruncommon.DesktopRestartResponse{OK: true}
+		resp := core.DesktopRestartResponse{OK: true}
 		if err := app.RestartApp(req.OrchestratorID); err != nil {
-			resp = eruncommon.DesktopRestartResponse{OK: false, Error: err.Error()}
+			resp = core.DesktopRestartResponse{OK: false, Error: err.Error()}
 		}
 		writeRestartControlResponse(w, resp)
 	}
@@ -91,7 +91,7 @@ func handleRestartPlanControl(app *App) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		writeRestartControlResponse(w, eruncommon.DesktopRestartResponse{
+		writeRestartControlResponse(w, core.DesktopRestartResponse{
 			OK:      true,
 			Preview: app.orchestratorRestartPreview(req.OrchestratorID),
 		})
@@ -100,20 +100,20 @@ func handleRestartPlanControl(app *App) http.HandlerFunc {
 
 // decodeRestartControlRequest reads the one request shape both control paths
 // take, answering the client itself when it cannot.
-func decodeRestartControlRequest(w http.ResponseWriter, r *http.Request) (eruncommon.DesktopRestartRequest, bool) {
+func decodeRestartControlRequest(w http.ResponseWriter, r *http.Request) (core.DesktopRestartRequest, bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return eruncommon.DesktopRestartRequest{}, false
+		return core.DesktopRestartRequest{}, false
 	}
-	var req eruncommon.DesktopRestartRequest
+	var req core.DesktopRestartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return eruncommon.DesktopRestartRequest{}, false
+		return core.DesktopRestartRequest{}, false
 	}
 	return req, true
 }
 
-func writeRestartControlResponse(w http.ResponseWriter, resp eruncommon.DesktopRestartResponse) {
+func writeRestartControlResponse(w http.ResponseWriter, resp core.DesktopRestartResponse) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
@@ -156,7 +156,7 @@ type restartControlClaim struct {
 // only thing that writes a control record: the shared package owns the
 // contract and the read, and one owner of the record keeps the rules for
 // taking it over in one place.
-func claimDesktopControlMarker(path string, marker eruncommon.DesktopControlMarker, processAlive func(int) bool) (restartControlClaim, error) {
+func claimDesktopControlMarker(path string, marker core.DesktopControlMarker, processAlive func(int) bool) (restartControlClaim, error) {
 	if path == "" {
 		return restartControlClaim{}, fmt.Errorf("desktop control marker path is unset")
 	}
@@ -166,7 +166,7 @@ func claimDesktopControlMarker(path string, marker eruncommon.DesktopControlMark
 	// A record that cannot be read as a marker at all (absent, truncated,
 	// corrupt) cannot be shown to belong to a live process, so it is not one
 	// this claim has to respect.
-	if existing, err := eruncommon.ReadDesktopControlMarker(path); err == nil && existing.PID != marker.PID && processAlive(existing.PID) {
+	if existing, err := core.ReadDesktopControlMarker(path); err == nil && existing.PID != marker.PID && processAlive(existing.PID) {
 		return restartControlClaim{HolderPID: existing.PID}, nil
 	}
 	if err := writeDesktopControlMarker(path, marker); err != nil {
@@ -178,7 +178,7 @@ func claimDesktopControlMarker(path string, marker eruncommon.DesktopControlMark
 // writeDesktopControlMarker replaces path in one rename. The claim above reads
 // the record to decide ownership, so a concurrent reader must never catch a
 // half-written one and misjudge whose it is.
-func writeDesktopControlMarker(path string, marker eruncommon.DesktopControlMarker) error {
+func writeDesktopControlMarker(path string, marker core.DesktopControlMarker) error {
 	data, err := json.Marshal(marker)
 	if err != nil {
 		return err
@@ -225,7 +225,7 @@ func removeDesktopControlMarker(path string, pid int) error {
 	if path == "" {
 		return nil
 	}
-	existing, err := eruncommon.ReadDesktopControlMarker(path)
+	existing, err := core.ReadDesktopControlMarker(path)
 	if err != nil {
 		return nil
 	}
@@ -251,7 +251,7 @@ func (a *App) startRestartControl() {
 		return
 	}
 	a.restartControl = server
-	marker := eruncommon.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
+	marker := core.DesktopControlMarker{PID: os.Getpid(), ControlPort: port, StartedAtUnix: time.Now().Unix()}
 	claim, err := a.claimRestartControlMarker(marker)
 	if err != nil {
 		log.Printf("erun-app: write restart control marker: %v", err)
@@ -281,7 +281,7 @@ func (a *App) startRestartControl() {
 //
 // The wait ends only on shutdown, which is the one thing that makes this
 // process's endpoint unserviceable and so makes publishing it wrong.
-func (a *App) adoptRestartControlRecord(marker eruncommon.DesktopControlMarker, holder int) {
+func (a *App) adoptRestartControlRecord(marker core.DesktopControlMarker, holder int) {
 	log.Printf("erun-app: restart control record is held by pid %d; waiting for it to exit", holder)
 	claim := func() (restartControlClaim, error) {
 		return a.claimRestartControlMarker(marker)
@@ -320,13 +320,13 @@ var errRestartControlReleased = errors.New("restart control record released")
 // unless a live process already owns the record. The shutdown guard and the
 // write are one critical section so an adoption waiting on a previous owner
 // cannot slip an endpoint in after shutdown removed the record.
-func (a *App) claimRestartControlMarker(marker eruncommon.DesktopControlMarker) (restartControlClaim, error) {
+func (a *App) claimRestartControlMarker(marker core.DesktopControlMarker) (restartControlClaim, error) {
 	a.restartControlMarkerMu.Lock()
 	defer a.restartControlMarkerMu.Unlock()
 	if a.restartControlMarkerReleased {
 		return restartControlClaim{}, errRestartControlReleased
 	}
-	return claimDesktopControlMarker(a.deps.desktopControlMarkerPath, marker, eruncommon.DesktopProcessAlive)
+	return claimDesktopControlMarker(a.deps.desktopControlMarkerPath, marker, core.DesktopProcessAlive)
 }
 
 // releaseRestartControlMarker stops an in-flight adoption and removes this

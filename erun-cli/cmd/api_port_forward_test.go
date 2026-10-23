@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort is the
@@ -52,16 +52,16 @@ func TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort(t *testi
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := common.OpenResult{
+			result := config.OpenResult{
 				Tenant:      "frs",
 				Environment: "prod",
-				EnvConfig: common.EnvConfig{
+				EnvConfig: config.EnvConfig{
 					Name:                "prod",
 					LocalPortRangeStart: tc.rangeSt,
 					KubernetesContext:   "erun",
 				},
 			}
-			if got := common.APIPortForResult(result); got != tc.wantLocal {
+			if got := config.APIPortForResult(result); got != tc.wantLocal {
 				t.Fatalf("expected local port %d, got %d", tc.wantLocal, got)
 			}
 			if got := apiPortMapping(kubectlAPIPortForwardArgs(result, tc.wantLocal)); got != tc.wantMap {

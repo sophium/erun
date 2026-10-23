@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -40,13 +42,13 @@ func hostedUploadRow() map[string]any {
 
 // hostedUploadConfig is a local environment already marked as hosted on the
 // stub's row, with one portable setting set so a change has something to move.
-func hostedUploadConfig(apiHost string) eruncommon.EnvConfig {
-	return eruncommon.EnvConfig{
+func hostedUploadConfig(apiHost string) configpkg.EnvConfig {
+	return configpkg.EnvConfig{
 		Name:              hostedUploadEnvironment,
-		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		Type:              configpkg.EnvironmentTypeLocalAgent,
 		KubernetesContext: hostedUploadContext,
 		RuntimeVersion:    "1.2.3",
-		Hosted: eruncommon.HostedEnvironment{
+		Hosted: configpkg.HostedEnvironment{
 			APIHost:       apiHost,
 			TenantID:      "tenant-1",
 			EnvironmentID: "env-1",
@@ -135,26 +137,26 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
-	if err := eruncommon.SaveERunConfig(eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
 		Alias:    testERunAlias,
-		Provider: eruncommon.CloudProviderERun,
+		Provider: configpkg.CloudProviderERun,
 		Username: "erun",
-		ERun:     &eruncommon.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+		ERun:     &configpkg.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
-	if err := eruncommon.SaveTenantConfig(eruncommon.TenantConfig{Name: hostedUploadTenant}); err != nil {
+	if err := configpkg.SaveTenantConfig(configpkg.TenantConfig{Name: hostedUploadTenant}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 	return NewApp(erunUIDeps{
-		store: eruncommon.ConfigStore{},
+		store: configpkg.ConfigStore{},
 		cloudDeps: eruncommon.CloudDependencies{
 			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
+			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
 				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
 			},
-			RefreshERunTokens: func(eruncommon.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
+			RefreshERunTokens: func(core.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
 				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
 			},
 		},
@@ -165,14 +167,14 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 // writer does: read the file, change one setting, write it back. Rebuilding a
 // config from a fixture instead would drop the marker's digest, and the digest
 // is the very thing half of these tests are about.
-func changeHostedUploadConfig(t *testing.T, mutate func(*eruncommon.EnvConfig)) eruncommon.EnvConfig {
+func changeHostedUploadConfig(t *testing.T, mutate func(*configpkg.EnvConfig)) configpkg.EnvConfig {
 	t.Helper()
-	config, _, err := eruncommon.LoadEnvConfig(hostedUploadTenant, hostedUploadEnvironment)
+	config, _, err := configpkg.LoadEnvConfig(hostedUploadTenant, hostedUploadEnvironment)
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
 	mutate(&config)
-	if err := eruncommon.SaveEnvConfig(hostedUploadTenant, config); err != nil {
+	if err := configpkg.SaveEnvConfig(hostedUploadTenant, config); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 	return config
@@ -186,7 +188,7 @@ func seededHostedUploadApp(t *testing.T) (*App, *hostedUploadPlatform, string) {
 	platform := newHostedUploadPlatform(t)
 	apiHost := platform.URL
 	config := hostedUploadConfig(apiHost)
-	if err := eruncommon.SaveEnvConfig(hostedUploadTenant, config); err != nil {
+	if err := configpkg.SaveEnvConfig(hostedUploadTenant, config); err != nil {
 		t.Fatalf("seed env config: %v", err)
 	}
 	return newHostedUploadApp(t, platform), platform, apiHost
@@ -206,7 +208,7 @@ func TestTheOriginFilterIsWhatTurnsTheWatchersOwnWriteAway(t *testing.T) {
 	platform := newHostedUploadPlatform(t)
 	// No digest recorded, so HasUnsentChange() is true and an unfiltered
 	// reaction would upload.
-	if err := eruncommon.SaveEnvConfig(hostedUploadTenant, hostedUploadConfig(platform.URL)); err != nil {
+	if err := configpkg.SaveEnvConfig(hostedUploadTenant, hostedUploadConfig(platform.URL)); err != nil {
 		t.Fatalf("seed env config: %v", err)
 	}
 	app := newHostedUploadApp(t, platform)
@@ -253,7 +255,7 @@ func TestADesktopDefinitionWriteDoesNotReFireTheUpload(t *testing.T) {
 	}
 
 	// An outside change, made the way `erun init` / `erun cloud set` make one.
-	changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) { config.RuntimeVersion = "9.9.9" })
+	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "9.9.9" })
 	app.reactToConfigWatchTargets([]definitionWatchTarget{{tenant: hostedUploadTenant, environment: hostedUploadEnvironment}})
 	if got := platform.uploadCount(); got != 2 {
 		t.Fatalf("an outside change did not reach the platform: %d uploads, want 2", got)
@@ -272,7 +274,7 @@ func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 	// A marker naming a row the platform does not serve fails the transfer at
 	// its first step — the resolved row is not the one the marker names — so
 	// nothing is written and no config event follows.
-	changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) { config.Hosted.EnvironmentID = "some-other-row" })
+	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.Hosted.EnvironmentID = "some-other-row" })
 
 	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err == nil {
 		t.Fatal("an upload against a row the marker does not name was accepted")
@@ -283,7 +285,7 @@ func TestTheOriginMarkIsClearedWhenTheUploadWritesNothing(t *testing.T) {
 
 	// An outside change after the failure, which is exactly the change a mark
 	// left behind by the failed transfer would swallow.
-	changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) {
+	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) {
 		config.Hosted.EnvironmentID = "env-1"
 		config.RuntimeVersion = "4.5.6"
 	})
@@ -307,7 +309,7 @@ func TestAChangeMadeWhileTheDesktopWasClosedIsSurfacedAndThenUploaded(t *testing
 
 	// An offline change: nothing is watching, and nothing will report it
 	// unless the marker itself can tell.
-	offline := changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) { config.RuntimeVersion = "7.7.7" })
+	offline := changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "7.7.7" })
 
 	marker := hostedEnvironmentToUI(offline)
 	if marker == nil {
@@ -339,7 +341,7 @@ func TestAHostOwnedChangeIsNotUploaded(t *testing.T) {
 	if _, err := app.uploadHostedDefinition(context.Background(), hostedUploadTenant, hostedUploadEnvironment); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	hostOwned := changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) {
+	hostOwned := changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) {
 		config.LocalRepoPath = t.TempDir()
 		config.RuntimeRunningImage = "registry.example.test/erun-devops:9.9.9"
 	})
@@ -360,8 +362,8 @@ func TestAnUnhostedEnvironmentIsNeverUploaded(t *testing.T) {
 	app, platform, _ := seededHostedUploadApp(t)
 	unhosted := hostedUploadConfig(platform.URL)
 	unhosted.Name = "plain"
-	unhosted.Hosted = eruncommon.HostedEnvironment{}
-	if err := eruncommon.SaveEnvConfig(hostedUploadTenant, unhosted); err != nil {
+	unhosted.Hosted = configpkg.HostedEnvironment{}
+	if err := configpkg.SaveEnvConfig(hostedUploadTenant, unhosted); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -383,7 +385,7 @@ func TestTheWatcherUploadsAnOutsideChangeEndToEnd(t *testing.T) {
 
 	// A change made the way an outside writer makes one, with the watcher
 	// armed — the case that exists precisely because the desktop is running.
-	changeHostedUploadConfig(t, func(config *eruncommon.EnvConfig) { config.RuntimeVersion = "3.3.3" })
+	changeHostedUploadConfig(t, func(config *configpkg.EnvConfig) { config.RuntimeVersion = "3.3.3" })
 
 	waitForUploadCount(t, platform, 1)
 	if got, _ := platform.lastUpload()["runtimeVersion"].(string); got != "3.3.3" {
@@ -416,11 +418,11 @@ func TestDefinitionWatchTargetForAttributesOnlyAnEnvironmentsOwnConfig(t *testin
 	// The root is the watcher's own root — the directory the config store
 	// resolves under — not an unrelated temp tree, or every case below would
 	// be rejected for the wrong reason and prove nothing.
-	root, err := eruncommon.ERunConfigDir()
+	root, err := configpkg.ERunConfigDir()
 	if err != nil {
 		t.Fatalf("resolve config dir: %v", err)
 	}
-	livePath, err := eruncommon.EnvConfigPath(hostedUploadTenant, hostedUploadEnvironment)
+	livePath, err := configpkg.EnvConfigPath(hostedUploadTenant, hostedUploadEnvironment)
 	if err != nil {
 		t.Fatalf("resolve env config path: %v", err)
 	}
@@ -496,14 +498,14 @@ func TestTheDirtyFlagIsStampedOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	reloaded, _, err := eruncommon.LoadEnvConfig(hostedUploadTenant, hostedUploadEnvironment)
+	reloaded, _, err := configpkg.LoadEnvConfig(hostedUploadTenant, hostedUploadEnvironment)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 	if reloaded.Hosted.DefinitionDigest == "" {
 		t.Fatalf("the upload recorded no digest:\n%s", raw)
 	}
-	if change := eruncommon.HostedDefinitionLocalChangeFor(reloaded); !change.Available || change.Changed {
+	if change := configpkg.HostedDefinitionLocalChangeFor(reloaded); !change.Available || change.Changed {
 		t.Fatalf("a just-uploaded copy reads as %+v", change)
 	}
 }

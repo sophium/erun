@@ -9,7 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // orchestratorEdgeTestID is the orchestrator the launch-path tests wire. It is
@@ -43,7 +44,7 @@ func (p *spawnEdgeProbe) reachable(int) bool {
 	return p.answering
 }
 
-func (p *spawnEdgeProbe) reconnect(_ context.Context, _ eruncommon.OpenResult, _ func(string)) error {
+func (p *spawnEdgeProbe) reconnect(_ context.Context, _ config.OpenResult, _ func(string)) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	_, statErr := os.Stat(orchestratorMCPConfigPath(orchestratorEdgeTestID))
@@ -114,7 +115,7 @@ func spawnEdgeTestOrchestrator(t *testing.T, app *App) {
 	spawn := orchestratorSpawn{
 		id:   orchestratorEdgeTestID,
 		name: "Petios",
-		envs: []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}},
+		envs: []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}},
 		cols: 80,
 		rows: 24,
 	}
@@ -123,8 +124,8 @@ func spawnEdgeTestOrchestrator(t *testing.T, app *App) {
 	}
 }
 
-func spawnEdgeTestTarget() []eruncommon.OrchestratorEnvConfig {
-	return []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
+func spawnEdgeTestTarget() []config.OrchestratorEnvConfig {
+	return []config.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}}
 }
 
 // TestSpawnOrchestratorOpensTheEdgeBeforeWritingMCPConfig is the regression for

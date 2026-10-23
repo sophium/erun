@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // An idle-status read parses every activity snapshot and reclaims every lease
@@ -38,7 +40,7 @@ func TestRecordEnvironmentActivityReplacesTheSnapshotRatherThanRewritingItInPlac
 	record := func(address string) {
 		t.Helper()
 		if err := RecordEnvironmentActivity(EnvironmentActivityParams{
-			Tenant: "acme", Environment: "dev", Kind: ActivityKindCLI,
+			Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI,
 			ClientUpdates: []EnvironmentActivityClientUpdate{{Address: address, Bytes: 1}},
 		}); err != nil {
 			t.Fatalf("record activity: %v", err)
@@ -49,7 +51,7 @@ func TestRecordEnvironmentActivityReplacesTheSnapshotRatherThanRewritingItInPlac
 	if err != nil {
 		t.Fatalf("activity dir: %v", err)
 	}
-	path := filepath.Join(dir, ActivityKindCLI+".json")
+	path := filepath.Join(dir, config.ActivityKindCLI+".json")
 	before := readFileOrFail(t, path)
 	observer := linkObserver(t, path)
 

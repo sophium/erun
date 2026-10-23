@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The line has to name the image and how long it has been going, because those
@@ -13,7 +15,7 @@ import (
 // elapsed time is what distinguishes a build that is working from one that is
 // wedged.
 func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
-	got := formatBuildHeartbeat([]buildHeartbeatSnapshot{{Label: "erun-devops", Elapsed: 2*time.Minute + 30*time.Second}})
+	got := core.FormatBuildHeartbeat([]core.BuildHeartbeatSnapshot{{Label: "erun-devops", Elapsed: 2*time.Minute + 30*time.Second}})
 	if got != "still building erun-devops, 2m30s elapsed" {
 		t.Fatalf("heartbeat line = %q", got)
 	}
@@ -22,7 +24,7 @@ func TestFormatBuildHeartbeatNamesTheImageAndItsElapsedTime(t *testing.T) {
 // A concurrent build can have several images in flight, and the heartbeat must
 // still say which one is the long one rather than only how many there are.
 func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
-	got := formatBuildHeartbeat([]buildHeartbeatSnapshot{
+	got := core.FormatBuildHeartbeat([]core.BuildHeartbeatSnapshot{
 		{Label: "erun-devops", Elapsed: 9 * time.Minute},
 		{Label: "erun-console", Elapsed: 70 * time.Second},
 	})
@@ -30,7 +32,7 @@ func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
 	if got != want {
 		t.Fatalf("heartbeat line = %q, want %q", got, want)
 	}
-	if empty := formatBuildHeartbeat(nil); empty != "" {
+	if empty := core.FormatBuildHeartbeat(nil); empty != "" {
 		t.Fatalf("nothing in flight must render nothing, got %q", empty)
 	}
 }
@@ -40,21 +42,21 @@ func TestFormatBuildHeartbeatNamesEveryImageStillBuilding(t *testing.T) {
 // the whole of a long rebuild the log said nothing about what was building.
 func TestBuildHeartbeatBeatsOnlyWhileABuildIsStillRunning(t *testing.T) {
 	clock := time.Unix(0, 0)
-	heartbeat := &buildHeartbeat{now: func() time.Time { return clock }, emit: func(string) {}, ticks: make(chan time.Time)}
+	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
 
-	if line := heartbeat.line(); line != "" {
+	if line := heartbeat.Line(); line != "" {
 		t.Fatalf("an idle heartbeat must say nothing, got %q", line)
 	}
 
-	done := heartbeat.begin("erun-devops")
+	done := heartbeat.Begin("erun-devops")
 	clock = clock.Add(4 * time.Minute)
-	if line := heartbeat.line(); line != "still building erun-devops, 4m0s elapsed" {
+	if line := heartbeat.Line(); line != "still building erun-devops, 4m0s elapsed" {
 		t.Fatalf("a running build must be named, got %q", line)
 	}
 
 	done()
 	clock = clock.Add(time.Minute)
-	if line := heartbeat.line(); line != "" {
+	if line := heartbeat.Line(); line != "" {
 		t.Fatalf("a finished build must be cleared, got %q", line)
 	}
 	done() // idempotent: a second clear must not drop another image's registration
@@ -64,24 +66,24 @@ func TestBuildHeartbeatBeatsOnlyWhileABuildIsStillRunning(t *testing.T) {
 // first stops being named while the other keeps its own elapsed time.
 func TestBuildHeartbeatTracksConcurrentBuildsIndependently(t *testing.T) {
 	clock := time.Unix(0, 0)
-	heartbeat := &buildHeartbeat{now: func() time.Time { return clock }, emit: func(string) {}, ticks: make(chan time.Time)}
+	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
 
-	first := heartbeat.begin("erun-devops")
+	first := heartbeat.Begin("erun-devops")
 	clock = clock.Add(30 * time.Second)
-	second := heartbeat.begin("erun-console")
+	second := heartbeat.Begin("erun-console")
 	clock = clock.Add(90 * time.Second)
 
 	want := "still building 2 images: erun-devops, 2m0s elapsed; erun-console, 1m30s elapsed"
-	if line := heartbeat.line(); line != want {
+	if line := heartbeat.Line(); line != want {
 		t.Fatalf("heartbeat line = %q, want %q", line, want)
 	}
 
 	first()
-	if line := heartbeat.line(); line != "still building erun-console, 1m30s elapsed" {
+	if line := heartbeat.Line(); line != "still building erun-console, 1m30s elapsed" {
 		t.Fatalf("only the still-running build must remain, got %q", line)
 	}
 	second()
-	if line := heartbeat.line(); line != "" {
+	if line := heartbeat.Line(); line != "" {
 		t.Fatalf("nothing must remain, got %q", line)
 	}
 }
@@ -93,13 +95,13 @@ func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 	ticks := make(chan time.Time)
 	emitted := make(chan string)
 	clock := time.Unix(0, 0)
-	heartbeat := &buildHeartbeat{
-		now:   func() time.Time { return clock },
-		emit:  func(line string) { emitted <- line },
-		ticks: ticks,
+	heartbeat := &core.BuildHeartbeat{
+		Now:   func() time.Time { return clock },
+		Emit:  func(line string) { emitted <- line },
+		Ticks: ticks,
 	}
-	heartbeat.start()
-	done := heartbeat.begin("erun-devops")
+	heartbeat.Start()
+	done := heartbeat.Begin("erun-devops")
 
 	clock = clock.Add(30 * time.Second)
 	ticks <- time.Now()
@@ -107,7 +109,7 @@ func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 		t.Fatalf("expected a heartbeat naming the running build, got %q", line)
 	}
 
-	heartbeat.finish()
+	heartbeat.Finish()
 	// The loop is gone, so nothing is left to receive a tick: sends used to be
 	// accepted by it, and now nothing but this goroutine can.
 	select {
@@ -122,23 +124,23 @@ func TestBuildHeartbeatEmitsOnEveryTickUntilItIsFinished(t *testing.T) {
 // build's own BuildKit output streams live, so a heartbeat would be a second,
 // redundant signal. Neither installs one.
 func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
-	if ctx, _ := withBuildProgress(Context{DryRun: true}); ctx.progress != nil {
+	if ctx, _ := withBuildProgress(core.Context{DryRun: true}); ctx.Progress != nil {
 		t.Fatal("dry-run must not install a heartbeat")
 	}
-	if ctx, _ := withBuildProgress(Context{Verbosity: VerbosityDebug}); ctx.progress != nil {
+	if ctx, _ := withBuildProgress(core.Context{Verbosity: core.VerbosityDebug}); ctx.Progress != nil {
 		t.Fatal("a run whose build output streams live must not install a heartbeat")
 	}
 
 	var log bytes.Buffer
-	ctx, stop := withBuildProgress(Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, io.Discard)})
+	ctx, stop := withBuildProgress(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, io.Discard)})
 	defer stop()
-	if ctx.progress == nil {
+	if ctx.Progress == nil {
 		t.Fatal("a real build run must install a heartbeat")
 	}
 	// The installed heartbeat writes to the run's own log stream, which is where
 	// the reader watching for the build's next line is looking.
-	cleared := ctx.progress.begin("erun-devops")
-	ctx.progress.beat()
+	cleared := ctx.Progress.Begin("erun-devops")
+	ctx.Progress.Beat()
 	cleared()
 	if got := log.String(); !strings.Contains(got, "still building erun-devops, 0s elapsed") {
 		t.Fatalf("heartbeat must reach the run's log stream, got %q", got)
@@ -147,7 +149,7 @@ func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
 	// restart the clock every image's elapsed time is measured from.
 	again, secondStop := withBuildProgress(ctx)
 	defer secondStop()
-	if again.progress != ctx.progress {
+	if again.Progress != ctx.Progress {
 		t.Fatal("a run must reuse the heartbeat it already has")
 	}
 }
@@ -157,8 +159,8 @@ func TestWithBuildProgressInstallsOneHeartbeatPerRun(t *testing.T) {
 // been going, so a working rebuild was indistinguishable from a wedged one.
 func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	clock := time.Unix(0, 0)
-	heartbeat := &buildHeartbeat{now: func() time.Time { return clock }, emit: func(string) {}, ticks: make(chan time.Time)}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard), progress: heartbeat}
+	heartbeat := &core.BuildHeartbeat{Now: func() time.Time { return clock }, Emit: func(string) {}, Ticks: make(chan time.Time)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), Progress: heartbeat}
 
 	spec := DockerBuildSpec{
 		Image:          DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
@@ -167,7 +169,7 @@ func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	duringBuild := ""
 	build := func(DockerBuildSpec, io.Writer, io.Writer) error {
 		clock = clock.Add(11 * time.Minute)
-		duringBuild = heartbeat.line()
+		duringBuild = heartbeat.Line()
 		return nil
 	}
 
@@ -177,7 +179,7 @@ func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	if duringBuild != "still building erun-devops, 11m0s elapsed" {
 		t.Fatalf("mid-build heartbeat = %q, want the image and its elapsed time", duringBuild)
 	}
-	if after := heartbeat.line(); after != "" {
+	if after := heartbeat.Line(); after != "" {
 		t.Fatalf("the build must stop being named once it finishes, got %q", after)
 	}
 }

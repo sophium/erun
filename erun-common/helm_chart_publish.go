@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,7 +62,7 @@ func (p HelmChartPublishSpec) tgzPath() string {
 
 // traceChartPackage traces the package sequence: `helm dependency build` first
 // for umbrella charts, then `helm package`. runChartPackage executes it.
-func traceChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool) {
+func traceChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps bool) {
 	if declaresDeps {
 		dep := spec.dependencyBuildCommand()
 		ctx.TraceCommand(dep.Dir, dep.Name, dep.Args...)
@@ -70,7 +71,7 @@ func traceChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool
 	ctx.TraceCommand(pkg.Dir, pkg.Name, pkg.Args...)
 }
 
-func runChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool) error {
+func runChartPackage(ctx core.Context, spec HelmChartPublishSpec, declaresDeps bool) error {
 	if declaresDeps {
 		// `helm dependency build` vendors declared subcharts into <chart>/charts/.
 		// The packaged .tgz is self-contained, so remove a charts/ we vendored to
@@ -94,7 +95,7 @@ func runChartPackage(ctx Context, spec HelmChartPublishSpec, declaresDeps bool) 
 // an image. It runs `helm dependency build` first for umbrella charts, then
 // removes the .tgz so the working tree stays clean; publishing to OCI is push's
 // job (RunHelmChartPublish).
-func PackageResolvedChart(ctx Context, spec HelmChartPublishSpec) error {
+func PackageResolvedChart(ctx core.Context, spec HelmChartPublishSpec) error {
 	spec.Verbosity = ctx.Verbosity
 	declaresDeps, err := helmChartDeclaresDependencies(spec.ChartPath)
 	if err != nil {
@@ -114,7 +115,7 @@ func PackageResolvedChart(ctx Context, spec HelmChartPublishSpec) error {
 
 // RunHelmChartPublish traces and executes the chart package-then-push sequence
 // (dependency build for umbrella charts, package, push).
-func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
+func RunHelmChartPublish(ctx core.Context, spec HelmChartPublishSpec) error {
 	if strings.TrimSpace(spec.ChartName) == "" {
 		return errors.New("publish: chart name is required")
 	}
@@ -150,8 +151,8 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 // runHelmCommand runs helm with both of its streams on erun's stderr: what
 // helm prints here ("Successfully packaged chart …", push digests) is progress,
 // never data, and on stdout it would land ahead of `--output json` results.
-func runHelmCommand(ctx Context, spec commandSpec) error {
-	cmd := Command(spec.Name, spec.Args...)
+func runHelmCommand(ctx core.Context, spec commandSpec) error {
+	cmd := core.Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
 	cmd.Stdout = ctx.Stderr
 	cmd.Stderr = ctx.Stderr
@@ -161,14 +162,14 @@ func runHelmCommand(ctx Context, spec commandSpec) error {
 // runHelmCommandCapturingOutput streams helm's output as usual while also
 // capturing it, so a caller can classify the failure it reports. See
 // commandOutputCapture for why stdout and stderr need separate buffers.
-func runHelmCommandCapturingOutput(ctx Context, spec commandSpec) (string, error) {
-	capture := &commandOutputCapture{}
-	cmd := Command(spec.Name, spec.Args...)
+func runHelmCommandCapturingOutput(ctx core.Context, spec commandSpec) (string, error) {
+	capture := &core.CommandOutputCapture{}
+	cmd := core.Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir
-	cmd.Stdout = teeWriter(ctx.Stderr, &capture.stdout)
-	cmd.Stderr = teeWriter(ctx.Stderr, &capture.stderr)
+	cmd.Stdout = core.TeeWriter(ctx.Stderr, &capture.Stdout)
+	cmd.Stderr = core.TeeWriter(ctx.Stderr, &capture.Stderr)
 	err := cmd.Run()
-	return capture.combined(), err
+	return capture.Combined(), err
 }
 
 func loadHelmChartName(chartPath string) (string, error) {
@@ -274,7 +275,7 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 // keep their image at the upstream pin but must still publish their chart at the
 // release version so platform deploys resolve it. It is a no-op for an image
 // that ships no chart (a tenant's <tenant>-devops override, or infra like dind).
-func publishComponentChart(ctx Context, image DockerImageReference, chartVersion string) error {
+func publishComponentChart(ctx core.Context, image DockerImageReference, chartVersion string) error {
 	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)
 	if imageName == "" || projectRoot == "" {

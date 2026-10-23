@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // dindDockerdEntrypoint is the stock docker:dind entrypoint the sidecar hands
@@ -41,8 +43,8 @@ type dindEntrypointHost struct {
 //
 // Neither step is ever fatal: a daemon that starts at its defaults is strictly
 // better than one that does not start. Each says so when it cannot apply.
-func RunDindEntrypoint(ctx Context, params DindEntrypointParams) error {
-	if hostOS := resolveDetectedHostOS(); hostOS != HostOSLinux {
+func RunDindEntrypoint(ctx core.Context, params DindEntrypointParams) error {
+	if hostOS := core.ResolveDetectedHostOS(); hostOS != core.HostOSLinux {
 		return dindEntrypointUnsupportedError(string(hostOS))
 	}
 	host, err := defaultDindEntrypointHost()
@@ -56,7 +58,7 @@ func dindEntrypointUnsupportedError(goos string) error {
 	return fmt.Errorf("erun dind-entrypoint runs only inside the erun-dind sidecar, which is Linux; this host is %s", goos)
 }
 
-func runDindEntrypoint(ctx Context, params DindEntrypointParams, host dindEntrypointHost) error {
+func runDindEntrypoint(ctx core.Context, params DindEntrypointParams, host dindEntrypointHost) error {
 	args := params.DockerdArgs
 	// Reads procfs/sysfs rather than shelling out to iproute2, which the dind
 	// image has no reason to carry (egressMTUUnder, shared with the build-side
@@ -107,7 +109,7 @@ func runDindEntrypoint(ctx Context, params DindEntrypointParams, host dindEntryp
 //
 // A cap that reads as applied while enforcing nothing is worse than a build
 // openly left uncapped, so every way it cannot apply is reported, once.
-func capBuildContainerCPU(ctx Context, host dindEntrypointHost) {
+func capBuildContainerCPU(ctx core.Context, host dindEntrypointHost) {
 	ownCPUMax, pod, ok := readOwnCPUQuota(host)
 	if !ok {
 		return
@@ -228,6 +230,6 @@ func writeCPUCap(capCgroup, cpuMax string) string {
 	return ""
 }
 
-func reportUncappedBuilds(ctx Context, reason string) {
+func reportUncappedBuilds(ctx core.Context, reason string) {
 	ctx.Info("erun-dind: WARNING: build containers are not CPU-capped: " + reason)
 }

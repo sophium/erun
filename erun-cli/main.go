@@ -7,7 +7,8 @@ import (
 	"os"
 
 	"github.com/sophium/erun/cmd"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/internal"
 )
 
@@ -60,7 +61,7 @@ func runERun() int {
 		return 0
 	}
 	if !internal.IsReported(err) {
-		logger := eruncommon.NewLogger(0)
+		logger := core.NewLogger(0)
 		logger.Fatal(err)
 	}
 	return exitCodeFor(err)

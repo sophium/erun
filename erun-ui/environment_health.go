@@ -7,7 +7,8 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // CheckEnvironmentHealth runs the out-of-pod diagnostics the Manage dialog's
@@ -46,7 +47,7 @@ func healthChecksAllOK(checks []uiEnvironmentHealthCheck) bool {
 // registryHealthCheck reports whether the env resolves to any effective
 // container registry, using the same resolution the editor and the build/deploy
 // resolvers use.
-func (a *App) registryHealthCheck(tenant, environment string, config eruncommon.EnvConfig) uiEnvironmentHealthCheck {
+func (a *App) registryHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
 	list, inherited := a.effectiveEnvironmentContainerRegistries(tenant, environment, config)
 	check := uiEnvironmentHealthCheck{ID: healthCheckIDRegistry, Title: "Container registry"}
 	if list.IsZero() {
@@ -63,7 +64,7 @@ func (a *App) registryHealthCheck(tenant, environment string, config eruncommon.
 // registryHealthDetail names the registry the environment will act on in plain
 // language, so a passing check still tells the operator which registry is in
 // effect (and whether it is inherited from the project).
-func registryHealthDetail(list eruncommon.ContainerRegistries, inherited bool) string {
+func registryHealthDetail(list configpkg.ContainerRegistries, inherited bool) string {
 	target := "a configured registry"
 	if cluster, ok := list.ClusterEntry(); ok {
 		target = fmt.Sprintf("in-cluster registry %s.%s:%d", cluster.Service, cluster.Namespace, cluster.Port)
@@ -81,7 +82,7 @@ func registryHealthDetail(list eruncommon.ContainerRegistries, inherited bool) s
 // runtimeDeployedHealthCheck reports whether the env's runtime is deployed to
 // its Kubernetes context. It is deliberately out-of-pod: `erun doctor` runs
 // inside the runtime container and so cannot observe an undeployed env.
-func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config eruncommon.EnvConfig) uiEnvironmentHealthCheck {
+func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config configpkg.EnvConfig) uiEnvironmentHealthCheck {
 	check := uiEnvironmentHealthCheck{ID: healthCheckIDRuntime, Title: "Runtime deployment"}
 	kubeContext := strings.TrimSpace(config.KubernetesContext)
 	if kubeContext == "" {

@@ -15,6 +15,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // E2ETarget scopes an erun e2e run to a deployed environment, the same
@@ -40,19 +43,6 @@ type E2EParams struct {
 	// what a --base-url serves, so only it supplies the expected version for
 	// one.
 	TargetNamed bool
-}
-
-// ProjectE2EConfig is the `e2e:` block of a project's .erun/config.yaml.
-type ProjectE2EConfig struct {
-	// Secrets are the BuildKit secrets every e2e suite build receives, in the
-	// same reference-only shape as docker.secrets. They are deliberately a
-	// separate list: docker.secrets reach every component build, so an e2e
-	// credential declared there would become mandatory for every build.
-	Secrets []DockerBuildSecret `yaml:"secrets,omitempty"`
-}
-
-func (c ProjectE2EConfig) IsZero() bool {
-	return len(c.Secrets) == 0
 }
 
 // E2ESuiteResult is how one suite's run ended.
@@ -112,11 +102,11 @@ var hardcodedPlaywrightBaseURLPattern = regexp.MustCompile(`baseURL\s*:\s*['"]`)
 // order, with the deployed version and the resolved URLs as build args. Every
 // suite runs even after one fails; the returned error names each failure. A
 // failure is reported, never acted on: erun e2e is not a release gate.
-func RunE2E(ctx Context, params E2EParams) (*E2EResult, error) {
+func RunE2E(ctx core.Context, params E2EParams) (*E2EResult, error) {
 	return runE2E(ctx, params, defaultE2EDeps)
 }
 
-func runE2E(ctx Context, params E2EParams, deps e2eDeps) (*E2EResult, error) {
+func runE2E(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResult, error) {
 	result, runs, err := resolveE2ERuns(ctx, params, deps)
 	if err != nil {
 		return nil, err
@@ -138,7 +128,7 @@ func runE2E(ctx Context, params E2EParams, deps e2eDeps) (*E2EResult, error) {
 // resolveE2ERuns does every check erun e2e refuses on -- suite lint, secrets,
 // --base-url, the environment's preconditions, each suite's URL -- before any
 // suite runs, and resolves each suite to the exact docker invocation.
-func resolveE2ERuns(ctx Context, params E2EParams, deps e2eDeps) (*E2EResult, []e2eRun, error) {
+func resolveE2ERuns(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResult, []e2eRun, error) {
 	for _, suite := range params.Plan.Suites {
 		if err := lintPlaywrightSuite(suite.Dir); err != nil {
 			return nil, nil, err
@@ -211,7 +201,7 @@ func refuseE2EBaseURLWithoutVersion(params E2EParams, baseURLOverride, versionOv
 		baseURLOverride, params.Target.Tenant, params.Target.Environment)
 }
 
-func traceE2EVersion(ctx Context, version string, overridden bool) {
+func traceE2EVersion(ctx core.Context, version string, overridden bool) {
 	if overridden {
 		ctx.Trace(fmt.Sprintf("e2e: expected version %s (from --version; deployed-version lookup skipped)", version))
 		return
@@ -221,7 +211,7 @@ func traceE2EVersion(ctx Context, version string, overridden bool) {
 
 // resolveE2ERun picks a suite's base URL, refuses one a docker build cannot
 // reach, and renders the docker invocation that runs it.
-func resolveE2ERun(ctx Context, suite E2ESuite, target E2ETarget, version, baseURLOverride string, exposed []ExposedService, secrets []DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
+func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, baseURLOverride string, exposed []ExposedService, secrets []config.DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
 	baseURL := baseURLOverride
 	ctx.Trace(fmt.Sprintf("e2e: suite %s: %s", suite.Component, suite.Dockerfile))
 	if baseURL != "" {
@@ -245,7 +235,7 @@ func resolveE2ERun(ctx Context, suite E2ESuite, target E2ETarget, version, baseU
 	return e2eRun{
 		suite:   suite,
 		baseURL: baseURL,
-		args:    e2eDockerBuildArgs(suite, version, baseURL, exposed, secrets, buildContainerCPUCapCgroupParent()),
+		args:    e2eDockerBuildArgs(suite, version, baseURL, exposed, secrets, core.BuildContainerCPUCapCgroupParent()),
 		logPath: logPath,
 	}, nil
 }
@@ -255,7 +245,7 @@ func resolveE2ERun(ctx Context, suite E2ESuite, target E2ETarget, version, baseU
 // while the stages it builds on (dependency installs) stay cached. Its output
 // is cache-only: an e2e run proves something about a deployment and produces
 // no image.
-func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []ExposedService, secrets []DockerBuildSecret, cgroupParent string) []string {
+func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []ExposedService, secrets []config.DockerBuildSecret, cgroupParent string) []string {
 	args := []string{
 		"build", "--progress=plain",
 		"--target", "e2e",
@@ -285,7 +275,7 @@ func e2eServiceURLBuildArg(service string) string {
 
 // runE2ESuite runs one suite, streaming its output to the operator and to the
 // suite's log, and records how it ended.
-func runE2ESuite(ctx Context, projectRoot string, run e2eRun, deps e2eDeps) E2ESuiteResult {
+func runE2ESuite(ctx core.Context, projectRoot string, run e2eRun, deps e2eDeps) E2ESuiteResult {
 	result := E2ESuiteResult{Component: run.suite.Component, Dockerfile: run.suite.Dockerfile, BaseURL: run.baseURL, LogPath: run.logPath}
 	ctx.Info(fmt.Sprintf("e2e: running %s against %s", run.suite.Component, run.baseURL))
 	if err := os.MkdirAll(filepath.Dir(run.logPath), 0o755); err != nil {
@@ -313,7 +303,7 @@ func runE2ESuite(ctx Context, projectRoot string, run e2eRun, deps e2eDeps) E2ES
 // reportE2EOutcome prints a pass line per passing suite and a self-contained,
 // bug-ready block per failing one, then returns an error naming every failure
 // so the exit code is non-zero when any suite failed.
-func reportE2EOutcome(ctx Context, result *E2EResult) error {
+func reportE2EOutcome(ctx core.Context, result *E2EResult) error {
 	failed := make([]string, 0, len(result.Suites))
 	for _, suite := range result.Suites {
 		if suite.Passed {
@@ -378,7 +368,7 @@ func e2eLogTail(path string, n int) string {
 // all. Read-only, so it runs even under --dry-run -- the same "no mutation, so
 // no reason to skip it" reasoning CheckKubernetesDeployment's own doc comment
 // gives.
-func checkE2EPreconditions(ctx Context, target E2ETarget, suites []E2ESuite, baseURLOverridden bool, versionOverride string) (string, []ExposedService, error) {
+func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite, baseURLOverridden bool, versionOverride string) (string, []ExposedService, error) {
 	if baseURLOverridden && versionOverride != "" {
 		ctx.Trace("e2e: --base-url and --version name the target; no environment is read (deployment, exposure and version checks skipped)")
 		return versionOverride, nil, nil
@@ -474,7 +464,7 @@ func parseE2EBaseURLOverride(raw string) (string, error) {
 // docker build without host networking, where loopback is the build container
 // itself. A host that does not resolve here is left to the build: the check is
 // for an established failure, not a guess.
-func refuseLoopbackE2ETarget(ctx Context, rawURL string, lookup func(string) ([]string, error)) error {
+func refuseLoopbackE2ETarget(ctx core.Context, rawURL string, lookup func(string) ([]string, error)) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -505,12 +495,12 @@ func lookupE2EHost(host string) ([]string, error) {
 // resolveE2ESecrets reads and validates e2e.secrets. Validation mirrors
 // docker.secrets: a declared secret that cannot be supplied fails the run
 // rather than letting the suite degrade to skipping what it was meant to check.
-func resolveE2ESecrets(projectRoot string) ([]DockerBuildSecret, error) {
+func resolveE2ESecrets(projectRoot string) ([]config.DockerBuildSecret, error) {
 	cfg, ok, err := loadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil || !ok {
 		return nil, err
 	}
-	secrets := make([]DockerBuildSecret, 0, len(cfg.E2E.Secrets))
+	secrets := make([]config.DockerBuildSecret, 0, len(cfg.E2E.Secrets))
 	for i, secret := range cfg.E2E.Secrets {
 		secret.ID = strings.TrimSpace(secret.ID)
 		secret.Env = strings.TrimSpace(secret.Env)
@@ -526,7 +516,7 @@ func resolveE2ESecrets(projectRoot string) ([]DockerBuildSecret, error) {
 	return secrets, nil
 }
 
-func validateE2ESecret(index int, secret DockerBuildSecret) error {
+func validateE2ESecret(index int, secret config.DockerBuildSecret) error {
 	switch {
 	case secret.ID == "":
 		return fmt.Errorf("e2e.secrets entry %d: id is required, naming the secret the e2e stage mounts with --mount=type=secret,id=<id>", index+1)
@@ -567,7 +557,7 @@ func e2eLogPath(target E2ETarget, component string) (string, error) {
 // build context every suite's Dockerfile COPYs from. One writer takes both
 // streams so os/exec serializes their writes.
 func runE2EDockerBuild(dir string, args []string, output io.Writer) error {
-	cmd := Command("docker", args...)
+	cmd := core.Command("docker", args...)
 	cmd.Dir = dir
 	cmd.Stdout = output
 	cmd.Stderr = output

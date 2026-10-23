@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 var errMissingPublishVersion = errors.New("publish requires a version: it mirrors an already-built version's images from the FROM to the TO registry and never builds — set the version input")
@@ -23,7 +24,7 @@ func publishTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 		if strings.TrimSpace(input.Version) == "" {
 			return nil, JobEnvelopeOutput{}, errMissingPublishVersion
 		}
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			findProjectRoot := func() (string, string, error) {
 				return runtimeFindProjectRoot(runtime.Context, workDir)
 			}

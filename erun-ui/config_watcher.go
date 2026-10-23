@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // configWatcherDebounce coalesces the burst of files erun init writes in
@@ -38,7 +38,7 @@ func (a *App) startConfigWatcher() {
 	}
 	a.mu.Unlock()
 
-	root, err := eruncommon.ERunConfigDir()
+	root, err := config.ERunConfigDir()
 	if err != nil {
 		a.reportConfigWatcherFailure(fmt.Errorf("resolve config directory: %w", err))
 		return
@@ -271,7 +271,7 @@ func definitionWatchTargetFor(root, path string) (definitionWatchTarget, bool) {
 		return definitionWatchTarget{}, false
 	}
 	tenant, environment := segments[0], segments[1]
-	expected, err := eruncommon.EnvConfigPath(tenant, environment)
+	expected, err := config.EnvConfigPath(tenant, environment)
 	if err != nil || filepath.Clean(expected) != filepath.Clean(path) {
 		return definitionWatchTarget{}, false
 	}

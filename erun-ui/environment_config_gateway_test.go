@@ -4,7 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestEnvironmentConfigGatewayChoiceReachesTheLaunch pins the desktop half of
@@ -15,13 +16,13 @@ import (
 // tabs on the new launch.
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{OpenRouter: &eruncommon.OpenRouterConfig{
+		config: &configpkg.ERunConfig{OpenRouter: &configpkg.OpenRouterConfig{
 			BaseURL:      "https://gateway.example/api",
 			DefaultModel: "vendor/model-x",
-			Models:       []eruncommon.OpenRouterModel{{ID: "vendor/model-x"}},
+			Models:       []configpkg.OpenRouterModel{{ID: "vendor/model-x"}},
 		}},
-		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs"}},
-		envs: map[string]eruncommon.EnvConfig{
+		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "cluster-local"},
 		},
 	}

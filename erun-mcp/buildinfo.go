@@ -1,6 +1,8 @@
 package erunmcp
 
-import eruncommon "github.com/sophium/erun/erun-common"
+import (
+	"github.com/sophium/erun/erun-common/base/model"
+)
 
 // These variables are replaced at build time via -ldflags to embed release metadata.
 var (
@@ -9,8 +11,8 @@ var (
 	buildDate    = ""
 )
 
-func CurrentBuildInfo() eruncommon.BuildInfo {
-	return eruncommon.NormalizeBuildInfo(eruncommon.BuildInfo{
+func CurrentBuildInfo() model.BuildInfo {
+	return model.NormalizeBuildInfo(model.BuildInfo{
 		Version: buildVersion,
 		Commit:  buildCommit,
 		Date:    buildDate,

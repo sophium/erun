@@ -3,7 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	common "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // reportExecutionModes answers "it behaves differently on my machine" for the
@@ -13,9 +14,9 @@ import (
 // short of reading the config file by hand. Root config, not
 // per-environment, so it runs unconditionally — it needs no runtime pod and
 // nothing here can fail dry-run.
-func reportExecutionModes(ctx common.Context) error {
-	config, _, _ := common.LoadERunConfig()
-	statuses := common.ExecutionModeReport(config)
+func reportExecutionModes(ctx core.Context) error {
+	config, _, _ := configpkg.LoadERunConfig()
+	statuses := configpkg.ExecutionModeReport(config)
 	if len(statuses) == 0 {
 		return nil
 	}

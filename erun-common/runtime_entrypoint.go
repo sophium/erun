@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The runtime entrypoint is what the erun-devops image runs as PID 1. It prepares
@@ -155,7 +157,7 @@ func runtimeEnvFlagDisabled(value string) bool {
 type runtimeBootStep struct {
 	name     string
 	describe func(runtimeBoot) string
-	run      func(Context, runtimeBoot, *runtimeSupervisor) error
+	run      func(core.Context, runtimeBoot, *runtimeSupervisor) error
 }
 
 // runtimePreambleSteps run in every mode, before the container's command.
@@ -186,7 +188,7 @@ func runtimeDevopsSteps() []runtimeBootStep {
 	}
 }
 
-func runRuntimeBootSteps(ctx Context, boot runtimeBoot, supervisor *runtimeSupervisor, steps []runtimeBootStep) {
+func runRuntimeBootSteps(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor, steps []runtimeBootStep) {
 	for _, step := range steps {
 		if step.describe(boot) == "" {
 			continue
@@ -197,7 +199,7 @@ func runRuntimeBootSteps(ctx Context, boot runtimeBoot, supervisor *runtimeSuper
 	}
 }
 
-func traceRuntimeBootSteps(ctx Context, boot runtimeBoot, steps []runtimeBootStep) {
+func traceRuntimeBootSteps(ctx core.Context, boot runtimeBoot, steps []runtimeBootStep) {
 	for _, step := range steps {
 		if description := step.describe(boot); description != "" {
 			ctx.Trace("runtime-init: " + step.name + ": " + description)
@@ -216,14 +218,14 @@ func runtimeEntrypointCommand(args []string) []string {
 
 // RunRuntimeEntrypoint boots the runtime container and returns the exit code the
 // container should end with.
-func RunRuntimeEntrypoint(ctx Context, params RuntimeEntrypointParams) (int, error) {
+func RunRuntimeEntrypoint(ctx core.Context, params RuntimeEntrypointParams) (int, error) {
 	boot := newRuntimeBoot(params)
 	command := runtimeEntrypointCommand(params.Command)
 	if ctx.DryRun {
 		traceRuntimeEntrypointPlan(ctx, boot, command)
 		return 0, nil
 	}
-	if hostOS := resolveDetectedHostOS(); hostOS != HostOSLinux {
+	if hostOS := core.ResolveDetectedHostOS(); hostOS != core.HostOSLinux {
 		return 1, fmt.Errorf("%w; this host is %s", ErrRuntimeEntrypointUnsupported, hostOS)
 	}
 	// Only the real boot asks the instance metadata service; a dry run traces
@@ -243,10 +245,10 @@ func RunRuntimeEntrypoint(ctx Context, params RuntimeEntrypointParams) (int, err
 	return supervisor.awaitTermination(), nil
 }
 
-func traceRuntimeEntrypointPlan(ctx Context, boot runtimeBoot, command []string) {
+func traceRuntimeEntrypointPlan(ctx core.Context, boot runtimeBoot, command []string) {
 	traceRuntimeBootSteps(ctx, boot, runtimePreambleSteps())
 	if command != nil {
-		ctx.Trace("runtime-init: run " + formatShellCommand("", command[0], command[1:]...) + " as the supervised foreground process and exit with its code")
+		ctx.Trace("runtime-init: run " + core.FormatShellCommand("", command[0], command[1:]...) + " as the supervised foreground process and exit with its code")
 		return
 	}
 	traceRuntimeBootSteps(ctx, boot, runtimeDevopsSteps())
@@ -297,7 +299,7 @@ func describeRuntimeCacheTrim(boot runtimeBoot) string {
 // environment already holding tens of gigabytes is brought under the cap by it,
 // and the boot must not wait on that. It repeats because a container outlives
 // the boot that started it.
-func startRuntimeCacheTrim(ctx Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func startRuntimeCacheTrim(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	dir, maxBytes, interval := boot.runtimeCacheTrimSettings()
 	supervisor.goLoop(func() bool {
 		if _, err := TrimGoBuildCache(ctx, dir, maxBytes); err != nil {

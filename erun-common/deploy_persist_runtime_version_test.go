@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"io"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestPersistRuntimeVersionFromDeploySpecs pins how the runtime version advances
@@ -21,7 +24,7 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 
 	runtimeSpec := func(skipHelm bool) DeploySpec {
 		return DeploySpec{
-			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{Name: "local"}},
+			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
 			Deploy: HelmDeploySpec{
 				ReleaseName:       RuntimeReleaseName(tenant),
 				Version:           mintedVersion,
@@ -31,14 +34,14 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 		}
 	}
 	fixedRunningVersion := func(version string) HelmReleaseVersionResolverFunc {
-		return func(Context, string, string, string) (string, error) { return version, nil }
+		return func(core.Context, string, string, string) (string, error) { return version, nil }
 	}
 
 	t.Run("rolled-out deploy persists the built and pushed version", func(t *testing.T) {
 		var savedTenant string
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(&savedTenant, &saved)
-		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(false)}, save, fixedRunningVersion(runningVersion))
+		persistOrFatal(t, core.Context{}, []DeploySpec{runtimeSpec(false)}, save, fixedRunningVersion(runningVersion))
 		if saved == nil || savedTenant != tenant {
 			t.Fatalf("expected save for tenant %q after a real rollout (saved=%v tenant=%q)", tenant, saved != nil, savedTenant)
 		}
@@ -49,9 +52,9 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 
 	t.Run("cached deploy (SkipHelm) heals to the running version, not the minted one", func(t *testing.T) {
 		var savedTenant string
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(&savedTenant, &saved)
-		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(runningVersion))
+		persistOrFatal(t, core.Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(runningVersion))
 		if saved == nil {
 			t.Fatalf("a cached deploy must heal RuntimeVersion to the running version")
 		}
@@ -62,9 +65,9 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 
 	t.Run("cached deploy (SkipHelm) with an unreadable running version leaves it unchanged", func(t *testing.T) {
 		saved := false
-		save := func(string, EnvConfig) error { saved = true; return nil }
+		save := func(string, config.EnvConfig) error { saved = true; return nil }
 		// Empty string models a missing release / unavailable helm.
-		persistOrFatal(t, Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(""))
+		persistOrFatal(t, core.Context{}, []DeploySpec{runtimeSpec(true)}, save, fixedRunningVersion(""))
 		if saved {
 			t.Fatalf("could not read the running version; must not persist (would be a phantom)")
 		}
@@ -73,20 +76,20 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 	t.Run("dry-run never persists or queries the cluster", func(t *testing.T) {
 		saved := false
 		resolverCalled := false
-		save := func(string, EnvConfig) error { saved = true; return nil }
-		resolver := func(Context, string, string, string) (string, error) {
+		save := func(string, config.EnvConfig) error { saved = true; return nil }
+		resolver := func(core.Context, string, string, string) (string, error) {
 			resolverCalled = true
 			return runningVersion, nil
 		}
-		persistOrFatal(t, Context{DryRun: true}, []DeploySpec{runtimeSpec(true)}, save, resolver)
+		persistOrFatal(t, core.Context{DryRun: true}, []DeploySpec{runtimeSpec(true)}, save, resolver)
 		if saved || resolverCalled {
 			t.Fatalf("dry-run must not persist (saved=%v) or query the cluster (resolverCalled=%v)", saved, resolverCalled)
 		}
 	})
 }
 
-func capturingSave(savedTenant *string, saved **EnvConfig) func(string, EnvConfig) error {
-	return func(tn string, cfg EnvConfig) error {
+func capturingSave(savedTenant *string, saved **config.EnvConfig) func(string, config.EnvConfig) error {
+	return func(tn string, cfg config.EnvConfig) error {
 		*savedTenant = tn
 		c := cfg
 		*saved = &c
@@ -94,7 +97,7 @@ func capturingSave(savedTenant *string, saved **EnvConfig) func(string, EnvConfi
 	}
 }
 
-func persistOrFatal(t *testing.T, ctx Context, specs []DeploySpec, save func(string, EnvConfig) error, resolve HelmReleaseVersionResolverFunc) {
+func persistOrFatal(t *testing.T, ctx core.Context, specs []DeploySpec, save func(string, config.EnvConfig) error, resolve HelmReleaseVersionResolverFunc) {
 	t.Helper()
 	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, save, resolve); err != nil {
 		t.Fatalf("persist: %v", err)
@@ -113,10 +116,10 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 
 	t.Run("heals a stale RuntimeImage left on the wrong line", func(t *testing.T) {
 		var savedTenant string
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(&savedTenant, &saved)
 		spec := DeploySpec{
-			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{
 				Name:         "build",
 				RuntimeImage: "ghcr.io/sophium/erun-devops",
 			}},
@@ -128,7 +131,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				PersistRuntimeImage:  "frs-devops",
 			},
 		}
-		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
 		if saved == nil {
 			t.Fatalf("expected a save")
 		}
@@ -141,10 +144,10 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 	})
 
 	t.Run("empty PersistRuntimeImage never clobbers a recorded RuntimeImage", func(t *testing.T) {
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(new(string), &saved)
 		spec := DeploySpec{
-			Target: OpenResult{Tenant: "erun", EnvConfig: EnvConfig{
+			Target: config.OpenResult{Tenant: "erun", EnvConfig: config.EnvConfig{
 				Name:         "prod",
 				RuntimeImage: "custom-fork-image",
 			}},
@@ -156,7 +159,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				// environments have no line of their own to persist.
 			},
 		}
-		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
 		if saved == nil {
 			t.Fatalf("expected a save (version changed from empty)")
 		}
@@ -167,9 +170,9 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 
 	t.Run("no-op when nothing changed, including RuntimeImage", func(t *testing.T) {
 		saved := false
-		save := func(string, EnvConfig) error { saved = true; return nil }
+		save := func(string, config.EnvConfig) error { saved = true; return nil }
 		spec := DeploySpec{
-			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{
 				Name:                "build",
 				RuntimeVersion:      version,
 				RuntimeImage:        "frs-devops",
@@ -182,7 +185,7 @@ func TestPersistRuntimeVersionFromDeploySpecsHealsRuntimeImage(t *testing.T) {
 				PersistRuntimeImage:  "frs-devops",
 			},
 		}
-		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
 		if saved {
 			t.Fatalf("expected no save: nothing changed")
 		}
@@ -202,10 +205,10 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 	const override = "oci://ghcr.io/sophium/charts/erun-devops:1.0.178"
 
 	t.Run("persists an operator's --runtime-chart override", func(t *testing.T) {
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(new(string), &saved)
 		spec := DeploySpec{
-			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{Name: "prod"}},
+			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "prod"}},
 			Deploy: HelmDeploySpec{
 				ReleaseName:         RuntimeReleaseName(tenant),
 				Version:             version,
@@ -213,7 +216,7 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 				PersistRuntimeChart: override,
 			},
 		}
-		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
 		if saved == nil {
 			t.Fatalf("expected a save")
 		}
@@ -223,10 +226,10 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 	})
 
 	t.Run("empty PersistRuntimeChart never clobbers a recorded RuntimeChart", func(t *testing.T) {
-		var saved *EnvConfig
+		var saved *config.EnvConfig
 		save := capturingSave(new(string), &saved)
 		spec := DeploySpec{
-			Target: OpenResult{Tenant: tenant, EnvConfig: EnvConfig{
+			Target: config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{
 				Name:         "prod",
 				RuntimeChart: override,
 			}},
@@ -237,7 +240,7 @@ func TestPersistRuntimeVersionFromDeploySpecsPersistsRuntimeChart(t *testing.T) 
 				// PersistRuntimeChart left empty: this deploy named no override.
 			},
 		}
-		persistOrFatal(t, Context{}, []DeploySpec{spec}, save, nil)
+		persistOrFatal(t, core.Context{}, []DeploySpec{spec}, save, nil)
 		if saved == nil {
 			t.Fatalf("expected a save (version changed from empty)")
 		}
@@ -256,10 +259,10 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	const tenant = "erun"
 	const mintedVersion = "1.0.86-snapshot-20260608124610"
 	const runningVersion = "1.0.86-snapshot-20260605090000"
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 
 	spec := DeploySpec{
-		Target:        OpenResult{Tenant: tenant, EnvConfig: EnvConfig{Name: "local"}},
+		Target:        config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
 		DeployContext: KubernetesDeployContext{ComponentName: RuntimeReleaseName(tenant)},
 		Deploy: HelmDeploySpec{
 			ReleaseName:       RuntimeReleaseName(tenant),
@@ -272,8 +275,8 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 	helmed := false
 	var savedVersion string
 	deploy := func(HelmDeployParams) error { helmed = true; return nil }
-	save := func(_ string, cfg EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil }
-	resolveRunning := func(Context, string, string, string) (string, error) { return runningVersion, nil }
+	save := func(_ string, cfg config.EnvConfig) error { savedVersion = cfg.RuntimeVersion; return nil }
+	resolveRunning := func(core.Context, string, string, string) (string, error) { return runningVersion, nil }
 
 	specs := []DeploySpec{spec}
 	if err := RunDeploySpecs(ctx, specs, deploy); err != nil {

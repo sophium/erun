@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func TestDecideWhipStaleUncappedNudges(t *testing.T) {
@@ -109,7 +111,7 @@ func TestResolveWhipConfigOverrideWins(t *testing.T) {
 	message := "Custom whip text specific to this install."
 	staleSeconds := 120
 	maxNudges := 2
-	cfg := ResolveWhipConfig(&WhipConfigOverride{
+	cfg := ResolveWhipConfig(&config.WhipConfigOverride{
 		Message:           &message,
 		StaleAfterSeconds: &staleSeconds,
 		MaxNudges:         &maxNudges,
@@ -126,7 +128,7 @@ func TestResolveWhipConfigOverrideWins(t *testing.T) {
 }
 
 func TestListWhipOrchestratorCandidatesAreUnreachable(t *testing.T) {
-	candidates := ListWhipOrchestratorCandidates([]OrchestratorConfig{{ID: "eng-1", Name: "Eng One"}})
+	candidates := ListWhipOrchestratorCandidates([]config.OrchestratorConfig{{ID: "eng-1", Name: "Eng One"}})
 	if len(candidates) != 1 {
 		t.Fatalf("got %d candidates, want 1", len(candidates))
 	}

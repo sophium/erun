@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // OrchestratorEnvRoleNone is the CLI-facing token for explicitly declaring an
@@ -16,15 +19,15 @@ const OrchestratorEnvRoleNone = "none"
 // OrchestratorEnvRole it names, so every surface that lets an operator type a
 // role validates against the exact same set IsValid already defines: "code",
 // "build", "runtime", or OrchestratorEnvRoleNone for undeclared.
-func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
+func ParseOrchestratorEnvRoleFlag(value string) (configpkg.OrchestratorEnvRole, error) {
 	trimmed := strings.TrimSpace(value)
 	if strings.EqualFold(trimmed, OrchestratorEnvRoleNone) {
 		return "", nil
 	}
-	role := OrchestratorEnvRole(trimmed)
+	role := configpkg.OrchestratorEnvRole(trimmed)
 	if !role.IsValid() || role == "" {
 		return "", fmt.Errorf("invalid role %q: must be %q, %q, %q, or %q (undeclared)",
-			value, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime, OrchestratorEnvRoleNone)
+			value, configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime, OrchestratorEnvRoleNone)
 	}
 	return role, nil
 }
@@ -38,9 +41,9 @@ func ParseOrchestratorEnvRoleFlag(value string) (OrchestratorEnvRole, error) {
 // allowed to be created that way -- since editing an existing link never
 // re-derives the type/role pairing on its own.
 type OrchestratorRoleStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-	SaveERunConfig(ERunConfig) error
-	LoadEnvConfig(tenant, environment string) (EnvConfig, string, error)
+	LoadERunConfig() (configpkg.ERunConfig, string, error)
+	SaveERunConfig(configpkg.ERunConfig) error
+	LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error)
 }
 
 // SetOrchestratorEnvRoleParams identifies one orchestrator-to-environment
@@ -49,7 +52,7 @@ type SetOrchestratorEnvRoleParams struct {
 	OrchestratorID string
 	Tenant         string
 	Environment    string
-	Role           OrchestratorEnvRole
+	Role           configpkg.OrchestratorEnvRole
 }
 
 // SetOrchestratorEnvRole sets the role an orchestrator uses one of its
@@ -65,34 +68,34 @@ type SetOrchestratorEnvRoleParams struct {
 // resolves the environment's type to render it); this gate only blocks a new
 // write that keeps or reintroduces an invalid pairing, and it blocks that
 // write the same way regardless of what was persisted before it ran.
-func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params SetOrchestratorEnvRoleParams) (OrchestratorConfig, error) {
+func SetOrchestratorEnvRole(ctx core.Context, store OrchestratorRoleStore, params SetOrchestratorEnvRoleParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
-		return OrchestratorConfig{}, fmt.Errorf("store is required")
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}
 	orchestratorID, tenant, environment, err := normalizeOrchestratorEnvRoleParams(params)
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	if !params.Role.IsValid() {
-		return OrchestratorConfig{}, fmt.Errorf("invalid role %q: must be %q, %q, or %q, or empty for undeclared",
-			params.Role, OrchestratorEnvRoleCode, OrchestratorEnvRoleBuild, OrchestratorEnvRoleRuntime)
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("invalid role %q: must be %q, %q, or %q, or empty for undeclared",
+			params.Role, configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime)
 	}
 
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	orchestratorIndex, envIndex, err := findOrchestratorEnvLink(config, orchestratorID, tenant, environment)
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return OrchestratorConfig{}, fmt.Errorf("resolve %s/%s's environment type to validate role %q: %w", tenant, environment, roleLabel(params.Role), err)
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("resolve %s/%s's environment type to validate role %q: %w", tenant, environment, roleLabel(params.Role), err)
 	}
 	envType := envConfig.ResolvedType()
-	if reason := OrchestratorEnvRoleIneligibilityReason(envType, params.Role); reason != "" {
-		return OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %s/%s is a %q environment, so it cannot take role %q -- %s",
+	if reason := configpkg.OrchestratorEnvRoleIneligibilityReason(envType, params.Role); reason != "" {
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %s/%s is a %q environment, so it cannot take role %q -- %s",
 			orchestratorID, tenant, environment, envType, roleLabel(params.Role), reason)
 	}
 	orchestrator := config.Orchestrators[orchestratorIndex]
@@ -104,14 +107,14 @@ func SetOrchestratorEnvRole(ctx Context, store OrchestratorRoleStore, params Set
 		return orchestrator, nil
 	}
 	if err := store.SaveERunConfig(config); err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	return orchestrator, nil
 }
 
 // findOrchestratorIndex locates orchestratorID's entry in config, or -1 when no
 // orchestrator carries that id.
-func findOrchestratorIndex(config ERunConfig, orchestratorID string) int {
+func findOrchestratorIndex(config configpkg.ERunConfig, orchestratorID string) int {
 	for i, orchestrator := range config.Orchestrators {
 		if orchestrator.ID == orchestratorID {
 			return i
@@ -123,7 +126,7 @@ func findOrchestratorIndex(config ERunConfig, orchestratorID string) int {
 // findOrchestratorEnvLink locates orchestratorID's entry in config and, within
 // it, the link to tenant/environment, returning both indices so the caller can
 // mutate either the orchestrator or one of its environments in place.
-func findOrchestratorEnvLink(config ERunConfig, orchestratorID, tenant, environment string) (orchestratorIndex, envIndex int, err error) {
+func findOrchestratorEnvLink(config configpkg.ERunConfig, orchestratorID, tenant, environment string) (orchestratorIndex, envIndex int, err error) {
 	orchestratorIndex = findOrchestratorIndex(config, orchestratorID)
 	if orchestratorIndex < 0 {
 		return -1, -1, fmt.Errorf("orchestrator %q not found", orchestratorID)
@@ -144,7 +147,7 @@ func findOrchestratorEnvLink(config ERunConfig, orchestratorID, tenant, environm
 // roleLabel renders role the way an operator reads it back: the bare value
 // for a declared role, "undeclared" for the empty zero value, matching what
 // the set-role command itself echoes on a real run.
-func roleLabel(role OrchestratorEnvRole) string {
+func roleLabel(role configpkg.OrchestratorEnvRole) string {
 	if role == "" {
 		return "undeclared"
 	}

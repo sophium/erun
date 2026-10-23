@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -119,7 +121,7 @@ func dockerBuildProcessExitSignal(err error) string {
 	if !errors.As(err, &exitErr) {
 		return ""
 	}
-	return environmentJobExitSignal(exitErr.ProcessState)
+	return core.EnvironmentJobExitSignal(exitErr.ProcessState)
 }
 
 // dockerBuildResourceExhaustionEvidence decides whether the build's own
@@ -240,7 +242,7 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner openK
 	if podName == "" {
 		return "", false
 	}
-	if currentExecutionMode(kubectlPodGetExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryDockerBuildContainerMemoryLimit(podName, containerName)
 	}
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A doctor docker-storage read or prune acts on exactly one docker daemon, and
@@ -86,13 +89,13 @@ func ResolveDoctorDockerDaemon(req ShellLaunchParams) DoctorDockerDaemon {
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
 				runtimeDindContainerName, RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
-	case req.Type == EnvironmentTypeHost:
+	case req.Type == config.EnvironmentTypeHost:
 		return DoctorDockerDaemon{
 			Kind:  DoctorDockerDaemonHost,
 			Label: "this machine's docker daemon",
 			Where: "the docker daemon on this machine, where a host environment's builds run (it is a worktree here with no pod)",
 		}
-	case req.Type == EnvironmentTypeRuntime:
+	case req.Type == config.EnvironmentTypeRuntime:
 		return DoctorDockerDaemon{
 			Kind:  DoctorDockerDaemonNone,
 			Label: "no build daemon",
@@ -334,7 +337,7 @@ func formatDockerStoreBytes(bytes uint64) string {
 
 // runDoctorDockerSteps runs steps against daemon through the transport that
 // daemon is reachable by, and returns both the output and the store readings.
-func runDoctorDockerSteps(ctx Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerSteps(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}
@@ -371,7 +374,7 @@ func runDoctorDockerSteps(ctx Context, runner RuntimeContainerCommandRunnerFunc,
 // hiding the readings that did succeed. The error is returned only when the
 // daemon produced nothing at all, which is the case where there is no reading
 // to show the operator.
-func runDoctorDockerStepsLocally(ctx Context, daemon DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerStepsLocally(ctx core.Context, daemon DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	result := DoctorDockerResult{Daemon: daemon, Readings: map[string]DoctorDockerStore{}}
 	var stdout, stderr bytes.Buffer
 	var failure doctorStepFailure
@@ -429,7 +432,7 @@ func (f *doctorStepFailure) record(step doctorDockerStep, err error) {
 }
 
 func runLocalDockerStep(step doctorDockerStep) ([]byte, []byte, error) {
-	cmd := Command(step.executable(), step.args...)
+	cmd := core.Command(step.executable(), step.args...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errOut

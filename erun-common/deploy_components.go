@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // deployComponentBaseOrder is the tenant-agnostic base of each platform
@@ -68,7 +70,7 @@ func componentBaseName(name string) string {
 // ordered by plan when one was resolved (see resolvePublishedDeployPlan) or
 // else by the default rank (postgres → db → api → powerdns → docs), for the
 // sourceless by-reference deploy path; the runtime is resolved separately.
-func selectedPublishableComponents(selected []string, tenant string, plan ProjectK8sConfig) []string {
+func selectedPublishableComponents(selected []string, tenant string, plan config.ProjectK8sConfig) []string {
 	runtimeAliases := runtimeComponentNames(tenant)
 	out := make([]string, 0, len(selected))
 	for _, name := range selected {
@@ -95,7 +97,7 @@ const (
 // precedence tier (flag, then saved set, then repo plan); tiers never merge. An
 // empty result means no explicit selection, which the caller treats as the runtime
 // chart alone (bootstrap/heal).
-func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan ProjectK8sConfig) ([]string, string) {
+func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan config.ProjectK8sConfig) ([]string, string) {
 	if names := normalizeComponentNames(flagComponents); len(names) > 0 {
 		return names, deploySelectionSourceFlag
 	}
@@ -125,7 +127,7 @@ func normalizeComponentNames(components []string) []string {
 	return out
 }
 
-func planComponentNameList(plan ProjectK8sConfig) []string {
+func planComponentNameList(plan config.ProjectK8sConfig) []string {
 	names := make([]string, 0)
 	for _, step := range plan.Deployments {
 		names = append(names, step.Components...)
@@ -290,7 +292,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 	// exist. A transport then filters this to the charts actually published at the
 	// selected version. Deploying local working-tree charts by name stays available
 	// to an operator via the CLI; the desktop checklist is a published-version view.
-	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, ProjectK8sConfig{})
+	selected, _ := resolveSelectedDeployComponents(target.Components, resolvedTarget.EnvConfig.Deploy.Components, config.ProjectK8sConfig{})
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
 
 	platformNames := publishablePlatformComponentNames(tenant)
@@ -337,14 +339,14 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot ProjectFinde
 // sortDeployContextsByDeployOrder ranks contexts by the k8s plan (hardcoded fallback
 // when the plan is empty); the sort must stay stable so plan-less contexts keep their
 // input order at the end.
-func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan ProjectK8sConfig) {
+func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan config.ProjectK8sConfig) {
 	rank := componentRankByPlan(plan)
 	sort.SliceStable(contexts, func(i, j int) bool {
 		return rank(contexts[i].ComponentName) < rank(contexts[j].ComponentName)
 	})
 }
 
-func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
+func componentRankByPlan(plan config.ProjectK8sConfig) func(name string) int {
 	if len(plan.Deployments) == 0 {
 		// Rank by tenant-agnostic base so erun-backend-api and frs-backend-api
 		// share ordering; a name with no known base sorts last.
@@ -375,7 +377,7 @@ func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
 	}
 }
 
-func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]DeploySpec {
+func groupDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) [][]DeploySpec {
 	if len(specs) == 0 {
 		return nil
 	}
@@ -409,7 +411,7 @@ func serialDeploySpecGroups(specs []DeploySpec) [][]DeploySpec {
 	return groups
 }
 
-func partitionDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) (map[string]DeploySpec, []DeploySpec) {
+func partitionDeploySpecsByPlan(specs []DeploySpec, plan config.ProjectK8sConfig) (map[string]DeploySpec, []DeploySpec) {
 	stepIndex := make(map[string]int)
 	for i, step := range plan.Deployments {
 		for _, name := range step.Components {

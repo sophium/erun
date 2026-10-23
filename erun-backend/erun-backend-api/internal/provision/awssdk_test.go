@@ -12,7 +12,9 @@ import (
 	"sync"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // fakeAWS is an HTTP endpoint that speaks the real EC2/IAM query and SSM JSON
@@ -198,12 +200,12 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 	}
 
 	status, err := eruncommon.InitCloudContext(
-		eruncommon.Context{
-			Logger: eruncommon.NewLoggerWithWriters(eruncommon.VerbosityInfo, io.Discard, io.Discard),
+		core.Context{
+			Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard),
 			Stdout: io.Discard,
 			Stderr: io.Discard,
 		},
-		aliasStore{alias: "acme-aws", provider: eruncommon.CloudProviderAWS},
+		aliasStore{alias: "acme-aws", provider: config.CloudProviderAWS},
 		eruncommon.InitCloudContextParams{
 			Name:               "erun-test",
 			CloudProviderAlias: "acme-aws",
@@ -214,7 +216,7 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 		},
 		eruncommon.CloudContextDependencies{
 			RunAWS:     runner.runAWS(t.Context()),
-			RunKubectl: func(eruncommon.Context, []string) error { return nil },
+			RunKubectl: func(core.Context, []string) error { return nil },
 			NewToken:   func() string { return "test-admin-token" },
 		},
 	)

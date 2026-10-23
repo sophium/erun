@@ -4,13 +4,16 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // materializeConfiguredFingerprints seeds the local Docker store with the
 // fp-tagged images a project's configured fingerprints point at, so a fresh
 // checkout can promote those builds instead of rebuilding them. Failures fall
 // through silently, leaving the build to rebuild as it would without this step.
-func materializeConfiguredFingerprints(ctx Context, builds []DockerBuildSpec) (map[string]struct{}, error) {
+func materializeConfiguredFingerprints(ctx core.Context, builds []DockerBuildSpec) (map[string]struct{}, error) {
 	materialized := make(map[string]struct{})
 	configuredByEnv := make(map[string]map[string]string)
 
@@ -47,9 +50,9 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	if configured, loaded := cache[key]; loaded {
 		return configured, nil
 	}
-	cfg, _, err := LoadProjectConfig(projectRoot)
+	cfg, _, err := config.LoadProjectConfig(projectRoot)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			cache[key] = nil
 			return nil, nil
 		}
@@ -60,7 +63,7 @@ func loadConfiguredFingerprints(projectRoot, environment string, cache map[strin
 	return configured, nil
 }
 
-func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash string, materialized map[string]struct{}) {
+func materializeBuildFingerprints(ctx core.Context, build DockerBuildSpec, hash string, materialized map[string]struct{}) {
 	for _, platform := range build.Platforms {
 		fpTag := fingerprintTag(build.Image, hash, platform)
 		if exists, err := DockerImageExists(fpTag); err == nil && exists {
@@ -75,7 +78,7 @@ func materializeBuildFingerprints(ctx Context, build DockerBuildSpec, hash strin
 	}
 }
 
-func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform string, insecure bool) error {
+func pullAndTagConfiguredFingerprint(ctx core.Context, sourceTag, fpTag, platform string, insecure bool) error {
 	ctx.TraceCommand("", "docker", append(dockerManifestArgs("inspect", insecure), sourceTag)...)
 	if !ctx.DryRun {
 		exists, err := DockerManifestExists(sourceTag, insecure)
@@ -88,7 +91,7 @@ func pullAndTagConfiguredFingerprint(ctx Context, sourceTag, fpTag, platform str
 	}
 	ctx.TraceCommand("", "docker", "pull", "--platform", platform, sourceTag)
 	if !ctx.DryRun {
-		cmd := Command("docker", "pull", "--platform", platform, sourceTag)
+		cmd := core.Command("docker", "pull", "--platform", platform, sourceTag)
 		if err := cmd.Run(); err != nil {
 			return err
 		}

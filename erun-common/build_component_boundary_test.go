@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const unconsumedTestStageDockerfileContent = "" +
@@ -80,7 +82,7 @@ func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, unconsumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, componentDir)
 
-	_, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err == nil {
 		t.Fatal("expected erun build to refuse a Dockerfile whose test stage is never consumed")
 	}
@@ -91,7 +93,7 @@ func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 	}
 
 	// erun push resolves its own builds; it must not publish what build refuses.
-	if _, err := ResolveDockerPushExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
+	if _, err := ResolveDockerPushExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
 		t.Fatal("expected erun push to refuse the same Dockerfile")
 	}
 }
@@ -100,7 +102,7 @@ func TestBuildResolutionAcceptsAConsumedTestStage(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, componentDir)
 
-	execution, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err != nil {
 		t.Fatalf("expected a consumed test stage to resolve, got %v", err)
 	}
@@ -115,7 +117,7 @@ func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
 	projectRoot, _, suiteDir := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, suiteDir)
 
-	_, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
+	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
 	if err == nil {
 		t.Fatal("expected erun build to refuse an e2e suite's Dockerfile")
 	}
@@ -126,7 +128,7 @@ func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {
 		t.Fatalf("refusal %q does not point at erun e2e for the suite", err)
 	}
 
-	if _, _, err := ResolveDockerPushSpec(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
+	if _, _, err := ResolveDockerPushSpec(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot)); err == nil {
 		t.Fatal("expected erun push to refuse an e2e suite's Dockerfile")
 	}
 }
@@ -178,7 +180,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) DockerBuildSpec {
 func runOutcomeBuild(t *testing.T, buildInput DockerBuildSpec, build DockerImageBuilderFunc) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	err := executeDockerBuild(ctx, buildInput, build, io.Discard, io.Discard)
 	return log.String(), err
 }
@@ -204,7 +206,7 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 		{"rebuilt on a fingerprint miss", rebuilt, succeed, "api: test: passed\n"},
 		{"promoted", promoted, succeed, "api: test: reused (fingerprint fp-abc123)\n"},
 		{"promote fell back to a rebuild", promoted, func(input DockerBuildSpec, _, _ io.Writer) error {
-			input.cache.notePromoteFallback()
+			input.cache.NotePromoteFallback()
 			return nil
 		}, "api: test: passed\n"},
 	}
@@ -229,7 +231,7 @@ func TestFailedOrDryRunBuildReportsNoTestOutcome(t *testing.T) {
 	}
 
 	var dry bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityInfo, &dry, &dry)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &dry, &dry)}
 	if err := RunDockerBuild(ctx, build, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("a dry run must not build")
 		return nil
@@ -263,7 +265,7 @@ func TestConcurrentBuildsReportTestOutcomesInBuildOrder(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: io.Discard, Stderr: io.Discard}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: io.Discard, Stderr: io.Discard}
 	if err := runBuildDependencies(ctx, ordered, dependencies, build, 2); err != nil {
 		t.Fatalf("run builds: %v", err)
 	}

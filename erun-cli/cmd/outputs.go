@@ -8,11 +8,13 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
 // OpenResolver resolves an env's runtime target from tenant/environment scope.
-type OpenResolver func(common.OpenParams) (common.OpenResult, error)
+type OpenResolver func(common.OpenParams) (config.OpenResult, error)
 
 func newOutputsCmd(resolveOpen OpenResolver) *cobra.Command {
 	return newCommandGroup(
@@ -83,7 +85,7 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath string, limit int, run common.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath string, limit int, run common.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -93,7 +95,7 @@ func runOutputsListCommand(ctx common.Context, resolveOpen OpenResolver, params 
 	if err != nil {
 		return err
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(list)
 	}
 	if ctx.DryRun {
@@ -102,7 +104,7 @@ func runOutputsListCommand(ctx common.Context, resolveOpen OpenResolver, params 
 	return writeOutputsListText(ctx, list)
 }
 
-func writeOutputsListText(ctx common.Context, list common.RuntimeOutputsListResult) error {
+func writeOutputsListText(ctx core.Context, list common.RuntimeOutputsListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Outputs in %s:\n", list.Dir); err != nil {
 		return err
 	}
@@ -139,7 +141,7 @@ type outputsDownloadCLIResult struct {
 	Signing *common.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run common.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run common.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -161,7 +163,7 @@ func runOutputsDownloadCommand(ctx common.Context, resolveOpen OpenResolver, par
 	// operator runs, so it is where a darwin binary gets the signature macOS
 	// demands. A signing problem is reported, never fatal: the file has arrived.
 	signing := common.SignHostArtifact(destPath)
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		result := outputsDownloadCLIResult{
 			Name:          out.Name,
 			Dest:          destPath,

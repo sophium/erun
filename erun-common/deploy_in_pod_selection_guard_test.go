@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // inPodEnvLookup matches what the runtime chart injects into every container.
@@ -19,8 +22,8 @@ func inPodEnvLookup(tenant, environment string) func(string) string {
 }
 
 func TestInPodRuntimeOnlySelectionRefusesRatherThanRollingOneChartSilently(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
-	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
+	selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
 	if len(selected) != 0 || source != deploySelectionSourceDefault {
 		t.Fatalf("precondition: got (%v, %q), want the runtime-only default", selected, source)
 	}
@@ -45,7 +48,7 @@ func TestInPodRuntimeOnlySelectionRefusesRatherThanRollingOneChartSilently(t *te
 }
 
 func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
+	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
 	inPod := inPodEnvLookup("frs", "prod")
 	components := []string{"frs-devops", "frs-backend-api", "frs-docs"}
 
@@ -53,12 +56,12 @@ func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
 		name       string
 		flag       []string
 		saved      []string
-		plan       ProjectK8sConfig
+		plan       config.ProjectK8sConfig
 		wantSource string
 	}{
-		{"explicit flag", components, nil, ProjectK8sConfig{}, deploySelectionSourceFlag},
-		{"saved deploy.components", nil, components, ProjectK8sConfig{}, deploySelectionSourceSaved},
-		{"repo k8s.deployments plan", nil, nil, ProjectK8sConfig{Deployments: []ProjectK8sDeploymentStep{{Components: components}}}, deploySelectionSourcePlan},
+		{"explicit flag", components, nil, config.ProjectK8sConfig{}, deploySelectionSourceFlag},
+		{"saved deploy.components", nil, components, config.ProjectK8sConfig{}, deploySelectionSourceSaved},
+		{"repo k8s.deployments plan", nil, nil, config.ProjectK8sConfig{Deployments: []config.ProjectK8sDeploymentStep{{Components: components}}}, deploySelectionSourcePlan},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, source := resolveSelectedDeployComponents(tc.flag, tc.saved, tc.plan)
@@ -76,8 +79,8 @@ func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
 }
 
 func TestInPodRuntimeOnlySelectionLeavesTheOffPodFallbackAlone(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
-	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
+	selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
 
 	for _, tc := range []struct {
 		name string
@@ -104,7 +107,7 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 	t.Setenv("ERUN_TENANT", "frs")
 	t.Setenv("ERUN_ENVIRONMENT", "prod")
 
-	selected, err := resolveGuardedDeploySelection(Context{}, DeployTarget{}, OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}, ProjectK8sConfig{})
+	selected, err := resolveGuardedDeploySelection(core.Context{}, DeployTarget{}, config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}, config.ProjectK8sConfig{})
 	if err == nil {
 		t.Fatal("resolveGuardedDeploySelection returned the runtime-only default in-pod without refusing")
 	}
@@ -120,20 +123,20 @@ func TestResolveGuardedDeploySelectionRefusesTheBlindRuntimeOnlyFallbackInPod(t 
 // refusal speaks, not what is permitted.
 func TestInPodRuntimeOnlySelectionIsScopedToRuntimeEnvironments(t *testing.T) {
 	for _, tc := range []struct {
-		envType EnvironmentType
+		envType config.EnvironmentType
 		refused bool
 	}{
-		{EnvironmentTypeRuntime, true},
-		{EnvironmentTypeLocalAgent, false},
-		{EnvironmentTypeRemoteAgent, false},
+		{config.EnvironmentTypeRuntime, true},
+		{config.EnvironmentTypeLocalAgent, false},
+		{config.EnvironmentTypeRemoteAgent, false},
 	} {
 		t.Run(string(tc.envType), func(t *testing.T) {
-			resolvedTarget := OpenResult{
+			resolvedTarget := config.OpenResult{
 				Tenant:      "frs",
 				Environment: "prod",
-				EnvConfig:   EnvConfig{Type: tc.envType},
+				EnvConfig:   config.EnvConfig{Type: tc.envType},
 			}
-			selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+			selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
 			err := guardInPodBlindRuntimeOnlySelection(inPodEnvLookup("frs", "prod"), resolvedTarget, DeployTarget{}, selected, source)
 			if tc.refused && err == nil {
 				t.Fatalf("%s: in-pod runtime-only fallback was not refused", tc.envType)
@@ -146,8 +149,8 @@ func TestInPodRuntimeOnlySelectionIsScopedToRuntimeEnvironments(t *testing.T) {
 }
 
 func TestInPodRuntimeOnlySelectionIgnoresAnIncompleteInjectedIdentity(t *testing.T) {
-	resolvedTarget := OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: EnvConfig{Type: EnvironmentTypeRuntime}}
-	selected, source := resolveSelectedDeployComponents(nil, nil, ProjectK8sConfig{})
+	resolvedTarget := config.OpenResult{Tenant: "frs", Environment: "prod", EnvConfig: config.EnvConfig{Type: config.EnvironmentTypeRuntime}}
+	selected, source := resolveSelectedDeployComponents(nil, nil, config.ProjectK8sConfig{})
 	env := func(key string) string {
 		if key == "ERUN_TENANT" {
 			return "frs"

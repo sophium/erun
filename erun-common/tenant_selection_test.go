@@ -4,10 +4,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func refusingSelector(called *bool) SelectTenantFunc {
-	return func([]TenantConfig) (TenantSelectionResult, error) {
+	return func([]config.TenantConfig) (TenantSelectionResult, error) {
 		*called = true
 		return TenantSelectionResult{}, nil
 	}
@@ -20,7 +22,7 @@ func TestSelectTenantUnavailableUsesSoleTenantWithoutAsking(t *testing.T) {
 		SelectTenant:               refusingSelector(&called),
 	}}
 
-	selection, err := runner.selectTenant(BootstrapInitParams{}, []TenantConfig{{Name: "erun"}})
+	selection, err := runner.selectTenant(BootstrapInitParams{}, []config.TenantConfig{{Name: "erun"}})
 	if err != nil {
 		t.Fatalf("selectTenant: %v", err)
 	}
@@ -39,7 +41,7 @@ func TestSelectTenantUnavailableRefusesARealChoiceWithoutAsking(t *testing.T) {
 		SelectTenant:               refusingSelector(&called),
 	}}
 
-	_, err := runner.selectTenant(BootstrapInitParams{}, []TenantConfig{{Name: "erun"}, {Name: "frs"}, {Name: "petios"}})
+	_, err := runner.selectTenant(BootstrapInitParams{}, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}, {Name: "petios"}})
 	if err == nil {
 		t.Fatal("expected a refusal when several tenants need a choice nobody can make")
 	}
@@ -65,7 +67,7 @@ func TestSelectTenantUnavailableLeavesAnExplicitChoiceAlone(t *testing.T) {
 		SelectTenant:               refusingSelector(&called),
 	}}
 
-	selection, err := runner.selectTenant(BootstrapInitParams{SelectedTenant: "frs"}, []TenantConfig{{Name: "erun"}, {Name: "frs"}})
+	selection, err := runner.selectTenant(BootstrapInitParams{SelectedTenant: "frs"}, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
 	if err != nil {
 		t.Fatalf("selectTenant: %v", err)
 	}
@@ -80,13 +82,13 @@ func TestSelectTenantUnavailableLeavesAnExplicitChoiceAlone(t *testing.T) {
 func TestSelectTenantAvailableStillAsks(t *testing.T) {
 	called := false
 	runner := bootstrapRunner{BootstrapInitDependencies: BootstrapInitDependencies{
-		SelectTenant: func([]TenantConfig) (TenantSelectionResult, error) {
+		SelectTenant: func([]config.TenantConfig) (TenantSelectionResult, error) {
 			called = true
 			return TenantSelectionResult{Tenant: "frs"}, nil
 		},
 	}}
 
-	selection, err := runner.selectTenant(BootstrapInitParams{}, []TenantConfig{{Name: "erun"}, {Name: "frs"}})
+	selection, err := runner.selectTenant(BootstrapInitParams{}, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
 	if err != nil {
 		t.Fatalf("selectTenant: %v", err)
 	}
@@ -105,7 +107,7 @@ func TestTenantSelectionUnavailableIsNotABootstrapInteraction(t *testing.T) {
 		SelectTenant:               refusingSelector(&called),
 	}}
 
-	_, err := runner.selectTenant(BootstrapInitParams{}, []TenantConfig{{Name: "erun"}, {Name: "frs"}})
+	_, err := runner.selectTenant(BootstrapInitParams{}, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
 	if _, ok := AsBootstrapInitInteraction(err); ok {
 		t.Fatal("a transport that cannot ask got asked again through an interaction request")
 	}

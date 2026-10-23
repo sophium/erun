@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The pod's sshd listens on loopback only; the activity ssh-proxy in front of it
@@ -28,7 +30,7 @@ func describeRuntimeSSHD(boot runtimeBoot) string {
 // holds the pid file. The pid files are on the home volume and survive the pod,
 // while every pod gets a fresh pid namespace that recycles low pids, so a pid is
 // only trusted when /proc says the process is the expected program.
-func startRuntimeSSHD(_ Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func startRuntimeSSHD(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	sshdDir := boot.path(".sshd")
 	hostKeyDir := filepath.Join(sshdDir, "host_keys")
 	for _, dir := range []string{boot.path(".ssh"), hostKeyDir} {
@@ -52,7 +54,7 @@ func startRuntimeSSHD(_ Context, boot runtimeBoot, supervisor *runtimeSupervisor
 func launchRuntimeSSHD(boot runtimeBoot, sshdDir, hostKeyDir, pidFile string, supervisor *runtimeSupervisor) error {
 	hostKey := filepath.Join(hostKeyDir, "ssh_host_ed25519_key")
 	if _, err := os.Stat(hostKey); err != nil {
-		if err := supervisor.run(Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", hostKey)); err != nil {
+		if err := supervisor.run(core.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", hostKey)); err != nil {
 			return fmt.Errorf("generate the sshd host key: %w", err)
 		}
 	}
@@ -85,7 +87,7 @@ func launchRuntimeSSHD(boot runtimeBoot, sshdDir, hostKeyDir, pidFile string, su
 	}
 	// sshd daemonises: this waits only for its parent, and the daemon itself is
 	// reparented here, where the init loop reaps its per-connection children.
-	return supervisor.run(Command(boot.sshdPath, "-f", configFile, "-E", filepath.Join(sshdDir, "sshd.log")))
+	return supervisor.run(core.Command(boot.sshdPath, "-f", configFile, "-E", filepath.Join(sshdDir, "sshd.log")))
 }
 
 func startRuntimeSSHProxy(boot runtimeBoot, sshdDir string, supervisor *runtimeSupervisor) error {
@@ -98,7 +100,7 @@ func startRuntimeSSHProxy(boot runtimeBoot, sshdDir string, supervisor *runtimeS
 	if err != nil {
 		return err
 	}
-	cmd := Command(boot.erunPath, "activity", "ssh-proxy",
+	cmd := core.Command(boot.erunPath, "activity", "ssh-proxy",
 		"--tenant", boot.tenant(),
 		"--environment", boot.environment(),
 		"--listen", "0.0.0.0:"+boot.sshdProxyPort(),

@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // rulesetBypassNotice is GitHub's own report, written to `git push`'s stderr,
@@ -85,7 +87,7 @@ func bypassNoticeRef(line string) string {
 // rules. Saying so where the push itself is reported is the point -- the only
 // other trace is GitHub's own remote line, which erun captures and used to
 // discard on success.
-func reportRulesetBypass(ctx Context, remote string, notice rulesetBypassNotice) {
+func reportRulesetBypass(ctx core.Context, remote string, notice rulesetBypassNotice) {
 	target := "this repository's ruleset"
 	if notice.Ref != "" {
 		target = "the ruleset protecting " + notice.Ref
@@ -103,7 +105,7 @@ func reportRulesetBypass(ctx Context, remote string, notice rulesetBypassNotice)
 // the entry point for callers that hold a push's arguments rather than the
 // resolved remote, so every push erun makes can report a bypass from the one
 // parse instead of each site growing its own.
-func reportRulesetBypassFromPushArgs(ctx Context, args []string, stderr string) {
+func reportRulesetBypassFromPushArgs(ctx core.Context, args []string, stderr string) {
 	notice, ok := parseRulesetBypassNotice(stderr)
 	if !ok {
 		return

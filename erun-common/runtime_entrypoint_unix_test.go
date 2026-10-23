@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func waitForRuntimeCondition(t *testing.T, what string, condition func() bool) {
@@ -73,7 +75,7 @@ func TestRuntimeMCPIsRestartedWhenItExits(t *testing.T) {
 
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17000"})
 	var log syncBuffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	supervisor := newRuntimeSupervisor(ctx)
 	t.Cleanup(func() { supervisor.shutdown(syscall.SIGTERM) })
 	if err := startRuntimeMCP(ctx, boot, supervisor); err != nil {
@@ -171,7 +173,7 @@ func TestRuntimeBootGitChildrenAreOwnedWhileTheyRun(t *testing.T) {
 	repo := filepath.Join(work, "git", "repo")
 	boot := newTestRuntimeBoot(t, map[string]string{"ERUN_REPO_URL": origin, "ERUN_REPO_REF": "v1.2.3", "ERUN_REPO_PATH": repo})
 	var log syncBuffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	supervisor := newRuntimeSupervisor(ctx)
 
 	finish := watchRuntimeGitGate(supervisor, gate, pidsFile)

@@ -12,7 +12,9 @@ import (
 	"runtime"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ignoreAlreadyClosed makes a session's Close idempotent. A PTY whose process
@@ -179,7 +181,7 @@ func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) st
 
 func runIDECommand(ctx context.Context, params startTerminalSessionParams) (string, error) {
 	cmd := exec.CommandContext(ctx, params.Executable, params.Args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	cmd.Dir = resolveTerminalStartDir(params.Dir)
 	if len(params.Env) > 0 {
 		cmd.Env = append(os.Environ(), params.Env...)
@@ -196,7 +198,7 @@ func runIDECommand(ctx context.Context, params startTerminalSessionParams) (stri
 func launchHostArtifactDetached(exePath, dir string) error {
 	cmd := exec.Command(exePath)
 	cmd.Dir = dir
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch %s: %w", filepath.Base(exePath), err)
 	}
@@ -244,7 +246,7 @@ func buildOpenIDEArgs(selection uiSelection, ide string) []string {
 	}
 }
 
-func buildLocalOpenIDEParams(result eruncommon.OpenResult, ide string) (startTerminalSessionParams, error) {
+func buildLocalOpenIDEParams(result config.OpenResult, ide string) (startTerminalSessionParams, error) {
 	projectPath := strings.TrimSpace(result.RepoPath)
 	if projectPath == "" {
 		return startTerminalSessionParams{}, fmt.Errorf("local project path is required")
@@ -343,11 +345,11 @@ func reconnectSessionParams(params startTerminalSessionParams) startTerminalSess
 	return params
 }
 
-func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result config.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -366,11 +368,11 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 // actionable detail on failure. It passes --reconnect, so the child reattaches
 // to the runtime that is already there: it neither deploys one nor starts a
 // stopped environment.
-func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
+func runOpenForReconnect(ctx context.Context, cliPath string, result config.OpenResult, onLine func(string)) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -419,11 +421,11 @@ func scanReconnectOutput(reader io.Reader, captureErr bool, onLine func(string),
 	}
 }
 
-func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result config.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
-	eruncommon.HideConsoleWindow(cmd)
-	eruncommon.BoundCommandWait(cmd)
+	core.HideConsoleWindow(cmd)
+	core.BoundCommandWait(cmd)
 	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
@@ -605,7 +607,7 @@ func resolveTerminalStartDir(preferred string) string {
 	return "."
 }
 
-func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result eruncommon.OpenResult) string {
+func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result config.OpenResult) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return resolveTerminalStartDir(projectRoot)

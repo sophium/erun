@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // resourceQuotaName and limitRangeName are deterministic per namespace, so a
@@ -23,7 +26,7 @@ const (
 // minimum node size for the whole namespace (#1076), so it is instead the
 // small fixed value in DefaultLimitRangeDefaultRequestCPU/Memory, independent
 // of how large the cap is configured.
-func namespaceResourceQuotaManifest(namespace string, quota NamespaceResourceQuota) string {
+func namespaceResourceQuotaManifest(namespace string, quota config.NamespaceResourceQuota) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -61,7 +64,7 @@ spec:
 // TraceApplyKubernetesResourceQuota records the dry-run plan for the namespace
 // cap, mirroring TraceEnsureKubernetesNamespace. A zero quota traces nothing —
 // deploy applies no ResourceQuota/LimitRange when the env has no cap configured.
-func TraceApplyKubernetesResourceQuota(ctx Context, contextName, namespace string, quota NamespaceResourceQuota) {
+func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace string, quota config.NamespaceResourceQuota) {
 	if quota.IsZero() || strings.TrimSpace(namespace) == "" {
 		return
 	}
@@ -77,7 +80,7 @@ func TraceApplyKubernetesResourceQuota(ctx Context, contextName, namespace strin
 // ResourceQuota + LimitRange from quota. A zero quota is a no-op, so an
 // environment with no cap configured deploys exactly as it did before this
 // existed.
-func EnsureKubernetesResourceQuota(contextName, namespace string, quota NamespaceResourceQuota) error {
+func EnsureKubernetesResourceQuota(contextName, namespace string, quota config.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil
 	}
@@ -92,7 +95,7 @@ func EnsureKubernetesResourceQuota(contextName, namespace string, quota Namespac
 	}
 	args = append(args, "apply", "-n", namespace, "-f", "-")
 
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stdin = strings.NewReader(namespaceResourceQuotaManifest(namespace, quota))
 	output, err := cmd.CombinedOutput()
 	if err != nil {

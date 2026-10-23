@@ -8,9 +8,11 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-type SSHDActivator func(common.Context, common.OpenResult) error
+type SSHDActivator func(core.Context, config.OpenResult) error
 
 var (
 	waitForSSHDRemoteDeployment    = common.WaitForShellDeployment
@@ -23,7 +25,7 @@ const (
 )
 
 func newSSHDActivator(runRemoteCommand common.RemoteCommandRunnerFunc) SSHDActivator {
-	return func(ctx common.Context, result common.OpenResult) error {
+	return func(ctx core.Context, result config.OpenResult) error {
 		if !result.EnvConfig.SSHD.Enabled {
 			return nil
 		}
@@ -43,7 +45,7 @@ func newSSHDActivator(runRemoteCommand common.RemoteCommandRunnerFunc) SSHDActiv
 	}
 }
 
-func syncRemoteSSHDKey(ctx common.Context, result common.OpenResult, runRemoteCommand common.RemoteCommandRunnerFunc) (string, error) {
+func syncRemoteSSHDKey(ctx core.Context, result config.OpenResult, runRemoteCommand common.RemoteCommandRunnerFunc) (string, error) {
 	publicKeyPath, publicKey, err := resolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
 		if !ctx.DryRun {
@@ -130,7 +132,7 @@ func readSSHDPublicKey(path string) (string, error) {
 // executes, and this block is prose (`SSH:`, `host:`, ...) that eval would run
 // as commands. stderr is not the fallback: the alias does not capture it, and
 // keeping it quiet there is deliberate, so a piped run simply omits the block.
-func emitSSHDConnectionInfo(ctx common.Context, info common.SSHConnectionInfo) error {
+func emitSSHDConnectionInfo(ctx core.Context, info common.SSHConnectionInfo) error {
 	if ctx.Stdout == nil || !writerIsTerminal(ctx.Stdout) {
 		return nil
 	}

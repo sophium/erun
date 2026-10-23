@@ -8,19 +8,21 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
-type APIForwarder func(common.Context, common.OpenResult) error
+type APIForwarder func(core.Context, config.OpenResult) error
 
 func newAPIForwarder() APIForwarder {
-	return func(ctx common.Context, result common.OpenResult) error {
+	return func(ctx core.Context, result config.OpenResult) error {
 		_, err := ensureAPIPortForward(ctx, result)
 		return err
 	}
 }
 
-func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, error) {
-	localPort := common.APIPortForResult(result)
+func ensureAPIPortForward(ctx core.Context, result config.OpenResult) (int, error) {
+	localPort := config.APIPortForResult(result)
 	statePath, err := apiPortForwardStatePath(result.Tenant, result.Environment, ctx.DryRun)
 	if err != nil {
 		return 0, err
@@ -80,7 +82,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 // the caller, rather than asserted outright — the same split
 // TraceEnsureKubernetesNamespace uses for the analogous namespace-create
 // decision.
-func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, state, expectedState mcpPortForwardState, localPort int) (int, error) {
+func ensureAPIPortForwardDryRun(ctx core.Context, result config.OpenResult, state, expectedState mcpPortForwardState, localPort int) (int, error) {
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args, canReachLocalAPIEndpoint); previewed {
 		return port, nil
@@ -93,7 +95,7 @@ func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, st
 }
 
 // adoptForeignAPIPortForward mirrors adoptForeignMCPPortForward; see it for the adoption contract.
-func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
+func adoptForeignAPIPortForward(ctx core.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
 	pid, argv, ok := findLocalPortHolder(localPort)
 	if !ok {
 		return false, fmt.Errorf("local API port %d is already in use", localPort)
@@ -118,7 +120,7 @@ func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected m
 	return true, nil
 }
 
-func startAPIPortForward(ctx common.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
+func startAPIPortForward(ctx core.Context, statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	expectedState.LogPath = logPath
 	process, err := startPortForwardWithBindRetry(ctx, "api", localPort, func() (*os.Process, error) {
@@ -154,7 +156,7 @@ func launchAPIPortForwardProcess(logPath string, args []string) (*os.Process, er
 		_ = logFile.Close()
 	}()
 
-	cmd := common.Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)
@@ -187,7 +189,7 @@ func waitForAPIPortForward(localPort int, logPath string, logStart int64) error 
 	return fmt.Errorf("timed out waiting for API port-forward on 127.0.0.1:%d; see %s", localPort, logPath)
 }
 
-func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string {
+func kubectlAPIPortForwardArgs(result config.OpenResult, localPort int) []string {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
@@ -212,7 +214,7 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	// environment that resolves no port block at all deploys the chart's
 	// `default 17033`, so that is the port its Service answers on and the one
 	// to ask kubectl for.
-	servicePort := common.APIServicePortForResult(result)
+	servicePort := config.APIServicePortForResult(result)
 	args = append(args,
 		"port-forward",
 		fmt.Sprintf("service/%s", common.APIDeploymentName(result.Tenant)),

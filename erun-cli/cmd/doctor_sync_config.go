@@ -5,12 +5,13 @@ import (
 	"os"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runRuntimeConfigSync reconciles the in-pod erun config with the helm-injected
 // env vars. The --sync-config flag is itself the operator's confirmation, so it
 // applies without a further prompt.
-func runRuntimeConfigSync(ctx common.Context, promptRunner PromptRunner, options doctorOptions, configHome string) error {
+func runRuntimeConfigSync(ctx core.Context, promptRunner PromptRunner, options doctorOptions, configHome string) error {
 	_ = promptRunner
 	_ = options
 	inspection, err := common.InspectRuntimeConfigSync(configHome, os.Getenv)
@@ -39,7 +40,7 @@ func runRuntimeConfigSync(ctx common.Context, promptRunner PromptRunner, options
 	return err
 }
 
-func writeConfigSyncDriftReport(ctx common.Context, inspection common.ConfigSyncInspection) error {
+func writeConfigSyncDriftReport(ctx core.Context, inspection common.ConfigSyncInspection) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "In-pod config drift for %s/%s:\n", inspection.Tenant, inspection.Environment); err != nil {
 		return err
 	}

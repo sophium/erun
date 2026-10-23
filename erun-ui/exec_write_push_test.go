@@ -6,17 +6,18 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func execWritePushTestStore(t *testing.T) erunUIStore {
 	t.Helper()
 	projectRoot := t.TempDir()
 	return stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/local": {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // reportedRuntimePodEnvNames is the `erun-devops` container's environment
@@ -49,10 +51,10 @@ func reportedRuntimePodEnvNames() []string {
 // configured against: the operator had a gateway, which is why the absence of
 // its routing variable on the pod is a defect rather than a configuration the
 // operator never asked for.
-func reportedGateway() *OpenRouterConfig {
-	return &OpenRouterConfig{
+func reportedGateway() *config.OpenRouterConfig {
+	return &config.OpenRouterConfig{
 		BaseURL: "https://openrouter.ai/api",
-		Models:  []OpenRouterModel{{ID: "some/model", Context: 200000}},
+		Models:  []config.OpenRouterModel{{ID: "some/model", Context: 200000}},
 	}
 }
 
@@ -124,7 +126,7 @@ func runtimeDeploymentJSON(container string, envNames []string) string {
 
 // gatewayDiagnosisRequest is the request `erun doctor` and `erun environment`
 // build for a gateway-routed environment.
-func gatewayDiagnosisRequest(gateway *OpenRouterConfig) ShellLaunchParams {
+func gatewayDiagnosisRequest(gateway *config.OpenRouterConfig) ShellLaunchParams {
 	return ShellLaunchParams{
 		Tenant:            "frs",
 		Environment:       "build",
@@ -253,7 +255,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 		{
 			name: "the environment opted out of the catalog",
 			params: RuntimeAgentCredentialParams{
-				Claude:               EnvironmentClaudeConfig{UseGateway: &optedOut},
+				Claude:               config.EnvironmentClaudeConfig{UseGateway: &optedOut},
 				Gateway:              reportedGateway(),
 				Container:            DevopsComponentName,
 				ContainerEnvObserved: true,

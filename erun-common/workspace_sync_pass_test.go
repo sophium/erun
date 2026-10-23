@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The host mirror deletes exactly what the pod's remote listing omits, so these
@@ -99,14 +101,14 @@ func TestMain(m *testing.M) {
 	// whole binary rather than per test, so a test added later is isolated by
 	// default. A caller who set the variable explicitly keeps their value.
 	var timingTempDir string
-	if _, ok := os.LookupEnv(TimingRecordDirEnv); !ok {
+	if _, ok := os.LookupEnv(core.TimingRecordDirEnv); !ok {
 		dir, err := os.MkdirTemp("", "erun-timing-test-")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "create timing temp dir: %v\n", err)
 			os.Exit(1)
 		}
-		if err := os.Setenv(TimingRecordDirEnv, dir); err != nil {
-			fmt.Fprintf(os.Stderr, "set %s: %v\n", TimingRecordDirEnv, err)
+		if err := os.Setenv(core.TimingRecordDirEnv, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "set %s: %v\n", core.TimingRecordDirEnv, err)
 			os.Exit(1)
 		}
 		timingTempDir = dir

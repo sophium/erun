@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The sidebar lets an environment's own answer stop a row spinning, which makes
@@ -37,7 +38,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	// configured there.
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
-	if err := eruncommon.SaveEnvConfig(tenant, eruncommon.EnvConfig{Name: environment}); err != nil {
+	if err := config.SaveEnvConfig(tenant, config.EnvConfig{Name: environment}); err != nil {
 		t.Fatalf("SaveEnvConfig: %v", err)
 	}
 	path, err := eruncommon.PortForwardStatePath("mcp", tenant, environment)
@@ -145,7 +146,7 @@ func observeViaPodWith(
 	execRuntimePod func(context.Context, uiSelection, string) (string, error),
 ) environmentActivityState {
 	t.Helper()
-	store := stubUIStore{envs: map[string]eruncommon.EnvConfig{
+	store := stubUIStore{envs: map[string]config.EnvConfig{
 		"acme/dev": {Name: "dev", KubernetesContext: kubernetesContext},
 	}}
 	app := NewApp(erunUIDeps{store: store, execRuntimePod: execRuntimePod})

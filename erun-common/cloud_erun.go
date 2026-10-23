@@ -6,33 +6,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
-
-// ERunProviderConfig is the erun-hosted-platform identity for a cloud alias:
-// the API this alias authenticates against, the OIDC client it authenticates
-// as, and a reference to the stored credential (never the credential itself,
-// which lives only in the secret store).
-//
-// Exactly one of RefreshTokenRef and ClientSecretRef is set, and which one
-// says what kind of identity the alias is. A refresh-token reference is a
-// signed-in person's session, delegated to an environment by `erun init` on
-// the host they signed in on; a client-secret reference is a machine identity
-// erun provisioned for one environment, which presents itself through the
-// client_credentials grant and belongs to no person at all. The two are not
-// interchangeable in either direction: a machine identity can never act as its
-// operator, and a signed-in session is not something a pod should be holding.
-type ERunProviderConfig struct {
-	APIURL          string `json:"apiUrl,omitempty" yaml:"apiurl,omitempty"`
-	ClientID        string `json:"clientId,omitempty" yaml:"clientid,omitempty"`
-	RefreshTokenRef string `json:"refreshTokenRef,omitempty" yaml:"refreshtokenref,omitempty"`
-	ClientSecretRef string `json:"clientSecretRef,omitempty" yaml:"clientsecretref,omitempty"`
-}
-
-// IsMachineIdentity reports whether this alias authenticates as a provisioned
-// machine identity rather than a delegated operator session.
-func (c ERunProviderConfig) IsMachineIdentity() bool {
-	return strings.TrimSpace(c.RefreshTokenRef) == "" && strings.TrimSpace(c.ClientSecretRef) != ""
-}
 
 // InitERunCloudProviderParams is the explicit input for attaching a hosted
 // erun platform as a cloud alias: just the API base URL. Everything else
@@ -52,15 +29,15 @@ const HostedPlatformAPIURL = "https://api.erunpaas.com"
 // /v1/platform) and its issuer's OIDC discovery document, then records the
 // alias, API URL, issuer, and CLI client id. It performs no sign-in: use
 // LoginCloudProviderAlias afterward to obtain a token.
-func InitERunCloudProvider(ctx Context, store CloudStore, params InitERunCloudProviderParams, deps CloudDependencies) (CloudProviderConfig, error) {
+func InitERunCloudProvider(ctx core.Context, store CloudStore, params InitERunCloudProviderParams, deps CloudDependencies) (config.CloudProviderConfig, error) {
 	if store == nil {
-		return CloudProviderConfig{}, fmt.Errorf("store is required")
+		return config.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudDependencies(deps)
 	apiURL := strings.TrimRight(strings.TrimSpace(params.APIURL), "/")
 	ctx.Trace("cloud init erun: api-url=" + apiURL)
 	if apiURL == "" {
-		return CloudProviderConfig{}, fmt.Errorf("erun platform api url is required")
+		return config.CloudProviderConfig{}, fmt.Errorf("erun platform api url is required")
 	}
 
 	accountID := erunPlatformHost(apiURL)
@@ -68,11 +45,11 @@ func InitERunCloudProvider(ctx Context, store CloudStore, params InitERunCloudPr
 		// No network call at all in dry run — a preview must not depend on the
 		// platform actually being reachable.
 		ctx.Trace("cloud init erun: would resolve issuer, cli client id, and oidc discovery from " + apiURL)
-		provider := NormalizeCloudProviderConfig(CloudProviderConfig{
-			Provider:  CloudProviderERun,
+		provider := NormalizeCloudProviderConfig(config.CloudProviderConfig{
+			Provider:  config.CloudProviderERun,
 			Username:  erunAliasUsername,
 			AccountID: accountID,
-			ERun:      &ERunProviderConfig{APIURL: apiURL},
+			ERun:      &config.ERunProviderConfig{APIURL: apiURL},
 		})
 		ctx.Trace("write cloud provider " + provider.Alias)
 		return provider, nil
@@ -81,30 +58,30 @@ func InitERunCloudProvider(ctx Context, store CloudStore, params InitERunCloudPr
 	platform, err := deps.FetchPlatformInfo(ctx, apiURL)
 	if err != nil {
 		ctx.Trace("cloud init erun: platform discovery failed: " + err.Error())
-		return CloudProviderConfig{}, err
+		return config.CloudProviderConfig{}, err
 	}
 	if platform.Issuer == "" {
-		return CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report an OIDC issuer", apiURL)
+		return config.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report an OIDC issuer", apiURL)
 	}
 	if platform.CLIClientID == "" {
-		return CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report a cli oidc client id", apiURL)
+		return config.CloudProviderConfig{}, fmt.Errorf("erun platform at %s did not report a cli oidc client id", apiURL)
 	}
 	if _, err := deps.FetchOIDCDiscovery(ctx, platform.Issuer); err != nil {
 		ctx.Trace("cloud init erun: oidc discovery failed: " + err.Error())
-		return CloudProviderConfig{}, err
+		return config.CloudProviderConfig{}, err
 	}
 
-	alias := CloudProviderAlias(erunAliasUsername, accountID, CloudProviderERun)
+	alias := CloudProviderAlias(erunAliasUsername, accountID, config.CloudProviderERun)
 	if alias == "" {
-		return CloudProviderConfig{}, fmt.Errorf("erun cloud provider alias cannot be resolved")
+		return config.CloudProviderConfig{}, fmt.Errorf("erun cloud provider alias cannot be resolved")
 	}
-	provider := NormalizeCloudProviderConfig(CloudProviderConfig{
+	provider := NormalizeCloudProviderConfig(config.CloudProviderConfig{
 		Alias:         alias,
-		Provider:      CloudProviderERun,
+		Provider:      config.CloudProviderERun,
 		Username:      erunAliasUsername,
 		AccountID:     accountID,
 		OIDCIssuerURL: platform.Issuer,
-		ERun: &ERunProviderConfig{
+		ERun: &config.ERunProviderConfig{
 			APIURL:   apiURL,
 			ClientID: platform.CLIClientID,
 		},
@@ -112,7 +89,7 @@ func InitERunCloudProvider(ctx Context, store CloudStore, params InitERunCloudPr
 	provider.ERun.RefreshTokenRef = existingERunRefreshTokenRef(store, alias)
 	saved, err := SaveCloudProviderConfig(store, provider)
 	if err != nil {
-		return CloudProviderConfig{}, err
+		return config.CloudProviderConfig{}, err
 	}
 	return saved, nil
 }
@@ -158,7 +135,7 @@ func erunPlatformHost(apiURL string) string {
 // Authorization Code + PKCE on a loopback listener otherwise. On success it
 // persists the refresh token (via the secret store, referenced from config)
 // and caches the access token with its expiry.
-func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (CloudProviderStatus, error) {
+func erunCloudProviderLogin(ctx core.Context, store CloudStore, provider config.CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (CloudProviderStatus, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
 		return CloudProviderStatus{}, fmt.Errorf("erun cloud provider %q is not fully configured; run `erun cloud init erun` first", provider.Alias)
 	}
@@ -191,7 +168,7 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 		return CloudProviderStatus{}, err
 	}
 	if ctx.DryRun {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}, nil
+		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}, nil
 	}
 	return persistERunLoginTokens(store, provider, deps, tokens)
 }
@@ -210,7 +187,7 @@ func erunCloudProviderLogin(ctx Context, store CloudStore, provider CloudProvide
 // once, on the same flow, with fallbackScope — before falling back to a
 // different flow at all, since a different flow against the same issuer would
 // likely refuse the same scope for the same reason.
-func acquireERunLoginTokens(ctx Context, discovery OIDCDiscovery, clientID, scope, fallbackScope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
+func acquireERunLoginTokens(ctx core.Context, discovery OIDCDiscovery, clientID, scope, fallbackScope, flow string, hasDeviceEndpoint bool, deps CloudDependencies) (ERunTokens, error) {
 	device := func(s string) (ERunTokens, error) { return erunDeviceFlowLogin(ctx, discovery, clientID, s, deps) }
 	authCode := func(s string) (ERunTokens, error) { return deps.RunERunAuthCodeLogin(ctx, discovery, clientID, s) }
 
@@ -238,7 +215,7 @@ func acquireERunLoginTokens(ctx Context, discovery OIDCDiscovery, clientID, scop
 // runERunLoginAttempt runs run(scope), retrying once with fallbackScope when
 // the issuer's refusal is specifically an invalid_scope response — never for
 // any other failure, which is returned to the caller unchanged.
-func runERunLoginAttempt(ctx Context, scope, fallbackScope string, run func(string) (ERunTokens, error)) (ERunTokens, error) {
+func runERunLoginAttempt(ctx core.Context, scope, fallbackScope string, run func(string) (ERunTokens, error)) (ERunTokens, error) {
 	tokens, err := run(scope)
 	if err == nil || scope == fallbackScope || !isERunInvalidScopeError(err) {
 		return tokens, err
@@ -249,7 +226,7 @@ func runERunLoginAttempt(ctx Context, scope, fallbackScope string, run func(stri
 
 // persistERunLoginTokens saves a fresh refresh token (when the grant returned
 // one) and caches the access token, then returns the resulting status.
-func persistERunLoginTokens(store CloudStore, provider CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (CloudProviderStatus, error) {
+func persistERunLoginTokens(store CloudStore, provider config.CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (CloudProviderStatus, error) {
 	if deps.CloudSecretStore == nil {
 		return CloudProviderStatus{}, fmt.Errorf("cloud secret store is not configured")
 	}
@@ -271,7 +248,7 @@ func persistERunLoginTokens(store CloudStore, provider CloudProviderConfig, deps
 	return CloudProviderTokenStatus(provider, deps), nil
 }
 
-func erunDeviceFlowLogin(ctx Context, discovery OIDCDiscovery, clientID, scope string, deps CloudDependencies) (ERunTokens, error) {
+func erunDeviceFlowLogin(ctx core.Context, discovery OIDCDiscovery, clientID, scope string, deps CloudDependencies) (ERunTokens, error) {
 	auth, err := deps.StartERunDeviceAuthorization(ctx, discovery, clientID, scope)
 	if err != nil {
 		return ERunTokens{}, err
@@ -286,7 +263,7 @@ func erunDeviceFlowLogin(ctx Context, discovery OIDCDiscovery, clientID, scope s
 	return deps.PollERunDeviceToken(ctx, discovery, clientID, auth)
 }
 
-func writeERunLoginPrompt(ctx Context, message string) {
+func writeERunLoginPrompt(ctx core.Context, message string) {
 	if ctx.Stdout == nil {
 		return
 	}
@@ -297,7 +274,7 @@ func writeERunLoginPrompt(ctx Context, message string) {
 // deletion: there is no SSO session to end, so "logout" removes the stored
 // refresh token and cached access token, leaving the alias configured but
 // signed out.
-func erunCloudProviderLogout(ctx Context, provider CloudProviderConfig, deps CloudDependencies) error {
+func erunCloudProviderLogout(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) error {
 	ctx.Trace("cloud logout erun: alias=" + provider.Alias)
 	if ctx.DryRun {
 		return nil
@@ -313,7 +290,7 @@ func erunCloudProviderLogout(ctx Context, provider CloudProviderConfig, deps Clo
 	return deps.CloudSecretStore.DeleteCloudSecret(erunAccessTokenCacheRef(provider.Alias))
 }
 
-func erunCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, deps CloudDependencies) (CloudBearerToken, error) {
+func erunCloudProviderBearerToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (CloudBearerToken, error) {
 	if ctx.DryRun {
 		return CloudBearerToken{Alias: provider.Alias, Provider: provider.Provider, Issuer: provider.OIDCIssuerURL}, nil
 	}
@@ -324,9 +301,9 @@ func erunCloudProviderBearerToken(ctx Context, provider CloudProviderConfig, dep
 	return CloudBearerToken{Alias: provider.Alias, Provider: provider.Provider, Token: token, Issuer: provider.OIDCIssuerURL}, nil
 }
 
-func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDependencies) CloudProviderStatus {
+func erunCloudProviderTokenStatus(provider config.CloudProviderConfig, deps CloudDependencies) CloudProviderStatus {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusNotConfigured, Message: "erun cloud provider is not fully configured"}
+		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "erun cloud provider is not fully configured"}
 	}
 	// Checked here, ahead of resolveERunAccessToken, because that call also
 	// reports a missing store as an error, and a configured provider with a
@@ -334,16 +311,16 @@ func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDepend
 	// and rejected when it was never checked at all. unknown/"not
 	// checked" is the honest answer when nothing was actually verified.
 	if deps.CloudSecretStore == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
+		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
 	}
-	if _, err := resolveERunAccessToken(stderrOnlyContext(), provider, deps); err != nil {
-		status := CloudTokenStatusNotConfigured
+	if _, err := resolveERunAccessToken(core.StderrOnlyContext(), provider, deps); err != nil {
+		status := config.CloudTokenStatusNotConfigured
 		if provider.ERun.RefreshTokenRef != "" || provider.ERun.IsMachineIdentity() {
-			status = CloudTokenStatusExpired
+			status = config.CloudTokenStatusExpired
 		}
 		return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: err.Error()}
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+	return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 }
 
 // resolveERunAccessToken returns a usable access token: the cached one if
@@ -351,7 +328,7 @@ func erunCloudProviderTokenStatus(provider CloudProviderConfig, deps CloudDepend
 // (cached for next time). It is the single place both the bearer-token path
 // and the status check resolve a token, so they never disagree about what
 // "active" means.
-func resolveERunAccessToken(ctx Context, provider CloudProviderConfig, deps CloudDependencies) (string, error) {
+func resolveERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
 		return "", fmt.Errorf("erun cloud provider %q is not fully configured", provider.Alias)
 	}
@@ -380,7 +357,7 @@ func resolveERunAccessToken(ctx Context, provider CloudProviderConfig, deps Clou
 // reports why it could not. The report names re-provisioning rather than
 // `cloud login`, because there is no sign-in that would fix a machine
 // identity whose credential has been removed.
-func clientCredentialsERunAccessToken(ctx Context, provider CloudProviderConfig, deps CloudDependencies) (string, error) {
+func clientCredentialsERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	if deps.CloudSecretStore == nil {
 		return "", fmt.Errorf("cloud secret store is not configured")
 	}
@@ -408,7 +385,7 @@ func clientCredentialsERunAccessToken(ctx Context, provider CloudProviderConfig,
 // refreshERunAccessToken mints a fresh access token via the refresh_token
 // grant, caches it, and rotates the stored refresh token when the server
 // issued a new one (refresh-token rotation).
-func refreshERunAccessToken(ctx Context, provider CloudProviderConfig, deps CloudDependencies) (string, error) {
+func refreshERunAccessToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) (string, error) {
 	refreshToken, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.RefreshTokenRef)
 	if err != nil || strings.TrimSpace(refreshToken) == "" {
 		return "", fmt.Errorf("refresh token is not available on this machine; run `erun cloud login %s`", provider.Alias)

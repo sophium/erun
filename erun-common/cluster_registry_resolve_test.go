@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 func TestClusterRegistryResolverInCluster(t *testing.T) {
 	resolve := NewClusterRegistryResolver("erun-k3s", ClusterRegistryDeps{
@@ -11,7 +15,7 @@ func TestClusterRegistryResolverInCluster(t *testing.T) {
 			return 0, nil
 		},
 	})
-	addrs, err := resolve(ClusterRegistry{})
+	addrs, err := resolve(config.ClusterRegistry{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -26,7 +30,7 @@ func TestClusterRegistryResolverHostPortForward(t *testing.T) {
 		LookupClusterIP:  func(_, _, _ string) (string, error) { return "10.43.0.50", nil },
 		StartPortForward: func(_, _, _ string, _ int) (int, error) { return 41000, nil },
 	})
-	addrs, err := resolve(ClusterRegistry{})
+	addrs, err := resolve(config.ClusterRegistry{})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
@@ -43,7 +47,7 @@ func TestClusterRegistryResolverEmptyClusterIP(t *testing.T) {
 		InCluster:       true,
 		LookupClusterIP: func(_, _, _ string) (string, error) { return "", nil },
 	})
-	if _, err := resolve(ClusterRegistry{}); err == nil {
+	if _, err := resolve(config.ClusterRegistry{}); err == nil {
 		t.Fatal("expected error when the registry Service has no ClusterIP")
 	}
 }

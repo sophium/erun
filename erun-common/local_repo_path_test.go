@@ -3,8 +3,9 @@ package eruncommon
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // hostRepoPathFixture is one value a caller might be handed as a host-machine
@@ -40,46 +41,6 @@ func hostRepoPathFixtures(t *testing.T) []hostRepoPathFixture {
 	}
 }
 
-// TestValidateHostRepoPathVerdicts pins the shared definition both callers use.
-func TestValidateHostRepoPathVerdicts(t *testing.T) {
-	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeHost} {
-		for _, tc := range hostRepoPathFixtures(t) {
-			err := ValidateHostRepoPath(envType, tc.path)
-			switch {
-			case tc.accepted && err != nil:
-				t.Errorf("%s / %s: refused %q, want accepted: %v", envType, tc.name, tc.path, err)
-			case !tc.accepted && err == nil:
-				t.Errorf("%s / %s: accepted %q, want refused", envType, tc.name, tc.path)
-			case err != nil && !strings.Contains(err.Error(), HostRepoPathRequirement(envType)):
-				t.Errorf("%s / %s: refusal %q does not carry the shared reason %q",
-					envType, tc.name, err, HostRepoPathRequirement(envType))
-			}
-		}
-	}
-}
-
-// TestValidateEnvRepoPathLeavesOtherTypesAlone keeps the requirement on the two
-// types that actually use a host directory: a remote or runtime env records an
-// in-pod path that has no business existing on this machine.
-func TestValidateEnvRepoPathLeavesOtherTypesAlone(t *testing.T) {
-	for _, envType := range []EnvironmentType{EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime} {
-		for _, tc := range hostRepoPathFixtures(t) {
-			if err := ValidateEnvRepoPath(envType, tc.path); err != nil {
-				t.Errorf("%s / %s: %q carries no host repo path requirement, got %v",
-					envType, tc.name, tc.path, err)
-			}
-		}
-	}
-	for _, envType := range []EnvironmentType{EnvironmentTypeLocalAgent, EnvironmentTypeHost} {
-		for _, tc := range hostRepoPathFixtures(t) {
-			if err := ValidateEnvRepoPath(envType, tc.path); (err == nil) != tc.accepted {
-				t.Errorf("%s / %s: ValidateEnvRepoPath disagrees with the fixture verdict for %q (err=%v)",
-					envType, tc.name, tc.path, err)
-			}
-		}
-	}
-}
-
 // TestInitRetypeRefusesTheSamePaths drives init's own caller — the retype that
 // already refused — through the identical fixture set, so the side the issue
 // held up as correct is shown to be the side the dialog now matches.
@@ -93,9 +54,9 @@ func TestInitRetypeRefusesTheSamePaths(t *testing.T) {
 			// refusal instead of falling through to a project search that needs a
 			// real working directory to run in.
 			detected:  projectContext{loaded: true},
-			envConfig: EnvConfig{Name: "dev", Type: EnvironmentTypeRemoteAgent},
+			envConfig: config.EnvConfig{Name: "dev", Type: config.EnvironmentTypeRemoteAgent},
 		}
-		err := state.adoptLocalRepoPathForType(EnvironmentTypeLocalAgent)
+		err := state.adoptLocalRepoPathForType(config.EnvironmentTypeLocalAgent)
 		switch {
 		case tc.accepted && err != nil:
 			t.Errorf("init / %s: refused %q, want accepted: %v", tc.name, tc.path, err)

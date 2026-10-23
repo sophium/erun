@@ -8,17 +8,19 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
-func testPlatformAliasProvider() CloudProviderConfig {
-	return CloudProviderConfig{
+func testPlatformAliasProvider() configpkg.CloudProviderConfig {
+	return configpkg.CloudProviderConfig{
 		Alias:         "erun+api.erunpaas.com@erun",
-		Provider:      CloudProviderERun,
+		Provider:      configpkg.CloudProviderERun,
 		Username:      "erun",
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
-		ERun: &ERunProviderConfig{
+		ERun: &configpkg.ERunProviderConfig{
 			APIURL:          HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: erunRefreshTokenRef("erun+api.erunpaas.com@erun"),
@@ -29,13 +31,15 @@ func testPlatformAliasProvider() CloudProviderConfig {
 // staticCloudStore is a CloudReadStore holding one already-resolved root config,
 // so alias resolution is exercised without touching the operator's own config.
 type staticCloudStore struct {
-	config ERunConfig
+	config configpkg.ERunConfig
 }
 
-func (s staticCloudStore) LoadERunConfig() (ERunConfig, string, error) { return s.config, "", nil }
+func (s staticCloudStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return s.config, "", nil
+}
 
 func signedInHostStore() staticCloudStore {
-	return staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{testPlatformAliasProvider()}}}
+	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{testPlatformAliasProvider()}}}
 }
 
 func TestPlatformAliasSecretName(t *testing.T) {
@@ -67,7 +71,7 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 		"    profile: dev-profile\n"
 	document := infrastructure + entry
 
-	var config ERunConfig
+	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal([]byte(document), &config); err != nil {
 		t.Fatalf("provisioned config does not parse: %v\n%s", err, document)
 	}
@@ -78,7 +82,7 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 		t.Errorf("infrastructure alias was displaced: %+v", config.CloudProviders[0])
 	}
 	platform := config.CloudProviders[1]
-	if platform.Provider != CloudProviderERun || platform.Alias != "erun+api.erunpaas.com@erun" {
+	if platform.Provider != configpkg.CloudProviderERun || platform.Alias != "erun+api.erunpaas.com@erun" {
 		t.Fatalf("platform alias did not round-trip: %+v", platform)
 	}
 	if platform.ERun == nil || platform.ERun.APIURL != HostedPlatformAPIURL {
@@ -124,7 +128,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 		"ERUN_CLOUD_PROVIDER": "aws", "ERUN_CLOUD_PROVIDER_ALIAS": "dev-aws",
 	})
 	provider := writePlatformAliasSecret(t, boot)
-	if err := writeRuntimeBootConfig(Context{}, boot, nil); err != nil {
+	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
 		t.Fatalf("write the pod's config: %v", err)
 	}
 	rootPath := runtimeRootConfigPath(boot.configHome())
@@ -135,10 +139,10 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	// The reported state, asserted rather than assumed.
 	assertUnprovisionedAliasIsUnusable(t, string(unprovisioned))
 
-	if err := syncRuntimePlatformAlias(Context{}, boot, nil); err != nil {
+	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {
 		t.Fatalf("seed the platform alias: %v", err)
 	}
-	var podConfig ERunConfig
+	var podConfig configpkg.ERunConfig
 	readTestYAML(t, rootPath, &podConfig)
 
 	resolved, err := ResolveERunPlatformAlias(staticCloudStore{config: podConfig}, "")
@@ -148,7 +152,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if resolved.Alias != provider.Alias {
 		t.Fatalf("got alias %q, want %q", resolved.Alias, provider.Alias)
 	}
-	store := NewFileCloudSecretStore(filepath.Join(boot.configHome(), configRoot, "cloud-secrets"))
+	store := NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
 	token, err := store.LoadCloudSecret(resolved.ERun.RefreshTokenRef)
 	if err != nil {
 		t.Fatalf("the pod's secret store cannot read the token at the ref the resolved alias names: %v", err)
@@ -164,7 +168,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 // quoted, before any network call.
 func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 	t.Helper()
-	var before ERunConfig
+	var before configpkg.ERunConfig
 	if err := yaml.Unmarshal([]byte(document), &before); err != nil {
 		t.Fatalf("the unprovisioned config does not parse: %v", err)
 	}
@@ -240,8 +244,8 @@ func assertNoAliasToGive(t *testing.T, store CloudReadStore, deps CloudDependenc
 // credential, and provisioning one would leave the pod exactly as blocked.
 func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
-	store := staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
-		{Alias: "dev-aws", Provider: CloudProviderAWS},
+	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+		{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 	}}}
 	if _, _, ok, _ := resolveHostPlatformAlias(store, deps, ""); ok {
 		t.Fatal("an infrastructure alias must not be provisioned as a platform alias")
@@ -272,7 +276,7 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	name, err := provisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", DefaultCloudDependencies())
 	if err != nil {
 		t.Fatalf("an ambiguous host is a decline for init, not a failure: %v", err)
@@ -385,7 +389,7 @@ func TestHelmPlatformAliasSecretSetArgs(t *testing.T) {
 // whatever XDG config home the test redirected to. resolveHostPlatformAlias is
 // reached with a static store everywhere else in this file, which cannot prove
 // the deploying host's own config is what gets read.
-func signedInDefaultHostStore(t *testing.T, provider CloudProviderConfig) {
+func signedInDefaultHostStore(t *testing.T, provider configpkg.CloudProviderConfig) {
 	t.Helper()
 	store, err := DefaultCloudSecretStore()
 	if err != nil {
@@ -394,7 +398,7 @@ func signedInDefaultHostStore(t *testing.T, provider CloudProviderConfig) {
 	if err := store.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 		t.Fatalf("save refresh token: %v", err)
 	}
-	if err := SaveERunConfig(ERunConfig{DefaultTenant: "team", CloudProviders: []CloudProviderConfig{provider}}); err != nil {
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []configpkg.CloudProviderConfig{provider}}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
 }
@@ -417,7 +421,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 
 	// The environment exactly as a pre-fix init left it: no platform-alias
 	// Secret named anywhere.
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 	deployInput := HelmDeploySpec{
@@ -434,7 +438,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	}
 
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -460,7 +464,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	// The record is what keeps it: without it the next deploy reads back an
 	// empty field, and a deploy from a host that has since lost its alias would
 	// pass no name and drop the mount from an environment that had one.
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -478,7 +482,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 	redirectConfigHomeForTest(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -495,7 +499,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 	if want := "team-devops-platform-alias"; deployInput.PlatformAliasSecretName != want {
 		t.Fatalf("an already-provisioned environment's alias was changed: got %q, want %q", deployInput.PlatformAliasSecretName, want)
 	}
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -513,7 +517,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -524,7 +528,7 @@ func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t 
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -534,7 +538,7 @@ func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t 
 	if got := log.String(); strings.TrimSpace(got) != "" {
 		t.Fatalf("a host with nothing to give must add nothing to the trace, got:\n%s", got)
 	}
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -546,14 +550,14 @@ func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t 
 // secondPlatformAliasProvider is a second erun-type alias on the same host:
 // what makes resolution ambiguous, and therefore what the operator's own
 // selection has to disambiguate.
-func secondPlatformAliasProvider() CloudProviderConfig {
-	return CloudProviderConfig{
+func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
+	return configpkg.CloudProviderConfig{
 		Alias:         "erun+api.acme.services.erunpaas.com@acme",
-		Provider:      CloudProviderERun,
+		Provider:      configpkg.CloudProviderERun,
 		Username:      "acme",
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
-		ERun: &ERunProviderConfig{
+		ERun: &configpkg.ERunProviderConfig{
 			APIURL:          HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: erunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
@@ -572,16 +576,16 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
-	providers := []CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
+	providers := []configpkg.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
 	for _, provider := range providers {
 		if err := secretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 			t.Fatalf("save refresh token for %s: %v", provider.Alias, err)
 		}
 	}
-	if err := SaveERunConfig(ERunConfig{DefaultTenant: "team", CloudProviders: providers}); err != nil {
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: providers}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
-	return staticCloudStore{config: ERunConfig{CloudProviders: providers}}
+	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: providers}}
 }
 
 // TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral pins the selection
@@ -626,7 +630,7 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 // be tellable apart without matching on wording -- which each transport spells
 // its own way, naming its own selection.
 func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
-	several := staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
+	several := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
 		testPlatformAliasProvider(), secondPlatformAliasProvider(),
 	}}}
 
@@ -663,8 +667,8 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 	})
 
 	t.Run("names an infrastructure alias", func(t *testing.T) {
-		awsStore := staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
-			{Alias: "dev-aws", Provider: CloudProviderAWS},
+		awsStore := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+			{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 		}}}
 		assertSelectionRejected(t, awsStore, deps, "dev-aws", "not an erun platform alias")
 	})
@@ -716,7 +720,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	captured := installCapturingKubectl(t)
 	ambiguousHostStore(t)
 	chosen := secondPlatformAliasProvider()
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -727,7 +731,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), PlatformAlias: chosen.Alias}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), PlatformAlias: chosen.Alias}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -745,7 +749,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	if !strings.Contains(log.String(), "(alias "+chosen.Alias) {
 		t.Errorf("the trace does not name the alias that was provisioned:\n%s", log.String())
 	}
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -771,7 +775,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -782,7 +786,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("a decline the operator never named is not a failed deploy: %v", err)
 	}
@@ -799,7 +803,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 			t.Errorf("the declined retrofit must say %q, got:\n%s", want, trace)
 		}
 	}
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -818,7 +822,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguousHost(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -830,7 +834,7 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -840,7 +844,7 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 	if got := log.String(); strings.TrimSpace(got) != "" {
 		t.Fatalf("a recorded environment owes the trace nothing, got:\n%s", got)
 	}
-	recorded, _, err := LoadEnvConfig("team", "dev")
+	recorded, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}
@@ -859,7 +863,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 	redirectConfigHomeForTest(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev", PlatformAliasSecretName: "team-devops-platform-alias"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -871,7 +875,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), PlatformAlias: secondPlatformAliasProvider().Alias}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), PlatformAlias: secondPlatformAliasProvider().Alias}
 	if err := reconcilePlatformAliasSecret(ctx, &deployInput); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -893,7 +897,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.T) {
 	ambiguousHostStore(t)
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	if err := SaveEnvConfig("team", EnvConfig{Name: "dev"}); err != nil {
+	if err := configpkg.SaveEnvConfig("team", configpkg.EnvConfig{Name: "dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -905,7 +909,7 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), PlatformAlias: alias}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), PlatformAlias: alias}
 	err := reconcilePlatformAliasSecret(ctx, &deployInput)
 	if err == nil {
 		t.Fatal("a named alias that cannot be used must fail the deploy rather than decline")
@@ -916,7 +920,7 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	if deployInput.PlatformAliasSecretName != "" {
 		t.Fatalf("a failed provisioning must not thread a name into the upgrade, got %q", deployInput.PlatformAliasSecretName)
 	}
-	recorded, _, loadErr := LoadEnvConfig("team", "dev")
+	recorded, _, loadErr := configpkg.LoadEnvConfig("team", "dev")
 	if loadErr != nil {
 		t.Fatalf("load env config: %v", loadErr)
 	}
@@ -967,12 +971,12 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 	redirectConfigHomeForTest(t)
 	installCapturingKubectl(t)
 	signedInDefaultHostStore(t, testPlatformAliasProvider())
-	mustSaveEnvConfig(t, EnvConfig{Name: "dev"})
+	mustSaveEnvConfig(t, configpkg.EnvConfig{Name: "dev"})
 
 	// The spec's own view of the environment: resolved before the rollout, so
 	// it cannot carry a name this deploy has not provisioned yet.
 	spec := DeploySpec{
-		Target: OpenResult{Tenant: "team", Environment: "dev", EnvConfig: mustLoadEnvConfig(t)},
+		Target: configpkg.OpenResult{Tenant: "team", Environment: "dev", EnvConfig: mustLoadEnvConfig(t)},
 		Deploy: HelmDeploySpec{
 			Tenant:               "team",
 			Environment:          "dev",
@@ -984,7 +988,7 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 	}
 
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
 	if err := reconcilePlatformAliasSecret(ctx, &spec.Deploy); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -999,7 +1003,7 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 
 	// The deploy then persists what it rolled out, from the snapshot it
 	// resolved -- the write that used to discard the record above.
-	if err := persistRuntimeVersionIfChanged(spec, "1.0.0", SaveEnvConfig); err != nil {
+	if err := persistRuntimeVersionIfChanged(spec, "1.0.0", configpkg.SaveEnvConfig); err != nil {
 		t.Fatalf("persist runtime version: %v", err)
 	}
 	recorded := mustLoadEnvConfig(t)
@@ -1016,16 +1020,16 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 // mustSaveEnvConfig and mustLoadEnvConfig are the "team"/"dev" environment's
 // two config-store round trips, so a scenario that drives several writes in
 // sequence reads as the sequence rather than as error plumbing.
-func mustSaveEnvConfig(t *testing.T, config EnvConfig) {
+func mustSaveEnvConfig(t *testing.T, config configpkg.EnvConfig) {
 	t.Helper()
-	if err := SaveEnvConfig("team", config); err != nil {
+	if err := configpkg.SaveEnvConfig("team", config); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 }
 
-func mustLoadEnvConfig(t *testing.T) EnvConfig {
+func mustLoadEnvConfig(t *testing.T) configpkg.EnvConfig {
 	t.Helper()
-	config, _, err := LoadEnvConfig("team", "dev")
+	config, _, err := configpkg.LoadEnvConfig("team", "dev")
 	if err != nil {
 		t.Fatalf("load env config: %v", err)
 	}

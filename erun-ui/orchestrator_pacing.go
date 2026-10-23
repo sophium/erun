@@ -12,7 +12,8 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // A turn boundary is not the only place an orchestrator needs the pacing
@@ -85,7 +86,7 @@ func getOrchestratorWhipConfig() eruncommon.WhipConfig {
 // "unconfigured install is unaffected" contract erun-common's ResolveWhipConfig
 // makes for every transport.
 func refreshOrchestratorWhipConfig() {
-	config, _, _ := eruncommon.LoadERunConfig()
+	config, _, _ := configpkg.LoadERunConfig()
 	setOrchestratorWhipConfig(eruncommon.ResolveWhipConfig(config.Whip))
 }
 
@@ -293,7 +294,7 @@ type orchestratorPacingRow struct {
 	// session.envs), carried through so the env-aware gate only ever consults
 	// environments this orchestrator actually linked, never whatever else
 	// happens to be running (erun#1699).
-	envs []eruncommon.OrchestratorEnvConfig
+	envs []configpkg.OrchestratorEnvConfig
 	// unmanaged marks a configured orchestrator this desktop holds no session
 	// for, so it has no PTY to write into, no nudge budget to keep, and no
 	// wires that scope could have been read from. Everything that acts on a

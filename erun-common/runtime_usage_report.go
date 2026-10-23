@@ -1,5 +1,9 @@
 package eruncommon
 
+import (
+	"github.com/sophium/erun/erun-common/base/config"
+)
+
 // A usage reading and the sizing advice it implies are two answers to one
 // question, and separating them is how an operator ends up holding an alarm
 // with no remedy: the thresholds that warn and the evidence the recommender
@@ -30,7 +34,7 @@ type RuntimeUsageReport struct {
 // that answers it. A history read failure is silence rather than an error, the
 // same posture EnvironmentRuntimeSizing takes: a report is advisory and must
 // not fail over its own bookkeeping.
-func ResolveRuntimeUsageReport(tenant string, env EnvConfig, usage RuntimeUsage) RuntimeUsageReport {
+func ResolveRuntimeUsageReport(tenant string, env config.EnvConfig, usage RuntimeUsage) RuntimeUsageReport {
 	report := RuntimeUsageReport{RuntimeUsage: usage}
 	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {

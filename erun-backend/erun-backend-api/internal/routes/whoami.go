@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 type WhoamiUserRepository interface {
@@ -30,12 +30,12 @@ type WhoamiTenantRepository interface {
 // the capability set a client renders from is computed by the code that
 // enforces it rather than derived a second time.
 type WhoamiCapabilityResolver interface {
-	PermittedRoutes(ctx context.Context, candidates []eruncommon.PlatformCapability) ([]eruncommon.PlatformCapability, error)
+	PermittedRoutes(ctx context.Context, candidates []modelpkg.PlatformCapability) ([]modelpkg.PlatformCapability, error)
 }
 
 // WhoamiRouteCatalog reports every registered route, evaluated per request so
 // registration order cannot leave routes out of the answer.
-type WhoamiRouteCatalog func() []eruncommon.PlatformCapability
+type WhoamiRouteCatalog func() []modelpkg.PlatformCapability
 
 type WhoamiRoutes struct {
 	users        WhoamiUserRepository
@@ -63,9 +63,9 @@ type whoamiResponse struct {
 	// Deliberately not omitempty. A caller who may do nothing has to receive an
 	// empty set rather than no field, because a client treats a missing set as
 	// "this platform cannot tell me" and falls back to attempting every call.
-	Capabilities eruncommon.PlatformCapabilities `json:"capabilities"`
-	Issuer       string                          `json:"issuer"`
-	Subject      string                          `json:"subject"`
+	Capabilities modelpkg.PlatformCapabilities `json:"capabilities"`
+	Issuer       string                        `json:"issuer"`
+	Subject      string                        `json:"subject"`
 }
 
 func (routes WhoamiRoutes) handleWhoami(w http.ResponseWriter, r *http.Request) {

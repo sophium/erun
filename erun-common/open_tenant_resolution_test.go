@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // openTenantResolutionStore is a minimal OpenStore for exercising
@@ -13,25 +15,25 @@ type openTenantResolutionStore struct {
 	defaultEnvironment string
 }
 
-func (s openTenantResolutionStore) LoadERunConfig() (ERunConfig, string, error) {
+func (s openTenantResolutionStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	if s.defaultTenant == "" {
-		return ERunConfig{}, "", ErrNotInitialized
+		return config.ERunConfig{}, "", config.ErrNotInitialized
 	}
-	return ERunConfig{DefaultTenant: s.defaultTenant}, "", nil
+	return config.ERunConfig{DefaultTenant: s.defaultTenant}, "", nil
 }
 
-func (s openTenantResolutionStore) LoadTenantConfig(name string) (TenantConfig, string, error) {
-	return TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
+func (s openTenantResolutionStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
+	return config.TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
 }
 
-func (s openTenantResolutionStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
-	return EnvConfig{Name: environment}, "", nil
+func (s openTenantResolutionStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
+	return config.EnvConfig{Name: environment}, "", nil
 }
 
 // noProjectRoot simulates running outside any tenant's project checkout, so
 // resolveOpenTenant's cwd fallback never resolves a tenant.
 func noProjectRoot() (string, string, error) {
-	return "", "", ErrNotInGitRepository
+	return "", "", config.ErrNotInGitRepository
 }
 
 func TestResolveOpenTenantInferenceForbidden(t *testing.T) {

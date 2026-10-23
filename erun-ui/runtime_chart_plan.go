@@ -4,7 +4,8 @@ import (
 	"context"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // uiRuntimeChartPlan is what a deploy at the chosen version would install for the
@@ -88,7 +89,7 @@ func (a *App) statedRuntimeChartPlan(tenant, environment, version string) (uiRun
 func (a *App) probedRuntimeChartPlan(tenant, environment, version string) uiRuntimeChartPlan {
 	registry := strings.TrimSpace(a.runtimeRegistryNamespace(tenant, environment))
 	if registry == "" {
-		registry = eruncommon.DefaultContainerRegistry
+		registry = config.DefaultContainerRegistry
 	}
 	repo := func(chart string) string {
 		return eruncommon.PublishedDevopsChartOCIRepo(registry) + "/" + chart
@@ -133,7 +134,7 @@ func (a *App) probePublishedChart(tenant, environment, version, chart string) (p
 	}
 	namespace := strings.TrimSpace(a.runtimeRegistryNamespace(tenant, environment))
 	if namespace == "" {
-		namespace = eruncommon.DefaultContainerRegistry
+		namespace = config.DefaultContainerRegistry
 	}
 	versions, err := a.deps.resolveImageRegistry(ctx, namespace, "charts/"+chart)
 	if err != nil {

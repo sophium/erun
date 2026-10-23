@@ -5,7 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The Runtime tab has to answer "which chart would this version install?" before
@@ -16,7 +17,7 @@ import (
 // first is the difference between a named fix and a failed deploy.
 func TestResolveRuntimeChartPlan(t *testing.T) {
 	const snapshot = "9.9.9-snapshot-20260101010101"
-	envs := map[string]eruncommon.EnvConfig{
+	envs := map[string]config.EnvConfig{
 		"acme/plain":  {Name: "plain", RuntimeVersion: snapshot},
 		"acme/stated": {Name: "stated", RuntimeVersion: snapshot, RuntimeChart: "oci://ghcr.io/sophium/charts/erun-devops:1.0.178"},
 	}
@@ -100,7 +101,7 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			app := NewApp(erunUIDeps{
 				store: stubUIStore{
-					tenants: map[string]eruncommon.TenantConfig{"acme": {Name: "acme"}},
+					tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},
 					envs:    envs,
 				},
 				resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {

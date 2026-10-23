@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // terraformDNS01ProviderRFC2136 is the cluster-edge module's dns01_provider
@@ -105,7 +107,7 @@ func resolveTerraformRFC2136Requirement(dir, varFile string) (terraformRFC2136Re
 // itself failing for some other reason such as an RBAC denial or the wrong
 // context (fix credentials/context) — two different remedies that a bare
 // "could not be read: exit status 1" collapsed into one.
-func readTerraformRFC2136Secret(ctx Context, requirement terraformRFC2136Requirement) (string, error) {
+func readTerraformRFC2136Secret(ctx core.Context, requirement terraformRFC2136Requirement) (string, error) {
 	jsonPath := "jsonpath={.data." + strings.ReplaceAll(requirement.SecretKey, ".", `\.`) + "}"
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(requirement.KubernetesContext) != "" {

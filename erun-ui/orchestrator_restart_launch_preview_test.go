@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // requireLoneRestartPreviewNotice fails unless the preview names only id, with
 // a notice carrying every one of wants.
-func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopRestartReopen, id string, wants ...string) {
+func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestartReopen, id string, wants ...string) {
 	t.Helper()
 	if len(preview) != 1 || preview[0].OrchestratorID != id {
 		t.Fatalf("expected one row for %s, got %+v", id, preview)
@@ -30,7 +31,7 @@ func requireLoneRestartPreviewNotice(t *testing.T, preview []eruncommon.DesktopR
 func TestARestartPreviewWarnsWhenTheNextLaunchWouldBeRefused(t *testing.T) {
 	app, restoreDir := restartTestApp(t)
 	var credentialErr error
-	app.deps.resolveGatewayCredential = func(*eruncommon.OpenRouterConfig) (string, error) {
+	app.deps.resolveGatewayCredential = func(*config.OpenRouterConfig) (string, error) {
 		return testGatewayToken, credentialErr
 	}
 	stageGatewayCatalog(app)

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestListRemoteAppSessionsRebuildsOnlyRunningSessions pins the read-model that
@@ -31,10 +31,10 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", KubernetesContext: "ctx"},
 		},
 	}})
@@ -50,10 +50,10 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 // surfaces an error into the open flow.
 func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/local": {Name: "local"}, // no kubernetes context
 		},
 	}})
@@ -82,10 +82,10 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
 			},
 		},
@@ -206,10 +206,10 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			},
 		},

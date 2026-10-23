@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // unschedulablePod builds a pod that never got past scheduling: no container
@@ -234,17 +236,17 @@ func TestLibraryListReleasePodsHonorsContextOverride(t *testing.T) {
 }
 
 func TestExecutionModeForKubectlPodWatchDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlPodWatchExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, ExecutionModeSubprocess)
+	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlPodWatchExecutionOperation); got != config.ExecutionModeSubprocess {
+		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
-	report := ExecutionModeReport(ERunConfig{})
+	report := config.ExecutionModeReport(config.ERunConfig{})
 	for _, status := range report {
 		if status.Operation == kubectlPodWatchExecutionOperation {
-			if status.Mode != ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, ExecutionModeSubprocess)
+			if status.Mode != config.ExecutionModeSubprocess {
+				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
 			}
 			return
 		}
@@ -393,8 +395,8 @@ const pullingPodListJSON = `{
 // every run instead of whenever the scheduler allows it.
 func TestWatchReleasePodsKeepsThePullStateAnUnreadFinalPollWouldErase(t *testing.T) {
 	redirectConfigHomeForTest(t)
-	if err := SaveERunConfig(ERunConfig{Execution: ExecutionConfig{Modes: map[string]string{
-		kubectlPodWatchExecutionOperation: ExecutionModeLibrary,
+	if err := config.SaveERunConfig(config.ERunConfig{Execution: config.ExecutionConfig{Modes: map[string]string{
+		kubectlPodWatchExecutionOperation: config.ExecutionModeLibrary,
 	}}}); err != nil {
 		t.Fatalf("SaveERunConfig: %v", err)
 	}

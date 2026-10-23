@@ -1,6 +1,10 @@
 package eruncommon
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // SSHEnvironmentAlias is one configured environment's standing on the host's
 // ssh config: the Host alias erun derives for it, and the local port its
@@ -41,7 +45,7 @@ type SSHOrphanedAlias struct {
 // sshd is enabled -- see SSHEnvironmentAlias. A port an environment has
 // allocated but does not serve is not a destination, so it does not make a
 // stale block serious.
-func FindOrphanedSSHAliases(entries []SSHHostEntry, environments []SSHEnvironmentAlias) []SSHOrphanedAlias {
+func FindOrphanedSSHAliases(entries []config.SSHHostEntry, environments []SSHEnvironmentAlias) []SSHOrphanedAlias {
 	if len(entries) == 0 {
 		return nil
 	}

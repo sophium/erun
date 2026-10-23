@@ -6,7 +6,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
@@ -21,7 +22,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	if err != nil {
 		return uiIdleStatus{}, err
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		status, err := a.loadLocalIdleStatus(result)
 		if err == nil {
@@ -56,7 +57,7 @@ type resolvedUIIdleStatus struct {
 // pod call itself failed). The resulting uiIdleStatus.FromPod is always
 // false: this reading may be stale relative to whatever the pod is actually
 // doing right now.
-func (a *App) loadLocalIdleStatus(result eruncommon.OpenResult) (resolvedUIIdleStatus, error) {
+func (a *App) loadLocalIdleStatus(result config.OpenResult) (resolvedUIIdleStatus, error) {
 	status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return resolvedUIIdleStatus{}, err
@@ -64,7 +65,7 @@ func (a *App) loadLocalIdleStatus(result eruncommon.OpenResult) (resolvedUIIdleS
 	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status, false), status: status}, nil
 }
 
-func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
+func (a *App) idleStatusToUI(result config.OpenResult, status eruncommon.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
 	ui.FromPod = fromPod
 	a.verifyLeaseJobIDs(result.Tenant, result.Environment, ui.Leases)
@@ -191,7 +192,7 @@ func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []u
 	return out
 }
 
-func (a *App) mergeLocalIdleActivity(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
+func (a *App) mergeLocalIdleActivity(result config.OpenResult, status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
 	local, err := eruncommon.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return status
@@ -282,7 +283,7 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 // The desktop no longer fires auto-stop — the in-pod idle monitor owns that.
 // This only clears the post-fire latch when an env reappears as running, so a
 // stale "already fired" flag never sticks forever for future start callers.
-func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
+func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
@@ -337,7 +338,7 @@ func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextN
 			a.emitAppNotification("warning", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
 			continue
 		}
-		mcpPort := eruncommon.MCPPortForResult(result)
+		mcpPort := config.MCPPortForResult(result)
 		if !a.deps.canReachMCPEndpoint(mcpPort) {
 			// Best-effort audit: no port-forward to reach the tool, and the
 			// stop already succeeded, so skip silently.
@@ -411,7 +412,7 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 // idlePolicyIsZero reports whether the entry's policy snapshot is
 // unset — older history rows pre-date the snapshot, so we render
 // nothing rather than a misleading "Timeout: 0s" line.
-func idlePolicyIsZero(p eruncommon.EnvironmentIdlePolicy) bool {
+func idlePolicyIsZero(p config.EnvironmentIdlePolicy) bool {
 	return p.Timeout == 0 && strings.TrimSpace(p.WorkingHours) == "" && strings.TrimSpace(p.Timezone) == "" && p.IdleTrafficBytes == 0
 }
 

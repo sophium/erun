@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // hostedDefinitionDriftTimeout bounds the marker panel's own read. It matches
@@ -22,11 +22,11 @@ const hostedDefinitionDriftTimeout = tenantDashboardTimeout
 // and so is resolved in the read model rather than here; and the upload half
 // is `uploadHostedDefinition`, which the config watcher drives.
 func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment string) uiHostedDefinitionDrift {
-	config, _, err := eruncommon.LoadEnvConfig(tenant, environment)
+	config, _, err := configpkg.LoadEnvConfig(tenant, environment)
 	if err != nil {
 		return uiHostedDefinitionDrift{Error: fmt.Sprintf("Cannot read %s/%s's hosted marker: %s", tenant, environment, err)}
 	}
-	marker, ok := eruncommon.HostedEnvironmentFromConfig(config)
+	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return uiHostedDefinitionDrift{Error: fmt.Sprintf("%s/%s is not marked as hosted, so there is nothing to compare", tenant, environment)}
 	}
@@ -35,7 +35,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 	if err != nil {
 		return uiHostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
-			Describe:      eruncommon.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
+			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
 		}
 	}
@@ -45,14 +45,14 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 	if err != nil {
 		return uiHostedDefinitionDrift{
 			LocalRevision: marker.DefinitionRevision,
-			Describe:      eruncommon.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
+			Describe:      configpkg.HostedDefinitionDrift{LocalRevision: marker.DefinitionRevision}.Describe(),
 			Error:         fmt.Sprintf("Cannot read %s/%s's platform definition: %s", tenant, environment, err),
 		}
 	}
 	// The row the platform resolved has to be the row the marker names, or the
 	// comparison would answer about a different environment's definition — the
 	// same refusal an upload and a pull make, applied to the read.
-	if err := eruncommon.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
+	if err := configpkg.CheckHostedMarkerTarget(marker, client.APIHost(), record.TenantID, record.EnvironmentID); err != nil {
 		return uiHostedDefinitionDrift{
 			LocalRevision:    marker.DefinitionRevision,
 			PlatformRevision: record.Revision,
@@ -60,7 +60,7 @@ func (a *App) hostedDefinitionDriftFor(ctx context.Context, tenant, environment 
 		}
 	}
 
-	drift := eruncommon.HostedDefinitionDrift{
+	drift := configpkg.HostedDefinitionDrift{
 		LocalRevision:    marker.DefinitionRevision,
 		PlatformRevision: record.Revision,
 	}
@@ -90,8 +90,8 @@ func (a *App) CheckHostedDefinitionDrift(tenant, environment string) (uiHostedDe
 // hostedEnvironmentToUI renders the marker for the environment's details
 // panel, or nil when the environment carries none — the common case, which the
 // frontend renders as absence rather than as an empty marker.
-func hostedEnvironmentToUI(config eruncommon.EnvConfig) *uiHostedEnvironment {
-	marker, ok := eruncommon.HostedEnvironmentFromConfig(config)
+func hostedEnvironmentToUI(config configpkg.EnvConfig) *uiHostedEnvironment {
+	marker, ok := configpkg.HostedEnvironmentFromConfig(config)
 	if !ok {
 		return nil
 	}
@@ -101,14 +101,14 @@ func hostedEnvironmentToUI(config eruncommon.EnvConfig) *uiHostedEnvironment {
 		TenantID:           marker.TenantID,
 		EnvironmentID:      marker.EnvironmentID,
 		DefinitionRevision: marker.DefinitionRevision,
-		LocalChange:        hostedDefinitionLocalChangeToUI(eruncommon.HostedDefinitionLocalChangeFor(config)),
+		LocalChange:        hostedDefinitionLocalChangeToUI(configpkg.HostedDefinitionLocalChangeFor(config)),
 	}
 }
 
 // hostedDefinitionLocalChangeToUI mirrors the shared type. The sentence is
 // carried across rather than re-worded here, so the panel and the CLI cannot
 // describe one state two ways.
-func hostedDefinitionLocalChangeToUI(change eruncommon.HostedDefinitionLocalChange) uiHostedDefinitionLocalChange {
+func hostedDefinitionLocalChangeToUI(change configpkg.HostedDefinitionLocalChange) uiHostedDefinitionLocalChange {
 	return uiHostedDefinitionLocalChange{
 		Available: change.Available,
 		Changed:   change.Changed,

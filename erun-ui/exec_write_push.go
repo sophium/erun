@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // exec_write_push.go exposes the runtime repo's commit/push primitives to the
@@ -83,7 +84,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (erunco
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return eruncommon.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
@@ -122,7 +123,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (eruncommon
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return eruncommon.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),

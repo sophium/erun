@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // activityRecoveryResult carries a recovery action's outcome to the
@@ -31,7 +32,7 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 		ReleaseName:       strings.TrimSpace(entry.Release),
 		Namespace:         strings.TrimSpace(entry.Namespace),
 		KubernetesContext: strings.TrimSpace(entry.KubernetesContext),
-		Verbosity:         eruncommon.VerbosityDebug,
+		Verbosity:         core.VerbosityDebug,
 		Stdout:            &stdout,
 		Stderr:            &stderr,
 	})

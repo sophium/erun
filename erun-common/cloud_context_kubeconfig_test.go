@@ -6,18 +6,20 @@ import (
 	"strings"
 	"testing"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 func TestExecutionModeForKubectlContextConfigureDefaultsToSubprocess(t *testing.T) {
-	if got := ExecutionModeFor(ERunConfig{}, kubectlContextConfigureExecutionOperation); got != ExecutionModeSubprocess {
-		t.Fatalf("ExecutionModeFor = %q, want %q", got, ExecutionModeSubprocess)
+	if got := configpkg.ExecutionModeFor(configpkg.ERunConfig{}, kubectlContextConfigureExecutionOperation); got != configpkg.ExecutionModeSubprocess {
+		t.Fatalf("ExecutionModeFor = %q, want %q", got, configpkg.ExecutionModeSubprocess)
 	}
 }
 
 func TestExecutionModeReportListsKubectlContextConfigureOperation(t *testing.T) {
-	statuses := ExecutionModeReport(ERunConfig{})
+	statuses := configpkg.ExecutionModeReport(configpkg.ERunConfig{})
 	for _, status := range statuses {
 		if status.Operation == kubectlContextConfigureExecutionOperation {
 			return
@@ -26,8 +28,8 @@ func TestExecutionModeReportListsKubectlContextConfigureOperation(t *testing.T) 
 	t.Fatalf("ExecutionModeReport did not include %q: %+v", kubectlContextConfigureExecutionOperation, statuses)
 }
 
-func testCloudContextConfig() CloudContextConfig {
-	return CloudContextConfig{
+func testCloudContextConfig() configpkg.CloudContextConfig {
+	return configpkg.CloudContextConfig{
 		Name:              "erun-001",
 		KubernetesContext: "erun-001",
 		PublicIP:          "203.0.113.10",
@@ -47,7 +49,7 @@ func TestConfigureCloudKubeContextDryRunTracesRedactedTokenAndTouchesNothing(t *
 	ctx, trace := traceCapturingContext()
 	ctx.DryRun = true
 	deps := CloudContextDependencies{
-		RunKubectl: func(Context, []string) error {
+		RunKubectl: func(core.Context, []string) error {
 			t.Fatal("RunKubectl must not be called on a dry run")
 			return nil
 		},
@@ -82,7 +84,7 @@ func TestConfigureCloudKubeContextDryRunTracesRedactedTokenAndTouchesNothing(t *
 func TestConfigureCloudKubeContextSubprocessModeStillExecutesRunKubectl(t *testing.T) {
 	ctx, _ := traceCapturingContext()
 	var calls [][]string
-	deps := CloudContextDependencies{RunKubectl: func(_ Context, args []string) error {
+	deps := CloudContextDependencies{RunKubectl: func(_ core.Context, args []string) error {
 		calls = append(calls, args)
 		return nil
 	}}

@@ -11,6 +11,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // HelmReleaseConcurrentDeployError is returned when an erun deploy invocation
@@ -101,7 +104,7 @@ type helmDeploySingleFlightDeps struct {
 
 func (d helmDeploySingleFlightDeps) resolved() helmDeploySingleFlightDeps {
 	if d.configDir == nil {
-		d.configDir = ERunConfigDir
+		d.configDir = config.ERunConfigDir
 	}
 	if d.now == nil {
 		d.now = time.Now
@@ -140,11 +143,11 @@ const helmDeploySingleFlightMaxAge = 15 * time.Minute
 // In dry-run mode the function never touches the filesystem; it traces the
 // would-be claim and returns Proceed with a nil handle so dry-run output
 // remains a faithful preview of mutating intent without acquiring real state.
-func AcquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func AcquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	return acquireHelmDeploySingleFlight(ctx, deploy, helmDeploySingleFlightDeps{})
 }
 
-func acquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func acquireHelmDeploySingleFlight(ctx core.Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	deps = deps.resolved()
 	releaseKey := helmDeployReleaseKey(deploy)
 	paramsHash := helmDeployParamsHash(deploy)
@@ -200,7 +203,7 @@ func acquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec, deps helm
 // writeFreshInflightMarker cleans up the marker if writing or closing fails.
 // A leftover marker carries our own still-alive PID, so it would block later
 // deploys until the max-age reclaim rather than being seen as stale.
-func writeFreshInflightMarker(ctx Context, f *os.File, path string, record deployInflightRecord, releaseKey, paramsHash string) (*HelmDeploySingleFlightHandle, error) {
+func writeFreshInflightMarker(ctx core.Context, f *os.File, path string, record deployInflightRecord, releaseKey, paramsHash string) (*HelmDeploySingleFlightHandle, error) {
 	if writeErr := writeInflightRecord(f, record); writeErr != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
@@ -267,7 +270,7 @@ func concurrentDeployError(deploy HelmDeploySpec, existing deployInflightRecord)
 // reconcileExistingInflightMarker decides how to handle the marker that blocked
 // our claim. A true first return means it reclaimed the marker and the caller
 // should retry the exclusive create.
-func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDeps, deploy HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
+func reconcileExistingInflightMarker(ctx core.Context, deps helmDeploySingleFlightDeps, deploy HelmDeploySpec, path, releaseKey, paramsHash string) (bool, HelmDeploySingleFlightOutcome, error) {
 	existing, readErr := readInflightRecord(path)
 	if readErr != nil {
 		ctx.Trace("dedup: replacing unreadable in-flight marker (" + readErr.Error() + ")")
@@ -299,7 +302,7 @@ func reconcileExistingInflightMarker(ctx Context, deps helmDeploySingleFlightDep
 
 // reportHelmDeploySingleFlightDryRun mirrors the dedup decision a real run would
 // make but never mutates the on-disk marker, so dry-run stays side-effect free.
-func reportHelmDeploySingleFlightDryRun(ctx Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
+func reportHelmDeploySingleFlightDryRun(ctx core.Context, deploy HelmDeploySpec, deps helmDeploySingleFlightDeps, releaseKey, paramsHash, path string) (HelmDeploySingleFlightOutcome, *HelmDeploySingleFlightHandle, error) {
 	existing, readErr := readInflightRecord(path)
 	if errors.Is(readErr, os.ErrNotExist) {
 		ctx.Trace(fmt.Sprintf("dedup: ready (release=%s, hash=%s)", releaseKey, paramsHash))

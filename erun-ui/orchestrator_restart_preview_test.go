@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The dry-run wire shapes, declared here rather than borrowed from the Go types
@@ -36,7 +37,7 @@ func postRestartDryRun(t *testing.T, port int, orchestratorID string) restartDry
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, eruncommon.DesktopControlPlanPath), "application/json", bytes.NewReader(body))
+	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d%s", port, core.DesktopControlPlanPath), "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatalf("POST restart plan control: %v", err)
 	}
@@ -116,7 +117,7 @@ func stagedRestartFixture(t *testing.T, app *App) (asking, refused string) {
 	t.Helper()
 	asking = createAndStartNamedOrchestrator(t, app, "erun", "dev")
 	refused = createAndStartNamedOrchestrator(t, app, "petios-ops", "laptop")
-	editStoredOrchestrator(app, refused, func(o *eruncommon.OrchestratorConfig) { o.UseGateway = true })
+	editStoredOrchestrator(app, refused, func(o *config.OrchestratorConfig) { o.UseGateway = true })
 	return asking, refused
 }
 

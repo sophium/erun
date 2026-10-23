@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -419,7 +421,7 @@ func describePullingContainer(podName string, container containerStatusEntry) st
 // runKubectlGetPods dispatches to the subprocess or library path per the
 // kubectl-pod-watch execution mode (see execution_mode.go).
 func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, error) {
-	if currentExecutionMode(kubectlPodWatchExecutionOperation) == ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kubectlPodWatchExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryListReleasePods(parent, params)
 	}
 	return defaultRunKubectlGetPods(parent, params)
@@ -461,7 +463,7 @@ func defaultRunKubectlGetPods(parent context.Context, params podWatchParams) ([]
 	}
 	args = append(args, "--namespace", params.Namespace, "get", "pods", "-o", "json")
 
-	cmd := Command("kubectl", args...)
+	cmd := core.Command("kubectl", args...)
 	type runResult struct {
 		out []byte
 		err error

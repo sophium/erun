@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // environment_usage.go's cache (a.envUsage) used to live only in memory, so a
@@ -154,5 +154,5 @@ func writeEnvironmentUsageHistoryEntry(path string, selection uiSelection, readi
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return eruncommon.WriteFileAtomic(path, append(data, '\n'), 0o644)
+	return config.WriteFileAtomic(path, append(data, '\n'), 0o644)
 }

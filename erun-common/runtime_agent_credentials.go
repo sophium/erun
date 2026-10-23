@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // An environment's ability to run an in-pod agent is a property of its deployed
@@ -85,8 +88,8 @@ type RuntimeAgentCredentialStatus struct {
 // leaving an empty name list indistinguishable from a template that really
 // carries nothing.
 type RuntimeAgentCredentialParams struct {
-	Claude  EnvironmentClaudeConfig
-	Gateway *OpenRouterConfig
+	Claude  config.EnvironmentClaudeConfig
+	Gateway *config.OpenRouterConfig
 	// Container names the container whose environment was read.
 	Container string
 	// ContainerEnvObserved is true only when the deployed pod template's
@@ -103,7 +106,7 @@ type RuntimeAgentCredentialParams struct {
 // template.
 func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) RuntimeAgentCredentialStatus {
 	status := RuntimeAgentCredentialStatus{Container: strings.TrimSpace(params.Container)}
-	gateway := EffectiveGateway(params.Claude, params.Gateway)
+	gateway := config.EffectiveGateway(params.Claude, params.Gateway)
 	if !gateway.Configured() {
 		status.State = RuntimeAgentCredentialNotApplicable
 		return status
@@ -201,13 +204,13 @@ func runtimeAgentCredentialApplicability(req ShellLaunchParams) RuntimeAgentCred
 //
 // An install with no gateway configured pays nothing: the read is skipped
 // outright rather than resolved from an environment that was never fetched.
-func inspectRuntimeAgentCredentials(ctx Context, req ShellLaunchParams) RuntimeAgentCredentialStatus {
+func inspectRuntimeAgentCredentials(ctx core.Context, req ShellLaunchParams) RuntimeAgentCredentialStatus {
 	params := RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
 		Container: DevopsComponentName,
 	}
-	if !EffectiveGateway(req.Claude, req.Gateway).Configured() {
+	if !config.EffectiveGateway(req.Claude, req.Gateway).Configured() {
 		return ResolveRuntimeAgentCredentialStatus(params)
 	}
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The two variables the deployment renders to describe the node this
@@ -341,7 +343,7 @@ func TestBuildCacheRetentionDoesNotBoundToANodeShareOfNoBytes(t *testing.T) {
 
 	var prunedTo uint64
 	logs := &strings.Builder{}
-	ensureBuildCacheRetentionWith(Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
+	ensureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
 		func() (uint64, error) { return volumeBytes, nil },
 		func(time.Duration) (uint64, error) { return cacheBytes, nil },
 		func(ceiling uint64, _ time.Duration) error { prunedTo = ceiling; return nil })
@@ -387,7 +389,7 @@ func runNodeBoundCase(t *testing.T, tc nodeBoundCase) {
 	// a rejected node budget leaves the run in is reported as a trace, and a
 	// trace nothing captures is the silent fallback this asserts against. The
 	// terminal writers are discarded so each line is captured once.
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard).WithTraceSink(logs)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard).WithTraceSink(logs)}
 	ensureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy,
 		func() (uint64, error) { return tc.volumeGi << 30, nil },
 		func(time.Duration) (uint64, error) { return tc.cacheGi << 30, nil },

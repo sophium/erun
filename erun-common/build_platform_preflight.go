@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // verifyDockerBuildPlatforms fails fast when the host lacks binfmt/QEMU for a
@@ -30,7 +32,7 @@ func verifyDockerBuildPlatforms(required []string) error {
 // the kernel's registered binfmt handlers, so it faithfully answers whether
 // `docker build --platform X` can emulate X here.
 func dockerBuildxPlatforms() (map[string]bool, error) {
-	cmd := Command("docker", "buildx", "inspect")
+	cmd := core.Command("docker", "buildx", "inspect")
 	out := new(bytes.Buffer)
 	cmd.Stdout = out
 	cmd.Stderr = out

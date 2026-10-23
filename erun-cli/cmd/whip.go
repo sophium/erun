@@ -10,6 +10,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +66,7 @@ func newWhipCmd(store common.ListStore, resolveOpen OpenResolver) *cobra.Command
 	return cmd
 }
 
-func runWhipCommand(ctx context.Context, commandCtx common.Context, store common.ListStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runWhipCommand(ctx context.Context, commandCtx core.Context, store common.ListStore, resolveOpen OpenResolver, tenant, environment string, jsonOutput bool) error {
 	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
@@ -111,7 +112,7 @@ func runWhipCommand(ctx context.Context, commandCtx common.Context, store common
 
 // writeWhipReport picks the wire form once, so the documented global
 // --output json and the command's own --json alias cannot diverge.
-func writeWhipReport(commandCtx common.Context, report common.WhipReport, jsonOutput bool) error {
+func writeWhipReport(commandCtx core.Context, report common.WhipReport, jsonOutput bool) error {
 	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -171,7 +172,7 @@ func resolveWhipEnvironmentTargets(store common.ListStore, tenant, environment s
 // side. An environment with no reachable edge (nobody has it open in the
 // desktop right now) resolves to "not alive": there is no live session there
 // to push, whether or not this was a dry run.
-func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment string) common.WhipResult {
+func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment string) common.WhipResult {
 	id := tenant + "/" + environment
 	notAlive := common.WhipResult{
 		Candidate: common.WhipCandidate{Kind: common.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
@@ -239,7 +240,7 @@ func whipOneEnvironment(ctx context.Context, commandCtx common.Context, resolveO
 	return decoded
 }
 
-func writeWhipResult(ctx common.Context, result common.WhipResult, dryRun bool) error {
+func writeWhipResult(ctx core.Context, result common.WhipResult, dryRun bool) error {
 	return writeLabeledValue(ctx, whipResultLabel(result), whipResultValue(result, dryRun))
 }
 

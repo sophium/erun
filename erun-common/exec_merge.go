@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // MergeWorkingTreeBranchParams names the branch to bring into the working
@@ -87,7 +89,7 @@ func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDepe
 // atlas.sum: resolveAtlasSumConflicts regenerates and stages it from the
 // migration files already on disk, the merge commit is completed, and the
 // merge lands like a clean one.
-func MergeWorkingTreeBranch(ctx Context, root string, params MergeWorkingTreeBranchParams, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
+func MergeWorkingTreeBranch(ctx core.Context, root string, params MergeWorkingTreeBranchParams, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
 		return MergeWorkingTreeBranchResult{}, fmt.Errorf("target branch is required")
@@ -116,7 +118,7 @@ func MergeWorkingTreeBranch(ctx Context, root string, params MergeWorkingTreeBra
 // fetchAndMergeWorkingTree runs the mutating half of MergeWorkingTreeBranch,
 // isolated so the validation and dry-run branching above it don't inflate
 // that function's complexity.
-func fetchAndMergeWorkingTree(ctx Context, root, target, remote, remoteRef string, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
+func fetchAndMergeWorkingTree(ctx core.Context, root, target, remote, remoteRef string, deps MergeWorkingTreeBranchDependencies) (MergeWorkingTreeBranchResult, error) {
 	var fetchStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &fetchStderr, "fetch", remote, target); err != nil {
 		return MergeWorkingTreeBranchResult{}, fmt.Errorf("git fetch: %w: %s", err, strings.TrimSpace(fetchStderr.String()))

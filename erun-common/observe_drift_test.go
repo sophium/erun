@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // computeObserveDrift is pure (no subprocess, no filesystem), the same shape
@@ -120,11 +122,11 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 }
 
 func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodAvailable(t *testing.T) {
-	req := ShellLaunchParams{Namespace: "team-dev", RuntimePod: RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
+	req := ShellLaunchParams{Namespace: "team-dev", RuntimePod: config.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
 	release := &ObservedHelmRelease{
 		Name:       "team-devops",
 		Error:      "observe: not authorized to read helm release",
-		RuntimePod: RuntimePodResources{CPU: "2", Memory: "4096Mi"},
+		RuntimePod: config.RuntimePodResources{CPU: "2", Memory: "4096Mi"},
 	}
 
 	got := computeObserveDrift(req, release, nil)

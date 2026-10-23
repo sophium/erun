@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative is the
 // mandatory negative case: an environment whose power state was never
@@ -89,7 +93,7 @@ func TestResolveEnvironmentLifecycleStateIdleAndRunning(t *testing.T) {
 }
 
 func TestAssembleEnvironmentReadModelNilSignalsStayUnknown(t *testing.T) {
-	entry := ListEnvironmentResult{Name: "dev", Type: EnvironmentTypeRemoteAgent}
+	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
 	model := AssembleEnvironmentReadModel(" acme ", entry, nil, nil, nil)
 
 	if model.Tenant != "acme" {
@@ -108,8 +112,8 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 	// only (findCloudContextForKubernetesContext never refreshes it) -- this
 	// is the realistic shape ResolveEnvironmentReadModel's default,
 	// no-live-refresh call produces for a managed-cloud environment.
-	entry := ListEnvironmentResult{Name: "dev", Type: EnvironmentTypeRuntime}
-	cloudContext := &CloudContextStatus{CloudContextConfig: CloudContextConfig{Name: "acme-dev"}}
+	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRuntime}
+	cloudContext := &CloudContextStatus{CloudContextConfig: config.CloudContextConfig{Name: "acme-dev"}}
 	idle := &EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}
 
 	model := AssembleEnvironmentReadModel("acme", entry, cloudContext, idle, nil)
@@ -123,7 +127,7 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 }
 
 func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
-	entry := ListEnvironmentResult{Name: "dev", Type: EnvironmentTypeRemoteAgent}
+	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
 	idle := &EnvironmentIdleStatus{StopEligible: false}
 	resolvedHealth := ResolveEnvironmentHealth(RootConfigInspection{}, DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
 	health := &resolvedHealth

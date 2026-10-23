@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // An agent job that backgrounds its gate and exits reports nothing -- the
@@ -169,7 +171,7 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 // `sleep 5` redirected to a log names neither, which is why the background
 // commands below give their process a marker to be found by.
 func killProcessesMatching(path string) {
-	deadline := time.Now().Add(environmentJobProcessGroupSurvivorSettleWindow * 10)
+	deadline := time.Now().Add(core.EnvironmentJobProcessGroupSurvivorSettleWindow * 10)
 	for {
 		pids := pidsMatching(path)
 		if len(pids) == 0 {
@@ -181,7 +183,7 @@ func killProcessesMatching(path string) {
 		if !time.Now().Before(deadline) {
 			return
 		}
-		time.Sleep(environmentJobProcessGroupSurvivorSettlePoll)
+		time.Sleep(core.EnvironmentJobProcessGroupSurvivorSettlePoll)
 	}
 }
 

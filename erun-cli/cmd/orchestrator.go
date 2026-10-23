@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -65,7 +67,7 @@ func newOrchestratorSetGatewayCmd(store common.OrchestratorAliasStore) *cobra.Co
 	return cmd
 }
 
-func runOrchestratorSetGatewayCommand(ctx common.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorGatewayParams) error {
+func runOrchestratorSetGatewayCommand(ctx core.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorGatewayParams) error {
 	if _, err := common.SetOrchestratorGateway(ctx, store, params); err != nil {
 		return err
 	}
@@ -117,7 +119,7 @@ func newOrchestratorSetModelCmd(store common.OrchestratorAliasStore) *cobra.Comm
 	return cmd
 }
 
-func runOrchestratorSetModelCommand(ctx common.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorModelParams) error {
+func runOrchestratorSetModelCommand(ctx core.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorModelParams) error {
 	if _, err := common.SetOrchestratorModel(ctx, store, params); err != nil {
 		return err
 	}
@@ -163,7 +165,7 @@ func newOrchestratorSetEffortCmd(store common.OrchestratorAliasStore) *cobra.Com
 	return cmd
 }
 
-func runOrchestratorSetEffortCommand(ctx common.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorEffortParams) error {
+func runOrchestratorSetEffortCommand(ctx core.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorEffortParams) error {
 	if _, err := common.SetOrchestratorEffort(ctx, store, params); err != nil {
 		return err
 	}
@@ -221,7 +223,7 @@ func newOrchestratorSetAliasCmd(store common.OrchestratorAliasStore) *cobra.Comm
 	return cmd
 }
 
-func runOrchestratorSetAliasCommand(ctx common.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorAliasParams) error {
+func runOrchestratorSetAliasCommand(ctx core.Context, store common.OrchestratorAliasStore, params common.SetOrchestratorAliasParams) error {
 	if _, err := common.SetOrchestratorAlias(ctx, store, params); err != nil {
 		return err
 	}
@@ -271,7 +273,7 @@ func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Comman
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "", fmt.Sprintf("Role to set: %q, %q, %q, or %q for undeclared",
-		common.OrchestratorEnvRoleCode, common.OrchestratorEnvRoleBuild, common.OrchestratorEnvRoleRuntime, common.OrchestratorEnvRoleNone))
+		config.OrchestratorEnvRoleCode, config.OrchestratorEnvRoleBuild, config.OrchestratorEnvRoleRuntime, common.OrchestratorEnvRoleNone))
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}
@@ -279,7 +281,7 @@ func newOrchestratorSetRoleCmd(store common.OrchestratorRoleStore) *cobra.Comman
 	return cmd
 }
 
-func runOrchestratorSetRoleCommand(ctx common.Context, store common.OrchestratorRoleStore, params common.SetOrchestratorEnvRoleParams) error {
+func runOrchestratorSetRoleCommand(ctx core.Context, store common.OrchestratorRoleStore, params common.SetOrchestratorEnvRoleParams) error {
 	if _, err := common.SetOrchestratorEnvRole(ctx, store, params); err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +34,7 @@ func newAdoptWorktreeCmd() *cobra.Command {
 	return cmd
 }
 
-func runAdoptWorktreeCommand(ctx common.Context, legacyDir, claimDir string) error {
+func runAdoptWorktreeCommand(ctx core.Context, legacyDir, claimDir string) error {
 	result, err := common.AdoptWorktree(ctx, common.WorktreeAdoptParams{LegacyDir: legacyDir, ClaimDir: claimDir})
 	if err != nil {
 		return err

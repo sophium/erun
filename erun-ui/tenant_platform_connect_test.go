@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // erunTestPlatformAPIURL is the address the Connect card pre-fills; the alias
@@ -21,20 +23,20 @@ const erunTestAlias = "erun+api.erunpaas.com@erun"
 // non-empty and finds no erun-type alias in it.
 func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubUIStore) {
 	t.Helper()
-	rootConfig := eruncommon.ERunConfig{}
-	tenantConfig := eruncommon.TenantConfig{Name: tenant}
+	rootConfig := configpkg.ERunConfig{}
+	tenantConfig := configpkg.TenantConfig{Name: tenant}
 	if len(attached) > 0 {
 		tenantConfig.CloudProviderAliases = append([]string(nil), attached...)
 		tenantConfig.PrimaryCloudProviderAlias = attached[0]
 	}
 	store := stubUIStore{
 		config:  &rootConfig,
-		tenants: map[string]eruncommon.TenantConfig{tenant: tenantConfig},
+		tenants: map[string]configpkg.TenantConfig{tenant: tenantConfig},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
 		cloudDeps: eruncommon.CloudDependencies{
-			FetchPlatformInfo: func(_ eruncommon.Context, apiURL string) (eruncommon.PlatformInfo, error) {
+			FetchPlatformInfo: func(_ core.Context, apiURL string) (eruncommon.PlatformInfo, error) {
 				if apiURL != erunTestPlatformAPIURL {
 					t.Fatalf("platform discovery went to %q, want %q", apiURL, erunTestPlatformAPIURL)
 				}
@@ -44,7 +46,7 @@ func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubU
 					CLIClientID: "cli-client-1",
 				}, nil
 			},
-			FetchOIDCDiscovery: func(eruncommon.Context, string) (eruncommon.OIDCDiscovery, error) {
+			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
 				return eruncommon.OIDCDiscovery{}, nil
 			},
 		},
@@ -61,7 +63,7 @@ func loadTenantDashboardFor(t *testing.T, app *App, tenant string) uiTenantDashb
 	return dashboard
 }
 
-func loadTenantConfigFor(t *testing.T, app *App, tenant string) eruncommon.TenantConfig {
+func loadTenantConfigFor(t *testing.T, app *App, tenant string) configpkg.TenantConfig {
 	t.Helper()
 	config, _, err := app.deps.store.LoadTenantConfig(tenant)
 	if err != nil {

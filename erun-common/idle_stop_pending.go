@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // IdleStopActionSkip / Arm / Wait / Fire are the outcomes of
@@ -35,7 +38,7 @@ type EnvironmentStopPending struct {
 	Markers          []EnvironmentIdleMarker `json:"markers,omitempty"`
 	// Policy is snapshotted when the window is armed, so a stop-history
 	// row stays interpretable after the user later edits the policy.
-	Policy EnvironmentIdlePolicy `json:"policy"`
+	Policy config.EnvironmentIdlePolicy `json:"policy"`
 }
 
 // StopHistorySourcePodMonitor / StopHistorySourceHostManual are the
@@ -58,7 +61,7 @@ type EnvironmentStopHistoryEntry struct {
 	Source           string                         `json:"source,omitempty"`
 	Reason           string                         `json:"reason"`
 	CloudContextName string                         `json:"cloudContextName,omitempty"`
-	Policy           EnvironmentIdlePolicy          `json:"policy,omitzero"`
+	Policy           config.EnvironmentIdlePolicy   `json:"policy,omitzero"`
 	Markers          []EnvironmentStopHistoryMarker `json:"markers,omitempty"`
 }
 
@@ -101,7 +104,7 @@ type MaybeArmOrFireIdleStopResult struct {
 func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFireIdleStopResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if err := errMissingTenantOrEnvironment("resolve idle-stop arm/wait/fire decision", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve idle-stop arm/wait/fire decision", tenant, environment); err != nil {
 		return MaybeArmOrFireIdleStopResult{}, err
 	}
 	now := params.Now
@@ -174,7 +177,7 @@ func resolveArmedIdleStopWindow(tenant, environment string, pending EnvironmentS
 func idleStopGraceSeconds(status EnvironmentIdleStatus) int64 {
 	seconds := int64(status.Policy.Timeout / time.Second)
 	if seconds <= 0 {
-		seconds = int64(DefaultEnvironmentIdleTimeout / time.Second)
+		seconds = int64(config.DefaultEnvironmentIdleTimeout / time.Second)
 	}
 	return seconds
 }
@@ -205,7 +208,7 @@ func cloneIdleMarkersForPending(markers []EnvironmentIdleMarker) []EnvironmentId
 func LoadEnvironmentStopPending(tenant, environment string) (EnvironmentStopPending, bool, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("load environment stop-pending state", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("load environment stop-pending state", tenant, environment); err != nil {
 		return EnvironmentStopPending{}, false, err
 	}
 	path, err := EnvironmentStopPendingPath(tenant, environment)
@@ -284,7 +287,7 @@ func EnvironmentStopHistoryPath(tenant, environment string) (string, error) {
 func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHistoryEntry) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("append stop-history entry", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("append stop-history entry", tenant, environment); err != nil {
 		return err
 	}
 	path, err := EnvironmentStopHistoryPath(tenant, environment)
@@ -315,7 +318,7 @@ func AppendStopHistoryEntry(tenant, environment string, entry EnvironmentStopHis
 func LoadEnvironmentStopHistory(tenant, environment string) ([]EnvironmentStopHistoryEntry, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("load stop-history", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("load stop-history", tenant, environment); err != nil {
 		return nil, err
 	}
 	path, err := EnvironmentStopHistoryPath(tenant, environment)

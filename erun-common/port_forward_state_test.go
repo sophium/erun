@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // seedPortForwardStateFileForTest writes a forward's on-disk state file
@@ -87,7 +88,7 @@ func TestLoadPortForwardStatePropagatesAConfigReadFailureRatherThanReportingNoFo
 	tenant, environment := "acme", "dev"
 	seedPortForwardStateFileForTest(t, tenant, environment, 12345)
 
-	envConfigPath := filepath.Join(xdg.ConfigHome, configRoot, tenant, environment, configFile)
+	envConfigPath := filepath.Join(xdg.ConfigHome, config.ConfigRoot, tenant, environment, config.ConfigFile)
 	if err := os.MkdirAll(filepath.Dir(envConfigPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll env config dir: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestLoadPortForwardStatePropagatesAConfigReadFailureRatherThanReportingNoFo
 	if err == nil {
 		t.Fatal("expected the corrupt env config to surface as an error, not silently report no forward")
 	}
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, config.ErrNotInitialized) {
 		t.Fatalf("a corrupt config is not a genuine absence, got: %v", err)
 	}
 	if established {

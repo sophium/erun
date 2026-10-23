@@ -9,7 +9,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 type ReviewRepository interface {
@@ -160,7 +161,7 @@ func canonicalRepositoryParam(repository string) (string, error) {
 	if strings.TrimSpace(repository) == "" {
 		return "", nil
 	}
-	identity, err := eruncommon.RepositoryIdentity(repository)
+	identity, err := modelpkg.RepositoryIdentity(repository)
 	if err != nil {
 		return "", err
 	}

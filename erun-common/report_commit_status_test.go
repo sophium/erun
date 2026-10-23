@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The wire shape of the GitHub request (method, path, auth header, body) and
@@ -47,7 +49,7 @@ func TestReportCommitStatusPostsToGitHubWithTheRightShape(t *testing.T) {
 			return "gho_test_token", true
 		},
 	}
-	result, err := ReportCommitStatus(Context{}, ReportCommitStatusParams{
+	result, err := ReportCommitStatus(core.Context{}, ReportCommitStatusParams{
 		RemoteURL:   "git@github.com:sophium/erun.git",
 		Commit:      "abc123def456",
 		State:       CommitStatusSuccess,
@@ -95,7 +97,7 @@ func TestReportCommitStatusSurfacesAGitHubFailureResponse(t *testing.T) {
 	deps := ReportCommitStatusDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	_, err := ReportCommitStatus(Context{}, ReportCommitStatusParams{
+	_, err := ReportCommitStatus(core.Context{}, ReportCommitStatusParams{
 		RemoteURL:   "https://github.com/sophium/erun.git",
 		Commit:      "abc123",
 		State:       CommitStatusFailure,

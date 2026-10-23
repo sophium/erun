@@ -8,7 +8,10 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -38,21 +41,21 @@ const (
 
 type erunUIStore interface {
 	eruncommon.ListStore
-	SaveERunConfig(eruncommon.ERunConfig) error
-	SaveTenantConfig(eruncommon.TenantConfig) error
-	SaveEnvConfig(string, eruncommon.EnvConfig) error
+	SaveERunConfig(config.ERunConfig) error
+	SaveTenantConfig(config.TenantConfig) error
+	SaveEnvConfig(string, config.EnvConfig) error
 }
 
 type projectConfigStore interface {
-	LoadProjectConfig(string) (eruncommon.ProjectConfig, string, error)
-	SaveProjectConfig(string, eruncommon.ProjectConfig) error
+	LoadProjectConfig(string) (config.ProjectConfig, string, error)
+	SaveProjectConfig(string, config.ProjectConfig) error
 }
 
 type erunUIDeps struct {
 	store                  erunUIStore
 	findProjectRoot        eruncommon.ProjectFinderFunc
 	resolveCLIPath         func() string
-	resolveBuildInfo       func() eruncommon.BuildInfo
+	resolveBuildInfo       func() model.BuildInfo
 	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
 	cloudDeps              eruncommon.CloudDependencies
 	cloudContextDeps       eruncommon.CloudContextDependencies
@@ -62,18 +65,18 @@ type erunUIDeps struct {
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime func(eruncommon.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
-	readRuntimeRunState    func(eruncommon.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
-	ensureMCP              func(context.Context, eruncommon.OpenResult) error
-	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
-	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
+	stopEnvironmentRuntime func(core.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
+	readRuntimeRunState    func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
+	ensureMCP              func(context.Context, config.OpenResult) error
+	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
+	ensureSSHD             func(context.Context, config.OpenResult) error
 	canConnectLocalPort    func(int) bool
 	// canReachMCPEndpoint answers whether an MCP port carries traffic, which a
 	// dial cannot: a stale port-forward accepts and never answers, so a
 	// dial-gated recovery never fires and the environment stays dead behind a
 	// healthy-looking listener.
 	canReachMCPEndpoint       func(int) bool
-	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (eruncommon.EnvConfig, error)
+	setRemoteCloudAlias       func(context.Context, string, string, string, string, string) (config.EnvConfig, error)
 	startTerminal             func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
@@ -84,10 +87,10 @@ type erunUIDeps struct {
 	claudeAgents claudeAgentCLI
 	// resolveGatewayCredential reads the secret an orchestrator launched through
 	// the gateway sends, injectable so a test never reads the real secret store.
-	resolveGatewayCredential func(*eruncommon.OpenRouterConfig) (string, error)
+	resolveGatewayCredential func(*config.OpenRouterConfig) (string, error)
 	savePastedFile           func(pastedFileSaveParams) (string, error)
-	listAgentOutputs         func(eruncommon.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
-	downloadAgentOutput      func(eruncommon.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
+	listAgentOutputs         func(config.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
+	downloadAgentOutput      func(config.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
 	loadDiff                 func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
 	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
 	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
@@ -338,7 +341,7 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	app.contribute = newContributeStore(deps.contributeStatePath)
 	if app.identity == nil {
-		app.identity = newDesktopIdentity(eruncommon.DefaultDesktopIdentityDir())
+		app.identity = newDesktopIdentity(core.DefaultDesktopIdentityDir())
 	}
 	return app
 }
@@ -359,16 +362,16 @@ func (a *App) mcpBearer(tenant, environment string) string {
 
 func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	if deps.store == nil {
-		deps.store = eruncommon.ConfigStore{}
+		deps.store = config.ConfigStore{}
 	}
 	if deps.findProjectRoot == nil {
-		deps.findProjectRoot = eruncommon.FindProjectRoot
+		deps.findProjectRoot = config.FindProjectRoot
 	}
 	if deps.resolveCLIPath == nil {
 		deps.resolveCLIPath = resolveCLIExecutable
 	}
 	if deps.resolveBuildInfo == nil {
-		deps.resolveBuildInfo = func() eruncommon.BuildInfo {
+		deps.resolveBuildInfo = func() model.BuildInfo {
 			return resolveCurrentBuildInfo(deps.resolveCLIPath)
 		}
 	}
@@ -491,7 +494,7 @@ func loadHostedRegistryWithTestOverride(ctx context.Context) uiHostedRegistrySta
 	if !ok {
 		return loadHostedRegistry(ctx)
 	}
-	status := uiHostedRegistryStatus{Host: eruncommon.HostedRegistryHost, Available: available}
+	status := uiHostedRegistryStatus{Host: config.HostedRegistryHost, Available: available}
 	if !available {
 		status.Reason = "does not resolve"
 		status.Recovery = "Choose a different registry instead."
@@ -516,17 +519,17 @@ func hostedRegistryReachabilityOverride() (bool, bool) {
 
 func withDefaultRuntimeSessionDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
-		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
+		deps.ensureMCP = func(ctx context.Context, result config.OpenResult) error {
 			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
 	if deps.reconnectMCP == nil {
-		deps.reconnectMCP = func(ctx context.Context, result eruncommon.OpenResult, onLine func(string)) error {
+		deps.reconnectMCP = func(ctx context.Context, result config.OpenResult, onLine func(string)) error {
 			return runOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
 		}
 	}
 	if deps.ensureSSHD == nil {
-		deps.ensureSSHD = func(ctx context.Context, result eruncommon.OpenResult) error {
+		deps.ensureSSHD = func(ctx context.Context, result config.OpenResult) error {
 			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
@@ -649,7 +652,7 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.stopCloudContext == nil {
 		deps.stopCloudContext = func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.StopCloudContext(eruncommon.Context{}, deps.store, eruncommon.CloudContextParams{Name: name}, deps.cloudContextDeps)
+			return eruncommon.StopCloudContext(core.Context{}, deps.store, eruncommon.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
 	return deps
@@ -672,7 +675,7 @@ func withDefaultWindowAndContributeDeps(deps erunUIDeps) erunUIDeps {
 		deps.interruptedActivityPath = defaultInterruptedActivityPath()
 	}
 	if deps.desktopControlMarkerPath == "" {
-		deps.desktopControlMarkerPath = eruncommon.DefaultDesktopControlMarkerPath()
+		deps.desktopControlMarkerPath = core.DefaultDesktopControlMarkerPath()
 	}
 	return deps
 }

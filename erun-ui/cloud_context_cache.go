@@ -4,7 +4,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Balances how fast the idle widget and respawn gate see truth
@@ -147,7 +148,7 @@ func (a *App) refreshCloudContextStatusesOnce() {
 	if a.deps.store == nil {
 		return
 	}
-	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
+	statuses, err := eruncommon.RefreshCloudContextStatuses(core.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return
 	}

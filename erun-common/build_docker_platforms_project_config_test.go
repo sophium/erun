@@ -6,6 +6,9 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // repoRootForDockerPlatformsProjectConfigTest returns the repo root. erun-common
@@ -42,7 +45,7 @@ func repoRootForDockerPlatformsProjectConfigTest(t *testing.T) string {
 func TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments(t *testing.T) {
 	repoRoot := repoRootForDockerPlatformsProjectConfigTest(t)
 
-	cfg, _, err := LoadProjectConfig(repoRoot)
+	cfg, _, err := config.LoadProjectConfig(repoRoot)
 	if err != nil {
 		t.Fatalf("LoadProjectConfig(%q) failed: %v", repoRoot, err)
 	}
@@ -144,7 +147,7 @@ func TestProjectDockerPlatformsAbsentKeepsEveryPlatform(t *testing.T) {
 
 func resolveDockerBuildPlatformsForTest(t *testing.T, projectRoot, environment string, override ...string) []string {
 	t.Helper()
-	platforms, err := resolveDockerBuildPlatforms(Context{}, projectRoot, environment, override)
+	platforms, err := resolveDockerBuildPlatforms(core.Context{}, projectRoot, environment, override)
 	if err != nil {
 		t.Fatalf("resolveDockerBuildPlatforms(%q, %q) failed: %v", projectRoot, environment, err)
 	}
@@ -154,11 +157,11 @@ func resolveDockerBuildPlatformsForTest(t *testing.T, projectRoot, environment s
 func writeDockerPlatformsProjectConfig(t *testing.T, contents string) string {
 	t.Helper()
 	projectRoot := t.TempDir()
-	configDir := filepath.Join(projectRoot, projectConfigDir)
+	configDir := filepath.Join(projectRoot, config.ProjectConfigDir)
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll(%q) failed: %v", configDir, err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, configFile), []byte(contents), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, config.ConfigFile), []byte(contents), 0o644); err != nil {
 		t.Fatalf("writing test project config failed: %v", err)
 	}
 	return projectRoot

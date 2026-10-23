@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // PinInput selects which erun version an environment's references move to.
@@ -39,7 +41,7 @@ func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 	return func(_ context.Context, _ *mcp.CallToolRequest, input PinInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
 			var pinned *PinOutput
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, _ string) error {
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, _ string) error {
 				out, err := runPinToolCommand(runtime, input, runCtx)
 				if err != nil {
 					return err
@@ -61,7 +63,7 @@ func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 // out of pinTool's execute closure so the tenant/environment/root resolution,
 // the plan build, and the apply each read as one step rather than piling into
 // a single over-complex function.
-func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.Context) (*PinOutput, error) {
+func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx core.Context) (*PinOutput, error) {
 	tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 	if err != nil {
 		return nil, err
@@ -105,7 +107,7 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx eruncommon.
 // applyPinPlanUnlessPreviewing writes the plan unless this is a preview or the
 // tree is already aligned. The previous version is recorded before anything
 // moves, so a revert has somewhere to go even if the rewrite fails partway.
-func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx eruncommon.Context, plan eruncommon.PinPlan, workDir, tenant, environment string, envConfig eruncommon.EnvConfig) (PinOutput, error) {
+func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx core.Context, plan eruncommon.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (PinOutput, error) {
 	out := PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil

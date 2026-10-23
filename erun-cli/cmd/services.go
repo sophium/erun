@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +49,7 @@ func newServicesCmd(resolveOpen OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runServicesCommand(ctx common.Context, resolveOpen OpenResolver, params common.OpenParams) error {
+func runServicesCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -61,7 +62,7 @@ func runServicesCommand(ctx common.Context, resolveOpen OpenResolver, params com
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == common.OutputJSON {
+	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(services)
 	}
 	return writeServicesResult(ctx, services)
@@ -71,7 +72,7 @@ func runServicesCommand(ctx common.Context, resolveOpen OpenResolver, params com
 // Service carries its public address on an indented line beneath it, the same
 // shape `erun observe` uses for an Ingress's backends: the Service line stays
 // about what is running, and the address is what the exposure added to it.
-func writeServicesResult(ctx common.Context, result common.EnvironmentServiceList) error {
+func writeServicesResult(ctx core.Context, result common.EnvironmentServiceList) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
 		return err
 	}

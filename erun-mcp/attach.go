@@ -13,7 +13,8 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The MCP transport (erun-mcp/server.go's mcp.NewStreamableHTTPHandler) is
@@ -126,7 +127,7 @@ func attachHTTPHandler(runtime RuntimeConfig) http.Handler {
 			return
 		}
 		auditToolDecision(identity, attachToolName, true)
-		recordRuntimeActivity(runtime, eruncommon.ActivityKindMCP, false)
+		recordRuntimeActivity(runtime, config.ActivityKindMCP, false)
 		runAttachSession(conn, runtime, session, cols, rows)
 	})
 }

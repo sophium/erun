@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // gateMergeTrailerSeam answers the git calls one squash makes: the branch's
@@ -18,7 +20,7 @@ import (
 // from and this seam holds that choice to account directly.
 func gateMergeTrailerSeam(body string, committed *string) GateMergeWorkingTreeDependencies {
 	return GateMergeWorkingTreeDependencies{
-		ResolveRef: func(Context, string, string) (string, error) { return "abc123", nil },
+		ResolveRef: func(core.Context, string, string) (string, error) { return "abc123", nil },
 		RunGit: func(_ string, stdout io.Writer, _ io.Writer, args ...string) error {
 			if len(args) > 0 && args[0] == "log" {
 				_, _ = fmt.Fprint(stdout, body+"\x00")
@@ -28,7 +30,7 @@ func gateMergeTrailerSeam(body string, committed *string) GateMergeWorkingTreeDe
 			}
 			return nil
 		},
-		StagedPaths: func(Context, string) ([]string, error) { return []string{"widget.go"}, nil },
+		StagedPaths: func(core.Context, string) ([]string, error) { return []string{"widget.go"}, nil },
 	}
 }
 
@@ -179,7 +181,7 @@ func TestGateMergeOneSourceCarriesAHardWrappedReproducesTrailer(t *testing.T) {
 	var committed string
 	deps := gateMergeTrailerSeam(branchBody, &committed)
 	const spec = "erun-ui/playwright/tests/areas/orchestrator/orchestrator-restart-required.spec.ts"
-	deps.StagedPaths = func(Context, string) ([]string, error) { return []string{spec}, nil }
+	deps.StagedPaths = func(core.Context, string) ([]string, error) { return []string{spec}, nil }
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, spec)), 0o755); err != nil {
 		t.Fatal(err)

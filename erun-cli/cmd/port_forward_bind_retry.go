@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A replacement forward is started moments after the forward it replaces was
@@ -54,7 +54,7 @@ var errPortForwardListenConflict = errors.New("the local port could not be bound
 // The last process an attempt started is returned alongside the error that
 // ended the loop, so a caller's own failure path still has something to
 // release.
-func startPortForwardWithBindRetry(ctx common.Context, kind string, localPort int, attempt func() (*os.Process, error)) (*os.Process, error) {
+func startPortForwardWithBindRetry(ctx core.Context, kind string, localPort int, attempt func() (*os.Process, error)) (*os.Process, error) {
 	for try := 1; ; try++ {
 		process, err := attempt()
 		if err == nil {

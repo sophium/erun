@@ -5,7 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestUpgradeToolPreviewResolvesPlan verifies the upgrade preview path resolves
@@ -16,10 +17,10 @@ func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 	handler := upgradeTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
 		Store: listToolStore{
-			toolConfig:    eruncommon.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]eruncommon.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
-			envsByTenant: map[string][]eruncommon.EnvConfig{
-				"tenant-a": {{Name: "dev", Type: eruncommon.EnvironmentTypeRuntime, RuntimeVersion: "3.0.0", AutoUpgrade: true}},
+			toolConfig:    config.ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
+			envsByTenant: map[string][]config.EnvConfig{
+				"tenant-a": {{Name: "dev", Type: config.EnvironmentTypeRuntime, RuntimeVersion: "3.0.0", AutoUpgrade: true}},
 			},
 		},
 	}))

@@ -3,6 +3,9 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // orchestrator_alias.go is the CLI's writer for OrchestratorConfig.Alias, the
@@ -42,8 +45,8 @@ func ParseOrchestratorAliasFlag(value string) (string, error) {
 // against -- the very same resolution `erun platform --erun-alias` uses, so the
 // CLI validates an orchestrator's alias exactly the way it validates its own.
 type OrchestratorAliasStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-	SaveERunConfig(ERunConfig) error
+	LoadERunConfig() (configpkg.ERunConfig, string, error)
+	SaveERunConfig(configpkg.ERunConfig) error
 }
 
 // ValidateOrchestratorAlias reports whether alias names an erun platform alias
@@ -74,22 +77,22 @@ func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error
 // at use because a surface that stored an unresolvable alias would leave the
 // operator with a declaration nothing honours. The refusal carries the command
 // that configures one, so the dead end is a next action rather than a wall.
-func SetOrchestratorAlias(ctx Context, store OrchestratorAliasStore, params SetOrchestratorAliasParams) (OrchestratorConfig, error) {
+func SetOrchestratorAlias(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorAliasParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
-		return OrchestratorConfig{}, fmt.Errorf("store is required")
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}
 	orchestratorID, err := normalizeOrchestratorAliasParams(params)
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	orchestratorIndex := findOrchestratorIndex(config, orchestratorID)
 	if orchestratorIndex < 0 {
-		return OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", orchestratorID)
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %q not found", orchestratorID)
 	}
 
 	// Resolved in dry-run too: this is a local config lookup that never touches
@@ -97,7 +100,7 @@ func SetOrchestratorAlias(ctx Context, store OrchestratorAliasStore, params SetO
 	// be reporting a plan it cannot carry out.
 	alias := strings.TrimSpace(params.Alias)
 	if err := ValidateOrchestratorAlias(store, alias); err != nil {
-		return OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w -- name an erun platform alias this host has configured (`erun cloud init erun --api-url <url>` adds one), or pass %q to declare none",
+		return configpkg.OrchestratorConfig{}, fmt.Errorf("orchestrator %s: %w -- name an erun platform alias this host has configured (`erun cloud init erun --api-url <url>` adds one), or pass %q to declare none",
 			orchestratorID, err, OrchestratorAliasNone)
 	}
 
@@ -110,7 +113,7 @@ func SetOrchestratorAlias(ctx Context, store OrchestratorAliasStore, params SetO
 		return orchestrator, nil
 	}
 	if err := store.SaveERunConfig(config); err != nil {
-		return OrchestratorConfig{}, err
+		return configpkg.OrchestratorConfig{}, err
 	}
 	return orchestrator, nil
 }

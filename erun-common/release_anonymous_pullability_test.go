@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // writeModuleFixture lays down a single Terraform file referencing imageName
@@ -204,7 +206,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePasses(t *testing.T) {
 	writeModuleFixture(t, root, "erun-example-webhook")
 	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
 	var logBuf strings.Builder
-	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return true, nil }
 	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
@@ -219,7 +221,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselined(t 
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
 	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
 	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
@@ -251,7 +253,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselined(t *t
 	writeModuleFixture(t, root, "erun-baselined-webhook")
 	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.217", "1.0.217")
 	var logBuf strings.Builder
-	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return false, nil }
 	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
@@ -272,7 +274,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNow
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-baselined-webhook")
 	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.221", "1.0.221")
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) { return true, nil }
 	err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe)
@@ -308,7 +310,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedToken
 	writeModuleFixture(t, root, "erun-baselined-webhook")
 	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.219", "1.0.219")
 	var logBuf strings.Builder
-	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 
 	stub := &anonymousManifestStub{TokenStatus: http.StatusUnauthorized}
 	server := stub.start(t)
@@ -329,7 +331,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedTok
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
 	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	stub := &anonymousManifestStub{TokenStatus: http.StatusUnauthorized}
 	server := stub.start(t)
@@ -358,7 +360,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenNotBaselinedPro
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
 	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	unreachable := "http://127.0.0.1:1"
 	probe := func(ctx context.Context, _ *http.Client, repoPath, tag string) (bool, error) {
@@ -386,7 +388,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndPr
 	writeModuleFixture(t, root, "erun-baselined-webhook")
 	execution := fakeExecutionForImage("erun-baselined-webhook", "ghcr.io/sophium/erun-baselined-webhook:1.0.219", "1.0.219")
 	var logBuf strings.Builder
-	ctx := Context{Logger: NewLogger(0).WithTraceSink(&logBuf)}
+	ctx := core.Context{Logger: core.NewLogger(0).WithTraceSink(&logBuf)}
 
 	unreachable := "http://127.0.0.1:1"
 	probe := func(ctx context.Context, _ *http.Client, repoPath, tag string) (bool, error) {
@@ -405,7 +407,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableSkipsProbeInDryRun(t *te
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-example-webhook")
 	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-	ctx := Context{DryRun: true, Logger: NewLogger(0)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) {
 		t.Fatal("dry run must not invoke the probe")
@@ -420,7 +422,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenUnpublished(t *
 	root := t.TempDir()
 	writeModuleFixture(t, root, "erun-orphaned-webhook")
 	execution := BuildExecutionSpec{}
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 
 	probe := func(context.Context, *http.Client, string, string) (bool, error) {
 		t.Fatal("must not probe an image nothing publishes")
@@ -434,7 +436,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenUnpublished(t *
 
 func TestVerifyModuleReferencedImagesAnonymouslyPullableNoOpWhenNothingReferenced(t *testing.T) {
 	root := t.TempDir()
-	ctx := Context{Logger: NewLogger(0)}
+	ctx := core.Context{Logger: core.NewLogger(0)}
 	probe := func(context.Context, *http.Client, string, string) (bool, error) {
 		t.Fatal("must not probe when nothing is referenced")
 		return false, nil

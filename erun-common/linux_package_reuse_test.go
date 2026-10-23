@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // No test in this binary may read or write the operator's real package-test
@@ -105,7 +107,7 @@ func reuseDecision(t *testing.T, pkg LinuxPackageSpec) LinuxPackageSpec {
 func runChecksLogging(t *testing.T, packages []LinuxPackageSpec) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
 	err := runLinuxPackageChecks(ctx, packages)
 	return log.String(), err
 }
@@ -169,7 +171,7 @@ func TestLinuxPackageDryRunNeitherRunsNorRecords(t *testing.T) {
 	_, pkg := reusablePackageProject(t)
 	dockerLog := fakeDockerRecorder(t, "0")
 	var log bytes.Buffer
-	ctx := Context{DryRun: true, Logger: NewLoggerWithWriters(VerbosityTrace, &log, &log)}
+	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &log, &log)}
 	decided := reuseDecision(t, pkg)
 	if err := runLinuxPackageChecks(ctx, []LinuxPackageSpec{decided}); err != nil {
 		t.Fatal(err)
@@ -250,9 +252,9 @@ func TestLinuxPackagePassIsPerPlatform(t *testing.T) {
 func TestLinuxPackagePassIsKeyedByTheDaemonsPlatform(t *testing.T) {
 	useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
-	previousArch := currentGOARCH
-	t.Cleanup(func() { currentGOARCH = previousArch })
-	currentGOARCH = func() string { return "arm64" }
+	previousArch := core.CurrentGOARCH
+	t.Cleanup(func() { core.CurrentGOARCH = previousArch })
+	core.CurrentGOARCH = func() string { return "arm64" }
 	useLinuxPackageDaemonPlatform(t, readDockerDaemonPlatform)
 	dockerLog := filepath.Join(t.TempDir(), "docker.log")
 	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `echo "$*" >> '`+dockerLog+`'`+"\n"+`echo linux/amd64`))
@@ -352,7 +354,7 @@ func TestReleaseNeverReusesARecordedPass(t *testing.T) {
 		}
 	}
 	dockerLog := fakeDockerRecorder(t, "0")
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{}), Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}}
 	if err := exportReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +377,7 @@ func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 
 	target := boundaryTarget(root)
 	target.NoIncremental = false
-	execution, err := ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +386,7 @@ func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 	}
 
 	target.NoIncremental = true
-	execution, err = ResolveBuildExecution(Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	execution, err = ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatal(err)
 	}

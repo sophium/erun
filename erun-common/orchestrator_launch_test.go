@@ -4,13 +4,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
-func orchestratorLaunchTestCatalog() *OpenRouterConfig {
-	return &OpenRouterConfig{
+func orchestratorLaunchTestCatalog() *config.OpenRouterConfig {
+	return &config.OpenRouterConfig{
 		BaseURL:      " https://gateway.example/api ",
 		DefaultModel: "vendor/default-model",
-		Models: []OpenRouterModel{
+		Models: []config.OpenRouterModel{
 			{ID: "vendor/default-model", Context: 200000},
 			{ID: "vendor/other-model"},
 			{ID: "vendor/echo-model", RequiresReasoningEcho: true},
@@ -22,12 +24,12 @@ func orchestratorLaunchTestCatalog() *OpenRouterConfig {
 // orchestrator did before the settings existed, even on a host whose gateway
 // catalog is configured for its environments.
 func TestResolveOrchestratorLaunchWithNoSettingsKeepsTheHistoricalLaunch(t *testing.T) {
-	for name, catalog := range map[string]*OpenRouterConfig{
+	for name, catalog := range map[string]*config.OpenRouterConfig{
 		"no catalog":         nil,
 		"configured catalog": orchestratorLaunchTestCatalog(),
 	} {
 		t.Run(name, func(t *testing.T) {
-			launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{ID: "o1"}, catalog)
+			launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{ID: "o1"}, catalog)
 			if err != nil {
 				t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 			}
@@ -54,7 +56,7 @@ func TestResolveOrchestratorLaunchMapsEveryEffortLevelToItsFlags(t *testing.T) {
 		"ultracode": ` --settings '{"ultracode":true}'`,
 	}
 	for _, level := range ClaudeEffortLevels() {
-		launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{Effort: level}, nil)
+		launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{Effort: level}, nil)
 		if err != nil {
 			t.Fatalf("effort %q: %v", level, err)
 		}
@@ -68,7 +70,7 @@ func TestResolveOrchestratorLaunchMapsEveryEffortLevelToItsFlags(t *testing.T) {
 }
 
 func TestResolveOrchestratorLaunchHonoursAModelOffTheGateway(t *testing.T) {
-	launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{Model: "claude-sonnet-5-5"}, orchestratorLaunchTestCatalog())
+	launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{Model: "claude-sonnet-5-5"}, orchestratorLaunchTestCatalog())
 	if err != nil {
 		t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 	}
@@ -82,7 +84,7 @@ func TestResolveOrchestratorLaunchHonoursAModelOffTheGateway(t *testing.T) {
 
 func TestResolveOrchestratorLaunchThroughTheGatewayMirrorsThePodEnvironment(t *testing.T) {
 	catalog := orchestratorLaunchTestCatalog()
-	launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{UseGateway: true}, catalog)
+	launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{UseGateway: true}, catalog)
 	if err != nil {
 		t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 	}
@@ -110,7 +112,7 @@ func TestResolveOrchestratorLaunchThroughTheGatewayMirrorsThePodEnvironment(t *t
 }
 
 func TestResolveOrchestratorLaunchThroughTheGatewayHonoursAnUncuratedModel(t *testing.T) {
-	launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{UseGateway: true, Model: "vendor/uncurated"}, orchestratorLaunchTestCatalog())
+	launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{UseGateway: true, Model: "vendor/uncurated"}, orchestratorLaunchTestCatalog())
 	if err != nil {
 		t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 	}
@@ -125,7 +127,7 @@ func TestResolveOrchestratorLaunchThroughTheGatewayHonoursAnUncuratedModel(t *te
 }
 
 func TestResolveOrchestratorLaunchFallsBackToTheDefaultModelWhenTheCatalogListsNone(t *testing.T) {
-	launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{UseGateway: true}, &OpenRouterConfig{BaseURL: "https://gateway.example/api"})
+	launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{UseGateway: true}, &config.OpenRouterConfig{BaseURL: "https://gateway.example/api"})
 	if err != nil {
 		t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 	}
@@ -136,28 +138,28 @@ func TestResolveOrchestratorLaunchFallsBackToTheDefaultModelWhenTheCatalogListsN
 
 func TestResolveOrchestratorLaunchRefusesSettingsItCannotHonour(t *testing.T) {
 	cases := map[string]struct {
-		orchestrator OrchestratorConfig
-		catalog      *OpenRouterConfig
+		orchestrator config.OrchestratorConfig
+		catalog      *config.OpenRouterConfig
 		want         string
 	}{
 		"gateway without a catalog": {
-			orchestrator: OrchestratorConfig{UseGateway: true},
+			orchestrator: config.OrchestratorConfig{UseGateway: true},
 			want:         "no gateway catalog is configured",
 		},
 		"unknown effort": {
-			orchestrator: OrchestratorConfig{Effort: "turbo"},
+			orchestrator: config.OrchestratorConfig{Effort: "turbo"},
 			want:         `invalid effort "turbo"`,
 		},
 		"model that is flag syntax": {
-			orchestrator: OrchestratorConfig{Model: "--dangerously-skip-permissions"},
+			orchestrator: config.OrchestratorConfig{Model: "--dangerously-skip-permissions"},
 			want:         `invalid model "--dangerously-skip-permissions"`,
 		},
 		"model that is shell syntax": {
-			orchestrator: OrchestratorConfig{Model: "opus;rm -rf /"},
+			orchestrator: config.OrchestratorConfig{Model: "opus;rm -rf /"},
 			want:         `invalid model "opus;rm -rf /"`,
 		},
 		"model the gateway cannot drive": {
-			orchestrator: OrchestratorConfig{UseGateway: true, Model: "vendor/echo-model"},
+			orchestrator: config.OrchestratorConfig{UseGateway: true, Model: "vendor/echo-model"},
 			catalog:      orchestratorLaunchTestCatalog(),
 			want:         `model "vendor/echo-model" cannot be driven through the gateway`,
 		},
@@ -175,7 +177,7 @@ func TestResolveOrchestratorLaunchRefusesSettingsItCannotHonour(t *testing.T) {
 // A model the gateway cannot drive is only a problem through the gateway: off
 // it, the same id is the operator's own choice to make.
 func TestValidateOrchestratorLaunchSettingsAllowsAnEchoModelOffTheGateway(t *testing.T) {
-	if err := ValidateOrchestratorLaunchSettings(OrchestratorConfig{Model: "vendor/echo-model"}, orchestratorLaunchTestCatalog()); err != nil {
+	if err := ValidateOrchestratorLaunchSettings(config.OrchestratorConfig{Model: "vendor/echo-model"}, orchestratorLaunchTestCatalog()); err != nil {
 		t.Fatalf("ValidateOrchestratorLaunchSettings: %v", err)
 	}
 }
@@ -188,13 +190,13 @@ func TestValidateOrchestratorLaunchSettingsAllowsAnEchoModelOffTheGateway(t *tes
 func TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax(t *testing.T) {
 	for _, model := range []string{"--dangerously-skip-permissions", "-p", "-"} {
 		value := model
-		if got := claudeConfiguredModel(EnvironmentClaudeConfig{DefaultModel: &value}); got != "" {
+		if got := claudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != "" {
 			t.Fatalf("claudeConfiguredModel(%q) = %q, want it ignored", model, got)
 		}
 	}
 	for _, model := range []string{"opus", "claude-opus-5-5", "vendor/model-v1.2:beta"} {
 		value := model
-		if got := claudeConfiguredModel(EnvironmentClaudeConfig{DefaultModel: &value}); got != model {
+		if got := claudeConfiguredModel(config.EnvironmentClaudeConfig{DefaultModel: &value}); got != model {
 			t.Fatalf("claudeConfiguredModel(%q) = %q, want it kept", model, got)
 		}
 	}
@@ -206,16 +208,16 @@ func TestClaudeConfiguredModelIgnoresAModelThatIsFlagSyntax(t *testing.T) {
 // check a recorded model gets, so a catalog id carrying shell or flag syntax
 // ran on the host when the orchestrator started.
 func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T) {
-	catalog := &OpenRouterConfig{
+	catalog := &config.OpenRouterConfig{
 		BaseURL:      "https://gateway.example/api",
 		DefaultModel: "--dangerously-skip-permissions",
-		Models: []OpenRouterModel{
+		Models: []config.OpenRouterModel{
 			{ID: "x;touch${IFS}/tmp/pwned"},
 			{ID: "--dangerously-skip-permissions"},
 			{ID: "vendor/safe-model"},
 		},
 	}
-	launch, err := ResolveOrchestratorLaunch(OrchestratorConfig{UseGateway: true}, catalog)
+	launch, err := ResolveOrchestratorLaunch(config.OrchestratorConfig{UseGateway: true}, catalog)
 	if err != nil {
 		t.Fatalf("ResolveOrchestratorLaunch: %v", err)
 	}
@@ -226,7 +228,7 @@ func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T
 		t.Fatalf("ModelIDs() = %v, want only the safe id offered", got)
 	}
 	// The environment lane resolves its fallback through the same catalog.
-	if got := resolveGatewayLaunchModel(EnvironmentClaudeConfig{}, catalog); got != "vendor/safe-model" {
+	if got := resolveGatewayLaunchModel(config.EnvironmentClaudeConfig{}, catalog); got != "vendor/safe-model" {
 		t.Fatalf("resolveGatewayLaunchModel = %q, want the first safe catalog model", got)
 	}
 }
@@ -236,7 +238,7 @@ func TestResolveOrchestratorLaunchNeverLaunchesAnUnsafeCatalogModel(t *testing.T
 // every surface showed the default.
 func TestValidateOrchestratorLaunchSettingsRefusesTheDefaultTokenAsAModel(t *testing.T) {
 	for _, model := range []string{"default", " Default "} {
-		err := ValidateOrchestratorLaunchSettings(OrchestratorConfig{Model: model}, nil)
+		err := ValidateOrchestratorLaunchSettings(config.OrchestratorConfig{Model: model}, nil)
 		if err == nil || !strings.Contains(err.Error(), "token for clearing the model") {
 			t.Fatalf("model %q: err = %v, want the clearing token refused", model, err)
 		}

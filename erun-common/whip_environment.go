@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The environment half of the whip pass runs where its target
@@ -95,7 +97,7 @@ type whipEnvironmentState struct {
 }
 
 func whipEnvironmentStatePath(tenant, environment string) (string, error) {
-	return resolveCacheFilePath(filepath.Join("erun", "whip", sanitizeForFilename(tenant), sanitizeForFilename(environment), "state.json"))
+	return config.ResolveCacheFilePath(filepath.Join("erun", "whip", sanitizeForFilename(tenant), sanitizeForFilename(environment), "state.json"))
 }
 
 func loadWhipEnvironmentState(tenant, environment string) (whipEnvironmentState, bool) {
@@ -140,7 +142,7 @@ func latestEnvironmentAgentActivity(tenant, environment string) time.Time {
 		return time.Time{}
 	}
 	var latest time.Time
-	for _, kind := range []string{ActivityKindCodex, ActivityKindProcess} {
+	for _, kind := range []string{config.ActivityKindCodex, ActivityKindProcess} {
 		if snapshot, ok := activity[kind]; ok && snapshot.LastActivity.After(latest) {
 			latest = snapshot.LastActivity
 		}

@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The alive contract exists because a job's supervisor can die outright (a
@@ -156,7 +158,7 @@ func killJobAliveSupervisorHelper(t *testing.T, helper *exec.Cmd, childPID int) 
 	}
 	_ = helper.Wait()
 	if childPID > 0 {
-		_ = signalEnvironmentJobProcessGroup(childPID, "KILL")
+		_ = core.SignalEnvironmentJobProcessGroup(childPID, "KILL")
 	}
 }
 

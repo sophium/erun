@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/uptrace/bun"
 )
 
@@ -54,7 +54,7 @@ type Build struct {
 	// alongside this build's outcome -- a duration/CPU/throttle/IO summary
 	// plus the top costliest steps, never the full step tree. NULL when the
 	// caller collected none.
-	Profile   *eruncommon.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
-	CreatedAt time.Time                       `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt time.Time                       `json:"updatedAt" bun:"updated_at,scanonly"`
+	Profile   *core.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
+	CreatedAt time.Time                 `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt time.Time                 `json:"updatedAt" bun:"updated_at,scanonly"`
 }

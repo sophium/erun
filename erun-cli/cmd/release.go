@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ func newReleaseCmd(store common.DockerStore, findProjectRoot common.ProjectFinde
 	return cmd
 }
 
-func runReleaseCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit common.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
+func runReleaseCommand(ctx core.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, force bool, runGit common.GitCommandRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc) error {
 	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, common.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err

@@ -7,17 +7,17 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	erunmcp "github.com/sophium/erun/erun-mcp"
 )
 
 func TestRunUsesDefaultMCPConfig(t *testing.T) {
-	var gotInfo eruncommon.BuildInfo
+	var gotInfo model.BuildInfo
 	var gotCfg erunmcp.HTTPConfig
 	var gotMetricsCfg erunmcp.MetricsConfig
 	var gotRuntime erunmcp.RuntimeConfig
 
-	exitCode := run(nil, new(bytes.Buffer), eruncommon.BuildInfo{Version: "1.2.3"}, func(ctx context.Context, info eruncommon.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
+	exitCode := run(nil, new(bytes.Buffer), model.BuildInfo{Version: "1.2.3"}, func(ctx context.Context, info model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
 		if ctx == nil {
 			t.Fatal("expected non-nil context")
 		}
@@ -58,7 +58,7 @@ func TestRunPassesResolvedFlags(t *testing.T) {
 		"--host", "0.0.0.0", "--port", "17001", "--path", "custom",
 		"--metrics-host", "0.0.0.0", "--metrics-port", "9101", "--metrics-enabled=false",
 		"--tenant", "tenant-a", "--environment", "dev", "--repo-path", "/tmp/project", "--kubernetes-context", "cluster-dev", "--namespace", "tenant-a-dev",
-	}, new(bytes.Buffer), eruncommon.BuildInfo{}, func(_ context.Context, _ eruncommon.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
+	}, new(bytes.Buffer), model.BuildInfo{}, func(_ context.Context, _ model.BuildInfo, cfg erunmcp.HTTPConfig, metricsCfg erunmcp.MetricsConfig, runtime erunmcp.RuntimeConfig) error {
 		gotCfg = cfg
 		gotMetricsCfg = metricsCfg
 		gotRuntime = runtime
@@ -88,7 +88,7 @@ func TestRunRefusesSpaceSeparatedBoolFlagValue(t *testing.T) {
 	exitCode := run([]string{
 		"--metrics-enabled", "true",
 		"--tenant", "tenant-a", "--environment", "dev",
-	}, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
 		called = true
 		return nil
 	})
@@ -113,7 +113,7 @@ func TestRunRefusesUnrecognizedPositionalArgument(t *testing.T) {
 
 	exitCode := run([]string{
 		"bogus", "--tenant", "tenant-a",
-	}, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	}, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
 		called = true
 		return nil
 	})
@@ -138,7 +138,7 @@ func TestRunRefusesUnrecognizedPositionalArgument(t *testing.T) {
 func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	stderr := new(bytes.Buffer)
 
-	exitCode := run(nil, stderr, eruncommon.BuildInfo{}, func(context.Context, eruncommon.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
+	exitCode := run(nil, stderr, model.BuildInfo{}, func(context.Context, model.BuildInfo, erunmcp.HTTPConfig, erunmcp.MetricsConfig, erunmcp.RuntimeConfig) error {
 		return errors.New("boom")
 	})
 	if exitCode != 1 {

@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestIdleStopRecordToolWritesHostManualEntry covers the desktop Stop
@@ -64,7 +65,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 			{Name: "terminal-stdin", Idle: true, Reason: "no input", LastActivity: time.Now().Add(-15 * time.Minute).UTC()},
 			{Name: "ai", Idle: true, Reason: "no Claude session", LastActivity: time.Now().Add(-12 * time.Minute).UTC()},
 		},
-		Policy: eruncommon.EnvironmentIdlePolicy{
+		Policy: config.EnvironmentIdlePolicy{
 			Timeout:      10 * time.Minute,
 			WorkingHours: "09:00-18:00",
 			Timezone:     "Europe/Riga",

@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // machineIdentityHostStore is a host holding one signed-in erun alias pointed
@@ -19,7 +22,7 @@ import (
 func machineIdentityHostStore(apiURL string) staticCloudStore {
 	provider := testPlatformAliasProvider()
 	provider.ERun.APIURL = apiURL
-	return staticCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{provider}}}
+	return staticCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
 }
 
 // fakePlatformAPI stands in for the two calls provisioning makes: resolving the
@@ -53,13 +56,13 @@ func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clien
 	store := NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))
 	deps := CloudDependencies{
 		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
 			return OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: tokenEndpoint}, nil
 		},
-		RefreshERunTokens: func(Context, OIDCDiscovery, string, string) (ERunTokens, error) {
+		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
 			return ERunTokens{AccessToken: "caller-token"}, nil
 		},
-		ClientCredentialsERunTokens: func(_ Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
+		ClientCredentialsERunTokens: func(_ core.Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
 			return exchange(clientID, clientSecret)
 		},
 	}
@@ -215,11 +218,11 @@ func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.
 	if err := store.SaveCloudSecret(ref, "client-secret-value"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	provider := CloudProviderConfig{
+	provider := config.CloudProviderConfig{
 		Alias:         alias,
-		Provider:      CloudProviderERun,
+		Provider:      config.CloudProviderERun,
 		OIDCIssuerURL: "https://auth.example",
-		ERun: &ERunProviderConfig{
+		ERun: &config.ERunProviderConfig{
 			APIURL:          "https://api.example",
 			ClientID:        "client-env-0192",
 			ClientSecretRef: ref,
@@ -228,14 +231,14 @@ func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.
 	refreshCalled, machineCalled := false, false
 	deps := CloudDependencies{
 		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(Context, string) (OIDCDiscovery, error) {
+		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
 			return OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: "https://auth.example/token"}, nil
 		},
-		RefreshERunTokens: func(Context, OIDCDiscovery, string, string) (ERunTokens, error) {
+		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
 			refreshCalled = true
 			return ERunTokens{}, nil
 		},
-		ClientCredentialsERunTokens: func(_ Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
+		ClientCredentialsERunTokens: func(_ core.Context, _ OIDCDiscovery, clientID, clientSecret string) (ERunTokens, error) {
 			machineCalled = true
 			if clientID != "client-env-0192" || clientSecret != "client-secret-value" {
 				t.Fatalf("grant presented %q/%q", clientID, clientSecret)

@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 var errBoom = errors.New("boom")
@@ -198,7 +200,7 @@ func TestRunDockerBuildOnceBlamesTheFailedTestNotResourceExhaustion(t *testing.T
 	t.Setenv("ERUN_DOCKER_BIN", stub)
 
 	var stdout, stderr strings.Builder
-	_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, VerbosityInfo, &stdout, &stderr)
+	_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, core.VerbosityInfo, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected the stub's non-zero exit to fail the build")
 	}
@@ -235,7 +237,7 @@ func TestRunDockerBuildOnceReportsAKilledBuildProcess(t *testing.T) {
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 
 	var stdout, stderr strings.Builder
-	_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, VerbosityInfo, &stdout, &stderr)
+	_, err := runDockerBuildOnce([]string{"build"}, ".", "tag", false, core.VerbosityInfo, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("expected a SIGKILLed build process to fail the build")
 	}

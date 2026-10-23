@@ -14,7 +14,8 @@ import (
 	"testing"
 
 	cmd "github.com/sophium/erun/cmd"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-integration/internal/desktopsurface"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -612,7 +613,7 @@ func apiRouteCapabilities(t testing.TB, root string) []desktopsurface.Capability
 // enumerations could see the gap because a bare config field is none of a
 // route, an MCP tool, or a CLI command.
 func operatorConfigCapabilities() []desktopsurface.Capability {
-	fields := eruncommon.OperatorSettableConfigFields
+	fields := config.OperatorSettableConfigFields
 	capabilities := make([]desktopsurface.Capability, 0, len(fields))
 	for _, field := range fields {
 		capabilities = append(capabilities, desktopsurface.Capability{

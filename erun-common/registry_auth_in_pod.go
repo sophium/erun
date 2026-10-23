@@ -4,6 +4,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // inPodDeclaredRegistryAuth holds registry credentials resolved from the
@@ -48,7 +51,7 @@ var readDeclaredImagePullSecretAuths = func(namespace, kubernetesContext, name s
 // and only on a real run -- a dry run states no cluster read here, the same
 // tradeoff existingImagePullSecretAuths makes for the merged image-pull-secret
 // read, so preview traces stay free of cluster state a preview cannot know.
-func configureInPodDeclaredRegistryAuth(ctx Context, target OpenResult) {
+func configureInPodDeclaredRegistryAuth(ctx core.Context, target config.OpenResult) {
 	inPodDeclaredRegistryAuth = nil
 	if ctx.DryRun {
 		return
@@ -71,15 +74,15 @@ func configureInPodDeclaredRegistryAuth(ctx Context, target OpenResult) {
 // runtime pod -- the only place the Secrets that env declares are both reachable
 // and this process's own credential. A host run, or a pod deploying some other
 // env, resolves exactly as it did before.
-func runningInTargetRuntimePod(target OpenResult) bool {
-	tenant, environment, inPod := injectedRuntimePodIdentity(os.Getenv)
+func runningInTargetRuntimePod(target config.OpenResult) bool {
+	tenant, environment, inPod := core.InjectedRuntimePodIdentity(os.Getenv)
 	return inPod && tenant == strings.TrimSpace(target.Tenant) && environment == strings.TrimSpace(target.Environment)
 }
 
 // inPodNamespace names the namespace the pod runs in, preferring the chart's own
 // projection over the derived name so a renamed namespace still reads its own
 // declared Secrets.
-func inPodNamespace(target OpenResult) string {
+func inPodNamespace(target config.OpenResult) string {
 	if namespace := strings.TrimSpace(os.Getenv("ERUN_NAMESPACE")); namespace != "" {
 		return namespace
 	}
@@ -91,7 +94,7 @@ func inPodNamespace(target OpenResult) string {
 // winning a host. A Secret the pod cannot read is traced and skipped: the read
 // is a resolution aid, so its failure leaves the run credential-less rather than
 // failing the deploy on the read itself.
-func readDeclaredRegistryCredentials(ctx Context, namespace, kubernetesContext string, names []string) map[string]registryBasicAuth {
+func readDeclaredRegistryCredentials(ctx core.Context, namespace, kubernetesContext string, names []string) map[string]registryBasicAuth {
 	credentials := make(map[string]registryBasicAuth, len(names))
 	for _, name := range names {
 		auths, err := readDeclaredImagePullSecretAuths(namespace, kubernetesContext, name)

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"syscall"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // detachBackgroundProcess puts a port-forward in its own session, mirroring
@@ -23,7 +23,7 @@ func detachBackgroundProcess(cmd *exec.Cmd) {
 }
 
 func isPortForwardProcess(pid int) bool {
-	output, err := eruncommon.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	output, err := core.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
 	if err != nil {
 		return false
 	}
@@ -32,7 +32,7 @@ func isPortForwardProcess(pid int) bool {
 }
 
 func isSSHDActivityProxyProcess(pid int) bool {
-	output, err := eruncommon.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	output, err := core.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
 	if err != nil {
 		return false
 	}
@@ -47,7 +47,7 @@ func isSSHDActivityProxyProcess(pid int) bool {
 // filtered here rather than by a shell pattern, so nothing but an exact PID
 // ever reaches a kill call.
 func kubectlPortForwardProcessIDs() []int {
-	output, err := eruncommon.Command("ps", "-e", "-ww", "-o", "pid=", "-o", "command=").Output()
+	output, err := core.Command("ps", "-e", "-ww", "-o", "pid=", "-o", "command=").Output()
 	if err != nil {
 		return nil
 	}

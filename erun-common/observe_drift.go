@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // computeObserveDrift diffs the live release and the pods it produced against
@@ -134,7 +136,7 @@ func runningImageDrift(release *ObservedHelmRelease, pods []ObservedPod) []strin
 // each field compares only when the config actually recorded one, instead of
 // diffing the release against a manufactured default nobody configured.
 func runtimePodDrift(req ShellLaunchParams, release *ObservedHelmRelease) []string {
-	if release.RuntimePod == (RuntimePodResources{}) {
+	if release.RuntimePod == (config.RuntimePodResources{}) {
 		return nil
 	}
 	recorded := req.RuntimePod

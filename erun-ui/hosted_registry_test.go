@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestLoadHostedRegistryDelegatesToDeps locks down that the Wails-exported
@@ -15,7 +15,7 @@ func TestLoadHostedRegistryDelegatesToDeps(t *testing.T) {
 		deps: erunUIDeps{
 			loadHostedRegistry: func(context.Context) uiHostedRegistryStatus {
 				return uiHostedRegistryStatus{
-					Host:     eruncommon.HostedRegistryHost,
+					Host:     config.HostedRegistryHost,
 					Reason:   "does not resolve",
 					Recovery: "Choose a different registry instead.",
 				}
@@ -85,8 +85,8 @@ func TestLoadHostedRegistryDefaultMapsAnUnreachableProbe(t *testing.T) {
 	if status.Available {
 		t.Fatal("expected a canceled probe context to report unavailable")
 	}
-	if status.Host != eruncommon.HostedRegistryHost {
-		t.Fatalf("host = %q, want %q", status.Host, eruncommon.HostedRegistryHost)
+	if status.Host != config.HostedRegistryHost {
+		t.Fatalf("host = %q, want %q", status.Host, config.HostedRegistryHost)
 	}
 	if status.Reason == "" {
 		t.Fatal("expected a reason naming why the registry is unavailable")

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,7 +28,7 @@ func describeRuntimeRegistryCredential(boot runtimeBoot) string {
 // registry hosts the pod does not already carry: the pod's own `docker login`, or
 // a gh-driven push recovery, is more current than what erun resolved on the
 // operator's host at init time.
-func syncRuntimeRegistryCredential(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func syncRuntimeRegistryCredential(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	provisioned, err := readRuntimeJSONObject(boot.registryCredentialPath)
 	if err != nil {
 		return err
@@ -119,7 +121,7 @@ func describeRuntimePlatformAlias(boot runtimeBoot) string {
 // the config model, so it can never open a second cloudproviders key beside the
 // infrastructure provider's. An alias, or a token file, the pod already carries
 // is kept.
-func syncRuntimePlatformAlias(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	providers, err := readRuntimePlatformAliasEntry(boot.platformAliasEntryPath())
 	if err != nil {
 		return err
@@ -127,7 +129,7 @@ func syncRuntimePlatformAlias(_ Context, boot runtimeBoot, _ *runtimeSupervisor)
 	configHome := boot.configHome()
 	root, _, err := loadRuntimeRootConfigForSync(configHome)
 	if err != nil {
-		root = ERunConfig{}
+		root = config.ERunConfig{}
 	}
 	changed := false
 	for _, provider := range providers {
@@ -145,12 +147,12 @@ func syncRuntimePlatformAlias(_ Context, boot runtimeBoot, _ *runtimeSupervisor)
 	return seedRuntimePlatformAliasToken(boot, configHome)
 }
 
-func readRuntimePlatformAliasEntry(path string) ([]CloudProviderConfig, error) {
+func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var providers []CloudProviderConfig
+	var providers []config.CloudProviderConfig
 	if err := yaml.Unmarshal(data, &providers); err != nil {
 		return nil, fmt.Errorf("read the platform alias entry %s: %w", path, err)
 	}
@@ -171,7 +173,7 @@ func seedRuntimePlatformAliasToken(boot runtimeBoot, configHome string) error {
 	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
 		return fmt.Errorf("the platform alias secret file name %q is not a plain file name", name)
 	}
-	dir := filepath.Join(configHome, configRoot, "cloud-secrets")
+	dir := filepath.Join(configHome, config.ConfigRoot, "cloud-secrets")
 	dest := filepath.Join(dir, name)
 	if _, err := os.Stat(dest); err == nil {
 		return nil

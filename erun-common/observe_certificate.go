@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ObservedCertificate is a cert-manager Certificate's readiness. Orders is
@@ -219,7 +221,7 @@ func fetchOwnedResourceList(args []string, kind string) ([]ownedResourceItem, er
 // reason. ctx/req are needed here (unlike the other observe fetchers) because
 // that walk is itself conditional on what the first read finds, so its
 // kubectl calls are traced only when they actually run.
-func fetchObservedCertificates(ctx Context, req ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
+func fetchObservedCertificates(ctx core.Context, req ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
 	raw, stderr, err := runObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {

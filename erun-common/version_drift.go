@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // EnvironmentVersionStatus is one environment's erun version, compared
@@ -79,7 +81,7 @@ type TenantVersionDrift struct {
 // gate verdict is worse than an error. ctx supports --dry-run: an
 // environment whose cached config carries no version is never guessed at
 // live in a dry run, only traced (see resolveLiveEnvironmentVersion).
-func ResolveTenantVersionDrift(ctx Context, result ListResult, tenant, gateEnvironment string) (TenantVersionDrift, error) {
+func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gateEnvironment string) (TenantVersionDrift, error) {
 	tenant = strings.TrimSpace(tenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
 
@@ -217,7 +219,7 @@ type environmentVersionResolution struct {
 // distinguish "never deployed" from "deployed by a process whose config
 // never learned about it" -- both look identical to the config reader, and
 // only asking the cluster directly can tell them apart.
-func resolveEnvironmentVersionForDrift(ctx Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
+func resolveEnvironmentVersionForDrift(ctx core.Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
 	if version := erunVersionString(env); version != "" {
 		return environmentVersionResolution{Version: version}
 	}
@@ -232,7 +234,7 @@ func resolveEnvironmentVersionForDrift(ctx Context, tenant string, env ListEnvir
 // resolution comes back unresolved with a reason that says so, matching the
 // no-live-network-call dry-run contract every other list-mode live check in
 // this file already follows.
-func resolveLiveEnvironmentVersion(ctx Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
+func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
 	req := ShellLaunchParams{
 		Tenant:            tenant,
 		Environment:       env.Name,

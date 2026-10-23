@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The location, and the migration off earlier ones, are shared (erun-common):
@@ -29,7 +30,7 @@ const portForwardLogMaxBytes = 5 * 1024 * 1024
 // an over-cap log first. All three forwards share it so the bounding rule
 // cannot drift between them.
 func openPortForwardLog(logPath string) (*os.File, error) {
-	return common.OpenBoundedAppendLog(logPath, portForwardLogMaxBytes, 0o644)
+	return core.OpenBoundedAppendLog(logPath, portForwardLogMaxBytes, 0o644)
 }
 
 // rotatePortForwardLogIfOversized re-applies that cap to a forward that is
@@ -43,11 +44,11 @@ func openPortForwardLog(logPath string) (*os.File, error) {
 //
 // Best-effort and silent on failure: rotation is diagnostics housekeeping and
 // must never stop a healthy forward from being reused.
-func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
+func rotatePortForwardLogIfOversized(ctx core.Context, kind, logPath string) {
 	if strings.TrimSpace(logPath) == "" {
 		return
 	}
-	if common.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
+	if core.RotateOversizedLog(logPath, portForwardLogMaxBytes) {
 		ctx.Trace(fmt.Sprintf("%s: rotated oversized port-forward log %s (kept a %s.1 backup)", kind, logPath, logPath))
 	}
 }
@@ -62,7 +63,7 @@ func rotatePortForwardLogIfOversized(ctx common.Context, kind, logPath string) {
 // Best-effort and silent on failure: reclaiming disk is diagnostics
 // housekeeping and must never stop an operator opening the environment they
 // asked for.
-func reclaimOrphanedPortForwardRecords(ctx common.Context) {
+func reclaimOrphanedPortForwardRecords(ctx core.Context) {
 	if err := common.ReclaimOrphanedPortForwardRecords(ctx); err != nil {
 		ctx.Trace(fmt.Sprintf("portforward: orphan reclaim skipped: %v", err))
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The failure this locks: a detached gate's only durable artefact is its timing
@@ -113,15 +115,15 @@ ERROR: failed to solve: process "/bin/sh -c curl -fsSL ..." did not complete suc
 	}
 
 	clock := newFakeClock()
-	root := newStepTiming("build", clock.now)
-	image := root.child("erun-devops")
-	platform := image.child("linux/amd64")
+	root := core.NewStepTiming("build", clock.now)
+	image := root.Child("erun-devops")
+	platform := image.Child("linux/amd64")
 	clock.advance(2 * time.Minute)
-	platform.finish(buildErr)
-	image.finish(buildErr)
-	root.finish(buildErr)
+	platform.Finish(buildErr)
+	image.Finish(buildErr)
+	root.Finish(buildErr)
 
-	record := root.toRecord("build")
+	record := root.ToRecord("build")
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		t.Fatalf("marshal timing record: %v", err)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // An agent job's working tree is the one thing its own exit status says
@@ -82,7 +84,7 @@ func (o environmentJobWorktreeOutcome) apply(job *EnvironmentJob) {
 // agentJobWorktreeContender look at every sibling job sharing this
 // environment without needing tenant/environment threaded through separately.
 func captureAgentJobWorktreeOutcome(job EnvironmentJob, jobsDir string) environmentJobWorktreeOutcome {
-	ctx := Context{Logger: NewLogger(VerbosityInfo)}
+	ctx := core.Context{Logger: core.NewLogger(core.VerbosityInfo)}
 	dir, branch, dirty := agentJobDirtyWorktree(ctx, job)
 	if !dirty {
 		return environmentJobWorktreeOutcome{}
@@ -153,7 +155,7 @@ func agentJobWorktreeContenderCandidate(jobsDir string, entry os.DirEntry, selfI
 // agentJobDirtyWorktree reports whether job is a finished agent job whose Dir
 // is a git working tree with uncommitted changes, and if so, its directory
 // and current branch ("HEAD" literal when detached).
-func agentJobDirtyWorktree(ctx Context, job EnvironmentJob) (dir, branch string, dirty bool) {
+func agentJobDirtyWorktree(ctx core.Context, job EnvironmentJob) (dir, branch string, dirty bool) {
 	if job.Kind != EnvironmentJobKindAgent {
 		return "", "", false
 	}
@@ -183,7 +185,7 @@ func agentJobDirtyWorktree(ctx Context, job EnvironmentJob) (dir, branch string,
 // (unreachable the moment HEAD moves), a merge/rebase/cherry-pick/revert in
 // progress (committing over it could corrupt that operation's own state), or
 // a branch this job treats as protected.
-func refuseAgentJobWorktreeCheckpoint(ctx Context, dir, branch string) (string, bool) {
+func refuseAgentJobWorktreeCheckpoint(ctx core.Context, dir, branch string) (string, bool) {
 	if branch == "HEAD" {
 		return "the working tree had uncommitted changes when the job ended, but HEAD was detached; " +
 			"a checkpoint commit there would be unreachable the moment HEAD moves, so none was made", true
@@ -203,7 +205,7 @@ func refuseAgentJobWorktreeCheckpoint(ctx Context, dir, branch string) (string, 
 // checkpointAgentJobWorktree makes the machine-authored commit and pushes it,
 // folding whichever step fails into outcome.reason so a caller always learns
 // what the supervisor actually managed to preserve.
-func checkpointAgentJobWorktree(ctx Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
+func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
 	commitResult, err := CommitWorkingTree(ctx, dir, CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
@@ -238,9 +240,9 @@ func checkpointAgentJobWorktree(ctx Context, dir, branch string, outcome environ
 // all — an agent job's Dir is not guaranteed to be one, and this is what lets
 // every other check in this file no-op cleanly instead of misreading git's
 // own "not a git repository" error as some other failure.
-func gitIsInsideWorkTree(ctx Context, dir string) (bool, error) {
+func gitIsInsideWorkTree(ctx core.Context, dir string) (bool, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--is-inside-work-tree")
-	output, err := Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output()
+	output, err := core.Command("git", "-C", dir, "rev-parse", "--is-inside-work-tree").Output()
 	if err != nil {
 		return false, nil
 	}
@@ -251,9 +253,9 @@ func gitIsInsideWorkTree(ctx Context, dir string) (bool, error) {
 // pointer file a linked worktree uses instead of a real .git directory, so the
 // in-progress-operation check below looks in the right place for a lane
 // checked out as a worktree rather than a plain clone.
-func gitResolveGitDir(ctx Context, dir string) (string, error) {
+func gitResolveGitDir(ctx core.Context, dir string) (string, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-parse", "--git-dir")
-	output, err := Command("git", "-C", dir, "rev-parse", "--git-dir").Output()
+	output, err := core.Command("git", "-C", dir, "rev-parse", "--git-dir").Output()
 	if err != nil {
 		return "", err
 	}
@@ -288,7 +290,7 @@ func gitOperationInProgress(gitDir string) bool {
 // the case where origin/HEAD's symref was never set locally (e.g. a shallow
 // or single-branch fetch), which is a real layout this repository's own lanes
 // use.
-func environmentJobWorktreeIsProtectedBranch(ctx Context, dir, branch string) bool {
+func environmentJobWorktreeIsProtectedBranch(ctx core.Context, dir, branch string) bool {
 	if def, ok := gitRemoteDefaultBranch(ctx, dir, "origin"); ok {
 		return branch == def
 	}
@@ -300,9 +302,9 @@ func environmentJobWorktreeIsProtectedBranch(ctx Context, dir, branch string) bo
 	}
 }
 
-func gitRemoteDefaultBranch(ctx Context, dir, remote string) (string, bool) {
+func gitRemoteDefaultBranch(ctx core.Context, dir, remote string) (string, bool) {
 	ctx.TraceCommand("", "git", "-C", dir, "symbolic-ref", "refs/remotes/"+remote+"/HEAD")
-	output, err := Command("git", "-C", dir, "symbolic-ref", "refs/remotes/"+remote+"/HEAD").Output()
+	output, err := core.Command("git", "-C", dir, "symbolic-ref", "refs/remotes/"+remote+"/HEAD").Output()
 	if err != nil {
 		return "", false
 	}

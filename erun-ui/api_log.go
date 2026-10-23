@@ -6,7 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, error) {
@@ -43,7 +44,7 @@ func kubectlText(ctx context.Context, kubernetesContext string, args ...string) 
 		args = append([]string{"--context", kubernetesContext}, args...)
 	}
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	output, err := cmd.CombinedOutput()
 	text := strings.TrimRight(string(output), "\n")
 	if err != nil {

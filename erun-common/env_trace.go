@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // envTraceLogMaxBytes caps each trace file so the rotated pair stays under ~2× this.
@@ -22,7 +25,7 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 	}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := errMissingTenantOrEnvironment("resolve env trace log path", tenant, environment); err != nil {
+	if err := model.ErrMissingTenantOrEnvironment("resolve env trace log path", tenant, environment); err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".erun", tenant, environment, "trace.log"), nil
@@ -36,7 +39,7 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 // to the un-tee'd context. In dry-run nothing is written, but the trace still
 // names the resolved path so the plan stays auditable (the integration-golden
 // contract).
-func ActivateEnvTrace(ctx Context, tenant, environment string) (Context, func()) {
+func ActivateEnvTrace(ctx core.Context, tenant, environment string) (core.Context, func()) {
 	noop := func() {}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
@@ -63,7 +66,7 @@ func ActivateEnvTrace(ctx Context, tenant, environment string) (Context, func())
 }
 
 func openEnvTraceLog(path string) (*os.File, error) {
-	return OpenBoundedAppendLog(path, envTraceLogMaxBytes, 0o600)
+	return core.OpenBoundedAppendLog(path, envTraceLogMaxBytes, 0o600)
 }
 
 // stampedLineWriter stamps each line so interleaved invocations stay

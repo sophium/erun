@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A port-forward state file is the record that something established a local
@@ -57,11 +60,11 @@ func PortForwardStatePath(kind, tenant, environment string) (string, error) {
 		{"tenant", tenant},
 		{"environment", environment},
 	} {
-		if err := validateStatePathSegment(segment.kind, segment.value); err != nil {
+		if err := config.ValidateStatePathSegment(segment.kind, segment.value); err != nil {
 			return "", err
 		}
 	}
-	return resolveConfigFilePath(filepath.Join(configRoot, "portforward", kind, tenant, environment+".json"))
+	return config.ResolveConfigFilePath(filepath.Join(config.ConfigRoot, "portforward", kind, tenant, environment+".json"))
 }
 
 // ResolvePortForwardStatePath is PortForwardStatePath for the writer: a record
@@ -99,7 +102,7 @@ func ResolvePortForwardStatePath(kind, tenant, environment string, dryRun bool) 
 func legacyPortForwardStatePaths(kind, tenant, environment, statePath string) []string {
 	var paths []string
 	if cacheDir, err := os.UserCacheDir(); err == nil {
-		paths = append(paths, filepath.Join(cacheDir, configRoot, kind, tenant, environment+".json"))
+		paths = append(paths, filepath.Join(cacheDir, config.ConfigRoot, kind, tenant, environment+".json"))
 	}
 	if root, ok := legacyPortForwardRoot(); ok {
 		paths = append(paths, filepath.Join(root, kind, tenant, environment+".json"))
@@ -122,7 +125,7 @@ func legacyPortForwardRoot() (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	legacy := filepath.Join(configDir, configRoot, "portforward")
+	legacy := filepath.Join(configDir, config.ConfigRoot, "portforward")
 	current, err := portForwardRoot()
 	if err == nil && filepath.Clean(legacy) == filepath.Clean(current) {
 		return "", false
@@ -133,7 +136,7 @@ func legacyPortForwardRoot() (string, bool) {
 // legacyUserConfigDir is os.UserConfigDir with the macOS branch keyed on the
 // detected host, so the integration suite can pin that layout on any host.
 func legacyUserConfigDir() (string, error) {
-	if DetectHost().OS == HostOSDarwin {
+	if core.DetectHost().OS == core.HostOSDarwin {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
@@ -207,7 +210,7 @@ func portForwardLogPath(kind, tenant, environment string) (string, error) {
 // unmigrated only because nothing opened the environment since the upgrade, and
 // the next open would otherwise move it into the canonical tree for an
 // environment of the same name created later.
-func RemovePortForwardRecord(ctx Context, kind, tenant, environment string) error {
+func RemovePortForwardRecord(ctx core.Context, kind, tenant, environment string) error {
 	statePath, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
 		return err
@@ -223,7 +226,7 @@ func RemovePortForwardRecord(ctx Context, kind, tenant, environment string) erro
 	return nil
 }
 
-func removePortForwardRecordAt(ctx Context, kind, statePath string) error {
+func removePortForwardRecordAt(ctx core.Context, kind, statePath string) error {
 	// Derived from the state path, never read from the record's own logPath:
 	// a hand-edited or half-written record must not be able to point the
 	// removal at a file outside the forward tree.
@@ -266,11 +269,11 @@ var portForwardLogHeldByProcess = logHeldByLiveProcess
 // host, a probe that failed — which leaves the reclaim behaving as it did
 // before this check rather than refusing to run.
 func logHeldByLiveProcess(logPath string) bool {
-	if DetectHost().OS == HostOSWindows {
+	if core.DetectHost().OS == core.HostOSWindows {
 		return false
 	}
 	for _, path := range []string{logPath, logPath + ".1"} {
-		out, err := Command("lsof", "-nP", "--", path).Output()
+		out, err := core.Command("lsof", "-nP", "--", path).Output()
 		if err != nil {
 			continue
 		}
@@ -310,7 +313,7 @@ func readPortForwardStateFile(path string) (PortForwardState, bool) {
 // is skipped rather than returned: this runs as part of a teardown that must
 // not fail on a file it cannot inspect, which is the behaviour the port-forward
 // state removal has always had.
-func removeFileIfPresent(ctx Context, path string) error {
+func removeFileIfPresent(ctx core.Context, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return nil
 	}
@@ -369,11 +372,11 @@ func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, b
 // distinction LoadPortForwardState itself draws for a state file it cannot
 // read.
 func environmentIsConfigured(tenant, environment string) (bool, error) {
-	_, _, err := ConfigStore{}.LoadEnvConfig(tenant, environment)
+	_, _, err := config.ConfigStore{}.LoadEnvConfig(tenant, environment)
 	if err == nil {
 		return true, nil
 	}
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, config.ErrNotInitialized) {
 		return false, nil
 	}
 	return false, err

@@ -12,7 +12,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // connectWithCapabilities serves the tool surface a caller with these
@@ -38,7 +39,7 @@ func connectWithRuntime(t *testing.T, runtime RuntimeConfig, capabilities ...str
 		User:         "operator@acme",
 		Capabilities: eruncommon.NewMCPCapabilitySet(capabilities),
 	}
-	info := eruncommon.BuildInfo{Version: "1.2.3"}
+	info := model.BuildInfo{Version: "1.2.3"}
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return newServer(info, runtime, identity, nil)
 	}, &mcp.StreamableHTTPOptions{JSONResponse: true})
@@ -387,7 +388,7 @@ func TestOperateScopedTokenOverTheRealEdgeReachesLifecycleToolsAndIsRefusedElsew
 	t.Setenv(envTenant, "acme")
 
 	cfg := HTTPConfig{Path: "/mcp"}
-	httpServer := httptest.NewServer(newHTTPHandler(eruncommon.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
+	httpServer := httptest.NewServer(newHTTPHandler(model.BuildInfo{Version: "1.2.3"}, cfg, RuntimeConfig{}, nil))
 	t.Cleanup(httpServer.Close)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "operate-edge-test", Version: "v0.0.1"}, nil)

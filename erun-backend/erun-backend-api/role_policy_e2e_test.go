@@ -8,15 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routeroles"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // This file drives erun#1684's role model end to end against a real,
@@ -93,7 +91,7 @@ func enrollUser(t *testing.T, txManager *repository.TxManager, tenantID string, 
 // route set the same way TestCapabilityCandidatesAreTheHandlersOwnRoutes
 // does: every RegisterXRoutes call this binary really wires, not a hand
 // -typed candidate list that could drift from it.
-func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []eruncommon.PlatformCapability {
+func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []modelpkg.PlatformCapability {
 	t.Helper()
 	options := HandlerOptions{DB: db, DBDialect: repository.DialectPostgres}
 	auth, err := NewAuthMiddleware(AuthMiddlewareOptions{
@@ -116,7 +114,7 @@ func realProtectedRouteCatalog(t *testing.T, db *sql.DB) []eruncommon.PlatformCa
 // with expectAllowed(routeroles' classification of that route) -- proof
 // against the actual routes and the actual enforcement code, not by
 // inspecting routeroles.Routes' patterns.
-func assertEffectiveAccessMatches(t *testing.T, authorizer *repository.PermissionAuthorizer, ctx context.Context, candidates []eruncommon.PlatformCapability, expectAllowed func(routeroles.Roles) bool) {
+func assertEffectiveAccessMatches(t *testing.T, authorizer *repository.PermissionAuthorizer, ctx context.Context, candidates []modelpkg.PlatformCapability, expectAllowed func(routeroles.Roles) bool) {
 	t.Helper()
 	for _, route := range candidates {
 		granted, ok := routeroles.Routes[route.Method+" "+route.Path]

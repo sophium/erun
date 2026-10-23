@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // A required GitHub status check has nothing to require until something
@@ -92,7 +94,7 @@ var validCommitStatusStates = map[ReportCommitStatusState]bool{
 
 // ReportCommitStatus reports a commit status on GitHub for params.Commit, the
 // SHA a required status check on the remote's branch protection can point at.
-func ReportCommitStatus(ctx Context, params ReportCommitStatusParams, deps ReportCommitStatusDependencies) (ReportCommitStatusResult, error) {
+func ReportCommitStatus(ctx core.Context, params ReportCommitStatusParams, deps ReportCommitStatusDependencies) (ReportCommitStatusResult, error) {
 	ctx.Trace("report-commit-status: resolving commit")
 	commit := strings.TrimSpace(params.Commit)
 	if commit == "" {

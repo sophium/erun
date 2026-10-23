@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ExecPushInput takes the branch as an explicit claim to verify, mirroring
@@ -20,7 +21,7 @@ type ExecPushInput struct {
 func execPushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecPushInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecPushInput) (*mcp.CallToolResult, CommandOutput, error) {
 		var pushed *eruncommon.PushWorkingTreeBranchResult
-		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx eruncommon.Context, workDir string) error {
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
 			result, err := eruncommon.PushWorkingTreeBranch(runCtx, workDir, eruncommon.PushWorkingTreeBranchParams{
 				Branch: input.Branch,
 				Remote: input.Remote,

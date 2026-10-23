@@ -9,7 +9,8 @@ import (
 	"sync"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboard, error) {
@@ -72,7 +73,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 // grant that would lift its restriction, so a refused tab offers the request
 // rather than only naming the read it needs. Panels are the only place the
 // dashboard records a refused read, so they are also the whole input here.
-func loadTenantDashboardAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardAccessRemedies(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	var userID string
 	if dashboard.User != nil {
 		userID = dashboard.User.UserID
@@ -125,7 +126,7 @@ const (
 // loadTenantDashboardData resolves every panel independently. One panel the
 // caller may not read, or one call that fails, must not blank the panels that
 // worked — and a panel the caller may not read must not read as an empty one.
-func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) eruncommon.PlatformCapabilities {
+func loadTenantDashboardData(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard, input uiTenantDashboardInput) model.PlatformCapabilities {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
 		// Identity is the dashboard's own precondition: without it there is no
@@ -218,7 +219,7 @@ func tenantDashboardTenantMismatch(localTenant, platformTenantName string) strin
 // requests, or every request for an operations-scoped caller). Degrades like
 // every other panel here — a caller who cannot read the queue gets a named
 // restriction, never a false "nothing pending".
-func loadTenantDashboardInviteRequests(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardInviteRequests(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabRequests}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadInviteRequests); restricted != "" {
 		panel.Restricted = restricted
@@ -249,7 +250,7 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *eruncommon.P
 // panel's restriction, and a failed read gets the panel's own error — neither
 // silently reduces the tab to the caller's single row, which reads as a
 // one-user tenant.
-func loadTenantDashboardUsers(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) []eruncommon.PlatformUser {
+func loadTenantDashboardUsers(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []eruncommon.PlatformUser {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabUsers}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers); restricted != "" {
 		panel.Restricted = restricted
@@ -310,7 +311,7 @@ func tenantDashboardUsernamesFromRoster(users []eruncommon.PlatformUser) map[str
 // callers that resolved no roster of their own (the review detail read). Best
 // effort: a caller who cannot read /v1/users, or a read that fails, gets back
 // an empty map rather than failing the whole load.
-func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities) map[string]string {
+func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities) map[string]string {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return map[string]string{}
 	}
@@ -328,7 +329,7 @@ func tenantDashboardUsernames(ctx context.Context, client *eruncommon.PlatformCl
 // after. Best effort like the other row-enrichment reads: a restricted or
 // failing count simply leaves the corresponding field unset rather than
 // reporting a false zero.
-func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
+func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, userID string) {
 	if strings.TrimSpace(userID) == "" || restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews) != "" {
 		return
 	}
@@ -352,7 +353,7 @@ type reviewsLoadOutcome struct {
 	restricted string
 }
 
-func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, filter eruncommon.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
+func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, filter eruncommon.PlatformReviewFilter, usernames map[string]string) reviewsLoadOutcome {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabReviews}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviews); restricted != "" {
 		panel.Restricted = restricted
@@ -370,7 +371,7 @@ func loadTenantDashboardReviews(ctx context.Context, client *eruncommon.Platform
 	return reviewsLoadOutcome{reviews: reviews}
 }
 
-func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, usernames map[string]string) {
+func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, usernames map[string]string) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabQueue}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue); restricted != "" {
 		panel.Restricted = restricted
@@ -397,7 +398,7 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *eruncommon.Platf
 // review under this panel's own share of the whole dashboard's single
 // request timeout, so a big tenant read out as a timed-out API error instead
 // of a slow-but-successful load.
-func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
+func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabBuilds}
 	switch {
 	case reviewsOutcome.restricted != "":
@@ -428,7 +429,7 @@ func loadTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformC
 // blank builds the review-side read already found; it only becomes the
 // panel's own restriction/error when the review-side had none of its own to
 // report.
-func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, panel *uiTenantDashboardPanel) {
+func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, panel *uiTenantDashboardPanel) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAllBuilds); restricted != "" {
 		if panel.Restricted == "" && panel.Error == "" {
 			panel.Restricted = restricted
@@ -470,7 +471,7 @@ func appendUnattachedTenantDashboardBuilds(ctx context.Context, client *eruncomm
 // without a count (rather than a false zero) when the caller cannot read
 // comments at all, or when its own comment read failed — supplemental detail
 // on a row, not worth a panel error the way the Reviews/Builds panels get.
-func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
+func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard, reviewsOutcome reviewsLoadOutcome) {
 	if reviewsOutcome.restricted != "" || reviewsOutcome.err != nil {
 		return
 	}
@@ -588,7 +589,7 @@ func fetchReviewBuildsConcurrently(ctx context.Context, client *eruncommon.Platf
 	return builds, firstErr
 }
 
-func loadTenantDashboardAuditEvents(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardAuditEvents(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabAudit}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadAuditEvents); restricted != "" {
 		panel.Restricted = restricted
@@ -608,7 +609,7 @@ func loadTenantDashboardAuditEvents(ctx context.Context, client *eruncommon.Plat
 // the panel may be attempted. A platform that reported no capability set at all
 // leaves every read attemptable: the call then reports its own refusal, which is
 // still better than hiding a surface the caller can use.
-func restrictedTenantDashboardRead(capabilities eruncommon.PlatformCapabilities, read string) string {
+func restrictedTenantDashboardRead(capabilities model.PlatformCapabilities, read string) string {
 	if !capabilities.Known() {
 		return ""
 	}

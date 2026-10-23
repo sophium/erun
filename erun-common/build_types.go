@@ -4,6 +4,9 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const localSnapshotTimestampFormat = "20060102150405"
@@ -29,13 +32,13 @@ type (
 	DockerImageInspectorFunc func(string) (bool, error)
 	DockerRegistryLoginFunc  func(string, io.Reader, io.Writer, io.Writer) error
 	BuildScriptRunnerFunc    func(string, string, []string, io.Reader, io.Writer, io.Writer) error
-	DockerPushFunc           func(Context, DockerPushSpec) error
+	DockerPushFunc           func(core.Context, DockerPushSpec) error
 )
 
 type DockerStore interface {
-	ListTenantConfigs() ([]TenantConfig, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
-	ListEnvConfigs(string) ([]EnvConfig, error)
+	ListTenantConfigs() ([]config.TenantConfig, error)
+	LoadTenantConfig(string) (config.TenantConfig, string, error)
+	ListEnvConfigs(string) ([]config.EnvConfig, error)
 }
 
 type DockerBuildContext struct {
@@ -62,28 +65,6 @@ type DockerImageReference struct {
 	// insecure-registry list, so anything that shells out to it for this
 	// image must pass its own `--insecure` explicitly.
 	Insecure bool
-}
-
-// DockerBuildSecret is one BuildKit build secret a project declares under
-// `docker.secrets` in .erun/config.yaml, resolved for the build's environment.
-//
-// It carries a *reference* to the credential — the name of an environment
-// variable, or a host path — and never the credential itself. That is the
-// property that keeps a secret out of every surface erun writes: the value is
-// never in this struct, so it cannot reach the docker build argv as a literal,
-// a trace line, a log, or a timing record. docker resolves it from its own
-// (inherited) environment, or reads it from the file it is handed.
-type DockerBuildSecret struct {
-	// ID is the secret id the Dockerfile mounts, as in
-	// `RUN --mount=type=secret,id=<ID>`.
-	ID string `yaml:"id"`
-	// Env names the environment variable holding the credential, rendered as
-	// `--secret id=<ID>,env=<Env>`. docker reads the value from its own
-	// environment, so it never enters this process.
-	Env string `yaml:"env,omitempty"`
-	// Src names a host file or directory holding the credential, rendered as
-	// `--secret id=<ID>,src=<Src>`.
-	Src string `yaml:"src,omitempty"`
 }
 
 type DockerBuildSpec struct {
@@ -139,7 +120,7 @@ type DockerBuildSpec struct {
 	// a reference, never a credential value, which is what keeps a secret out of
 	// every trace, log, and timing record this build writes — see
 	// DockerBuildSecret.
-	DockerSecrets []DockerBuildSecret
+	DockerSecrets []config.DockerBuildSecret
 	// PlatformObserver, when set, is called after each platform's build (or
 	// promote+push) finishes, reporting that platform's elapsed time, error,
 	// build-cgroup cost (nil for a promote, which runs no docker build), and
@@ -150,7 +131,7 @@ type DockerBuildSpec struct {
 	// needing a signature change, since executeDockerBuild sets this field on
 	// the same buildInput value it hands to the builder — exactly how it already
 	// threads Verbosity through. Never marshaled: a func value has no JSON form.
-	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) `json:"-"`
+	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *core.BuildCgroupMetrics, buildOutput string) `json:"-"`
 	// cache is the same fingerprint cache decision the timing tree recorded for
 	// this image (see cacheDecision), threaded through by value so the builder
 	// can correct it: a promote whose cached image cannot be published falls back
@@ -158,7 +139,7 @@ type DockerBuildSpec struct {
 	// opposite of what the run did. Unexported because it is erun-common's own
 	// timing bookkeeping, not an input a caller sets; nil whenever no timing root
 	// is active, which is most callers.
-	cache *cacheDecision
+	cache *core.CacheDecision
 }
 
 type DockerPushSpec struct {

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -106,7 +106,7 @@ func stubPredatingDesktopControlServer(t *testing.T, port int) *stubDesktopContr
 		stub.mu.Lock()
 		stub.requests = append(stub.requests, stubDesktopControlRequest{Path: r.URL.Path})
 		stub.mu.Unlock()
-		if r.URL.Path != eruncommon.DesktopControlPath {
+		if r.URL.Path != core.DesktopControlPath {
 			http.NotFound(w, r)
 			return
 		}
@@ -318,7 +318,7 @@ exit 0`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "app/restart_dry_run_names_the_orchestrators_it_would_not_reopen", normalize.Apply(result.Combined))
-		assertAskedExactly(t, stub, eruncommon.DesktopControlPlanPath, "a dry run")
+		assertAskedExactly(t, stub, core.DesktopControlPlanPath, "a dry run")
 		if bodies := stub.bodies(); !strings.Contains(bodies, `"orchestratorId":"erun"`) {
 			t.Fatalf("expected the dry run to name the orchestrator to resume, sent %q", bodies)
 		}
@@ -337,7 +337,7 @@ exit 0`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "app/restart_dry_run_carries_the_plan_in_json_output", normalize.Apply(result.Combined))
-		assertAskedExactly(t, stub, eruncommon.DesktopControlPlanPath, "a dry run")
+		assertAskedExactly(t, stub, core.DesktopControlPlanPath, "a dry run")
 	})
 
 	t.Run("restart_dry_run_reports_a_plan_it_could_not_read", func(t *testing.T) {
@@ -371,7 +371,7 @@ exit 0`)
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "app/restart_dry_run_refuses_the_plan_path_an_older_desktop_does_not_serve", normalize.Apply(result.Combined))
-		assertAskedExactly(t, stub, eruncommon.DesktopControlPlanPath, "a dry run against an older desktop")
+		assertAskedExactly(t, stub, core.DesktopControlPlanPath, "a dry run against an older desktop")
 	})
 
 	t.Run("restart_real_run_restarts_a_live_target", func(t *testing.T) {
@@ -390,7 +390,7 @@ exit 0`)
 		// The restart is a restart: it goes to the restart path, never to the one
 		// reserved for the question, which is the one way an operator could be
 		// shown a plan and no restart.
-		assertAskedExactly(t, stub, eruncommon.DesktopControlPath, "a real restart")
+		assertAskedExactly(t, stub, core.DesktopControlPath, "a real restart")
 	})
 
 	t.Run("restart_real_run_reports_a_declined_restart", func(t *testing.T) {

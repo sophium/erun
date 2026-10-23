@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // resolveMCPAuthPublicKey loads the desktop key the per-env MCP edge verifies
@@ -39,7 +42,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // (mcptoken.Signer) so the edge trusts tokens the backend mints for the
 // console. No key resolved (and no explicit opt-out) leaves the deploy
 // unauthenticated, matching every deploy before this existed.
-func applyMCPAuthToRuntimeSpec(ctx Context, target DeployTarget, spec *DeploySpec) error {
+func applyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *DeploySpec) error {
 	if spec == nil || spec.Deploy.ReleaseName != RuntimeReleaseName(target.Tenant) {
 		return nil
 	}
@@ -58,7 +61,7 @@ func applyMCPAuthToRuntimeSpec(ctx Context, target DeployTarget, spec *DeploySpe
 // Precedence: the explicit opt-out clears it, then the caller-supplied path, then
 // the path the env recorded when auth was last enabled. Rethreading the recorded
 // path is what makes auth survive a plain version bump.
-func resolveMCPAuthKeyPathForDeploy(ctx Context, target DeployTarget, envConfig EnvConfig) string {
+func resolveMCPAuthKeyPathForDeploy(ctx core.Context, target DeployTarget, envConfig config.EnvConfig) string {
 	if target.DisableMCPAuth {
 		ctx.Trace("deploy: mcp auth disabled by request; the env's MCP edge will accept loopback traffic only")
 		return ""
@@ -80,7 +83,7 @@ func resolveMCPAuthKeyPathForDeploy(ctx Context, target DeployTarget, envConfig 
 // then has nothing to rethread — recovering the environment needs the very
 // record the failure withheld. The OIDC arm carries no local key, so its empty
 // field is legitimate and nothing is written there.
-func recordMCPAuthKeyOnEnv(ctx Context, deployInput HelmDeploySpec) error {
+func recordMCPAuthKeyOnEnv(ctx core.Context, deployInput HelmDeploySpec) error {
 	keyPath := strings.TrimSpace(deployInput.MCPAuthPublicKeyPath)
 	tenant := strings.TrimSpace(deployInput.Tenant)
 	environment := strings.TrimSpace(deployInput.Environment)
@@ -89,7 +92,7 @@ func recordMCPAuthKeyOnEnv(ctx Context, deployInput HelmDeploySpec) error {
 	}
 	// The read runs in both modes so a dry run traces the write only where a real
 	// one would perform it: an env already naming this key needs nothing.
-	envConfig, _, err := LoadEnvConfig(tenant, environment)
+	envConfig, _, err := config.LoadEnvConfig(tenant, environment)
 	if err == nil && strings.TrimSpace(envConfig.MCPAuthPublicKeyPath) == keyPath {
 		return nil
 	}
@@ -104,7 +107,7 @@ func recordMCPAuthKeyOnEnv(ctx Context, deployInput HelmDeploySpec) error {
 		return nil
 	}
 	envConfig.MCPAuthPublicKeyPath = keyPath
-	if err := SaveEnvConfig(tenant, envConfig); err != nil {
+	if err := config.SaveEnvConfig(tenant, envConfig); err != nil {
 		return fmt.Errorf("record mcp auth public key on %s/%s: %w", tenant, environment, err)
 	}
 	return nil
@@ -120,7 +123,7 @@ func recordMCPAuthKeyOnEnv(ctx Context, deployInput HelmDeploySpec) error {
 // runtime deploy whose resolved plan has auth off), so an auth-enabled deploy
 // pays nothing. Scoped to explicit deploy requests: `erun open`'s heal-redeploy
 // rethreads a recorded key but must not be blocked from handing over a shell.
-func guardMCPAuthDowngrade(ctx Context, target DeployTarget, deployInput HelmDeploySpec) error {
+func guardMCPAuthDowngrade(ctx core.Context, target DeployTarget, deployInput HelmDeploySpec) error {
 	if target.DisableMCPAuth || deployInput.MCPAuthEnabled {
 		return nil
 	}
@@ -145,7 +148,7 @@ func guardMCPAuthDowngrade(ctx Context, target DeployTarget, deployInput HelmDep
 // hand — the release's own values and Secret hold the answer. The two arms are
 // not interchangeable: an OIDC-authenticated edge has no local key at all, so
 // asking it for one sends the operator after a file that should not exist.
-func mcpAuthDowngradeRecovery(ctx Context, deployInput HelmDeploySpec, live liveMCPAuth) string {
+func mcpAuthDowngradeRecovery(ctx core.Context, deployInput HelmDeploySpec, live liveMCPAuth) string {
 	const optOut = ", or pass --no-mcp-auth to turn authentication off on purpose"
 	if issuer := strings.TrimSpace(live.issuer); issuer != "" && !strings.HasPrefix(issuer, fileIssuerScheme) {
 		ctx.Trace("deploy: mcp auth: release " + deployInput.ReleaseName + " authenticates against the OIDC issuer " + issuer + "; no local key is involved")
@@ -171,7 +174,7 @@ func mcpAuthDowngradeRecovery(ctx Context, deployInput HelmDeploySpec, live live
 // so the refusal can identify it rather than describe it. ok=false whenever the
 // read or the decode fails; the message then names the Secret alone instead of
 // leaking a cluster error into an operator-facing sentence.
-func readLiveMCPAuthPublicKey(ctx Context, deployInput HelmDeploySpec, secret string) ([]byte, bool) {
+func readLiveMCPAuthPublicKey(ctx core.Context, deployInput HelmDeploySpec, secret string) ([]byte, bool) {
 	namespace := strings.TrimSpace(deployInput.Namespace)
 	if secret == "" || namespace == "" {
 		return nil, false
@@ -183,7 +186,7 @@ func readLiveMCPAuthPublicKey(ctx Context, deployInput HelmDeploySpec, secret st
 	}
 	jsonPath := "jsonpath={.data." + strings.ReplaceAll(desktopMCPPublicKeyFile, ".", `\.`) + "}"
 	args = append(args, "-n", namespace, "get", "secret", secret, "-o", jsonPath)
-	output, err := Command("kubectl", args...).Output()
+	output, err := core.Command("kubectl", args...).Output()
 	if err != nil {
 		ctx.Trace("deploy: mcp auth: secret " + secret + " could not be read")
 		return nil, false
@@ -201,7 +204,7 @@ func readLiveMCPAuthPublicKey(ctx Context, deployInput HelmDeploySpec, secret st
 // refusal into the command that fixes it, and the match is what says re-supplying
 // keeps the edge's existing trust rather than rotating it.
 func desktopIdentityPublicKeyMatching(trusted []byte) (string, bool) {
-	dir := strings.TrimSpace(DefaultDesktopIdentityDir())
+	dir := strings.TrimSpace(core.DefaultDesktopIdentityDir())
 	if dir == "" {
 		return "", false
 	}
@@ -256,7 +259,7 @@ func readLiveMCPAuth(deployInput HelmDeploySpec) (liveMCPAuth, bool) {
 	if kubernetesContext := strings.TrimSpace(deployInput.KubernetesContext); kubernetesContext != "" {
 		args = append(args, "--kube-context", kubernetesContext)
 	}
-	output, err := Command("helm", args...).Output()
+	output, err := core.Command("helm", args...).Output()
 	if err != nil {
 		return liveMCPAuth{}, false
 	}
@@ -322,7 +325,7 @@ stringData:
 // applyMCPAuthSecret delivers the desktop public key into the env's runtime
 // pod. A no-op unless the deploy injected a trusted key (a desktop deploy); the
 // manifest is piped via stdin so it never appears as an argv element.
-func applyMCPAuthSecret(ctx Context, deployInput HelmDeploySpec) error {
+func applyMCPAuthSecret(ctx core.Context, deployInput HelmDeploySpec) error {
 	if !deployInput.MCPAuthEnabled || strings.TrimSpace(deployInput.MCPAuthSecretName) == "" {
 		return nil
 	}

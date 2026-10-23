@@ -5,7 +5,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // ResizeInput mirrors the CLI's `erun resize` flags. tenant/environment must
@@ -45,7 +46,7 @@ func resizeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			return nil, JobEnvelopeOutput{}, err
 		}
 		identity := authIdentityFrom(ctx)
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			findProjectRoot := func() (string, string, error) {
 				return runtimeFindProjectRoot(runtime.Context, workDir)
 			}

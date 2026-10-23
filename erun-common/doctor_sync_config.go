@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,9 +56,9 @@ type ConfigDriftField struct {
 type InjectedRuntimeConfig struct {
 	Tenant      string
 	Environment string
-	Env         EnvConfig
-	Providers   []CloudProviderConfig
-	Contexts    []CloudContextConfig
+	Env         configpkg.EnvConfig
+	Providers   []configpkg.CloudProviderConfig
+	Contexts    []configpkg.CloudContextConfig
 }
 
 // ConfigSyncInspection is the result of comparing the in-pod config against the
@@ -90,9 +92,9 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 		return InjectedRuntimeConfig{}, false
 	}
 
-	envType := EnvironmentType(get("ERUN_ENV_TYPE"))
+	envType := configpkg.EnvironmentType(get("ERUN_ENV_TYPE"))
 	if !envType.IsValid() {
-		envType = legacyEnvTypeFromRemoteSnapshot(strings.EqualFold(get("ERUN_REPO_REMOTE"), "true"), nil)
+		envType = configpkg.LegacyEnvTypeFromRemoteSnapshot(strings.EqualFold(get("ERUN_REPO_REMOTE"), "true"), nil)
 	}
 	kubernetesContext := get("ERUN_KUBERNETES_CONTEXT")
 	if kubernetesContext == "" {
@@ -107,7 +109,7 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	injected := InjectedRuntimeConfig{
 		Tenant:      tenant,
 		Environment: environment,
-		Env: EnvConfig{
+		Env: configpkg.EnvConfig{
 			Name:               environment,
 			Type:               envType,
 			KubernetesContext:  kubernetesContext,
@@ -125,12 +127,12 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	return injected, true
 }
 
-func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]CloudProviderConfig, []CloudContextConfig) {
+func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]configpkg.CloudProviderConfig, []configpkg.CloudContextConfig) {
 	if provider == "" || alias == "" {
 		return nil, nil
 	}
-	username, accountID, _, _ := ParseCloudProviderAlias(alias)
-	providers := []CloudProviderConfig{{Alias: alias, Provider: provider, Username: username, AccountID: accountID}}
+	username, accountID, _, _ := configpkg.ParseCloudProviderAlias(alias)
+	providers := []configpkg.CloudProviderConfig{{Alias: alias, Provider: provider, Username: username, AccountID: accountID}}
 	if region == "" {
 		return providers, nil
 	}
@@ -138,7 +140,7 @@ func injectedCloudConfig(provider, alias, region, instanceID, contextName, kuber
 	// defaults to the kubernetes context exactly as every writer (upsertCloudContext,
 	// the runtime boot) already defaults it — otherwise the injected ""
 	// never matches the on-disk default and drift never clears.
-	contexts := []CloudContextConfig{NormalizeCloudContextConfig(CloudContextConfig{
+	contexts := []configpkg.CloudContextConfig{NormalizeCloudContextConfig(configpkg.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,
@@ -161,8 +163,8 @@ func injectedManagedCloud(get func(string) string, provider, alias, region strin
 	return provider != "" && alias != "" && region != ""
 }
 
-func injectedIdleConfig(get func(string) string) EnvironmentIdleConfig {
-	idle := EnvironmentIdleConfig{
+func injectedIdleConfig(get func(string) string) configpkg.EnvironmentIdleConfig {
+	idle := configpkg.EnvironmentIdleConfig{
 		Timeout:      get("ERUN_IDLE_TIMEOUT"),
 		WorkingHours: get("ERUN_IDLE_WORKING_HOURS"),
 		Timezone:     get("ERUN_IDLE_TIMEZONE"),
@@ -182,12 +184,12 @@ func injectedIdleConfig(get func(string) string) EnvironmentIdleConfig {
 	return idle
 }
 
-func parseInjectedContainerRegistries(value string) ContainerRegistries {
+func parseInjectedContainerRegistries(value string) configpkg.ContainerRegistries {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil
 	}
-	var registries ContainerRegistries
+	var registries configpkg.ContainerRegistries
 	if err := json.Unmarshal([]byte(value), &registries); err != nil {
 		return nil
 	}
@@ -204,11 +206,11 @@ func ResolveRuntimeConfigHome(homeDir string) string {
 }
 
 func runtimeEnvConfigPath(configHome, tenant, environment string) string {
-	return filepath.Join(configHome, configRoot, tenant, environment, configFile)
+	return filepath.Join(configHome, configpkg.ConfigRoot, tenant, environment, configpkg.ConfigFile)
 }
 
 func runtimeRootConfigPath(configHome string) string {
-	return filepath.Join(configHome, configRoot, configFile)
+	return filepath.Join(configHome, configpkg.ConfigRoot, configpkg.ConfigFile)
 }
 
 // InspectRuntimeConfigSync compares the in-pod config under configHome against
@@ -246,36 +248,36 @@ func InspectRuntimeConfigSync(configHome string, env func(string) string) (Confi
 	return inspection, nil
 }
 
-func loadRuntimeEnvConfigForSync(configHome, tenant, environment string) (EnvConfig, map[string]any, error) {
+func loadRuntimeEnvConfigForSync(configHome, tenant, environment string) (configpkg.EnvConfig, map[string]any, error) {
 	path := runtimeEnvConfigPath(configHome, tenant, environment)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return EnvConfig{}, map[string]any{}, nil
+			return configpkg.EnvConfig{}, map[string]any{}, nil
 		}
-		return EnvConfig{}, nil, err
+		return configpkg.EnvConfig{}, nil, err
 	}
-	var config EnvConfig
+	var config configpkg.EnvConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return EnvConfig{}, nil, err
+		return configpkg.EnvConfig{}, nil, err
 	}
 	raw := map[string]any{}
 	_ = yaml.Unmarshal(data, &raw)
 	return config, raw, nil
 }
 
-func loadRuntimeRootConfigForSync(configHome string) (ERunConfig, bool, error) {
+func loadRuntimeRootConfigForSync(configHome string) (configpkg.ERunConfig, bool, error) {
 	path := runtimeRootConfigPath(configHome)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ERunConfig{}, false, nil
+			return configpkg.ERunConfig{}, false, nil
 		}
-		return ERunConfig{}, false, err
+		return configpkg.ERunConfig{}, false, err
 	}
-	var config ERunConfig
+	var config configpkg.ERunConfig
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return ERunConfig{}, false, err
+		return configpkg.ERunConfig{}, false, err
 	}
 	return config, true, nil
 }
@@ -283,7 +285,7 @@ func loadRuntimeRootConfigForSync(configHome string) (ERunConfig, bool, error) {
 // envTypeDrift reports drift on the env `type`, flagging a lingering legacy
 // `remote:` key even when the migrated value already matches (so the rewrite
 // drops it in favour of the canonical type).
-func envTypeDrift(injected, onDisk EnvConfig, raw map[string]any) (ConfigDriftField, bool) {
+func envTypeDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) (ConfigDriftField, bool) {
 	if _, hasLegacyRemote := raw["remote"]; hasLegacyRemote {
 		return ConfigDriftField{Scope: "env", Key: "type", OnDisk: "remote", Injected: string(injected.Type), Kind: ConfigDriftLegacyKey}, true
 	}
@@ -293,7 +295,7 @@ func envTypeDrift(injected, onDisk EnvConfig, raw map[string]any) (ConfigDriftFi
 	return ConfigDriftField{}, false
 }
 
-func envConfigDrift(injected, onDisk EnvConfig, raw map[string]any) []ConfigDriftField {
+func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []ConfigDriftField {
 	var drift []ConfigDriftField
 	add := func(key, onDiskVal, injectedVal string, kind ConfigDriftKind) {
 		drift = append(drift, ConfigDriftField{Scope: "env", Key: key, OnDisk: onDiskVal, Injected: injectedVal, Kind: kind})
@@ -331,7 +333,7 @@ func envConfigDrift(injected, onDisk EnvConfig, raw map[string]any) []ConfigDrif
 	return drift
 }
 
-func rootConfigDrift(injected InjectedRuntimeConfig, onDisk ERunConfig) []ConfigDriftField {
+func rootConfigDrift(injected InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []ConfigDriftField {
 	var drift []ConfigDriftField
 	for _, provider := range injected.Providers {
 		existing, found := findCloudProvider(onDisk.CloudProviders, provider.Alias)
@@ -354,25 +356,25 @@ func rootConfigDrift(injected InjectedRuntimeConfig, onDisk ERunConfig) []Config
 	return drift
 }
 
-func findCloudProvider(providers []CloudProviderConfig, alias string) (CloudProviderConfig, bool) {
+func findCloudProvider(providers []configpkg.CloudProviderConfig, alias string) (configpkg.CloudProviderConfig, bool) {
 	for _, provider := range providers {
 		if provider.Alias == alias {
 			return provider, true
 		}
 	}
-	return CloudProviderConfig{}, false
+	return configpkg.CloudProviderConfig{}, false
 }
 
-func findCloudContextByName(contexts []CloudContextConfig, name string) (CloudContextConfig, bool) {
+func findCloudContextByName(contexts []configpkg.CloudContextConfig, name string) (configpkg.CloudContextConfig, bool) {
 	for _, context := range contexts {
 		if context.Name == name {
 			return context, true
 		}
 	}
-	return CloudContextConfig{}, false
+	return configpkg.CloudContextConfig{}, false
 }
 
-func normalizeRegistries(registries ContainerRegistries) ContainerRegistries {
+func normalizeRegistries(registries configpkg.ContainerRegistries) configpkg.ContainerRegistries {
 	if len(registries) == 0 {
 		return nil
 	}
@@ -386,8 +388,8 @@ func driftKind(onDiskValue string) ConfigDriftKind {
 	return ConfigDriftWrong
 }
 
-func driftKindForIdle(onDisk EnvironmentIdleConfig) ConfigDriftKind {
-	if onDisk == (EnvironmentIdleConfig{}) {
+func driftKindForIdle(onDisk configpkg.EnvironmentIdleConfig) ConfigDriftKind {
+	if onDisk == (configpkg.EnvironmentIdleConfig{}) {
 		return ConfigDriftMissing
 	}
 	return ConfigDriftWrong
@@ -404,7 +406,7 @@ func formatBool(value bool) string {
 // env-derived projection matches the injected env, preserving every key the
 // injection does not carry. Overlaying only the projected fields lets a second
 // run round-trip to InSync() with no perpetual-drift loop.
-func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
+func RunRuntimeConfigSync(ctx core.Context, inspection ConfigSyncInspection) error {
 	if !inspection.HasInjected || inspection.InSync() {
 		return nil
 	}
@@ -418,7 +420,7 @@ func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	// Back up before the overlay rewrites the file so an in-pod sync that
 	// resolves a wrong value stays recoverable.
 	if !ctx.DryRun {
-		_ = writeEnvConfigBackupIfDue(envPath, timeNow)
+		_ = configpkg.WriteEnvConfigBackupIfDue(envPath, configpkg.TimeNow)
 	}
 	if err := writeRuntimeYAML(ctx, envPath, overlayInjectedEnvConfig(onDiskEnv, injected.Env)); err != nil {
 		return err
@@ -426,7 +428,7 @@ func RunRuntimeConfigSync(ctx Context, inspection ConfigSyncInspection) error {
 	return reconcileRuntimeRootConfig(ctx, inspection.ConfigHome, injected)
 }
 
-func reconcileRuntimeRootConfig(ctx Context, configHome string, injected InjectedRuntimeConfig) error {
+func reconcileRuntimeRootConfig(ctx core.Context, configHome string, injected InjectedRuntimeConfig) error {
 	if len(injected.Providers) == 0 && len(injected.Contexts) == 0 {
 		return nil
 	}
@@ -445,12 +447,12 @@ func reconcileRuntimeRootConfig(ctx Context, configHome string, injected Injecte
 		rootConfig.CloudContexts = upsertCloudContext(rootConfig.CloudContexts, context)
 	}
 	if !ctx.DryRun {
-		_ = writeRootConfigBackupIfDue(rootPath, timeNow)
+		_ = configpkg.WriteRootConfigBackupIfDue(rootPath, configpkg.TimeNow)
 	}
 	return writeRuntimeYAML(ctx, rootPath, rootConfig)
 }
 
-func overlayInjectedEnvConfig(onDisk, injected EnvConfig) EnvConfig {
+func overlayInjectedEnvConfig(onDisk, injected configpkg.EnvConfig) configpkg.EnvConfig {
 	onDisk.Name = injected.Name
 	onDisk.Type = injected.Type
 	onDisk.KubernetesContext = injected.KubernetesContext
@@ -463,18 +465,18 @@ func overlayInjectedEnvConfig(onDisk, injected EnvConfig) EnvConfig {
 	return onDisk
 }
 
-func writeRuntimeYAML(ctx Context, path string, config any) error {
+func writeRuntimeYAML(ctx core.Context, path string, config any) error {
 	ctx.TraceCommand("", "write-yaml", path)
 	if ctx.DryRun {
 		return nil
 	}
 	existing, _ := os.ReadFile(path)
-	data, err := marshalConfigPreservingUnknownFields(existing, config)
+	data, err := configpkg.MarshalConfigPreservingUnknownFields(existing, config)
 	if err != nil {
-		return ErrFailedToSaveConfig
+		return configpkg.ErrFailedToSaveConfig
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return ErrNoUserDataFolder
+		return configpkg.ErrNoUserDataFolder
 	}
-	return WriteFileAtomic(path, data, configFilePerm)
+	return configpkg.WriteFileAtomic(path, data, configpkg.ConfigFilePerm)
 }

@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type BuildInput struct {
@@ -35,8 +36,8 @@ var errMissingPushVersion = fmt.Errorf("push requires a version: it publishes a 
 func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
-			var result *eruncommon.BuildResult
-			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx eruncommon.Context, workDir string) error {
+			var result *core.BuildResult
+			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				runCtx.BuildJobs = input.Jobs
 				runCtx.MCPTool = "build"
 				component := strings.TrimSpace(input.Component)
@@ -69,12 +70,12 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		if strings.TrimSpace(input.Version) == "" {
 			return nil, JobEnvelopeOutput{}, errMissingPushVersion
 		}
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			execution, err := resolveRuntimePushExecution(runCtx, runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version))
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunPushCommand(runCtx, func(runCtx eruncommon.Context) error {
+			return eruncommon.RunPushCommand(runCtx, func(runCtx core.Context) error {
 				return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 			})
 		})
@@ -83,7 +84,7 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
@@ -123,7 +124,7 @@ func resolveRuntimeBuildExecution(ctx eruncommon.Context, runtime RuntimeConfig,
 	return eruncommon.ResolveBuildExecution(ctx, runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 }
 
-func resolveRuntimePushExecution(ctx eruncommon.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string) (eruncommon.DockerPushExecutionSpec, error) {
+func resolveRuntimePushExecution(ctx core.Context, runtime RuntimeConfig, projectRoot, component, versionOverride string) (eruncommon.DockerPushExecutionSpec, error) {
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     strings.TrimSpace(runtime.Context.Environment),

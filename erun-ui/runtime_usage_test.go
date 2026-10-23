@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable covers the cgroup
@@ -142,10 +143,10 @@ func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 // panel would otherwise misread as an OOM kill.
 func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"petios": {Name: "petios", DefaultEnvironment: "local"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"petios/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "test-context"},
 		},
 	}

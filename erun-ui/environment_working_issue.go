@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type workingIssueCommandRunner func(ctx context.Context, dir, name string, args ...string) (string, error)
@@ -40,7 +42,7 @@ func parseIssueNumberFromBranch(branch string) int {
 
 func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	eruncommon.HideConsoleWindow(cmd)
+	core.HideConsoleWindow(cmd)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
@@ -80,7 +82,7 @@ func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, er
 	return value, nil
 }
 
-func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
+func (a *App) resolveWorkingIssue(result config.OpenResult) uiWorkingIssue {
 	env := result.EnvConfig
 	if env.RemoteWorktree() {
 		return a.resolvePodWorkingIssue(result)
@@ -105,8 +107,8 @@ func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
 // port-forward exists only while the env is open here, so an unreachable port
 // means there is nothing to query yet — the honest state prompts the operator
 // to open the env.
-func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
-	mcpPort := eruncommon.MCPPortForResult(result)
+func (a *App) resolvePodWorkingIssue(result config.OpenResult) uiWorkingIssue {
+	mcpPort := config.MCPPortForResult(result)
 	if mcpPort <= 0 || !a.deps.canReachMCPEndpoint(mcpPort) {
 		return uiWorkingIssue{Available: false, Reason: "open this environment to see its in-pod work"}
 	}

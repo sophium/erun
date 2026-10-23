@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
@@ -90,31 +93,31 @@ func TestRenderCloudflareCredentialsSecretRedactsAndQuotes(t *testing.T) {
 
 func TestCloudProviderTypeFromAlias(t *testing.T) {
 	cases := map[string]string{
-		"alice+123456789012@aws":  CloudProviderAWS,
-		"ci+cf-acct-1@cloudflare": CloudProviderCloudflare,
-		"garbage-without-suffix":  CloudProviderAWS,
-		"":                        CloudProviderAWS,
+		"alice+123456789012@aws":  config.CloudProviderAWS,
+		"ci+cf-acct-1@cloudflare": config.CloudProviderCloudflare,
+		"garbage-without-suffix":  config.CloudProviderAWS,
+		"":                        config.CloudProviderAWS,
 	}
 	for alias, want := range cases {
-		if got := cloudProviderTypeFromAlias(alias); got != want {
+		if got := config.CloudProviderTypeFromAlias(alias); got != want {
 			t.Fatalf("cloudProviderTypeFromAlias(%q) = %q, want %q", alias, got, want)
 		}
 	}
 }
 
 func TestResolvedCloudAliasesFoldsLegacyScalarAndMap(t *testing.T) {
-	env := EnvConfig{
+	env := config.EnvConfig{
 		CloudProviderAlias: "alice+123456789012@aws",
 		CloudProviderAliases: map[string]string{
-			CloudProviderCloudflare: "ci+cf-acct-1@cloudflare",
+			config.CloudProviderCloudflare: "ci+cf-acct-1@cloudflare",
 		},
 	}
 	resolved := env.ResolvedCloudAliases()
-	if resolved[CloudProviderAWS] != "alice+123456789012@aws" {
-		t.Fatalf("aws slot = %q", resolved[CloudProviderAWS])
+	if resolved[config.CloudProviderAWS] != "alice+123456789012@aws" {
+		t.Fatalf("aws slot = %q", resolved[config.CloudProviderAWS])
 	}
-	if resolved[CloudProviderCloudflare] != "ci+cf-acct-1@cloudflare" {
-		t.Fatalf("cloudflare slot = %q", resolved[CloudProviderCloudflare])
+	if resolved[config.CloudProviderCloudflare] != "ci+cf-acct-1@cloudflare" {
+		t.Fatalf("cloudflare slot = %q", resolved[config.CloudProviderCloudflare])
 	}
 	if len(resolved) != 2 {
 		t.Fatalf("expected 2 resolved aliases, got %d", len(resolved))
@@ -251,12 +254,12 @@ func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
 	defer srv.Close()
 	t.Setenv(cloudflareAPIBaseURLEnv, srv.URL)
 
-	info, err := defaultVerifyCloudflareToken(Context{}, "tok")
+	info, err := defaultVerifyCloudflareToken(core.Context{}, "tok")
 	mustNoErr(t, err, "verify")
 	if info.ID != "abc" || info.Status != "active" {
 		t.Fatalf("verify info = %+v", info)
 	}
-	accounts, err := defaultListCloudflareAccounts(Context{}, "tok")
+	accounts, err := defaultListCloudflareAccounts(core.Context{}, "tok")
 	mustNoErr(t, err, "accounts")
 	assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
 
@@ -266,11 +269,11 @@ func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
 }
 
 func TestResolveTenantCloudProviderIssuersSkipsCloudflare(t *testing.T) {
-	store := stubCloudContextStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
-		{Alias: "alice+123456789012@aws", Provider: CloudProviderAWS, OIDCIssuerURL: "https://issuer.example.com"},
-		{Alias: "ci+cf-acct-1@cloudflare", Provider: CloudProviderCloudflare, Cloudflare: &CloudflareProviderConfig{AccountID: "cf-acct-1", TokenRef: "cloudflare/ci+cf-acct-1@cloudflare"}},
+	store := stubCloudContextStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+		{Alias: "alice+123456789012@aws", Provider: config.CloudProviderAWS, OIDCIssuerURL: "https://issuer.example.com"},
+		{Alias: "ci+cf-acct-1@cloudflare", Provider: config.CloudProviderCloudflare, Cloudflare: &config.CloudflareProviderConfig{AccountID: "cf-acct-1", TokenRef: "cloudflare/ci+cf-acct-1@cloudflare"}},
 	}}}
-	tenant := TenantConfig{CloudProviderAliases: []string{"alice+123456789012@aws", "ci+cf-acct-1@cloudflare"}}
+	tenant := config.TenantConfig{CloudProviderAliases: []string{"alice+123456789012@aws", "ci+cf-acct-1@cloudflare"}}
 
 	issuers, err := ResolveTenantCloudProviderIssuers(store, tenant)
 	if err != nil {

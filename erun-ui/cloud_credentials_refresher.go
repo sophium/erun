@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -61,13 +63,13 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 	}()
 }
 
-func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, eruncommon.OpenResult, bool) {
+func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (string, config.OpenResult, bool) {
 	if selection.Tenant == "" || selection.Environment == "" {
-		return "", eruncommon.OpenResult{}, false
+		return "", config.OpenResult{}, false
 	}
 	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
 	if err != nil {
-		return "", eruncommon.OpenResult{}, false
+		return "", config.OpenResult{}, false
 	}
 	// Deliberately not gated on env type. Where the worktree lives says nothing
 	// about whose identity the pod should act as, and the pod is in the cluster
@@ -78,21 +80,21 @@ func (a *App) resolveCloudCredentialsRefreshTarget(selection uiSelection) (strin
 	// Cloudflare-only env correctly reads empty here. Cloudflare credentials ship
 	// at deploy time via a chart Secret minted by the erun binary, not this timer.
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {
-		return "", eruncommon.OpenResult{}, false
+		return "", config.OpenResult{}, false
 	}
 	// Defense in depth: even if a Cloudflare alias somehow landed in the scalar,
 	// the strict provider-type gate keeps the AWS-only credential push from
 	// trying to export temporary credentials from a token-based provider.
 	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, envConfig.CloudProviderAlias)
-	if err != nil || provider.Provider != eruncommon.CloudProviderAWS {
-		return "", eruncommon.OpenResult{}, false
+	if err != nil || provider.Provider != config.CloudProviderAWS {
+		return "", config.OpenResult{}, false
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return "", eruncommon.OpenResult{}, false
+		return "", config.OpenResult{}, false
 	}
 	return envConfig.CloudProviderAlias, result, true
 }
@@ -143,15 +145,15 @@ func (a *App) reconcileCloudCredentialsRefresherForSelection(selection uiSelecti
 	}
 }
 
-func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSelection, alias string, result eruncommon.OpenResult) {
+func (a *App) runCloudCredentialsRefresher(ctx context.Context, selection uiSelection, alias string, result config.OpenResult) {
 	endpoint := mcpEndpointForOpenResult(result)
-	mcpPort := eruncommon.MCPPortForResult(result)
+	mcpPort := config.MCPPortForResult(result)
 	notifiedFailure := false
 	for {
 		if err := a.waitForMCPReady(ctx, mcpPort); err != nil {
 			return
 		}
-		creds, err := eruncommon.ExportCloudProviderCredentials(eruncommon.Context{}, a.deps.store, alias, a.deps.cloudDeps)
+		creds, err := eruncommon.ExportCloudProviderCredentials(core.Context{}, a.deps.store, alias, a.deps.cloudDeps)
 		if err != nil {
 			a.surfaceCredentialRefreshFailure(selection, fmt.Errorf("export host credentials: %w", err), &notifiedFailure)
 			if !sleepWithCancel(ctx, credentialRefreshBackoff) {

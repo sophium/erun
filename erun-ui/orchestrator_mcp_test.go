@@ -11,7 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // orchestratorTestPort is the port stub the config builder is driven with;
@@ -28,8 +29,8 @@ func orchestratorTestPort(tenant, _ string) int {
 	}
 }
 
-func orchestratorTestEnvs() []eruncommon.OrchestratorEnvConfig {
-	return []eruncommon.OrchestratorEnvConfig{
+func orchestratorTestEnvs() []configpkg.OrchestratorEnvConfig {
+	return []configpkg.OrchestratorEnvConfig{
 		{Tenant: "petios", Environment: "rihards-win-develop"},
 		{Tenant: "erun", Environment: "main"},
 		{Tenant: "noport", Environment: "x"}, // skipped: port 0
@@ -48,8 +49,8 @@ func orchestratorTestAlwaysReachable(int) bool { return true }
 // the important half of the assertion: no env takes the host skip path, so
 // those tests' skip counts stay exactly what they were before a host env
 // could be linked at all.
-func orchestratorTestNoHostEnvType(string, string) eruncommon.EnvironmentType {
-	return eruncommon.EnvironmentTypeLocalAgent
+func orchestratorTestNoHostEnvType(string, string) configpkg.EnvironmentType {
+	return configpkg.EnvironmentTypeLocalAgent
 }
 
 // orchestratorTestEnvTypeHosts marks hostTenant's environments as host and
@@ -57,11 +58,11 @@ func orchestratorTestNoHostEnvType(string, string) eruncommon.EnvironmentType {
 // and the ordinary wiring path side by side -- the case that matters, since
 // the defect was a host env being wired as an edge that can never answer.
 func orchestratorTestEnvTypeHosts(hostTenant string) mcpEnvTypeResolver {
-	return func(tenant, _ string) eruncommon.EnvironmentType {
+	return func(tenant, _ string) configpkg.EnvironmentType {
 		if tenant == hostTenant {
-			return eruncommon.EnvironmentTypeHost
+			return configpkg.EnvironmentTypeHost
 		}
-		return eruncommon.EnvironmentTypeLocalAgent
+		return configpkg.EnvironmentTypeLocalAgent
 	}
 }
 
@@ -181,7 +182,7 @@ func writeBundledDesktopMCPConfig(t *testing.T, output string) {
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, _, _, err := app.writeOrchestratorMCPConfig("petios", []eruncommon.OrchestratorEnvConfig{
+	path, _, _, err := app.writeOrchestratorMCPConfig("petios", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "dev"},
 	})
 	if err != nil {
@@ -250,16 +251,16 @@ func copyTestFile(t *testing.T, source, destination string) string {
 func TestSpawnOrchestratorSignalsUnwiredEnvironments(t *testing.T) {
 	for _, testCase := range []struct {
 		name     string
-		envs     []eruncommon.OrchestratorEnvConfig
+		envs     []configpkg.OrchestratorEnvConfig
 		wantNote string
 	}{
 		{
 			name: "linked env resolves an MCP port",
-			envs: []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}},
+			envs: []configpkg.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}},
 		},
 		{
 			name:     "linked env resolves no MCP port",
-			envs:     []eruncommon.OrchestratorEnvConfig{{Tenant: "ghost", Environment: "missing"}},
+			envs:     []configpkg.OrchestratorEnvConfig{{Tenant: "ghost", Environment: "missing"}},
 			wantNote: errOrchestratorMCPNoPort.Error(),
 		},
 		{
@@ -449,8 +450,8 @@ func orchestratorTestPortWithHost(tenant, environment string) int {
 // hostAndOrdinaryEnvs is the fixture for the host tests below: one host tenant
 // and two ordinary ones, every one of which resolves an MCP port through
 // orchestratorTestPortWithHost.
-func hostAndOrdinaryEnvs() []eruncommon.OrchestratorEnvConfig {
-	return []eruncommon.OrchestratorEnvConfig{
+func hostAndOrdinaryEnvs() []configpkg.OrchestratorEnvConfig {
+	return []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "host"},
 		{Tenant: "petios", Environment: "rihards-win-develop"},
 		{Tenant: "erun", Environment: "main"},
@@ -611,9 +612,9 @@ func orchestratorTestAppWithHostEnv(t *testing.T) *App {
 	t.Setenv("ERUN_SKILLS_DIR", t.TempDir())
 	t.Setenv("ERUN_AGENTS_DIR", t.TempDir())
 	store := newOrchestratorStubStore(t.TempDir())
-	store.envs["frs/host"] = eruncommon.EnvConfig{
+	store.envs["frs/host"] = configpkg.EnvConfig{
 		Name:          "host",
-		Type:          eruncommon.EnvironmentTypeHost,
+		Type:          configpkg.EnvironmentTypeHost,
 		LocalRepoPath: t.TempDir(),
 	}
 	app := NewApp(erunUIDeps{
@@ -642,7 +643,7 @@ func TestWriteOrchestratorMCPConfigHostOnlyIsAWorkingConfiguration(t *testing.T)
 	t.Setenv("ERUN_ERUN_BIN", filepath.Join(t.TempDir(), "erun"))
 	app := orchestratorTestAppWithHostEnv(t)
 
-	path, skipped, _, err := app.writeOrchestratorMCPConfig("host-only", []eruncommon.OrchestratorEnvConfig{
+	path, skipped, _, err := app.writeOrchestratorMCPConfig("host-only", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "host"},
 	})
 	if err != nil {
@@ -672,7 +673,7 @@ func TestWireOrchestratorMCPHostEnvGetsAnInfoNoticeNotAWarning(t *testing.T) {
 	emits := newCapturedEmits()
 	app.emitFn = emits.fn()
 
-	path := app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+	path := app.wireOrchestratorMCP("petios", "Petios", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "host"},
 	})
 	if strings.TrimSpace(path) != "" {
@@ -708,7 +709,7 @@ func TestWireOrchestratorMCPHostEnvIsNotCountedAsMissing(t *testing.T) {
 	emits := newCapturedEmits()
 	app.emitFn = emits.fn()
 
-	path := app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+	path := app.wireOrchestratorMCP("petios", "Petios", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "host"},
 		{Tenant: "frs", Environment: "dev"},
 	})
@@ -773,7 +774,7 @@ func TestWireOrchestratorMCPWiresAnUnreachableEnvAndSaysSo(t *testing.T) {
 	emits := newCapturedEmits()
 	app.emitFn = emits.fn()
 
-	path := app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}})
+	path := app.wireOrchestratorMCP("petios", "Petios", []configpkg.OrchestratorEnvConfig{{Tenant: "frs", Environment: "dev"}})
 	if strings.TrimSpace(path) == "" {
 		t.Fatal("expected an MCP config path even though the edge is unreachable")
 	}
@@ -820,7 +821,7 @@ func TestWireOrchestratorMCPMultipleUnreachableEnvsAreEachActionable(t *testing.
 	emits := newCapturedEmits()
 	app.emitFn = emits.fn()
 
-	app.wireOrchestratorMCP("petios", "Petios", []eruncommon.OrchestratorEnvConfig{
+	app.wireOrchestratorMCP("petios", "Petios", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "frs", Environment: "dev"},
 		{Tenant: "frs", Environment: "laptop"},
 	})
@@ -936,7 +937,7 @@ func TestWriteOrchestratorMCPConfigCarriesSkipsEvenWhenNothingWired(t *testing.T
 	app := orchestratorTestApp(t)
 	defer app.shutdown(context.Background())
 
-	path, skipped, _, err := app.writeOrchestratorMCPConfig("nothing-wirable", []eruncommon.OrchestratorEnvConfig{
+	path, skipped, _, err := app.writeOrchestratorMCPConfig("nothing-wirable", []configpkg.OrchestratorEnvConfig{
 		{Tenant: "ghost", Environment: "one"},
 		{Tenant: "ghost", Environment: "two"},
 	})

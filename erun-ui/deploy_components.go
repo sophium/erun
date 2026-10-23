@@ -6,7 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // LoadDeployComponents powers the Runtime tab's "Components to deploy" checklist
@@ -131,7 +132,7 @@ func (a *App) publishedComponentChartAvailability(tenant, environment, version s
 	}
 	namespace := strings.TrimSpace(a.runtimeRegistryNamespace(tenant, environment))
 	if namespace == "" {
-		namespace = eruncommon.DefaultContainerRegistry
+		namespace = config.DefaultContainerRegistry
 	}
 
 	result := make(map[string]bool, len(components))

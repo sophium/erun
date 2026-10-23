@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -136,12 +138,6 @@ func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
 	return ids
 }
 
-type OpenStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
-	LoadEnvConfig(string, string) (EnvConfig, string, error)
-}
-
 type effectiveKubernetesContextResolver interface {
 	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
@@ -163,34 +159,6 @@ type OpenParams struct {
 	CommandScopesTenantByFlag bool
 }
 
-type OpenResult struct {
-	Tenant       string
-	Environment  string
-	TenantConfig TenantConfig
-	EnvConfig    EnvConfig
-	LocalPorts   EnvironmentLocalPorts
-	RepoPath     string
-	Title        string
-	// ClusterPullRegistry, when set, is the concrete in-cluster pull host a
-	// context-resolved cluster registry resolved to; deploy renders it as the
-	// chart's containerRegistry in place of the on-disk DEPLOY entry. Empty for a
-	// plain (non-cluster) registry, so those envs are unaffected.
-	ClusterPullRegistry string
-	// ClusterRegistryInsecure marks the resolved cluster registry as plain HTTP,
-	// so deploy tells the in-pod dind daemon to trust it (an in-pod build pushes
-	// to this non-loopback host, which dind would otherwise reject as needing TLS).
-	ClusterRegistryInsecure bool
-	// Gateway is the erun-level gateway catalog, resolved with the target so
-	// every caller that launches or diagnoses the environment's AI session
-	// reaches the same catalog instead of each reading it (or forgetting to).
-	// Nil when no catalog is configured or the root config cannot be read.
-	Gateway *OpenRouterConfig
-}
-
-func (r OpenResult) RemoteRepo() bool {
-	return r.EnvConfig.RemoteWorktree()
-}
-
 type ShellLaunchParams struct {
 	Dir                string
 	Tenant             string
@@ -199,10 +167,10 @@ type ShellLaunchParams struct {
 	Namespace          string
 	KubernetesContext  string
 	RemoteRepo         bool
-	Type               EnvironmentType
+	Type               configpkg.EnvironmentType
 	ManagedCloud       bool
 	CloudProviderAlias string
-	Idle               EnvironmentIdleConfig
+	Idle               configpkg.EnvironmentIdleConfig
 	// AppSession, when non-empty, makes the remote shell a persistent,
 	// reattachable dtach session keyed by this id, so closing/reopening a tab
 	// or a transient kubectl-exec drop reconnects to the still-running shell
@@ -215,14 +183,14 @@ type ShellLaunchParams struct {
 	AI         bool
 	Contribute bool
 	AITool     string
-	Claude     EnvironmentClaudeConfig
+	Claude     configpkg.EnvironmentClaudeConfig
 	// Gateway is the erun-level OpenRouter catalog, when the operator has
 	// configured one, carried over from OpenResult.Gateway. The AI launch
 	// resolves this environment's effective gateway through it (model, Remote
 	// Control, context window), and so does the deploy diagnosis, to tell a
 	// gateway-routed environment whose pod template never consumed the gateway
 	// from a healthy one (runtime_agent_credentials.go).
-	Gateway *OpenRouterConfig
+	Gateway *configpkg.OpenRouterConfig
 	// RuntimeImage lets the AI session prelude advise on the erun-build-env
 	// skill only when the env still runs the default published runtime image.
 	RuntimeImage string
@@ -230,7 +198,7 @@ type ShellLaunchParams struct {
 	// deploy intent, threaded through so observe can diff them against what
 	// the live helm release and running pods actually hold.
 	RuntimeVersion string
-	RuntimePod     RuntimePodResources
+	RuntimePod     configpkg.RuntimePodResources
 }
 
 type ShellLaunchPreview struct {
@@ -267,9 +235,9 @@ func OpenParamsForArgs(args []string) (OpenParams, error) {
 	}
 }
 
-func loadOpenDefaultTenant(store OpenStore) (string, error) {
+func loadOpenDefaultTenant(store configpkg.OpenStore) (string, error) {
 	toolConfig, _, err := store.LoadERunConfig()
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return "", ErrDefaultTenantNotConfigured
 	}
 	if err != nil {
@@ -281,9 +249,9 @@ func loadOpenDefaultTenant(store OpenStore) (string, error) {
 	return toolConfig.DefaultTenant, nil
 }
 
-func loadOpenDefaultEnvironment(store OpenStore, tenant string) (string, error) {
+func loadOpenDefaultEnvironment(store configpkg.OpenStore, tenant string) (string, error) {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return "", ErrDefaultEnvironmentNotConfigured
 	}
 	if err != nil {
@@ -295,7 +263,7 @@ func loadOpenDefaultEnvironment(store OpenStore, tenant string) (string, error) 
 	return tenantConfig.DefaultEnvironment, nil
 }
 
-func InitParamsForOpenArgs(store OpenStore, args []string) (BootstrapInitParams, error) {
+func InitParamsForOpenArgs(store configpkg.OpenStore, args []string) (BootstrapInitParams, error) {
 	params, err := OpenParamsForArgs(args)
 	if err != nil {
 		return BootstrapInitParams{}, err
@@ -303,7 +271,7 @@ func InitParamsForOpenArgs(store OpenStore, args []string) (BootstrapInitParams,
 	return InitParamsForOpenTarget(store, params)
 }
 
-func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitParams, error) {
+func InitParamsForOpenTarget(store configpkg.OpenStore, params OpenParams) (BootstrapInitParams, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 
@@ -319,10 +287,10 @@ func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitP
 	return initParamsForOpenDefaults(store)
 }
 
-func initParamsForOpenEnvironmentOnly(store OpenStore, environment string) (BootstrapInitParams, error) {
+func initParamsForOpenEnvironmentOnly(store configpkg.OpenStore, environment string) (BootstrapInitParams, error) {
 	resolvedTenant, err := loadOpenDefaultTenant(store)
 	if err != nil {
-		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -330,10 +298,10 @@ func initParamsForOpenEnvironmentOnly(store OpenStore, environment string) (Boot
 	return BootstrapInitParams{Tenant: resolvedTenant, Environment: environment}, nil
 }
 
-func initParamsForOpenDefaults(store OpenStore) (BootstrapInitParams, error) {
+func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, error) {
 	resolvedTenant, err := loadOpenDefaultTenant(store)
 	if err != nil {
-		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{ResolveTenant: true}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -341,7 +309,7 @@ func initParamsForOpenDefaults(store OpenStore) (BootstrapInitParams, error) {
 
 	defaultEnvironment, err := loadOpenDefaultEnvironment(store, resolvedTenant)
 	if err != nil {
-		if errors.Is(err, ErrDefaultEnvironmentNotConfigured) || errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, ErrDefaultEnvironmentNotConfigured) || errors.Is(err, configpkg.ErrNotInitialized) {
 			return BootstrapInitParams{Tenant: resolvedTenant}, nil
 		}
 		return BootstrapInitParams{}, err
@@ -350,14 +318,14 @@ func initParamsForOpenDefaults(store OpenStore) (BootstrapInitParams, error) {
 	return BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
 }
 
-func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
-	return resolveOpenWithFinder(store, FindProjectRoot, params)
+func ResolveOpen(store configpkg.OpenStore, params OpenParams) (configpkg.OpenResult, error) {
+	return resolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
 }
 
 // EnsureLocalPortRangePersisted freezes the resolver's port choice into the
 // env config so future opens stay stable against alphabetical reshuffles of
 // unrelated tenants/envs.
-func EnsureLocalPortRangePersisted(ctx Context, saveEnvConfig func(string, EnvConfig) error, result OpenResult) (OpenResult, error) {
+func EnsureLocalPortRangePersisted(ctx core.Context, saveEnvConfig func(string, configpkg.EnvConfig) error, result configpkg.OpenResult) (configpkg.OpenResult, error) {
 	if result.EnvConfig.LocalPortRangeStart > 0 {
 		return result, nil
 	}
@@ -383,40 +351,40 @@ func EnsureLocalPortRangePersisted(ctx Context, saveEnvConfig func(string, EnvCo
 	return result, nil
 }
 
-func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (OpenResult, error) {
+func resolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (configpkg.OpenResult, error) {
 	if store == nil {
-		return OpenResult{}, fmt.Errorf("store is required")
+		return configpkg.OpenResult{}, fmt.Errorf("store is required")
 	}
 
 	tenant, err := resolveOpenTenant(store, findProjectRoot, params)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 	tenantConfig, err := loadOpenTenantConfig(store, tenant)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 	environment, err := resolveOpenEnvironment(params, tenantConfig)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 	envConfig, err := loadOpenEnvConfig(store, tenant, environment)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 	repoPath, err := resolveOpenRepoPath(envConfig)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 	if err := validateOpenTarget(tenant, environment, repoPath, envConfig); err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
-	localPorts, err := environmentLocalPortsForTarget(store, tenant, envConfig)
+	localPorts, err := configpkg.EnvironmentLocalPortsForTarget(store, tenant, envConfig)
 	if err != nil {
-		return OpenResult{}, err
+		return configpkg.OpenResult{}, err
 	}
 
-	return OpenResult{
+	return configpkg.OpenResult{
 		Tenant:       tenant,
 		Environment:  environment,
 		TenantConfig: tenantConfig,
@@ -432,8 +400,8 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 // target. A root config that cannot be read leaves it unset rather than failing
 // the open: the catalog only changes how an AI session is routed, and the
 // unreadable config itself is reported by whatever inspects the root config.
-func resolveOpenGateway(store OpenStore) *OpenRouterConfig {
-	gateway, err := ResolveOpenRouterConfig(store)
+func resolveOpenGateway(store configpkg.OpenStore) *configpkg.OpenRouterConfig {
+	gateway, err := configpkg.ResolveOpenRouterConfig(store)
 	if err != nil {
 		return nil
 	}
@@ -470,7 +438,7 @@ func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
 	return fmt.Sprintf("%s — pass a tenant explicitly with `%s --tenant <name>`, %s", cause, command, setState)
 }
 
-func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
+func resolveOpenTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
 		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
@@ -497,13 +465,13 @@ func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, param
 	return tenant, nil
 }
 
-func loadOpenTenantConfig(store OpenStore, tenant string) (TenantConfig, error) {
+func loadOpenTenantConfig(store configpkg.OpenStore, tenant string) (configpkg.TenantConfig, error) {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if errors.Is(err, ErrNotInitialized) {
-		return TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
+	if errors.Is(err, configpkg.ErrNotInitialized) {
+		return configpkg.TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
 	}
 	if err != nil {
-		return TenantConfig{}, err
+		return configpkg.TenantConfig{}, err
 	}
 	if tenantConfig.Name == "" {
 		tenantConfig.Name = tenant
@@ -511,7 +479,7 @@ func loadOpenTenantConfig(store OpenStore, tenant string) (TenantConfig, error) 
 	return tenantConfig, nil
 }
 
-func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (string, error) {
+func resolveOpenEnvironment(params OpenParams, tenantConfig configpkg.TenantConfig) (string, error) {
 	environment := params.Environment
 	if environment == "" && params.UseDefaultEnvironment {
 		environment = tenantConfig.DefaultEnvironment
@@ -525,13 +493,13 @@ func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (strin
 	return environment, nil
 }
 
-func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, error) {
+func loadOpenEnvConfig(store configpkg.OpenStore, tenant, environment string) (configpkg.EnvConfig, error) {
 	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
-	if errors.Is(err, ErrNotInitialized) {
-		return EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
+	if errors.Is(err, configpkg.ErrNotInitialized) {
+		return configpkg.EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
 	}
 	if err != nil {
-		return EnvConfig{}, err
+		return configpkg.EnvConfig{}, err
 	}
 	if envConfig.Name == "" {
 		envConfig.Name = environment
@@ -542,7 +510,7 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 	return envConfig, nil
 }
 
-func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
+func resolveOpenRepoPath(envConfig configpkg.EnvConfig) (string, error) {
 	repoPath := envConfig.EffectiveLocalRepoPath()
 	if repoPath == "" {
 		// A runtime env with no mounted source worktree genuinely has no repo path
@@ -550,7 +518,7 @@ func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 		// tenant with no project never has one to configure. Every other type has a
 		// real worktree (hostPath for local-agent, a PVC for remote-agent, or a
 		// runtime env's own opted-in mutable-source clone), so those still require it.
-		if envConfig.Type == EnvironmentTypeRuntime && !envConfig.MountsRuntimeSource() {
+		if envConfig.Type == configpkg.EnvironmentTypeRuntime && !envConfig.MountsRuntimeSource() {
 			return "", nil
 		}
 		return "", ErrRepoPathNotConfigured
@@ -566,7 +534,7 @@ func resolveOpenRepoPath(envConfig EnvConfig) (string, error) {
 	return filepath.Clean(repoPath), nil
 }
 
-func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfig) error {
+func validateOpenTarget(tenant, environment, repoPath string, envConfig configpkg.EnvConfig) error {
 	if !envConfig.RemoteWorktree() {
 		info, err := os.Stat(repoPath)
 		if err != nil {
@@ -581,7 +549,7 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfi
 	// ResolvedType rather than the broader !HasPod() so a legacy env with an
 	// unresolved type keeps requiring a context exactly as it did before host
 	// existed.
-	if envConfig.ResolvedType() == EnvironmentTypeHost {
+	if envConfig.ResolvedType() == configpkg.EnvironmentTypeHost {
 		return nil
 	}
 	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
@@ -590,20 +558,20 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfi
 	return nil
 }
 
-func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
+func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
 	tenantLister, ok := store.(interface {
-		ListTenantConfigs() ([]TenantConfig, error)
+		ListTenantConfigs() ([]configpkg.TenantConfig, error)
 	})
 	if !ok {
 		return "", false, nil
 	}
 
 	if findProjectRoot == nil {
-		findProjectRoot = FindProjectRoot
+		findProjectRoot = configpkg.FindProjectRoot
 	}
 
 	tenant, _, err := findProjectRoot()
-	if errors.Is(err, ErrNotInGitRepository) {
+	if errors.Is(err, configpkg.ErrNotInGitRepository) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -615,7 +583,7 @@ func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFu
 	}
 
 	tenants, err := tenantLister.ListTenantConfigs()
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return "", false, nil
 	} else if err != nil {
 		return "", false, err
@@ -628,76 +596,7 @@ func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFu
 	return "", false, nil
 }
 
-func resolveEffectiveKubernetesContext(environment, configured string, listContexts func() ([]string, error), currentContext func() (string, error)) string {
-	environment = strings.TrimSpace(environment)
-	configured = strings.TrimSpace(configured)
-	if configured == "" || environment != DefaultEnvironment {
-		return configured
-	}
-	if listContexts == nil || currentContext == nil {
-		return configured
-	}
-
-	contexts, err := listContexts()
-	if err != nil {
-		return configured
-	}
-	if containsTrimmedString(contexts, configured) {
-		return configured
-	}
-
-	current, err := currentContext()
-	if err != nil {
-		return configured
-	}
-	current = strings.TrimSpace(current)
-	if current == "" || !containsTrimmedString(contexts, current) {
-		return configured
-	}
-
-	return current
-}
-
-func listKubernetesContextNames() ([]string, error) {
-	output, err := Command("kubectl", "config", "get-contexts", "-o=name").Output()
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(string(output), "\n")
-	contexts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		contexts = append(contexts, line)
-	}
-	return contexts, nil
-}
-
-func currentKubernetesContextName() (string, error) {
-	output, err := Command("kubectl", "config", "current-context").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-func containsTrimmedString(values []string, target string) bool {
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.TrimSpace(value) == target {
-			return true
-		}
-	}
-	return false
-}
-
-func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
+func ShellLaunchParamsFromResult(result configpkg.OpenResult) ShellLaunchParams {
 	return ShellLaunchParams{
 		Dir:                result.RepoPath,
 		Tenant:             result.Tenant,
@@ -719,7 +618,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 	}
 }
 
-func LocalShellSetupScript(result OpenResult) string {
+func LocalShellSetupScript(result configpkg.OpenResult) string {
 	commands := []string{
 		fmt.Sprintf("kubectl config use-context %s >/dev/null", shellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext))),
 		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", shellQuote(KubernetesNamespaceName(result.Tenant, result.Environment))),
@@ -729,7 +628,7 @@ func LocalShellSetupScript(result OpenResult) string {
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
-	if currentExecutionMode(kubectlDeploymentWaitExecutionOperation) == ExecutionModeLibrary {
+	if configpkg.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == configpkg.ExecutionModeLibrary {
 		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
 			return enrichShellDeploymentError(req, err, runOpenKubectl)
 		}
@@ -763,7 +662,7 @@ func ExecShell(req ShellLaunchParams) error {
 	// erun open already runs inside the ERun tab's ConPTY, so inheriting that
 	// console flashes nothing. Use newExecCommand to keep the ERUN_KUBECTL_BIN
 	// test seam without the console-detaching flag.
-	cmd := newExecCommand("kubectl", kubectlExecArgs(req, script)...)
+	cmd := core.NewExecCommand("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -896,20 +795,20 @@ type remoteShellConfig struct {
 func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, error) {
 	remoteWorkdir := remoteWorktreePath(req)
 
-	tenantConfig, err := yaml.Marshal(TenantConfig{
+	tenantConfig, err := yaml.Marshal(configpkg.TenantConfig{
 		Name:               req.Tenant,
 		DefaultEnvironment: req.Environment,
 	})
 	if err != nil {
 		return remoteShellConfig{}, err
 	}
-	toolConfig, err := yaml.Marshal(ERunConfig{
+	toolConfig, err := yaml.Marshal(configpkg.ERunConfig{
 		DefaultTenant: req.Tenant,
 	})
 	if err != nil {
 		return remoteShellConfig{}, err
 	}
-	envConfig, err := yaml.Marshal(EnvConfig{
+	envConfig, err := yaml.Marshal(configpkg.EnvConfig{
 		Name:               req.Environment,
 		LocalRepoPath:      remoteWorkdir,
 		KubernetesContext:  req.KubernetesContext,
@@ -1185,7 +1084,7 @@ func isShellReplacementExit(err error) bool {
 }
 
 func resolveGitRemote(repoPath string) (string, string, string, error) {
-	output, err := Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	output, err := core.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "", "", "", err
 	}
@@ -1323,7 +1222,7 @@ func seedRemoteSSHKey(req ShellLaunchParams) error {
 	if strings.TrimSpace(keyMaterial) == "" {
 		return nil
 	}
-	cmd := Command("kubectl", remoteSSHKeySeedArgs(req)...)
+	cmd := core.Command("kubectl", remoteSSHKeySeedArgs(req)...)
 	cmd.Stdin = strings.NewReader(keyMaterial)
 	var output bytes.Buffer
 	cmd.Stdout = &output

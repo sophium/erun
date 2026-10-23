@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The entrypoint's init duties are process-wide -- it becomes a child subreaper
@@ -32,7 +34,7 @@ func TestRuntimeEntrypointHelperProcess(t *testing.T) {
 		os.Exit(90)
 	}
 	home, _ := os.UserHomeDir()
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr), Stdout: os.Stdout, Stderr: os.Stderr}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr), Stdout: os.Stdout, Stderr: os.Stderr}
 	code, err := RunRuntimeEntrypoint(ctx, RuntimeEntrypointParams{Command: args, ERunPath: "/bin/false", HomeDir: home})
 	if err != nil {
 		_, _ = os.Stderr.WriteString(err.Error() + "\n")
@@ -168,7 +170,7 @@ func TestRuntimeSourceHelperProcess(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &params); err != nil {
 		os.Exit(90)
 	}
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr), Stdout: os.Stderr, Stderr: os.Stderr}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr), Stdout: os.Stderr, Stderr: os.Stderr}
 	supervisor := newRuntimeSupervisor(ctx)
 	stop := supervisor.startInit()
 	sweeping := make(chan struct{})
@@ -228,7 +230,7 @@ func TestRuntimeSourceIsCheckedOutWhileTheInitReaps(t *testing.T) {
 // the kubelet kills it. handleSignal with no foreground is exactly the state the
 // preamble is in.
 func TestRuntimeForegroundReceivesASignalThatArrivedBeforeItStarted(t *testing.T) {
-	supervisor := newRuntimeSupervisor(Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)})
+	supervisor := newRuntimeSupervisor(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)})
 	supervisor.handleSignal(syscall.SIGTERM)
 	type result struct {
 		code int

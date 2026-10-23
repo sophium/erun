@@ -6,11 +6,13 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runEnvConfigRestoreFromArgs recovers a changed or corrupted env config before
 // the rest of doctor tries to load it.
-func runEnvConfigRestoreFromArgs(ctx common.Context, args []string, selector string) (bool, error) {
+func runEnvConfigRestoreFromArgs(ctx core.Context, args []string, selector string) (bool, error) {
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
 		return false, err
@@ -34,7 +36,7 @@ func runEnvConfigRestoreFromArgs(ctx common.Context, args []string, selector str
 }
 
 func availableEnvBackupDates(tenant, environment string) string {
-	backups, err := common.ListEnvConfigBackups(tenant, environment)
+	backups, err := config.ListEnvConfigBackups(tenant, environment)
 	if err != nil || len(backups) == 0 {
 		return ""
 	}
@@ -45,18 +47,18 @@ func availableEnvBackupDates(tenant, environment string) string {
 	return strings.Join(dates, ", ")
 }
 
-func resolveEnvConfigBackupSelector(tenant, environment, selector string) (common.ConfigBackup, bool, error) {
+func resolveEnvConfigBackupSelector(tenant, environment, selector string) (config.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return common.ConfigBackup{Path: selector}, true, nil
+		return config.ConfigBackup{Path: selector}, true, nil
 	}
 	if _, err := time.Parse("2006-01-02", selector); err != nil {
-		return common.ConfigBackup{}, false, fmt.Errorf("invalid backup date %q (expected YYYY-MM-DD or an absolute path)", selector)
+		return config.ConfigBackup{}, false, fmt.Errorf("invalid backup date %q (expected YYYY-MM-DD or an absolute path)", selector)
 	}
-	return common.FindEnvConfigBackupByDate(tenant, environment, selector)
+	return config.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
 
-func runEnvConfigRestore(ctx common.Context, tenant, environment string, backup common.ConfigBackup) (bool, error) {
-	livePath, err := common.EnvConfigPath(tenant, environment)
+func runEnvConfigRestore(ctx core.Context, tenant, environment string, backup config.ConfigBackup) (bool, error) {
+	livePath, err := config.EnvConfigPath(tenant, environment)
 	if err != nil {
 		return false, err
 	}
@@ -65,7 +67,7 @@ func runEnvConfigRestore(ctx common.Context, tenant, environment string, backup 
 		_, err := fmt.Fprintf(ctx.Stdout, "Dry-run: would restore %s/%s config from %s\n", tenant, environment, backup.Path)
 		return true, err
 	}
-	if err := common.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
+	if err := config.RestoreEnvConfigFromBackup(backup.Path, tenant, environment); err != nil {
 		return false, err
 	}
 	_, err = fmt.Fprintf(ctx.Stdout, "Restored %s/%s config from %s\n", tenant, environment, backup.Path)

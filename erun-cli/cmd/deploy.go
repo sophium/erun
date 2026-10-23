@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/spf13/cobra"
 )
 
@@ -98,7 +99,7 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx common.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
+func runDeploy(ctx core.Context, store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, deployHelmChart common.HelmChartDeployerFunc, deployTarget common.DeployTarget) error {
 	deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())

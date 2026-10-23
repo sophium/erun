@@ -5,6 +5,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TestCloudContextPowerErrorClassification pins the actionable-error contract
@@ -13,7 +16,7 @@ import (
 // cannot produce the real AWS error responses these branches key on, so the
 // contract lives here as a white-box test.
 func TestCloudContextPowerErrorClassification(t *testing.T) {
-	ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}
+	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 	params := CloudContextParams{Name: "petios-ctx"}
 
 	t.Run("stop blocked by stop protection names the lock and the unlock lever", func(t *testing.T) {
@@ -95,8 +98,8 @@ func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...str
 	}
 }
 
-func alreadyStoppingRunAWS(waited *bool) func(Context, CloudProviderConfig, string, []string) (string, error) {
-	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+func alreadyStoppingRunAWS(waited *bool) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 		joined := strings.Join(args, " ")
 		if strings.Contains(joined, "stop-instances") {
 			return "", fmt.Errorf("aws ec2 stop-instances: An error occurred (IncorrectInstanceState) when calling the StopInstances operation")
@@ -109,8 +112,8 @@ func alreadyStoppingRunAWS(waited *bool) func(Context, CloudProviderConfig, stri
 	}
 }
 
-func failingStopWaitRunAWS() func(Context, CloudProviderConfig, string, []string) (string, error) {
-	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+func failingStopWaitRunAWS() func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), "wait instance-stopped") {
 			return "", fmt.Errorf("aws ec2 wait instance-stopped: Waiter InstanceStopped failed: Max attempts exceeded")
 		}
@@ -119,11 +122,11 @@ func failingStopWaitRunAWS() func(Context, CloudProviderConfig, string, []string
 }
 
 func powerErrorTestStore() CloudContextStore {
-	return stubCloudContextStore{config: ERunConfig{
-		CloudProviders: []CloudProviderConfig{{Alias: "dev-aws", Provider: CloudProviderAWS, Profile: "dev-profile"}},
-		CloudContexts: []CloudContextConfig{{
+	return stubCloudContextStore{config: configpkg.ERunConfig{
+		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
+		CloudContexts: []configpkg.CloudContextConfig{{
 			Name:               "petios-ctx",
-			Provider:           CloudProviderAWS,
+			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
 			Region:             "eu-west-1",
 			InstanceID:         "i-0abc123",
@@ -131,13 +134,15 @@ func powerErrorTestStore() CloudContextStore {
 	}}
 }
 
-type stubCloudContextStore struct{ config ERunConfig }
+type stubCloudContextStore struct{ config configpkg.ERunConfig }
 
-func (s stubCloudContextStore) LoadERunConfig() (ERunConfig, string, error) { return s.config, "", nil }
-func (s stubCloudContextStore) SaveERunConfig(ERunConfig) error             { return nil }
+func (s stubCloudContextStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
+	return s.config, "", nil
+}
+func (s stubCloudContextStore) SaveERunConfig(configpkg.ERunConfig) error { return nil }
 
-func failingRunAWS(action, message string) func(Context, CloudProviderConfig, string, []string) (string, error) {
-	return func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+func failingRunAWS(action, message string) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), action) {
 			return "", fmt.Errorf("%s", message)
 		}

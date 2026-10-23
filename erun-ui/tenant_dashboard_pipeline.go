@@ -4,7 +4,8 @@ import (
 	"context"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // loadTenantDashboardPipeline is the Pipeline tab's own panel: every job and
@@ -21,7 +22,7 @@ import (
 // Degrades independently like every other panel here: a caller who cannot
 // read GET /v1/pipeline gets a named restriction, and a read that fails
 // carries its own error, neither of which blanks a neighbouring panel.
-func loadTenantDashboardPipeline(ctx context.Context, client *eruncommon.PlatformClient, capabilities eruncommon.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardPipeline(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabPipeline}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadPipeline); restricted != "" {
 		panel.Restricted = restricted

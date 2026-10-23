@@ -5,36 +5,36 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestDeployNeedsBuildOrchestration locks the desktop's per-env-type deploy
 // policy here because the Playwright harness has no cluster or Docker daemon to
 // drive the real build -> push -> deploy end-to-end.
 func TestDeployNeedsBuildOrchestration(t *testing.T) {
-	openOf := func(envType eruncommon.EnvironmentType) eruncommon.OpenResult {
-		return eruncommon.OpenResult{EnvConfig: eruncommon.EnvConfig{Type: envType}}
+	openOf := func(envType config.EnvironmentType) config.OpenResult {
+		return config.OpenResult{EnvConfig: config.EnvConfig{Type: envType}}
 	}
 	cases := []struct {
 		name    string
-		result  eruncommon.OpenResult
+		result  config.OpenResult
 		version string
 		force   bool
 		want    bool
 	}{
-		{"local-agent, no version: build fresh", openOf(eruncommon.EnvironmentTypeLocalAgent), "", false, true},
-		{"local-agent, pinned version: install by reference", openOf(eruncommon.EnvironmentTypeLocalAgent), "1.2.3-snapshot", false, false},
-		{"local-agent, forced: rebuild even with a version", openOf(eruncommon.EnvironmentTypeLocalAgent), "1.2.3-snapshot", true, true},
-		{"runtime: install by reference", openOf(eruncommon.EnvironmentTypeRuntime), "", false, false},
-		{"runtime, forced: still no local build", openOf(eruncommon.EnvironmentTypeRuntime), "", true, false},
-		{"remote-agent: builds in its pod, not here", openOf(eruncommon.EnvironmentTypeRemoteAgent), "", false, false},
+		{"local-agent, no version: build fresh", openOf(config.EnvironmentTypeLocalAgent), "", false, true},
+		{"local-agent, pinned version: install by reference", openOf(config.EnvironmentTypeLocalAgent), "1.2.3-snapshot", false, false},
+		{"local-agent, forced: rebuild even with a version", openOf(config.EnvironmentTypeLocalAgent), "1.2.3-snapshot", true, true},
+		{"runtime: install by reference", openOf(config.EnvironmentTypeRuntime), "", false, false},
+		{"runtime, forced: still no local build", openOf(config.EnvironmentTypeRuntime), "", true, false},
+		{"remote-agent: builds in its pod, not here", openOf(config.EnvironmentTypeRemoteAgent), "", false, false},
 		{"unresolved type: no orchestration", openOf(""), "", false, false},
 		// A host env also satisfies BuildsHere() && !RemoteRepo() (it builds
 		// here, on a local worktree) — the exact combination that used to mean
 		// "local-agent" before host existed. It has no pod to deploy to at
 		// all, so it must never need build orchestration, forced or not.
-		{"host: no pod to deploy to, regardless of version", openOf(eruncommon.EnvironmentTypeHost), "", false, false},
-		{"host, forced: still no pod to deploy to", openOf(eruncommon.EnvironmentTypeHost), "", true, false},
+		{"host: no pod to deploy to, regardless of version", openOf(config.EnvironmentTypeHost), "", false, false},
+		{"host, forced: still no pod to deploy to", openOf(config.EnvironmentTypeHost), "", true, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

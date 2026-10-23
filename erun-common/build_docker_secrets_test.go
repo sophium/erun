@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // dockerBuildSpecForSecretTest is a build spec with the fields dockerBuildArgs
@@ -167,44 +169,44 @@ func TestApplyDockerSecretsFailsWhenADeclaredSecretCannotBeSupplied(t *testing.T
 func TestNormalizeDockerBuildSecretsRefusesEntriesThatWouldNotMeanWhatTheySay(t *testing.T) {
 	cases := []struct {
 		name    string
-		secrets []DockerBuildSecret
-		want    []DockerBuildSecret
+		secrets []configpkg.DockerBuildSecret
+		want    []configpkg.DockerBuildSecret
 		wantErr string
 	}{
 		{
 			name:    "an entry with no id",
-			secrets: []DockerBuildSecret{{Env: "ACME_TOKEN"}},
+			secrets: []configpkg.DockerBuildSecret{{Env: "ACME_TOKEN"}},
 			wantErr: "id is required",
 		},
 		{
 			name:    "an entry naming neither env nor src",
-			secrets: []DockerBuildSecret{{ID: "ghcr"}},
+			secrets: []configpkg.DockerBuildSecret{{ID: "ghcr"}},
 			wantErr: "declare env",
 		},
 		{
 			name:    "an entry naming both env and src",
-			secrets: []DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN", Src: "/tmp/x"}},
+			secrets: []configpkg.DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN", Src: "/tmp/x"}},
 			wantErr: "not both",
 		},
 		{
 			name:    "an id containing the key=value separator",
-			secrets: []DockerBuildSecret{{ID: "ghcr,env=OTHER", Env: "ACME_TOKEN"}},
+			secrets: []configpkg.DockerBuildSecret{{ID: "ghcr,env=OTHER", Env: "ACME_TOKEN"}},
 			wantErr: "comma",
 		},
 		{
 			name:    "a src containing the key=value separator",
-			secrets: []DockerBuildSecret{{ID: "ghcr", Src: "/tmp/a,b"}},
+			secrets: []configpkg.DockerBuildSecret{{ID: "ghcr", Src: "/tmp/a,b"}},
 			wantErr: "comma",
 		},
 		{
 			name:    "a wholly blank entry a YAML list literal left behind",
-			secrets: []DockerBuildSecret{{}, {ID: "ghcr", Env: "ACME_TOKEN"}},
-			want:    []DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN"}},
+			secrets: []configpkg.DockerBuildSecret{{}, {ID: "ghcr", Env: "ACME_TOKEN"}},
+			want:    []configpkg.DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN"}},
 		},
 		{
 			name:    "whitespace is trimmed rather than passed to docker",
-			secrets: []DockerBuildSecret{{ID: " ghcr ", Env: " ACME_TOKEN "}},
-			want:    []DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN"}},
+			secrets: []configpkg.DockerBuildSecret{{ID: " ghcr ", Env: " ACME_TOKEN "}},
+			want:    []configpkg.DockerBuildSecret{{ID: "ghcr", Env: "ACME_TOKEN"}},
 		},
 		{
 			name:    "nothing declared stays nil",
@@ -254,7 +256,7 @@ environments:
             secrets: []
 `)
 
-	cfg, _, err := LoadProjectConfig(projectRoot)
+	cfg, _, err := configpkg.LoadProjectConfig(projectRoot)
 	if err != nil {
 		t.Fatalf("LoadProjectConfig(%q) failed: %v", projectRoot, err)
 	}
@@ -262,19 +264,19 @@ environments:
 	cases := []struct {
 		name        string
 		environment string
-		want        []DockerBuildSecret
+		want        []configpkg.DockerBuildSecret
 		wantOrigin  string
 	}{
 		{
 			name:        "an environment with no entry inherits the project default",
 			environment: "code5",
-			want:        []DockerBuildSecret{{ID: "project-default", Env: "ACME_TOKEN"}},
+			want:        []configpkg.DockerBuildSecret{{ID: "project-default", Env: "ACME_TOKEN"}},
 			wantOrigin:  "docker.secrets (project default)",
 		},
 		{
 			name:        "an environment's own list wins over the project default",
 			environment: "overridden",
-			want:        []DockerBuildSecret{{ID: "env-own", Env: "ACME_ENV_TOKEN"}},
+			want:        []configpkg.DockerBuildSecret{{ID: "env-own", Env: "ACME_ENV_TOKEN"}},
 			wantOrigin:  "environments.overridden.docker.secrets",
 		},
 		{

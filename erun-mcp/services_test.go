@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // servicesKubectlStub points ERUN_KUBECTL_BIN at a script answering the two
@@ -39,11 +40,11 @@ func servicesTestRuntime(t *testing.T, tenant, environment string) RuntimeConfig
 	return RuntimeConfig{
 		Context: RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
 		Store: listToolStore{
-			tenantConfigs: map[string]eruncommon.TenantConfig{tenant: {Name: tenant}},
-			envConfigs: map[string]eruncommon.EnvConfig{
+			tenantConfigs: map[string]config.TenantConfig{tenant: {Name: tenant}},
+			envConfigs: map[string]config.EnvConfig{
 				tenant + "/" + environment: {Name: environment, LocalRepoPath: repoPath, KubernetesContext: "test-context"},
 			},
-			envsByTenant: map[string][]eruncommon.EnvConfig{
+			envsByTenant: map[string][]config.EnvConfig{
 				tenant: {{Name: environment, LocalRepoPath: repoPath, KubernetesContext: "test-context"}},
 			},
 		},

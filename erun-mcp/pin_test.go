@@ -7,7 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func writePinTestFile(t *testing.T, path, body string) {
@@ -28,7 +29,7 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{
+			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.100"},
 			},
 		},
@@ -55,7 +56,7 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "frs", Environment: "prod"},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{
+			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
 			},
 		},
@@ -113,7 +114,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 	runtime := RuntimeConfig{
 		Context: RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: frsRoot},
 		Store: listToolStore{
-			envConfigs: map[string]eruncommon.EnvConfig{
+			envConfigs: map[string]config.EnvConfig{
 				"frs/prod": {Name: "prod", RuntimeVersion: "1.0.175"},
 			},
 		},
@@ -136,7 +137,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	root := t.TempDir()
 	store := listToolStore{
-		envConfigs: map[string]eruncommon.EnvConfig{
+		envConfigs: map[string]config.EnvConfig{
 			"frs/prod": {
 				Name:           "prod",
 				RuntimeVersion: "1.0.201",

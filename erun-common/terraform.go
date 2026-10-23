@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // TerraformStore is the read surface RunTerraform needs to resolve the target
@@ -13,9 +16,9 @@ import (
 // and resolve the same kubernetes context every other kubectl-touching
 // command uses for it.
 type TerraformStore interface {
-	LoadERunConfig() (ERunConfig, string, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
-	LoadEnvConfig(string, string) (EnvConfig, string, error)
+	LoadERunConfig() (configpkg.ERunConfig, string, error)
+	LoadTenantConfig(string) (configpkg.TenantConfig, string, error)
+	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
 	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
 
@@ -41,7 +44,7 @@ var terraformLockPlatforms = []string{"linux_amd64", "linux_arm64"}
 // is produced and before it is applied. The operator confirms by restating the
 // environment name — the guard against applying to the wrong env. It is never
 // called for a read-only plan or under dry-run.
-type TerraformConfirmFunc func(ctx Context, environment string) error
+type TerraformConfirmFunc func(ctx core.Context, environment string) error
 
 // TerraformParams are the inputs to running Terraform against a platform's
 // per-env root. An empty Tenant/Environment resolves the configured default
@@ -148,9 +151,9 @@ type terraformStep struct {
 // dispatches non-interactively into the env's own runtime pod via kubectl
 // exec, the same primitive erun doctor/outputs/sshd already use. nil defaults
 // to RunRemoteCommand.
-func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
+func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if store == nil {
-		store = ConfigStore{}
+		store = configpkg.ConfigStore{}
 	}
 
 	target, err := resolveTerraformTargetEnvironment(params, store)
@@ -191,7 +194,7 @@ func RunTerraform(ctx Context, params TerraformParams, store TerraformStore, con
 // Secret's name/namespace ride there. The read targets result.KubernetesContext
 // — the same context every other kubectl call against this env uses — rather
 // than kubectl's own ambient current-context.
-func prepareTerraformRFC2136Secret(ctx Context, result *TerraformResult) (string, error) {
+func prepareTerraformRFC2136Secret(ctx core.Context, result *TerraformResult) (string, error) {
 	if result.Operation == string(TerraformInit) {
 		return "", nil
 	}
@@ -212,7 +215,7 @@ func prepareTerraformRFC2136Secret(ctx Context, result *TerraformResult) (string
 	return secret, nil
 }
 
-func traceTerraformPlan(ctx Context, result TerraformResult, steps []terraformStep) {
+func traceTerraformPlan(ctx core.Context, result TerraformResult, steps []terraformStep) {
 	ctx.Trace(fmt.Sprintf("terraform: %s in %s (env %s/%s, type %s, namespace %s)", result.Operation, result.Directory, result.Tenant, result.Environment, terraformEnvTypeLabel(result.EnvType), result.Namespace))
 	if result.RootSource == string(terraformRootDevops) {
 		ctx.Trace(fmt.Sprintf("terraform: root under %s-devops/terraform-%s/ (devops-convention layout)", result.Tenant, result.Tenant))
@@ -262,7 +265,7 @@ var terraformBackendBlockRe = regexp.MustCompile(`(?m)^\s*backend\s+"`)
 // then does `terraform init -backend-config=path=` persist to plan/apply; without
 // one, Terraform silently keeps state in ./terraform.tfstate inside the (often
 // read-only) playbook tree instead of on the durable home PVC.
-func traceTerraformStateBackend(ctx Context, result TerraformResult) {
+func traceTerraformStateBackend(ctx core.Context, result TerraformResult) {
 	if terraformTreeHasBackend(result.Directory) {
 		return
 	}
@@ -298,7 +301,7 @@ func terraformTreeHasBackend(dir string) bool {
 // committed lock keeps init read-only (never rewrites the tree), while its
 // absence means init generates one covering every deploy platform for the
 // operator to commit.
-func traceTerraformInitLock(ctx Context, result TerraformResult) {
+func traceTerraformInitLock(ctx core.Context, result TerraformResult) {
 	if result.Operation != string(TerraformInit) {
 		return
 	}
@@ -309,7 +312,7 @@ func traceTerraformInitLock(ctx Context, result TerraformResult) {
 	ctx.Trace("terraform: no .terraform.lock.hcl yet — init will generate it and record provider hashes for " + strings.Join(terraformLockPlatforms, ", ") + "; commit it so read-only envs can init with -lockfile=readonly")
 }
 
-func executeTerraformSteps(ctx Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
+func executeTerraformSteps(ctx core.Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
 	// The durable state + data dir live on the home PVC; create it before init so
 	// terraform can write the local-backend state and TF_DATA_DIR there.
 	if err := os.MkdirAll(result.WorkDir, 0o755); err != nil {
@@ -349,7 +352,7 @@ type terraformTarget struct {
 	Tenant         string
 	Environment    string
 	KubeContext    string
-	EnvType        EnvironmentType
+	EnvType        configpkg.EnvironmentType
 	RemoteWorktree bool
 	// NeedsDispatch is true when the target's terraform state lives on its own
 	// runtime pod's home PVC (RemoteWorktree) and this process is not verifiably
@@ -385,7 +388,7 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	// host env has neither. Checked against ResolvedType, not the broader
 	// !HasPod(), so a legacy env with an unresolved type keeps working exactly
 	// as it did before host existed.
-	if envType == EnvironmentTypeHost {
+	if envType == configpkg.EnvironmentTypeHost {
 		return terraformTarget{}, fmt.Errorf("terraform %s/%s: %s is a host environment — it has no pod and no cluster to run terraform against", tenant, environment, environment)
 	}
 	// A remote-agent or runtime env's terraform state lives on its own runtime
@@ -400,7 +403,7 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	// backend.
 	needsDispatch := false
 	if remoteWorktree {
-		podTenant, podEnvironment, inPod := injectedRuntimePodIdentity(os.Getenv)
+		podTenant, podEnvironment, inPod := core.InjectedRuntimePodIdentity(os.Getenv)
 		needsDispatch = !inPod || podTenant != tenant || podEnvironment != environment
 	}
 	kubeContext := store.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
@@ -430,7 +433,7 @@ func requiresTerraformConfirmation(op TerraformOperation) bool {
 // plan/init dispatch automatically (read-only), while apply/destroy still
 // requires --confirm-environment (or an interactive terminal that can answer
 // the same prompt) before anything runs.
-func dispatchTerraform(ctx Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
+func dispatchTerraform(ctx core.Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch RemoteCommandRunnerFunc) (TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
 		return TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
 	}
@@ -525,7 +528,7 @@ func resolveTerraformPlan(params TerraformParams, target terraformTarget, store 
 
 	tenant, environment, kubeContext, envType, remoteWorktree := target.Tenant, target.Environment, target.KubeContext, target.EnvType, target.RemoteWorktree
 
-	paths, err := loadProjectPaths(projectRoot)
+	paths, err := configpkg.LoadProjectPaths(projectRoot)
 	if err != nil {
 		return TerraformResult{}, nil, err
 	}
@@ -585,7 +588,7 @@ func validateTerraformOperation(op TerraformOperation) error {
 // mirroring how deploy/build discover the -devops dir. Either way erun appends
 // /<environment>.
 func resolveTerraformDir(projectRoot, tenant, environment, configuredBase string) (dir, varFile string, source terraformRootSource, err error) {
-	if base := resolveProjectPath(projectRoot, configuredBase); base != "" {
+	if base := configpkg.ResolveProjectPath(projectRoot, configuredBase); base != "" {
 		dir = filepath.Join(base, environment)
 		if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
 			return "", "", "", terraformRootNotFoundError(tenant, environment, configuredBase, dir)
@@ -766,8 +769,8 @@ func ensureTerraformTreeWritable(dir string) error {
 	return nil
 }
 
-func execTerraformStep(ctx Context, dir string, extraEnv, args []string) error {
-	cmd := Command("terraform", args...)
+func execTerraformStep(ctx core.Context, dir string, extraEnv, args []string) error {
+	cmd := core.Command("terraform", args...)
 	cmd.Dir = dir
 	if len(extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), extraEnv...)

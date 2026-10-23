@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // writePushableProjectConfig writes a project whose only configured platform is
@@ -60,7 +62,7 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 		NoIncremental:   true,
 	}
 
-	execution, err := ResolveDockerPushExecution(Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	execution, err := ResolveDockerPushExecution(core.Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatalf("ResolveDockerPushExecution failed: %v", err)
 	}
@@ -75,7 +77,7 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 
 	// The single-context path `erun push` takes when a Dockerfile is in the
 	// current directory resolves the same policy, and must not diverge from it.
-	pushSpec, resolvedBuild, err := ResolveDockerPushSpec(Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	pushSpec, resolvedBuild, err := ResolveDockerPushSpec(core.Context{}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatalf("ResolveDockerPushSpec failed: %v", err)
 	}

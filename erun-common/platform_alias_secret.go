@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"gopkg.in/yaml.v3"
 )
 
@@ -68,11 +70,11 @@ const (
 // sequence to share one indentation -- mixing the two is a parse error, not a
 // cosmetic difference. The current runtime boot parses the item instead, so it
 // reads either indent.
-func renderPlatformAliasEntry(provider CloudProviderConfig) (string, error) {
+func renderPlatformAliasEntry(provider config.CloudProviderConfig) (string, error) {
 	// The refresh-token reference travels with the alias, exactly as it does in
 	// an operator's own config.yaml. The token itself never appears here -- it
 	// goes to the secret store, under a ref the alias points at.
-	data, err := yaml.Marshal([]CloudProviderConfig{provider})
+	data, err := yaml.Marshal([]config.CloudProviderConfig{provider})
 	if err != nil {
 		return "", fmt.Errorf("render platform alias entry: %w", err)
 	}
@@ -114,22 +116,22 @@ func renderPlatformAliasEntry(provider CloudProviderConfig) (string, error) {
 // one silent-looking no-op the operator can actually lift. Every other unnamed
 // decline -- no alias, no session, no readable store -- is nil, so a caller
 // that names no alias keeps the silence it has always had.
-func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alias string) (CloudProviderConfig, string, bool, error) {
+func resolveHostPlatformAlias(store CloudReadStore, deps CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
 	explicit := hostAliasSelected(alias)
 	if store == nil || deps.CloudSecretStore == nil {
-		return CloudProviderConfig{}, "", false, hostAliasUnusable(
+		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(
 			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
 	}
 	provider, err := ResolveERunPlatformAlias(store, alias)
 	if err != nil {
-		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
+		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.RefreshTokenRef) == "" {
-		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
+		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
 	token, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.RefreshTokenRef)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
+		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
 	return provider, token, true, nil
 }
@@ -229,7 +231,7 @@ stringData:
 // Host alias resolution is a local, read-only lookup (the caller's config store
 // plus the secret store), so it still runs under dry-run: the decision it makes
 // belongs in the trace either way.
-func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, namespace, kubernetesContext string, deps CloudDependencies) (string, error) {
+func provisionPlatformAliasSecret(ctx core.Context, store CloudReadStore, tenant, namespace, kubernetesContext string, deps CloudDependencies) (string, error) {
 	provider, token, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if !ok {
 		if hostAliasSelected(ctx.PlatformAlias) {
@@ -304,7 +306,7 @@ func provisionPlatformAliasSecret(ctx Context, store CloudReadStore, tenant, nam
 // anywhere -- the pod's own refusal names a different cause and a remedy that
 // cannot work from inside a pod. So the decline is traced, and only it: the
 // absence above still adds nothing.
-func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) error {
+func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec) error {
 	if deployInput == nil || deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
@@ -319,7 +321,7 @@ func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) erro
 		}
 		return nil
 	}
-	store, deps := ConfigStore{}, DefaultCloudDependencies()
+	store, deps := config.ConfigStore{}, DefaultCloudDependencies()
 	// Resolved before provisioning so "this host has nothing to give" is
 	// distinguishable from "there was nothing to do", and so the reason is in
 	// hand before the provisioning below re-resolves the same local, read-only
@@ -363,7 +365,7 @@ func reconcilePlatformAliasSecret(ctx Context, deployInput *HelmDeploySpec) erro
 // field, resolve the host again, and -- worse -- a deploy whose host had since
 // lost its alias would pass no name at all, dropping the mount from an
 // environment that had one.
-func recordPlatformAliasSecretNameOnEnv(ctx Context, tenant, environment, name string) error {
+func recordPlatformAliasSecretNameOnEnv(ctx core.Context, tenant, environment, name string) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant == "" || environment == "" {
@@ -374,7 +376,7 @@ func recordPlatformAliasSecretNameOnEnv(ctx Context, tenant, environment, name s
 	// nothing. It cannot normally be reached with the record already in place
 	// (the caller gates on the name being empty), so this is the reconciliation
 	// against the store rather than against the plan.
-	envConfig, _, err := LoadEnvConfig(tenant, environment)
+	envConfig, _, err := config.LoadEnvConfig(tenant, environment)
 	if err == nil && strings.TrimSpace(envConfig.PlatformAliasSecretName) == name {
 		return nil
 	}
@@ -387,7 +389,7 @@ func recordPlatformAliasSecretNameOnEnv(ctx Context, tenant, environment, name s
 		return nil
 	}
 	envConfig.PlatformAliasSecretName = name
-	if err := SaveEnvConfig(tenant, envConfig); err != nil {
+	if err := config.SaveEnvConfig(tenant, envConfig); err != nil {
 		return fmt.Errorf("record platform alias secret on %s/%s: %w", tenant, environment, err)
 	}
 	return nil

@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type DeleteInput struct {
@@ -34,10 +36,10 @@ func deleteTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 
 		deleteStore, ok := any(runtime.Store).(eruncommon.DeleteStore)
 		if !ok {
-			deleteStore = eruncommon.ConfigStore{}
+			deleteStore = config.ConfigStore{}
 		}
 
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			result, err := eruncommon.RunDeleteEnvironment(runCtx, eruncommon.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,

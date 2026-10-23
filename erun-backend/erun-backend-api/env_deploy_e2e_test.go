@@ -17,18 +17,16 @@ import (
 
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
-
-	eruncommon "github.com/sophium/erun/erun-common"
-
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/provision"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 )
 
 // envDeployE2E is the opt-in environment for the live env-deploy gate. It needs
@@ -185,7 +183,7 @@ func assertMCPReachable(t *testing.T, kubeConfig *rest.Config, kube kubernetes.I
 	}
 	podName := pods.Items[0].Name
 
-	localPort := forwardToPod(t, kubeConfig, kube, namespace, podName, eruncommon.LowerServicePort)
+	localPort := forwardToPod(t, kubeConfig, kube, namespace, podName, configpkg.LowerServicePort)
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"erun-e2e","version":"1.0.0"}}}`
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:%d/mcp", localPort), bytes.NewBufferString(initBody))

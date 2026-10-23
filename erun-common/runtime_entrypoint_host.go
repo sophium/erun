@@ -7,6 +7,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func (b runtimeBoot) kubeconfigPath() string {
@@ -26,7 +29,7 @@ func describeRuntimeKubeconfig(boot runtimeBoot) string {
 // cluster: the desktop-synced env config and any lookup that knows the outer
 // name run `kubectl --context <outer-name>` from inside the pod, which would
 // otherwise fail with "context does not exist".
-func writeRuntimeKubeconfig(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func writeRuntimeKubeconfig(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	tokenFile := filepath.Join(boot.serviceAccountDir, "token")
 	caFile := filepath.Join(boot.serviceAccountDir, "ca.crt")
 	namespaceFile := filepath.Join(boot.serviceAccountDir, "namespace")
@@ -68,7 +71,7 @@ func describeRuntimeSSHPermissions(boot runtimeBoot) string {
 // holds the g+rw the kubelet ORed into every home-volume file, and ssh refuses a
 // private key looser than 0600. *.pub stays world-readable; everything else
 // directly in ~/.ssh is treated as private.
-func normalizeRuntimeSSHPermissions(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func normalizeRuntimeSSHPermissions(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	dir := boot.path(".ssh")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -95,7 +98,7 @@ func describeRuntimeOutputsDir(boot runtimeBoot) string {
 // ensureRuntimeOutputsDir creates the directory agents write deliverables to,
 // which `erun outputs` lists. The image creates the default one; an overridden
 // path may not exist yet.
-func ensureRuntimeOutputsDir(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func ensureRuntimeOutputsDir(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	return os.MkdirAll(boot.outputsDir(), 0o755)
 }
 
@@ -112,13 +115,13 @@ func describeRuntimeGitSafeDirectory(boot runtimeBoot) string {
 // Every child the boot starts goes through the supervisor, here and below: the
 // init reaps each zombie it does not own, and a child it reaps before os/exec
 // waits for it reports "no child processes" instead of its exit status.
-func ensureRuntimeGitSafeDirectory(_ Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func ensureRuntimeGitSafeDirectory(_ core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return nil
 	}
 	repoDir := boot.repoDir()
 	var existing bytes.Buffer
-	read := Command("git", "config", "--global", "--get-all", "safe.directory")
+	read := core.Command("git", "config", "--global", "--get-all", "safe.directory")
 	read.Stdout = &existing
 	_ = supervisor.run(read) // exits 1 when no safe.directory is set yet
 	for _, line := range strings.Split(existing.String(), "\n") {
@@ -126,7 +129,7 @@ func ensureRuntimeGitSafeDirectory(_ Context, boot runtimeBoot, supervisor *runt
 			return nil
 		}
 	}
-	return supervisor.run(Command("git", "config", "--global", "--add", "safe.directory", repoDir))
+	return supervisor.run(core.Command("git", "config", "--global", "--add", "safe.directory", repoDir))
 }
 
 func describeRuntimeSource(boot runtimeBoot) string {
@@ -149,13 +152,13 @@ func describeRuntimeSource(boot runtimeBoot) string {
 // only into an empty worktree, so live patches survive pod restarts, then checks
 // out the deployed release ref. Failures are reported and the pod keeps serving
 // without mounted source.
-func ensureRuntimeSource(ctx Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
+func ensureRuntimeSource(ctx core.Context, boot runtimeBoot, supervisor *runtimeSupervisor) error {
 	url := boot.get("ERUN_REPO_URL")
 	repoDir := boot.repoDir()
 	if err := os.MkdirAll(filepath.Dir(repoDir), 0o755); err != nil {
 		return err
 	}
-	if err := supervisor.run(Command("git", "clone", url, repoDir)); err != nil {
+	if err := supervisor.run(core.Command("git", "clone", url, repoDir)); err != nil {
 		ctx.Info("erun: failed to clone runtime source from " + url + "; continuing without mounted source")
 		return nil
 	}
@@ -163,7 +166,7 @@ func ensureRuntimeSource(ctx Context, boot runtimeBoot, supervisor *runtimeSuper
 	if ref == "" {
 		return nil
 	}
-	checkout := Command("git", "checkout", "-q", ref)
+	checkout := core.Command("git", "checkout", "-q", ref)
 	checkout.Dir = repoDir
 	if err := supervisor.run(checkout); err != nil {
 		ctx.Info("erun: could not check out " + ref + "; runtime source left at the default branch")
@@ -172,7 +175,7 @@ func ensureRuntimeSource(ctx Context, boot runtimeBoot, supervisor *runtimeSuper
 }
 
 func describeRuntimeReleaseLink(boot runtimeBoot) string {
-	if boot.get("ERUN_ENV_TYPE") != string(EnvironmentTypeRuntime) || boot.flag("ERUN_REPO_REMOTE") {
+	if boot.get("ERUN_ENV_TYPE") != string(configpkg.EnvironmentTypeRuntime) || boot.flag("ERUN_REPO_REMOTE") {
 		return ""
 	}
 	return "link " + boot.repoDir() + " to " + boot.releaseDir + " when the image bakes one"
@@ -181,7 +184,7 @@ func describeRuntimeReleaseLink(boot runtimeBoot) string {
 // linkRuntimeRelease surfaces the image's baked release tree through the git
 // folder of a sourceless runtime environment. Agent environments and runtime
 // environments that mount source carry a real worktree and are not linked.
-func linkRuntimeRelease(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func linkRuntimeRelease(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	_, err := LinkRuntimeRelease(boot.repoDir(), boot.releaseDir)
 	return err
 }

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // LinuxPackageSpec is one linux package component: a Dockerfile under
@@ -137,8 +139,8 @@ func releaseLinuxPackageDir(projectRoot, version string) string {
 // runLinuxPackageDockerBuild runs one package build on the run's heartbeat:
 // below debug verbosity its BuildKit output is captured, so the heartbeat is
 // the only sign a long test stage is still working.
-func runLinuxPackageDockerBuild(ctx Context, pkg LinuxPackageSpec, label string, args []string) error {
-	done := ctx.progress.begin(label)
+func runLinuxPackageDockerBuild(ctx core.Context, pkg LinuxPackageSpec, label string, args []string) error {
+	done := ctx.Progress.Begin(label)
 	defer done()
 	if _, err := runDockerBuildOnce(args, pkg.ContextDir, "", false, ctx.Verbosity, ctx.Stdout, ctx.Stderr); err != nil {
 		return fmt.Errorf("linux package %s: %w", pkg.Name, err)
@@ -151,10 +153,10 @@ func runLinuxPackageDockerBuild(ctx Context, pkg LinuxPackageSpec, label string,
 // recorded pass reports `reused` (`none declared` without a `test` stage) and
 // runs nothing; one that passes records its fingerprint, and one that fails
 // records nothing.
-func runLinuxPackageChecks(ctx Context, packages []LinuxPackageSpec) error {
+func runLinuxPackageChecks(ctx core.Context, packages []LinuxPackageSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
-	cgroupParent := buildContainerCPUCapCgroupParent()
+	cgroupParent := core.BuildContainerCPUCapCgroupParent()
 	for _, pkg := range packages {
 		target, err := linuxPackageCheckTarget(pkg)
 		if err != nil {
@@ -170,7 +172,7 @@ func runLinuxPackageChecks(ctx Context, packages []LinuxPackageSpec) error {
 		if ctx.DryRun {
 			continue
 		}
-		_, finish := ctx.startTimingStep(pkg.Name)
+		_, finish := ctx.StartTimingStep(pkg.Name)
 		err = runLinuxPackageDockerBuild(ctx, pkg, pkg.Name, args)
 		finish(err)
 		if err != nil {
@@ -198,14 +200,14 @@ func linuxPackageTestOutcome(target, tested string) string {
 	return tested
 }
 
-func reportLinuxPackageReuse(ctx Context, pkg LinuxPackageSpec, target string) {
+func reportLinuxPackageReuse(ctx core.Context, pkg LinuxPackageSpec, target string) {
 	if target != linuxPackageTestStage {
 		ctx.Trace(pkg.Name + ": its " + target + " stage is reused (fingerprint fp-" + pkg.Fingerprint + ")")
 	}
 	ctx.Info(pkg.Name + ": test: " + linuxPackageTestOutcome(target, "reused (fingerprint fp-"+pkg.Fingerprint+")"))
 }
 
-func traceLinuxPackageRunReason(ctx Context, pkg LinuxPackageSpec, target string) {
+func traceLinuxPackageRunReason(ctx core.Context, pkg LinuxPackageSpec, target string) {
 	switch {
 	case pkg.noReuseReason != "":
 		ctx.Trace(pkg.Name + ": running its " + target + " stage: " + pkg.noReuseReason)
@@ -218,10 +220,10 @@ func traceLinuxPackageRunReason(ctx Context, pkg LinuxPackageSpec, target string
 // release platform into the release's package directory. It runs inside the
 // publish, so a package that fails to build stops the release before anything
 // is public.
-func exportReleaseLinuxPackages(ctx Context, spec ReleaseSpec) error {
+func exportReleaseLinuxPackages(ctx core.Context, spec ReleaseSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
-	cgroupParent := buildContainerCPUCapCgroupParent()
+	cgroupParent := core.BuildContainerCPUCapCgroupParent()
 	for _, pkg := range spec.LinuxPackages {
 		if !ctx.DryRun {
 			// A retried release must not upload what an earlier attempt exported.
@@ -236,7 +238,7 @@ func exportReleaseLinuxPackages(ctx Context, spec ReleaseSpec) error {
 				continue
 			}
 			label := pkg.Name + " " + platform
-			_, finish := ctx.startTimingStep(label)
+			_, finish := ctx.StartTimingStep(label)
 			err := runLinuxPackageDockerBuild(ctx, pkg, label, args)
 			finish(err)
 			if err != nil {
@@ -297,7 +299,7 @@ func githubReleaseCreateArgs(tag, version string, files []string) []string {
 // release for the version's tag, creating the release when it does not exist
 // yet. It runs after the tag is public, because creating a release for a tag
 // the remote does not have would make GitHub tag the default branch instead.
-func uploadReleaseLinuxPackages(ctx Context, spec ReleaseSpec) error {
+func uploadReleaseLinuxPackages(ctx core.Context, spec ReleaseSpec) error {
 	if len(spec.LinuxPackages) == 0 {
 		return nil
 	}
@@ -328,7 +330,7 @@ func uploadReleaseLinuxPackages(ctx Context, spec ReleaseSpec) error {
 }
 
 func runGitHubCLI(dir string, args []string, stdout, stderr io.Writer) error {
-	cmd := Command("gh", args...)
+	cmd := core.Command("gh", args...)
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

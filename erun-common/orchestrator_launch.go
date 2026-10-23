@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // DefaultOrchestratorModel is the model an orchestrator launches on when it
@@ -23,7 +25,7 @@ type OrchestratorLaunch struct {
 	// Gateway is the catalog the session routes through, nil when it stays on
 	// this machine's own Claude Code configuration. The credential is not
 	// resolved here: it is a secret, and the caller delivers it.
-	Gateway *OpenRouterConfig
+	Gateway *config.OpenRouterConfig
 	// Env is the non-secret process environment the launch needs, in a fixed
 	// order so a relaunch builds the same environment.
 	Env []string
@@ -42,11 +44,11 @@ type OrchestratorLaunch struct {
 // launching something other than what the operator recorded would hide that;
 // a gateway turned on with no catalog behind it would otherwise launch on the
 // host's own sign-in while reading as routed.
-func ResolveOrchestratorLaunch(orchestrator OrchestratorConfig, catalog *OpenRouterConfig) (OrchestratorLaunch, error) {
+func ResolveOrchestratorLaunch(orchestrator config.OrchestratorConfig, catalog *config.OpenRouterConfig) (OrchestratorLaunch, error) {
 	if err := ValidateOrchestratorLaunchSettings(orchestrator, catalog); err != nil {
 		return OrchestratorLaunch{}, err
 	}
-	var gateway *OpenRouterConfig
+	var gateway *config.OpenRouterConfig
 	if orchestrator.UseGateway {
 		gateway = catalog
 	}
@@ -69,7 +71,7 @@ func ResolveOrchestratorLaunch(orchestrator OrchestratorConfig, catalog *OpenRou
 	}, nil
 }
 
-func resolveOrchestratorModel(model string, gateway *OpenRouterConfig) string {
+func resolveOrchestratorModel(model string, gateway *config.OpenRouterConfig) string {
 	if model != "" {
 		return model
 	}
@@ -84,7 +86,7 @@ func resolveOrchestratorModel(model string, gateway *OpenRouterConfig) string {
 
 // orchestratorLaunchEnv mirrors what a pod's gateway env block renders, so a
 // host session and an environment reach the same gateway the same way.
-func orchestratorLaunchEnv(model string, gateway *OpenRouterConfig) []string {
+func orchestratorLaunchEnv(model string, gateway *config.OpenRouterConfig) []string {
 	env := []string{"CLAUDE_CODE_SUBAGENT_MODEL=" + model}
 	if !gateway.Configured() {
 		return env
@@ -109,7 +111,7 @@ func orchestratorLaunchEnv(model string, gateway *OpenRouterConfig) []string {
 //
 // The reasons name no command: the CLI and the desktop dialog both call this,
 // and each adds the remedy its own surface offers.
-func ValidateOrchestratorLaunchSettings(orchestrator OrchestratorConfig, catalog *OpenRouterConfig) error {
+func ValidateOrchestratorLaunchSettings(orchestrator config.OrchestratorConfig, catalog *config.OpenRouterConfig) error {
 	if orchestrator.UseGateway && !catalog.Configured() {
 		return orchestratorLaunchSettingError{
 			kind:   orchestratorLaunchSettingNoCatalog,

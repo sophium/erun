@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // TestStartSessionStopsReconnectingAfterRepeatedFailures guards against
@@ -19,10 +20,10 @@ import (
 func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}
@@ -91,10 +92,10 @@ func TestRespawnDeclaresItselfAReconnect(t *testing.T) {
 	emits := newCapturedEmits()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]eruncommon.TenantConfig{
+			tenants: map[string]config.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
-			envs: map[string]eruncommon.EnvConfig{
+			envs: map[string]config.EnvConfig{
 				"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 			},
 		},
@@ -220,21 +221,21 @@ func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
 func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &config.ERunConfig{
+			CloudContexts: []config.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              config.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -257,7 +258,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		// marker can block it, which is what this test isolates.
 		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
 			return eruncommon.CloudContextStatus{
-				CloudContextConfig: eruncommon.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
@@ -299,21 +300,21 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 func TestClearIntentionalStopForCloudContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &config.ERunConfig{
+			CloudContexts: []config.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              config.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -322,7 +323,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 		store: store,
 		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
 			return eruncommon.CloudContextStatus{
-				CloudContextConfig: eruncommon.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
@@ -352,21 +353,21 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
+		config: &config.ERunConfig{
+			CloudContexts: []config.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {
 				Name:              "remote",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Type:              eruncommon.EnvironmentTypeRuntime,
+				Type:              config.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -532,10 +533,10 @@ func sawDeployFailedMarker(emits *capturedEmits) bool {
 func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
+		tenants: map[string]config.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
-		envs: map[string]eruncommon.EnvConfig{
+		envs: map[string]config.EnvConfig{
 			"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"},
 		},
 	}

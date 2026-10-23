@@ -14,7 +14,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // The runtime pod's Prometheus exposition listener, documented at
@@ -315,7 +316,7 @@ func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
 // LastActivity across these three kinds is the same value that page already
 // documents, computed from the same on-disk activity snapshots the `idle`
 // tool reads rather than a metrics-only redefinition.
-var terminalInputActivityKinds = []string{eruncommon.ActivityKindSSH, eruncommon.ActivityKindCLI, eruncommon.ActivityKindMCP}
+var terminalInputActivityKinds = []string{config.ActivityKindSSH, config.ActivityKindCLI, config.ActivityKindMCP}
 
 func secondsSinceLastTerminalInput(status eruncommon.EnvironmentIdleStatus, now time.Time) float64 {
 	var last time.Time
@@ -368,7 +369,7 @@ func sampleTrafficWindow(runtime RuntimeConfig, recorder *metricsRecorder, lastS
 	sshBytes := lastSSHBytes
 	if tenant != "" && environment != "" {
 		if activity, err := eruncommon.LoadEnvironmentActivity(tenant, environment); err == nil {
-			sshBytes = activity[eruncommon.ActivityKindSSH].Bytes
+			sshBytes = activity[config.ActivityKindSSH].Bytes
 		}
 	}
 	mcpBytes := recorder.mcpBytesSeen.Load()

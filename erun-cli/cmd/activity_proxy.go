@@ -9,6 +9,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/spf13/cobra"
 )
 
@@ -213,7 +214,7 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
 		Tenant:        r.tenant,
 		Environment:   r.environment,
-		Kind:          common.ActivityKindSSH,
+		Kind:          config.ActivityKindSSH,
 		Seen:          true,
 		Bytes:         bytes,
 		ClientUpdates: clientUpdatesFromMap(byClient),

@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // Sizing has always been a guess made once. A recommendation turns it into an
@@ -218,7 +220,7 @@ type RuntimeSizingParams struct {
 	// limit, so a runtimepod above what it can admit is a recommendation that
 	// cannot be deployed. Zero means no quota is configured and no ceiling is
 	// known here.
-	Ceiling NamespaceResourceQuota
+	Ceiling config.NamespaceResourceQuota
 	// Live is the reading this recommendation is being reported alongside, when
 	// the caller has just taken one. Supplying it is what lets a warning and the
 	// recommendation that answers it be derived from the same evidence: the
@@ -330,7 +332,7 @@ func runtimeLivePeakMemoryBytes(usage RuntimeUsage) int64 {
 // worded. Both the retained history and a live reading funnel through it, so
 // the two can never reach different conclusions from the same evidence, and
 // the figure it tests against is the same one the memory warning fires on.
-func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
+func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
 	verdict := RuntimeSizingVerdict{Resource: "memory", Current: formatBytesAsMi(limit)}
 	if oomKills > 0 {
 		// A kill is evidence of harm, and one is enough. The observed peak is
@@ -355,7 +357,7 @@ func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling NamespaceRes
 	return verdict, true
 }
 
-func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, peak, oomKills int64, ceiling NamespaceResourceQuota) RuntimeSizingVerdict {
+func recommendRuntimeMemory(history RuntimeUsageHistory, latest RuntimeUsage, peak, oomKills int64, ceiling config.NamespaceResourceQuota) RuntimeSizingVerdict {
 	verdict := RuntimeSizingVerdict{Resource: "memory"}
 	limit := latest.Memory.LimitBytes
 	if limit <= 0 {
@@ -468,7 +470,7 @@ func runtimeSizingShrinkWindowShortfall(history RuntimeUsageHistory) (string, bo
 // suggestion above the remainder is one Kubernetes would refuse to schedule.
 // This is a bound, not the knob: raising the quota is a separate decision from
 // resizing the pod.
-func boundRuntimeMemorySuggestion(suggested int64, ceiling NamespaceResourceQuota) (string, string) {
+func boundRuntimeMemorySuggestion(suggested int64, ceiling config.NamespaceResourceQuota) (string, string) {
 	quotaMi, err := ParseKubernetesMemoryToMi(ceiling.Memory)
 	if err != nil {
 		return formatBytesAsMi(suggested), ""

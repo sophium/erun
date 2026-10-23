@@ -3,7 +3,8 @@ package model
 import (
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/uptrace/bun"
 )
 
@@ -69,6 +70,6 @@ type Review struct {
 	// name is a guess that the branch was named honestly, and a client that
 	// renders it as a link the author declared claims a provenance the
 	// platform does not have; the source is what makes the two tellable apart.
-	IssueRef       string                          `json:"issueRef,omitempty" bun:"-"`
-	IssueRefSource eruncommon.IssueReferenceSource `json:"issueRefSource,omitempty" bun:"-"`
+	IssueRef       string                     `json:"issueRef,omitempty" bun:"-"`
+	IssueRefSource model.IssueReferenceSource `json:"issueRefSource,omitempty" bun:"-"`
 }

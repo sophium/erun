@@ -7,6 +7,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // HostedRegistryProbeTimeout bounds the availability probe. It is short on
@@ -45,7 +47,7 @@ func (s HostedRegistryStatus) Err() error {
 // treating a non-2xx status as down would report every correctly configured
 // registry as missing.
 func ProbeHostedRegistry(ctx context.Context, client *http.Client) HostedRegistryStatus {
-	return probeHostedRegistryAt(ctx, client, "https://"+HostedRegistryHost+"/v2/", HostedRegistryHost)
+	return probeHostedRegistryAt(ctx, client, "https://"+config.HostedRegistryHost+"/v2/", config.HostedRegistryHost)
 }
 
 // probeHostedRegistryAt is ProbeHostedRegistry with the endpoint injected, so a

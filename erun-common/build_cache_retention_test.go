@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // buildCacheTestVolume is the docker volume the chart declares by default, in
@@ -238,7 +240,7 @@ func runBuildCacheRetentionCase(t *testing.T, tc buildCacheRetentionCase) {
 	}
 
 	logs := &strings.Builder{}
-	ctx := Context{DryRun: tc.dryRun, Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}
+	ctx := core.Context{DryRun: tc.dryRun, Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}
 	ensureBuildCacheRetentionWith(ctx, buildDiskHeadroomPolicy, readVolume, readCacheBytes, prune)
 
 	if readCalls != tc.wantReads {
@@ -314,8 +316,8 @@ echo "/dev/fake       419430400 314572800  104857600     75% `+root+`"`))
 	t.Setenv(releaseMinDiskHeadroomEnv, strconv.FormatUint(1<<30, 10))
 
 	logs := &strings.Builder{}
-	if err := awaitDiskHeadroomPreflight(t, Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)},
-		func(ctx Context) error { return ensureBuildDiskHeadroom(ctx) }); err != nil {
+	if err := awaitDiskHeadroomPreflight(t, core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)},
+		func(ctx core.Context) error { return ensureBuildDiskHeadroom(ctx) }); err != nil {
 		t.Fatalf("a build must proceed on a healthy disk, got %v", err)
 	}
 
@@ -364,7 +366,7 @@ func TestBuildCacheRetentionReclaimsOnlyAtTheCeiling(t *testing.T) {
 	for size := step; size <= buildCacheTestVolume; size += step {
 		logs := &strings.Builder{}
 		pruned := false
-		ensureBuildCacheRetentionWith(Context{Logger: NewLoggerWithWriters(VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
+		ensureBuildCacheRetentionWith(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, logs, logs)}, buildDiskHeadroomPolicy,
 			func() (uint64, error) { return buildCacheTestVolume, nil },
 			func(time.Duration) (uint64, error) { return size, nil },
 			func(uint64, time.Duration) error { pruned = true; return nil })
@@ -423,7 +425,7 @@ esac`))
 // awaitDiskHeadroomPreflight runs a check to its own return and fails the test
 // if it does not get there, since one that blocks is a build that neither
 // proceeds nor fails and writes no terminal record for a gate to report.
-func awaitDiskHeadroomPreflight(t *testing.T, ctx Context, check func(Context) error) error {
+func awaitDiskHeadroomPreflight(t *testing.T, ctx core.Context, check func(core.Context) error) error {
 	t.Helper()
 	done := make(chan error, 1)
 	go func() { done <- check(ctx) }()
@@ -441,7 +443,7 @@ func awaitDiskHeadroomPreflight(t *testing.T, ctx Context, check func(Context) e
 func awaitBuildCacheRetention(t *testing.T, policy diskHeadroomPolicy) error {
 	t.Helper()
 	policy.limits = diskHeadroomShortLimits()
-	return awaitDiskHeadroomPreflight(t, Context{}, func(ctx Context) error {
+	return awaitDiskHeadroomPreflight(t, core.Context{}, func(ctx core.Context) error {
 		ensureBuildCacheRetention(ctx, policy)
 		return nil
 	})

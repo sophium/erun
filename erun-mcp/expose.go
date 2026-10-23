@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ExposeInput struct {
@@ -68,10 +70,10 @@ func exposeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 
 		exposeStore, ok := any(runtime.Store).(eruncommon.ExposeStore)
 		if !ok {
-			exposeStore = eruncommon.ConfigStore{}
+			exposeStore = config.ConfigStore{}
 		}
 
-		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			runCtx.MCPTool = "expose"
 			_, err := eruncommon.RunExposeService(runCtx, eruncommon.ExposeServiceParams{
 				Tenant:             tenant,

@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // installReadNamingKubectl points ERUN_KUBECTL_BIN at a stub that answers every
@@ -54,7 +56,7 @@ func TestSharedReadsNameTheReadAndTheOperationNamesItself(t *testing.T) {
 		t.Fatalf("the shared read names an operation %q's caller never ran: %v", "ListExposedServices", err)
 	}
 
-	_, err = RunObservation(Context{Logger: NewLoggerWithWriters(VerbosityInfo, io.Discard, io.Discard)}, req, ObserveParams{})
+	_, err = RunObservation(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}, req, ObserveParams{})
 	if err == nil {
 		t.Fatal("expected the failing ingress read to surface through observe")
 	}

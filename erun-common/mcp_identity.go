@@ -6,35 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
-
-// The desktop's Ed25519 identity is the trust anchor for every per-env MCP
-// bearer: the private key signs tokens and the public half is what a deploy
-// injects into the pod. Its location and TTL live here so the desktop, the CLI,
-// and any third-party caller mint tokens the deployed edge already trusts — a
-// second identity would only produce tokens every environment rejects.
-const (
-	desktopIdentityDirName = "ERun"
-	desktopIdentityKeyFile = "desktopid.key"
-	desktopMCPTokenSubject = "erun-desktop"
-
-	// DesktopMCPTokenTTL is kept short so a leaked bearer has a small exploit
-	// window; callers mint per request rather than holding one.
-	DesktopMCPTokenTTL = 5 * time.Minute
-)
-
-// DefaultDesktopIdentityDir returns an empty string when the OS config directory
-// cannot be resolved, leaving it to the caller to decide whether that is fatal.
-func DefaultDesktopIdentityDir() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(configDir, desktopIdentityDirName)
-}
 
 func DesktopIdentityKeyPath(dir string) string {
-	return filepath.Join(dir, desktopIdentityKeyFile)
+	return filepath.Join(dir, core.DesktopIdentityKeyFile)
 }
 
 func DesktopIdentityPublicKeyPath(dir string) string {
@@ -65,10 +42,10 @@ func LoadDesktopIdentityKey(dir string) ([]byte, error) {
 func SignDesktopMCPToken(privatePEM []byte, tenant, environment string, now time.Time) (string, error) {
 	return SignMCPToken(privatePEM, MCPTokenClaims{
 		Issuer:    DesktopMCPIssuer(),
-		Subject:   desktopMCPTokenSubject,
+		Subject:   core.DesktopMCPTokenSubject,
 		Audience:  MCPTokenAudience(tenant, environment),
 		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(DesktopMCPTokenTTL).Unix(),
+		ExpiresAt: now.Add(core.DesktopMCPTokenTTL).Unix(),
 	})
 }
 

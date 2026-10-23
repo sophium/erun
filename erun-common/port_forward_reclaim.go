@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The forward tree outlives the environments it describes. A state file is
@@ -33,7 +36,7 @@ import (
 // through the same config root so a sweep and a write cannot disagree about
 // where the tree is.
 func portForwardRoot() (string, error) {
-	return resolveConfigFilePath(filepath.Join(configRoot, "portforward"))
+	return config.ResolveConfigFilePath(filepath.Join(config.ConfigRoot, "portforward"))
 }
 
 // ReclaimOrphanedPortForwardRecords removes every forward record under the
@@ -42,7 +45,7 @@ func portForwardRoot() (string, error) {
 // read is left entirely alone, so "the config could not be listed" can never
 // be mistaken for "no environment exists" and take a live forward's log with
 // it.
-func ReclaimOrphanedPortForwardRecords(ctx Context) error {
+func ReclaimOrphanedPortForwardRecords(ctx core.Context) error {
 	configured, known, err := configuredEnvironmentNames()
 	if err != nil {
 		return err
@@ -76,7 +79,7 @@ func ReclaimOrphanedPortForwardRecords(ctx Context) error {
 	return nil
 }
 
-func reclaimOrphanedRecordsInKind(ctx Context, kindDir, kind string, configured map[string]map[string]bool, reclaimed map[string]bool) error {
+func reclaimOrphanedRecordsInKind(ctx core.Context, kindDir, kind string, configured map[string]map[string]bool, reclaimed map[string]bool) error {
 	tenantEntries, err := os.ReadDir(kindDir)
 	if err != nil {
 		// Nothing recorded for this kind yet, which is the ordinary state of a
@@ -166,13 +169,13 @@ func portForwardRecordNames(tenantDir string) ([]string, error) {
 // only distinguishable by asking the question the store answers differently —
 // whether the machine-level config it is initialized around is there.
 func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
-	store := ConfigStore{}
+	store := config.ConfigStore{}
 	if _, _, err := store.LoadERunConfig(); err != nil {
 		return nil, false, nil
 	}
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
+		if errors.Is(err, config.ErrNotInitialized) {
 			return nil, false, nil
 		}
 		return nil, false, err
@@ -201,7 +204,7 @@ func configuredEnvironmentNames() (map[string]map[string]bool, bool, error) {
 // removeDirIfEmpty removes a directory the sweep has emptied. Only an empty
 // one: os.Remove refuses a populated directory, and the tenant directory left
 // behind by a tenant deleted long ago is the same residue in a smaller shape.
-func removeDirIfEmpty(ctx Context, dir string) {
+func removeDirIfEmpty(ctx core.Context, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) > 0 {
 		return

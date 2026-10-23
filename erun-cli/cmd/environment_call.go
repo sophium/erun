@@ -7,6 +7,7 @@ import (
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The idle, job, and activity-lease verbs each have two homes. Inside the
@@ -32,7 +33,7 @@ func environmentTargetsItself() bool {
 // sets exempts the whole request from the environment's activity accounting, so
 // setting it for a tool that can mutate the environment (job_start, job_cancel,
 // activity_lease_take, ...) would let driving the environment read as idle.
-func callEnvironmentTool[T any](ctx context.Context, commandCtx common.Context, resolveOpen OpenResolver, tenant, environment, tool string, arguments map[string]any, idleProbe bool) (T, bool, error) {
+func callEnvironmentTool[T any](ctx context.Context, commandCtx core.Context, resolveOpen OpenResolver, tenant, environment, tool string, arguments map[string]any, idleProbe bool) (T, bool, error) {
 	var decoded T
 	if arguments == nil {
 		arguments = map[string]any{}

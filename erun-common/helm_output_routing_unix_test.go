@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Helm's "Successfully packaged chart …" is progress, not data: on erun's
@@ -20,9 +22,9 @@ func TestHelmProgressStaysOffStdout(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for name, run := range map[string]func(Context, commandSpec) error{
+	for name, run := range map[string]func(core.Context, commandSpec) error{
 		"runHelmCommand": runHelmCommand,
-		"runHelmCommandCapturingOutput": func(ctx Context, spec commandSpec) error {
+		"runHelmCommandCapturingOutput": func(ctx core.Context, spec commandSpec) error {
 			out, err := runHelmCommandCapturingOutput(ctx, spec)
 			if !strings.Contains(out, "Successfully packaged chart") {
 				t.Errorf("captured output lost helm's stdout: %q", out)
@@ -35,7 +37,7 @@ func TestHelmProgressStaysOffStdout(t *testing.T) {
 			// writer, so the stderr side must be safe for concurrent writes.
 			var stdout syncBuffer
 			var stderr syncBuffer
-			ctx := Context{Stdout: &stdout, Stderr: &stderr}
+			ctx := core.Context{Stdout: &stdout, Stderr: &stderr}
 			if err := run(ctx, commandSpec{Name: "helm", Args: []string{"package", "chart"}}); err != nil {
 				t.Fatalf("helm: %v", err)
 			}

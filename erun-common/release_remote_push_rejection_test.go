@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // The two directions of the misdiagnosed release push, as unit tests over the
@@ -68,8 +70,8 @@ func releasePushTestCommand(dir string) ReleaseCommandSpec {
 	}
 }
 
-func releasePushTestContext() Context {
-	return Context{Stdout: io.Discard, Stderr: io.Discard}
+func releasePushTestContext() core.Context {
+	return core.Context{Stdout: io.Discard, Stderr: io.Discard}
 }
 
 func TestReleasePushRejectionOfDevelopIsNotAttributedToMainHavingMoved(t *testing.T) {

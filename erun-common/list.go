@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 type ListStore interface {
-	OpenStore
-	ListTenantConfigs() ([]TenantConfig, error)
-	ListEnvConfigs(string) ([]EnvConfig, error)
+	configpkg.OpenStore
+	ListTenantConfigs() ([]configpkg.TenantConfig, error)
+	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 }
 
 type ListResult struct {
@@ -57,10 +59,10 @@ type ListOrchestratorResult struct {
 // ListOrchestratorEnvResult is the read-model view of one
 // OrchestratorEnvConfig link, including its (possibly undeclared) Role.
 type ListOrchestratorEnvResult struct {
-	Tenant      string              `json:"tenant"`
-	Environment string              `json:"environment"`
-	Directory   string              `json:"directory,omitempty"`
-	Role        OrchestratorEnvRole `json:"role,omitempty"`
+	Tenant      string                        `json:"tenant"`
+	Environment string                        `json:"environment"`
+	Directory   string                        `json:"directory,omitempty"`
+	Role        configpkg.OrchestratorEnvRole `json:"role,omitempty"`
 }
 
 type ListDefaultsResult struct {
@@ -77,16 +79,16 @@ type ListCurrentDirectoryResult struct {
 }
 
 type ListEffectiveTargetResult struct {
-	Tenant             string                `json:"tenant"`
-	Environment        string                `json:"environment"`
-	Type               EnvironmentType       `json:"type,omitempty"`
-	KubernetesContext  string                `json:"kubernetesContext"`
-	CloudProviderAlias string                `json:"cloudProviderAlias,omitempty"`
-	RepoPath           string                `json:"repoPath"`
-	LocalRepoPath      string                `json:"localRepoPath,omitempty"`
-	APIURL             string                `json:"apiUrl,omitempty"`
-	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
-	SSH                ListSSHResult         `json:"ssh,omitempty"`
+	Tenant             string                          `json:"tenant"`
+	Environment        string                          `json:"environment"`
+	Type               configpkg.EnvironmentType       `json:"type,omitempty"`
+	KubernetesContext  string                          `json:"kubernetesContext"`
+	CloudProviderAlias string                          `json:"cloudProviderAlias,omitempty"`
+	RepoPath           string                          `json:"repoPath"`
+	LocalRepoPath      string                          `json:"localRepoPath,omitempty"`
+	APIURL             string                          `json:"apiUrl,omitempty"`
+	LocalPorts         configpkg.EnvironmentLocalPorts `json:"localPorts,omitempty"`
+	SSH                ListSSHResult                   `json:"ssh,omitempty"`
 }
 
 type ListTenantResult struct {
@@ -101,15 +103,15 @@ type ListTenantResult struct {
 }
 
 type ListEnvironmentResult struct {
-	Name                string              `json:"name"`
-	Type                EnvironmentType     `json:"type,omitempty"`
-	APIURL              string              `json:"apiUrl,omitempty"`
-	KubernetesContext   string              `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias  string              `json:"cloudProviderAlias,omitempty"`
-	RepoPath            string              `json:"repoPath,omitempty"`
-	LocalRepoPath       string              `json:"localRepoPath,omitempty"`
-	ContainerRegistries ContainerRegistries `json:"containerRegistries,omitempty"`
-	RuntimeVersion      string              `json:"runtimeVersion,omitempty"`
+	Name                string                        `json:"name"`
+	Type                configpkg.EnvironmentType     `json:"type,omitempty"`
+	APIURL              string                        `json:"apiUrl,omitempty"`
+	KubernetesContext   string                        `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias  string                        `json:"cloudProviderAlias,omitempty"`
+	RepoPath            string                        `json:"repoPath,omitempty"`
+	LocalRepoPath       string                        `json:"localRepoPath,omitempty"`
+	ContainerRegistries configpkg.ContainerRegistries `json:"containerRegistries,omitempty"`
+	RuntimeVersion      string                        `json:"runtimeVersion,omitempty"`
 	// RuntimeVersionLine names which release line RuntimeVersion's number
 	// belongs to. Nil whenever RuntimeVersion itself is empty -- there is
 	// nothing to annotate for an environment that has never deployed.
@@ -122,7 +124,7 @@ type ListEnvironmentResult struct {
 	// last-observed runtime images name different release lines -- see
 	// EnvConfig.RuntimeImageLineMismatch.
 	RuntimeImageLineMismatch *RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
-	RuntimePod               RuntimePodResources             `json:"runtimePod,omitempty"`
+	RuntimePod               configpkg.RuntimePodResources   `json:"runtimePod,omitempty"`
 	// Sizing is the environment's standing recommendation, derived from the usage
 	// history the in-pod monitor retains. Nil where erun has never observed this
 	// environment — which is every environment seen from a host other than its
@@ -133,19 +135,19 @@ type ListEnvironmentResult struct {
 	// Hosted is the platform row this environment corresponds to, when it has
 	// one. Nil means the environment is not marked as hosted, which is the
 	// normal state: most environments never reach the platform.
-	Hosted             *HostedEnvironment      `json:"hosted,omitempty"`
-	DisableBuildScript bool                    `json:"disableBuildScript,omitempty"`
-	PlatformAccount    bool                    `json:"platformAccount,omitempty"`
-	AITool             string                  `json:"aiTool,omitempty"`
-	Claude             EnvironmentClaudeConfig `json:"claude,omitempty"`
-	Idle               EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Deploy             EnvironmentDeployConfig `json:"deploy,omitempty"`
-	IsActive           bool                    `json:"isActive,omitempty"`
-	LocalPorts         EnvironmentLocalPorts   `json:"localPorts,omitempty"`
-	IsDefault          bool                    `json:"isDefault,omitempty"`
-	IsEffective        bool                    `json:"isEffective,omitempty"`
-	SSH                ListSSHResult           `json:"ssh,omitempty"`
-	AutoStart          *bool                   `json:"autoStart,omitempty"`
+	Hosted             *configpkg.HostedEnvironment      `json:"hosted,omitempty"`
+	DisableBuildScript bool                              `json:"disableBuildScript,omitempty"`
+	PlatformAccount    bool                              `json:"platformAccount,omitempty"`
+	AITool             string                            `json:"aiTool,omitempty"`
+	Claude             configpkg.EnvironmentClaudeConfig `json:"claude,omitempty"`
+	Idle               configpkg.EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Deploy             configpkg.EnvironmentDeployConfig `json:"deploy,omitempty"`
+	IsActive           bool                              `json:"isActive,omitempty"`
+	LocalPorts         configpkg.EnvironmentLocalPorts   `json:"localPorts,omitempty"`
+	IsDefault          bool                              `json:"isDefault,omitempty"`
+	IsEffective        bool                              `json:"isEffective,omitempty"`
+	SSH                ListSSHResult                     `json:"ssh,omitempty"`
+	AutoStart          *bool                             `json:"autoStart,omitempty"`
 }
 
 // RuntimeImageLineMismatchResult is the list read-model view of
@@ -187,14 +189,14 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	}
 
 	effectiveResult, effectiveErr := ResolveOpen(store, params)
-	configDir, configDirErr := ERunConfigDir()
+	configDir, configDirErr := configpkg.ERunConfigDir()
 	if configDirErr != nil {
 		return ListResult{}, configDirErr
 	}
 	result := newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath, tenants)
 	result.CurrentDirectory = listCurrentDirectoryResult(result.CurrentDirectory, effectiveResult, effectiveErr)
 
-	portAllocations, err := ResolveAllEnvironmentLocalPorts(store)
+	portAllocations, err := configpkg.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -228,7 +230,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 // failure: the aliases say something about a file the operator may never have
 // had, and nothing about the environments this command exists to print.
 func listOrphanedSSHAliases(tenants []ListTenantResult) []SSHOrphanedAlias {
-	entries, err := ReadDefaultSSHHostEntries()
+	entries, err := configpkg.ReadDefaultSSHHostEntries()
 	if err != nil {
 		return nil
 	}
@@ -249,7 +251,7 @@ func listOrphanedSSHAliases(tenants []ListTenantResult) []SSHOrphanedAlias {
 	return FindOrphanedSSHAliases(entries, environments)
 }
 
-func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []TenantConfig) ListResult {
+func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName, currentRepoPath string, tenants []configpkg.TenantConfig) ListResult {
 	return ListResult{
 		ConfigDirectory: strings.TrimSpace(configDir),
 		Defaults:        ListDefaultsResult{Tenant: defaultTenant, Environment: defaultEnvironment},
@@ -262,7 +264,7 @@ func newListResult(configDir, defaultTenant, defaultEnvironment, currentRepoName
 	}
 }
 
-func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective OpenResult, effectiveErr error) ListCurrentDirectoryResult {
+func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective configpkg.OpenResult, effectiveErr error) ListCurrentDirectoryResult {
 	if effectiveErr != nil {
 		current.EffectiveError = effectiveErr.Error()
 		return current
@@ -275,14 +277,14 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective Op
 		CloudProviderAlias: strings.TrimSpace(effective.EnvConfig.CloudProviderAlias),
 		RepoPath:           effective.RepoPath,
 		LocalRepoPath:      strings.TrimSpace(effective.EnvConfig.LocalRepoPath),
-		APIURL:             APIURLForListEnvironment(effective.TenantConfig, LocalPortsForResult(effective)),
-		LocalPorts:         LocalPortsForResult(effective),
+		APIURL:             APIURLForListEnvironment(effective.TenantConfig, configpkg.LocalPortsForResult(effective)),
+		LocalPorts:         configpkg.LocalPortsForResult(effective),
 		SSH:                listSSHResult(effective),
 	}
 	return current
 }
 
-func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string, effective OpenResult, effectiveErr error, portAllocations map[string]EnvironmentLocalPorts) (ListTenantResult, error) {
+func listTenantResult(store ListStore, tenant configpkg.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]configpkg.EnvironmentLocalPorts) (ListTenantResult, error) {
 	envs, err := store.ListEnvConfigs(tenant.Name)
 	if err != nil {
 		return ListTenantResult{}, err
@@ -303,7 +305,7 @@ func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string
 	return result, nil
 }
 
-func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, effective OpenResult, effectiveErr error, portAllocations map[string]EnvironmentLocalPorts) ListEnvironmentResult {
+func listEnvironmentResult(store ListStore, tenant configpkg.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]configpkg.EnvironmentLocalPorts) ListEnvironmentResult {
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
 	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
 	return ListEnvironmentResult{
@@ -314,7 +316,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		CloudProviderAlias:       strings.TrimSpace(env.CloudProviderAlias),
 		RepoPath:                 env.EffectiveLocalRepoPath(),
 		LocalRepoPath:            strings.TrimSpace(env.LocalRepoPath),
-		ContainerRegistries:      EffectiveEnvironmentContainerRegistries(env),
+		ContainerRegistries:      configpkg.EffectiveEnvironmentContainerRegistries(env),
 		RuntimeVersion:           strings.TrimSpace(env.RuntimeVersion),
 		RuntimeVersionLine:       runtimeVersionLine,
 		ErunVersion:              ResolveErunVersion(env, runtimeVersionLine),
@@ -341,8 +343,8 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 // listHostedEnvironment returns the env's hosted marker as a pointer, so an
 // environment that carries none reports absent rather than as an all-zero
 // marker a reader would have to know to ignore.
-func listHostedEnvironment(env EnvConfig) *HostedEnvironment {
-	marker, ok := HostedEnvironmentFromConfig(env)
+func listHostedEnvironment(env configpkg.EnvConfig) *configpkg.HostedEnvironment {
+	marker, ok := configpkg.HostedEnvironmentFromConfig(env)
 	if !ok {
 		return nil
 	}
@@ -353,7 +355,7 @@ func listHostedEnvironment(env EnvConfig) *HostedEnvironment {
 // is a RuntimeVersion to annotate at all -- an environment that has never
 // deployed has no version, and "undetermined" would misread as "deployed,
 // but the line is unknown" rather than "never deployed".
-func listRuntimeVersionLine(tenant string, env EnvConfig) *RuntimeVersionLine {
+func listRuntimeVersionLine(tenant string, env configpkg.EnvConfig) *RuntimeVersionLine {
 	if strings.TrimSpace(env.RuntimeVersion) == "" {
 		return nil
 	}
@@ -363,7 +365,7 @@ func listRuntimeVersionLine(tenant string, env EnvConfig) *RuntimeVersionLine {
 
 // listRuntimeImageLineMismatch wraps EnvConfig.RuntimeImageLineMismatch, only
 // surfacing a result when it reports a real disagreement.
-func listRuntimeImageLineMismatch(env EnvConfig) *RuntimeImageLineMismatchResult {
+func listRuntimeImageLineMismatch(env configpkg.EnvConfig) *RuntimeImageLineMismatchResult {
 	recordedLine, observedLine, mismatched := env.RuntimeImageLineMismatch()
 	if !mismatched {
 		return nil
@@ -375,7 +377,7 @@ func listRuntimeImageLineMismatch(env EnvConfig) *RuntimeImageLineMismatchResult
 // one. A read failure is silence rather than an error: every caller of this
 // (`erun list`, `resize`, the `usage` MCP tool) treats sizing as advisory and
 // must not fail over it.
-func EnvironmentRuntimeSizing(tenant string, env EnvConfig) *RuntimeSizingRecommendation {
+func EnvironmentRuntimeSizing(tenant string, env configpkg.EnvConfig) *RuntimeSizingRecommendation {
 	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {
 		return nil
@@ -395,13 +397,13 @@ func copyAutoStartPtr(value *bool) *bool {
 	return &v
 }
 
-func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPorts) string {
+func APIURLForListEnvironment(tenant configpkg.TenantConfig, localPorts configpkg.EnvironmentLocalPorts) string {
 	if apiURL := strings.TrimSpace(tenant.APIURL); apiURL != "" {
 		return apiURL
 	}
 	port := localPorts.API
 	if port <= 0 {
-		port = APIServicePort
+		port = configpkg.APIServicePort
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
@@ -410,19 +412,19 @@ func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPo
 // one environment: the config-derived allocation, overridden by the chart's
 // injected ERUN_*_PORT values when this process is that environment's own
 // runtime pod -- see overlayInjectedRuntimeLocalPorts.
-func listEnvironmentLocalPorts(tenant string, env EnvConfig, portAllocations map[string]EnvironmentLocalPorts) EnvironmentLocalPorts {
-	localPorts := portAllocations[environmentPortKey(tenant, env.Name)]
+func listEnvironmentLocalPorts(tenant string, env configpkg.EnvConfig, portAllocations map[string]configpkg.EnvironmentLocalPorts) configpkg.EnvironmentLocalPorts {
+	localPorts := portAllocations[configpkg.EnvironmentPortKey(tenant, env.Name)]
 	if env.SSHD.LocalPort > 0 {
 		localPorts.SSH = env.SSHD.LocalPort
 	}
-	return overlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
+	return configpkg.OverlayInjectedRuntimeLocalPorts(localPorts, os.Getenv, tenant, env.Name)
 }
 
-func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts EnvironmentLocalPorts) OpenResult {
-	return OpenResult{
+func listEnvironmentOpenResult(tenant configpkg.TenantConfig, env configpkg.EnvConfig, localPorts configpkg.EnvironmentLocalPorts) configpkg.OpenResult {
+	return configpkg.OpenResult{
 		Tenant:      tenant.Name,
 		Environment: env.Name,
-		TenantConfig: TenantConfig{
+		TenantConfig: configpkg.TenantConfig{
 			Name: tenant.Name,
 		},
 		EnvConfig:  env,
@@ -431,7 +433,7 @@ func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts En
 	}
 }
 
-func listEnvironmentIsActive(store CloudReadStore, env EnvConfig) bool {
+func listEnvironmentIsActive(store CloudReadStore, env configpkg.EnvConfig) bool {
 	if !env.RemoteWorktree() {
 		return false
 	}
@@ -442,7 +444,7 @@ func listEnvironmentIsActive(store CloudReadStore, env EnvConfig) bool {
 	return strings.TrimSpace(status.Status) == CloudContextStatusRunning
 }
 
-func listSSHResult(result OpenResult) ListSSHResult {
+func listSSHResult(result configpkg.OpenResult) ListSSHResult {
 	if !result.EnvConfig.SSHD.Enabled {
 		return ListSSHResult{}
 	}
@@ -461,7 +463,7 @@ func listSSHResult(result OpenResult) ListSSHResult {
 	}
 }
 
-func configuredTenantForRepo(repoName string, tenants []TenantConfig) string {
+func configuredTenantForRepo(repoName string, tenants []configpkg.TenantConfig) string {
 	repoName = strings.TrimSpace(repoName)
 	if repoName == "" {
 		return ""
@@ -476,16 +478,16 @@ func configuredTenantForRepo(repoName string, tenants []TenantConfig) string {
 
 func detectCurrentRepo(findProjectRoot ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
-		findProjectRoot = FindProjectRoot
+		findProjectRoot = configpkg.FindProjectRoot
 	}
 	name, path, err := findProjectRoot()
 	if err == nil {
 		return strings.TrimSpace(name), filepath.Clean(path), nil
 	}
-	if errors.Is(err, ErrNotInGitRepository) {
+	if errors.Is(err, configpkg.ErrNotInGitRepository) {
 		return "", "", nil
 	}
-	if strings.Contains(err.Error(), ErrNotInGitRepository.Error()) {
+	if strings.Contains(err.Error(), configpkg.ErrNotInGitRepository.Error()) {
 		return "", "", nil
 	}
 	return "", "", err
@@ -501,7 +503,7 @@ func loadListDefaultTenant(store ListStore) (string, error) {
 
 func loadListOrchestrators(store ListStore) ([]ListOrchestratorResult, error) {
 	config, _, err := store.LoadERunConfig()
-	if errors.Is(err, ErrNotInitialized) {
+	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil
 	}
 	if err != nil {

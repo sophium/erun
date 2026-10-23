@@ -12,7 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	eruncommon "github.com/sophium/erun/erun-common"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 type stubReviewRepository struct {
@@ -801,9 +801,9 @@ func TestCreateReviewRecordsADeclaredIssueAndItWinsOverTheBranch(t *testing.T) {
 			if created["issueRef"] != tc.want {
 				t.Fatalf("issueRef = %v in the response, want %q", created["issueRef"], tc.want)
 			}
-			if created["issueRefSource"] != string(eruncommon.IssueReferenceDeclared) {
+			if created["issueRefSource"] != string(modelpkg.IssueReferenceDeclared) {
 				t.Fatalf("issueRefSource = %v, want %q: an issue the author stated is declared, not inferred",
-					created["issueRefSource"], eruncommon.IssueReferenceDeclared)
+					created["issueRefSource"], modelpkg.IssueReferenceDeclared)
 			}
 		})
 	}
@@ -835,9 +835,9 @@ func TestCreateReviewLeavesTheBranchDerivationInferredWhenNothingIsDeclared(t *t
 	if created["issueRef"] != "2212" {
 		t.Fatalf("issueRef = %v, want the branch's own number", created["issueRef"])
 	}
-	if created["issueRefSource"] != string(eruncommon.IssueReferenceInferred) {
+	if created["issueRefSource"] != string(modelpkg.IssueReferenceInferred) {
 		t.Fatalf("issueRefSource = %v, want %q: a number parsed out of a branch name is a guess",
-			created["issueRefSource"], eruncommon.IssueReferenceInferred)
+			created["issueRefSource"], modelpkg.IssueReferenceInferred)
 	}
 }
 

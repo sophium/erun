@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // runtimeShellHook is sourced by every shell in the pod. It records CLI activity
@@ -46,7 +48,7 @@ func (b runtimeBoot) runtimeShellProfiles() []string {
 	return profiles
 }
 
-func installRuntimeShellHook(_ Context, boot runtimeBoot, _ *runtimeSupervisor) error {
+func installRuntimeShellHook(_ core.Context, boot runtimeBoot, _ *runtimeSupervisor) error {
 	hookFile := boot.path(".erun-shell-hook.bashrc")
 	if err := os.WriteFile(hookFile, []byte(runtimeShellHook), 0o644); err != nil {
 		return err

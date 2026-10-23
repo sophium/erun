@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // publishedChartRepoPath is the path segment every published chart lives under,
@@ -62,7 +65,7 @@ func (c runtimeChartCandidate) describe() string {
 // holds nothing but this project's own app images — its own ECR, or the
 // in-cluster erun-registry — never has it, and stopping at the deploy registry
 // left such an environment undeployable at every version.
-func runtimeChartCandidates(target OpenResult, chartRegistry string) []runtimeChartCandidate {
+func runtimeChartCandidates(target config.OpenResult, chartRegistry string) []runtimeChartCandidate {
 	chartRegistry = strings.TrimSpace(chartRegistry)
 	candidates := make([]runtimeChartCandidate, 0, 3)
 	if tenantChart := RuntimeReleaseName(target.Tenant); tenantChart != DevopsComponentName {
@@ -80,11 +83,11 @@ func runtimeChartCandidates(target OpenResult, chartRegistry string) []runtimeCh
 // this env: the runtime image's registry when the env states one, else erun's
 // default. Both are the same claim — the platform chart is published beside the
 // platform image, never beside the tenant's app images.
-func platformChartRegistry(target OpenResult) (registry, why string) {
-	if imageRegistry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); imageRegistry != "" {
+func platformChartRegistry(target config.OpenResult) (registry, why string) {
+	if imageRegistry := config.RuntimeImageRegistry(target.EnvConfig.RuntimeImage); imageRegistry != "" {
 		return imageRegistry, "the shared platform chart in the runtime image's registry"
 	}
-	return DefaultContainerRegistry, "the shared platform chart in erun's own registry"
+	return config.DefaultContainerRegistry, "the shared platform chart in erun's own registry"
 }
 
 // resolvedRuntimeChart is the coordinate a runtime deploy installs: the chart
@@ -135,7 +138,7 @@ type resolvedRuntimeChart struct {
 // search reports what it found (or didn't) without failing the deploy, and the
 // caller installs a placeholder coordinate that the override immediately
 // supersedes.
-func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chartRegistry, version string, deferToOverride bool) (resolvedRuntimeChart, error) {
+func resolvePublishedRuntimeChartReference(ctx core.Context, target config.OpenResult, chartRegistry, version string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	probed := runtimeChartCandidates(target, chartRegistry)
 	candidates := make([]string, 0, len(probed))
 	for _, candidate := range probed {
@@ -187,7 +190,7 @@ func resolvePublishedRuntimeChartReference(ctx Context, target OpenResult, chart
 // umbrella's own line (resolveTenantUmbrellaPin). Honoring either installs the
 // older chart while the deploy records the newer version, so the operator reads
 // a version roll that did not happen.
-func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
+func resolveRuntimeChartCoordinate(ctx core.Context, target config.OpenResult, registry, version, reason string, deferToOverride bool) (resolvedRuntimeChart, error) {
 	if named := strings.TrimSpace(target.EnvConfig.RuntimeChart); named != "" {
 		reference, chartVersion := splitChartReferenceVersion(named)
 		chart := resolvedRuntimeChart{reference: reference, name: chartNameFromReference(reference), version: chartVersion}
@@ -245,7 +248,7 @@ func resolveRuntimeChartCoordinate(ctx Context, target OpenResult, registry, ver
 // overrideComing is true when an operator-stated --runtime-chart is about to
 // replace this coordinate wholesale; the hold is reported against the
 // coordinate that override discards, so nothing is said or probed here.
-func resolveTenantUmbrellaPin(ctx Context, target OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (resolvedRuntimeChart, bool) {
+func resolveTenantUmbrellaPin(ctx core.Context, target config.OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (resolvedRuntimeChart, bool) {
 	name, stated, version, lagging := laggingTenantUmbrellaPin(target, chart, deployVersion, overrideComing)
 	if !lagging {
 		return chart, false
@@ -271,7 +274,7 @@ func resolveTenantUmbrellaPin(ctx Context, target OpenResult, chart resolvedRunt
 // laggingTenantUmbrellaPin answers whether a stated chart coordinate is the
 // tenant's own runtime umbrella left at a version this deploy has moved past,
 // and names the chart, the version it states, and the version to move it to.
-func laggingTenantUmbrellaPin(target OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (name, stated, version string, ok bool) {
+func laggingTenantUmbrellaPin(target config.OpenResult, chart resolvedRuntimeChart, deployVersion string, overrideComing bool) (name, stated, version string, ok bool) {
 	if overrideComing || !isTenantRuntimeUmbrella(target.Tenant, chart.name) {
 		return "", "", "", false
 	}
@@ -309,7 +312,7 @@ func tenantUmbrellaHoldTrace(chart resolvedRuntimeChart, name, stated, version, 
 // is the one the operator pointed at, falling back to the deploy registry the
 // tenant's own charts are published to for a reference that is not an OCI chart
 // URL.
-func tenantUmbrellaChartRegistry(target OpenResult, reference string) string {
+func tenantUmbrellaChartRegistry(target config.OpenResult, reference string) string {
 	if registry := ociChartReferenceRegistry(reference); registry != "" {
 		return registry
 	}
@@ -323,7 +326,7 @@ func tenantUmbrellaChartRegistry(target OpenResult, reference string) string {
 // short-circuits there; an env that already names one keeps it, because the memo
 // is how an operator redirects this search and a deploy must not take that choice
 // back silently.
-func traceRuntimeRegistryMemo(ctx Context, target OpenResult, searchedFrom, resolvedFrom string) {
+func traceRuntimeRegistryMemo(ctx core.Context, target config.OpenResult, searchedFrom, resolvedFrom string) {
 	resolvedFrom = strings.TrimSpace(resolvedFrom)
 	if resolvedFrom == "" || resolvedFrom == strings.TrimSpace(searchedFrom) {
 		return
@@ -368,7 +371,7 @@ func publishedUmbrellaSubchartKey(tenant, chartName string) string {
 // component chart must be published at the version. Failing here keeps the deploy
 // from silently installing the vanilla erun-devops runtime via the chart fallback,
 // or half-applying before a missing chart aborts the rollout.
-func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride string, runtimeSelected bool, components []string) error {
+func ensureTenantChartsPublished(ctx core.Context, target config.OpenResult, versionOverride string, runtimeSelected bool, components []string) error {
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
 		version = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
@@ -431,14 +434,14 @@ func ensureTenantChartsPublished(ctx Context, target OpenResult, versionOverride
 // tenant's own artifacts are never published beside the platform image, so
 // following that registry here probed a registry the tenant's charts were
 // never going to be in.
-func publishedTenantComponentChartRegistry(target OpenResult) string {
+func publishedTenantComponentChartRegistry(target config.OpenResult) string {
 	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
 	}
 	if registry := resolveProjectContainerRegistry(target.RepoPath, target.Environment); registry != "" {
 		return registry
 	}
-	return DefaultContainerRegistry
+	return config.DefaultContainerRegistry
 }
 
 // chartRegistryInsecure reports whether registry is the deploy target's own
@@ -446,7 +449,7 @@ func publishedTenantComponentChartRegistry(target OpenResult) string {
 // entry. It is the only registry a chart probe can ever need to address over
 // plain HTTP -- erun's own platform registries (ghcr.io, an ECR account, a
 // project's static `registry:` entry) are always TLS.
-func chartRegistryInsecure(target OpenResult, registry string) bool {
+func chartRegistryInsecure(target config.OpenResult, registry string) bool {
 	registry = strings.TrimSpace(registry)
 	return registry != "" && target.ClusterRegistryInsecure && registry == strings.TrimSpace(target.ClusterPullRegistry)
 }
@@ -487,7 +490,7 @@ func probeChartVersion(ctx context.Context, containerRegistry, chartName, versio
 	if override, ok := os.LookupEnv(publishedChartProbeOverrideEnv); ok {
 		return publishedChartOverrideHasVersion(override, containerRegistry, chartName, version), nil
 	}
-	versions, err := ResolveConfiguredRuntimeRegistryVersions(ctx, RuntimeRegistryConfig{
+	versions, err := ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistryConfig{
 		Namespace:  containerRegistry,
 		Repository: publishedChartRepoPath + "/" + chartName,
 		Insecure:   insecure,
@@ -558,7 +561,7 @@ func IsOCIChartReference(chartPath string) bool {
 // never carry a --runtime-chart override of their own, and always carry an
 // operator-stated runtime image (that is the whole point of the call), so it
 // must never be discarded for an inferred one.
-func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride string) (DeploySpec, error) {
+func ResolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride string) (DeploySpec, error) {
 	return resolvePublishedDevopsDeploySpec(ctx, target, versionOverride, "", true)
 }
 
@@ -574,11 +577,11 @@ func ResolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOve
 // operator's --runtime-image on this very invocation, rather than merely
 // carried over from a previous deploy's persisted memo -- see
 // resolveDeployRuntimeImage.
-func resolvePublishedDevopsDeploySpec(ctx Context, target OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+func resolvePublishedDevopsDeploySpec(ctx core.Context, target config.OpenResult, versionOverride, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
 	return resolvePublishedDevopsDeploySpecWithReason(ctx, target, versionOverride, "no local runtime chart", runtimeChartOverride, runtimeImageExplicit)
 }
 
-func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
+func resolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.OpenResult, versionOverride, reason, runtimeChartOverride string, runtimeImageExplicit bool) (DeploySpec, error) {
 	// Every chart probe below (the runtime ladder and the tenant-chart check)
 	// reads a registry. A deploy running inside the target env's own runtime pod
 	// resolves the credential that env declared for itself first, so a private
@@ -639,7 +642,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 		// service.yaml's devopsImage default, `<registry>/erun-devops:<appVersion>`.
 		// That is fully known here even though nothing is threaded to helm for
 		// it, so record it rather than leaving the memo empty.
-		deployInput.ResolvedRuntimeImage = registry + "/" + DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
+		deployInput.ResolvedRuntimeImage = registry + "/" + config.DefaultRuntimeImageName + ":" + deployInput.resolvedChartVersion()
 	}
 	deployInput.PersistRuntimeImage = persistImage
 	explicitLineChange := runtimeImageExplicit || strings.TrimSpace(runtimeChartOverride) != ""
@@ -671,7 +674,7 @@ func resolvePublishedDevopsDeploySpecWithReason(ctx Context, target OpenResult, 
 // not reach; publishedUmbrellaSubchartKey resolves the erun-<component> scope so
 // command() re-scopes them and the subchart's required tenant/environment are
 // satisfied. The release is named <tenant>-<component> so it is tenant-clear.
-func resolvePublishedComponentDeploySpec(ctx Context, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
+func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenResult, componentName, versionOverride string) (DeploySpec, error) {
 	registry := publishedTenantComponentChartRegistry(target)
 	version := strings.TrimSpace(versionOverride)
 	if version == "" {
@@ -725,8 +728,8 @@ func publishedComponentReleaseName(tenant, component string) string {
 // values.<env>.yaml, so the overlay lives beside the env config instead; its
 // absence just means chart defaults and erun's --set list fully describe the
 // deploy.
-func publishedDevopsValuesOverlayPath(ctx Context, target OpenResult) string {
-	configDir, err := ERunConfigDir()
+func publishedDevopsValuesOverlayPath(ctx core.Context, target config.OpenResult) string {
+	configDir, err := config.ERunConfigDir()
 	if err != nil {
 		return ""
 	}
@@ -740,7 +743,7 @@ func publishedDevopsValuesOverlayPath(ctx Context, target OpenResult) string {
 
 // publishedDevopsChartRegistry prefers the env's recorded RuntimeRegistry so a
 // reopen keeps addressing the registry the env was deployed from.
-func publishedDevopsChartRegistry(target OpenResult) string {
+func publishedDevopsChartRegistry(target config.OpenResult) string {
 	if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 		return registry
 	}
@@ -754,7 +757,7 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 	// deploy registry, so its chart follows where charts are published, never a
 	// runtime-image override (an image-only concern the chart must not inherit).
 	if isClusterRegistryEnv(target) {
-		if registry := runtimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
+		if registry := config.RuntimeImageRegistry(target.EnvConfig.RuntimeImage); registry != "" {
 			return registry
 		}
 	}
@@ -764,22 +767,7 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 	if registry := resolveProjectContainerRegistry(target.RepoPath, target.Environment); registry != "" {
 		return registry
 	}
-	return DefaultContainerRegistry
-}
-
-// runtimeImageRegistry returns the registry prefix (host and any org path) of a
-// runtime image reference, or "" when the reference is a bare image name with no
-// registry. The image name and any tag/digest live in the segment after the last
-// "/", so everything before it is the registry — e.g. ghcr.io/sophium/erun-devops
-// and ghcr.io/sophium/erun-devops:1.0.149 both yield ghcr.io/sophium, while a bare
-// "erun-devops" yields "".
-func runtimeImageRegistry(runtimeImage string) string {
-	ref := strings.TrimSpace(runtimeImage)
-	lastSlash := strings.LastIndex(ref, "/")
-	if lastSlash < 0 {
-		return ""
-	}
-	return ref[:lastSlash]
+	return config.DefaultContainerRegistry
 }
 
 // resolveRuntimeRegistry is the registry projected into the runtime pod as
@@ -790,12 +778,12 @@ func runtimeImageRegistry(runtimeImage string) string {
 // (e.g. ghcr) rather than the in-cluster registry that never held them. A plain
 // env projects nothing here: its runtime registry follows the deploy registry the
 // chart already renders, never a runtime-image override.
-func resolveRuntimeRegistry(target OpenResult) string {
+func resolveRuntimeRegistry(target config.OpenResult) string {
 	if r := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); r != "" {
 		return r
 	}
 	if isClusterRegistryEnv(target) {
-		return runtimeImageRegistry(target.EnvConfig.RuntimeImage)
+		return config.RuntimeImageRegistry(target.EnvConfig.RuntimeImage)
 	}
 	return ""
 }
@@ -807,7 +795,7 @@ func resolveRuntimeRegistry(target OpenResult) string {
 // front). The erun platform chart and images are never published to that in-cluster
 // registry, so only such an env resolves its runtime chart/registry from the runtime
 // image's own registry instead of its deploy registry.
-func isClusterRegistryEnv(target OpenResult) bool {
+func isClusterRegistryEnv(target config.OpenResult) bool {
 	return target.EnvConfig.ContainerRegistries.HasClusterEntry() ||
 		strings.TrimSpace(target.ClusterPullRegistry) != ""
 }
@@ -946,7 +934,7 @@ func effectiveRuntimeChartCoordinateForImage(chart resolvedRuntimeChart, runtime
 // to, healing exactly the field a prior report found silently left behind. Empty
 // only for the erun product's own environments, which have no line of their
 // own to persist a name for.
-func resolveDeployRuntimeImage(ctx Context, target OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) (image, persistImage string) {
+func resolveDeployRuntimeImage(ctx core.Context, target config.OpenResult, chartRegistry, version, chartName, chartVersion, runtimeChartOverride string, runtimeImageExplicit bool) (image, persistImage string) {
 	chartName = strings.TrimSpace(chartName)
 	version = strings.TrimSpace(version)
 	registry := deployRuntimeImageRegistry(target, chartRegistry)
@@ -1032,7 +1020,7 @@ func staleRuntimeImageTrace(image, chartName, version, chartVersion string) stri
 //     which line the stated chart is on, not about the tenant: a tenant that
 //     states its *own* <tenant>-devops umbrella has named a chart on the
 //     deploy's own line, which resolveTenantUmbrellaPin handles.
-func stockRuntimePinMovesWithDeployVersion(tenant string, env EnvConfig, pinName, pinVersion, version string) bool {
+func stockRuntimePinMovesWithDeployVersion(tenant string, env config.EnvConfig, pinName, pinVersion, version string) bool {
 	if strings.TrimSpace(pinName) != DevopsComponentName {
 		return false
 	}
@@ -1044,7 +1032,7 @@ func stockRuntimePinMovesWithDeployVersion(tenant string, env EnvConfig, pinName
 		return false
 	}
 	for _, reference := range []string{env.RuntimeImage, env.RuntimeRunningImage} {
-		if line, ok := runtimeImageReleaseLine(reference); ok {
+		if line, ok := config.RuntimeImageReleaseLine(reference); ok {
 			return line == "erun"
 		}
 	}
@@ -1056,7 +1044,7 @@ func stockRuntimePinMovesWithDeployVersion(tenant string, env EnvConfig, pinName
 // same-line one stockRuntimePinMovesWithDeployVersion describes. chartName is
 // the chart coordinate the same deploy resolved, so the two halves of the
 // coordinate move together or not at all.
-func laggingStockRuntimeImagePin(target OpenResult, registry, image, chartName, version string) string {
+func laggingStockRuntimeImagePin(target config.OpenResult, registry, image, chartName, version string) string {
 	if !runtimeImageIsStockDevops(image) {
 		return ""
 	}
@@ -1116,7 +1104,7 @@ func defaultDeployRuntimeImageName(registry, version, tenant, chartName string) 
 
 // defaultDeployRuntimeImage resolves defaultDeployRuntimeImageName and traces
 // the decision. See that function for the resolution itself.
-func defaultDeployRuntimeImage(ctx Context, registry, version, tenant, chartName string) string {
+func defaultDeployRuntimeImage(ctx core.Context, registry, version, tenant, chartName string) string {
 	image := defaultDeployRuntimeImageName(registry, version, tenant, chartName)
 	if image == "" {
 		return ""
@@ -1135,7 +1123,7 @@ func defaultDeployRuntimeImage(ctx Context, registry, version, tenant, chartName
 // builds and publishes them. So the image follows the role that describes the
 // cluster's pull, and falls back to the chart's registry only when no entry
 // marks one.
-func deployRuntimeImageRegistry(target OpenResult, chartRegistry string) string {
+func deployRuntimeImageRegistry(target config.OpenResult, chartRegistry string) string {
 	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
 	}
@@ -1148,7 +1136,7 @@ func deployRuntimeImageRegistry(target OpenResult, chartRegistry string) string 
 // erun-devops chart, which its own version line never publishes.
 func runtimeImageIsStockDevops(image string) bool {
 	_, name, _, ok := parseDockerImageReference(image)
-	return ok && name == DefaultRuntimeImageName
+	return ok && name == config.DefaultRuntimeImageName
 }
 
 // resolveRuntimeImageOverride normalizes a custom runtime image. A reference
