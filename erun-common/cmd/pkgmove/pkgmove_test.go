@@ -338,3 +338,26 @@ func TestApplyMovesSeveralInitsIntoOnePackage(t *testing.T) {
 	}
 	goIn(t, dir, "vet", "./...")
 }
+
+// TestApplyMovesAStubTypeOnlyAMovedTestUses is the reproduction of stub types
+// left behind unused: a test-only type with methods, declared in a file that
+// stays, used only by a test that moves. Its own methods are not a use that
+// keeps it at home, so the type moves with its methods instead of being
+// copied and leaving an unused original.
+func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
+		"stub_test.go":  "package fixture\n\ntype stub struct{}\n\nfunc (stub) Load() int { return 3 }\n\nfunc stays() int { return 1 }\n",
+		"store_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestRead(t *testing.T) {\n\tif Read(stub{}) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"root_test.go":  "package fixture\n\nimport \"testing\"\n\nfunc TestStays(t *testing.T) {\n\tif stays() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub store.go\nsub store_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if root := readFile(t, filepath.Join(dir, "stub_test.go")); strings.Contains(root, "type stub") || strings.Contains(root, "Load()") {
+		t.Errorf("the stub only the moved test uses must leave with its methods:\n%s", root)
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
