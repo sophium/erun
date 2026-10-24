@@ -71,7 +71,7 @@ func apply(w *world, m packageMap, opts options, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	suites, err := writeSuiteMains(w.rootDir)
+	suites, err := writeSuiteMains(w.rootDir, opts.timingEnv)
 	if err != nil {
 		return err
 	}

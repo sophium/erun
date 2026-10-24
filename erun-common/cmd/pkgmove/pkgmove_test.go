@@ -361,3 +361,23 @@ func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 	goIn(t, dir, "test", "./...")
 }
+
+// TestApplyGivesASplitOutsideTheBaseModuleItsSuiteFromTheNamedSeam pins the
+// suite for a package split in a module that has no base/core of its own
+// (erun-mcp, erun-cli): -timing-env names the seam, so the new packages are
+// isolated as the root's own TestMain isolated them.
+func TestApplyGivesASplitOutsideTheBaseModuleItsSuiteFromTheNamedSeam(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"root.go":      "package fixture\n\nfunc Root() int { return 1 }\n",
+		"tool.go":      "package fixture\n\nfunc Tool() int { return 2 }\n",
+		"tool_test.go": "package fixture\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nfunc TestTool(t *testing.T) {\n\tif Tool() != 2 || os.Getenv(\"FIXTURE_TIMING_DIR\") == \"\" {\n\t\tt.Fatal(\"the suite is not isolated\")\n\t}\n}\n",
+		"packages.map": "tools/x tool.go\ntools/x tool_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map"), "-timing-env", "FIXTURE_TIMING_DIR"); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "tools", "x", "suite_main_test.go")), `"FIXTURE_TIMING_DIR"`) {
+		t.Error("the moved package gets a suite redirecting the named seam")
+	}
+	goIn(t, dir, "test", "./...")
+}
