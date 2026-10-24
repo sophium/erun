@@ -7,11 +7,12 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // RepairOrphanedAlias re-creates a provider for one orphaned alias via InitAWSCloudProvider.
-func RepairOrphanedAlias(ctx core.Context, store cloud.CloudStore, params model.RepairOrphanedAliasParams, deps cloud.CloudDependencies) (model.CloudProviderConfig, error) {
+func RepairOrphanedAlias(ctx core.Context, store seam.CloudStore, params model.RepairOrphanedAliasParams, deps cloud.CloudDependencies) (model.CloudProviderConfig, error) {
 	if !params.Orphan.Parsed {
 		return model.CloudProviderConfig{}, fmt.Errorf("orphaned alias %q cannot be parsed; recreate the provider manually with `erun cloud init aws`", params.Orphan.Alias)
 	}

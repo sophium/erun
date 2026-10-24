@@ -9,16 +9,16 @@ import (
 	"github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/release"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewReleaseCmd(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) *cobra.Command {
+func NewReleaseCmd(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
@@ -43,7 +43,7 @@ func NewReleaseCmd(store projectseam.DockerStore, findProjectRoot projectseam.Pr
 	return cmd
 }
 
-func runReleaseCommand(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) error {
+func runReleaseCommand(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, force bool, runGit seam.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry seam.DockerRegistryLoginFunc, selectRunner prompt.SelectRunner, push build.DockerPushFunc) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, model.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err

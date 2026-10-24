@@ -38,7 +38,7 @@ new code goes into the layer it belongs to:
 
 ```
 erun-common/
-  base/          model/ core/ config/
+  base/          model/ core/ config/ seam/
   infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/ remoteinit/ codesign/
   primitive/     shared/<concern>/ build/ push/ deploy/ open/ release/
   orchestration/ build/ deploy/ release/ execute/ clusterread/ diagnosis/
@@ -53,6 +53,7 @@ import only the erun packages its row names:
 | `base/model` | no other erun package |
 | `base/core` | `base/model` |
 | `base/config` | `base/model`, `base/core` |
+| `base/seam` | `base/model`, `base/core`, `base/config` |
 | `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
 | `primitive/shared/*` | `base/*`, `infra/*`, other `primitive/shared/*` |
 | `primitive/*` | `base/*`, `infra/*`, `primitive/shared/*`; never another primitive |
@@ -67,6 +68,9 @@ import only the erun packages its row names:
   constants and methods only; behavior lives in the package that uses it.
   `erun-integration`'s `TestModelHoldsOnlyData` fails on a free function or
   package variable there.
+- `base/seam` holds the func and interface types one package injects into
+  another (stores, runners, resolvers), so a package that takes a seam depends
+  on `base/*`, not on the package that implements it.
 - depguard in `.golangci.yml` enforces the table: each package denies the
   module and allows only what lies beneath it. An infra package lists the exact
   infra packages it imports, so a new edge between external systems is a

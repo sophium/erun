@@ -10,14 +10,14 @@ import (
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
@@ -99,7 +99,7 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
+func runDeploy(ctx core.Context, store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
 	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -116,7 +116,7 @@ func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.
 	return nil
 }
 
-func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
+func NewK8sDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",

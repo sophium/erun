@@ -9,13 +9,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func newExecGateMergeCmd(findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
+func newExecGateMergeCmd(findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var (
 		sources    []string
 		target     string
@@ -81,7 +81,7 @@ func newExecGateMergeCmd(findProjectRoot projectseam.ProjectFinderFunc) *cobra.C
 	return cmd
 }
 
-func runExecGateMergeCommand(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
+func runExecGateMergeCommand(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, sourceBranches []string, targetBranch, remote, underLease string) error {
 	if len(sourceBranches) == 0 {
 		return fmt.Errorf("at least one --source is required")
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -23,7 +24,7 @@ type UnexposeResult struct {
 
 // RunUnexposeService removes the wildcard record expose created so a later env
 // reusing the name does not inherit it. Dry-run traces the full plan.
-func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -71,7 +72,7 @@ func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store Exp
 	return result, nil
 }
 
-func resolveUnexposeServicePlan(params model.UnexposeParams, store ExposeStore) (UnexposeResult, error) {
+func resolveUnexposeServicePlan(params model.UnexposeParams, store seam.ExposeStore) (UnexposeResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {

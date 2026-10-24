@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -66,7 +67,7 @@ func resolveOpenTarget(
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -195,7 +196,7 @@ func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams,
 	return config.OpenResult{}, true, nil
 }
 
-func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func RunResolvedOpenCommandWithAPI(ctx core.Context, result config.OpenResult, options OpenOptions, promptRunner prompt.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP portfwd.MCPForwarder, activateAPI portfwd.APIForwarder, activateSSHD sshdlink.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
 	defer closeEnvTrace()
 	runner := resolvedOpenRunner{
@@ -225,10 +226,10 @@ type resolvedOpenRunner struct {
 	promptRunner              prompt.PromptRunner
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(core.Context, config.OpenResult) error
-	checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc
+	checkKubernetesDeployment seam.KubernetesDeploymentCheckerFunc
 	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error)
 	deployHelmChart           deploy.HelmChartDeployerFunc
-	resolveDeployedVersion    deploy.HelmReleaseVersionResolverFunc
+	resolveDeployedVersion    seam.HelmReleaseVersionResolverFunc
 	activateMCP               portfwd.MCPForwarder
 	activateAPI               portfwd.APIForwarder
 	activateSSHD              sshdlink.SSHDActivator

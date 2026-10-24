@@ -13,9 +13,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +46,7 @@ type versionProjectResult struct {
 }
 
 // NewVersionCmd returns a Cobra command that prints the build information.
-func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) *cobra.Command {
+func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveRegistryVersions seam.RuntimeRegistryVersionResolverFunc) *cobra.Command {
 	var noRegistry bool
 	cmd := &cobra.Command{
 		Use:   "version",
@@ -136,7 +135,7 @@ func formatProjectVersionLine(info VersionCommandInfo) string {
 }
 
 // A registry lookup failure is traced, not fatal.
-func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) model.RuntimeRegistryVersions {
+func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions seam.RuntimeRegistryVersionResolverFunc) model.RuntimeRegistryVersions {
 	if resolveRegistryVersions == nil {
 		return model.RuntimeRegistryVersions{}
 	}
@@ -148,7 +147,7 @@ func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx co
 	return versions
 }
 
-func ResolveVersionCommandBuildInfo(findProjectRoot projectseam.ProjectFinderFunc) (VersionCommandInfo, error) {
+func ResolveVersionCommandBuildInfo(findProjectRoot seam.ProjectFinderFunc) (VersionCommandInfo, error) {
 	info := VersionCommandInfo{Build: shared.CurrentBuildInfo()}
 
 	buildDir, err := os.Getwd()

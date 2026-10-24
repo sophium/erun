@@ -8,9 +8,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type fakeDockerStoreForDindResources struct {
@@ -36,7 +36,7 @@ func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config
 	return f.envs, nil
 }
 
-func storeWithDindConfig(t *testing.T, projectRoot string, resources model.RuntimePodResources) projectseam.DockerStore {
+func storeWithDindConfig(t *testing.T, projectRoot string, resources model.RuntimePodResources) seam.DockerStore {
 	t.Helper()
 	return fakeDockerStoreForDindResources{
 		tenant: model.TenantConfig{Name: "acme"},

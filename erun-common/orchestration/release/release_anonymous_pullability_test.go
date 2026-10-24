@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
@@ -241,7 +242,7 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullableFailsWhenBaselinedButNow
 	}
 }
 
-func realProbeAt(server *httptest.Server) dockerregistry.AnonymousPullProbeFunc {
+func realProbeAt(server *httptest.Server) seam.AnonymousPullProbeFunc {
 	return func(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error) {
 		return dockerregistry.ProbeAnonymousManifestPullAt(ctx, server.Client(), repoPath, tag, server.URL, server.URL)
 	}

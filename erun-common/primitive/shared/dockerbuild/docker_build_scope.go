@@ -10,12 +10,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func NormalizeDockerDependencies(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc) (projectseam.DockerStore, projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc, projectseam.NowFunc) {
+func NormalizeDockerDependencies(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc) (seam.DockerStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.NowFunc) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -66,7 +66,7 @@ func IsDockerBuildModuleDir(dir string) (bool, error) {
 	return len(buildContexts) > 0, nil
 }
 
-func ResolveDockerBuildProjectRoot(findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (string, error) {
+func ResolveDockerBuildProjectRoot(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (string, error) {
 	if projectRoot := strings.TrimSpace(target.ProjectRoot); projectRoot != "" {
 		return filepath.Clean(projectRoot), nil
 	}
@@ -81,7 +81,7 @@ func ResolveDockerBuildProjectRoot(findProjectRoot projectseam.ProjectFinderFunc
 	return projectRoot, nil
 }
 
-func ResolveDockerBuildEnvironment(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, projectRoot, environment string) (string, error) {
+func ResolveDockerBuildEnvironment(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, projectRoot, environment string) (string, error) {
 	if environment = strings.TrimSpace(environment); environment != "" {
 		return environment, nil
 	}
@@ -93,7 +93,7 @@ func ResolveDockerBuildEnvironment(store projectseam.DockerStore, findProjectRoo
 	return dockerBuildEnvironmentFromDetectedProject(store, findProjectRoot, cleanProjectRoot)
 }
 
-func dockerBuildEnvironmentFromTenantConfigs(store projectseam.DockerStore, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromTenantConfigs(store seam.DockerStore, cleanProjectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
@@ -112,7 +112,7 @@ func dockerBuildEnvironmentFromTenantConfigs(store projectseam.DockerStore, clea
 	return "", nil
 }
 
-func dockerBuildEnvironmentFromTenantEnvs(store projectseam.DockerStore, tenant, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromTenantEnvs(store seam.DockerStore, tenant, cleanProjectRoot string) (string, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
@@ -132,7 +132,7 @@ func dockerBuildEnvironmentFromTenantEnvs(store projectseam.DockerStore, tenant,
 	return "", nil
 }
 
-func dockerBuildEnvironmentFromDetectedProject(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, cleanProjectRoot string) (string, error) {
+func dockerBuildEnvironmentFromDetectedProject(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, cleanProjectRoot string) (string, error) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInGitRepository) {
@@ -154,7 +154,7 @@ func dockerBuildEnvironmentFromDetectedProject(store projectseam.DockerStore, fi
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
 
-func ResolveDockerBuildEnvConfigForProject(store projectseam.DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
+func ResolveDockerBuildEnvConfigForProject(store seam.DockerStore, projectRoot, wantEnv string) *config.EnvConfig {
 	cleanRoot := filepath.Clean(projectRoot)
 
 	tenants, err := store.ListTenantConfigs()

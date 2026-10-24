@@ -10,13 +10,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // HostedPlatformAPIURL is erun's hosted platform API, one apex host for every tenant.
 const HostedPlatformAPIURL = "https://api.erunpaas.com"
 
 // InitERunCloudProvider discovers the platform config and records the alias; it does not sign in.
-func InitERunCloudProvider(ctx core.Context, store CloudStore, params model.InitERunCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
+func InitERunCloudProvider(ctx core.Context, store seam.CloudStore, params model.InitERunCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
 		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
@@ -82,7 +83,7 @@ func InitERunCloudProvider(ctx core.Context, store CloudStore, params model.Init
 
 // existingERunRefreshTokenRef returns the alias's current session reference so
 // re-init, which replaces the alias wholesale, does not sign the operator out.
-func existingERunRefreshTokenRef(store CloudStore, alias string) string {
+func existingERunRefreshTokenRef(store seam.CloudStore, alias string) string {
 	existing, err := ResolveCloudProvider(store, alias)
 	if err != nil || existing.ERun == nil {
 		return ""
@@ -104,7 +105,7 @@ func erunPlatformHost(apiURL string) string {
 
 // erunCloudProviderLogin signs in via the device grant when advertised (it works
 // without a browser), else Authorization Code + PKCE on a loopback listener.
-func erunCloudProviderLogin(ctx core.Context, store CloudStore, provider model.CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (model.CloudProviderStatus, error) {
+func erunCloudProviderLogin(ctx core.Context, store seam.CloudStore, provider model.CloudProviderConfig, requestedFlow string, extraScopes []string, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.ClientID) == "" {
 		return model.CloudProviderStatus{}, fmt.Errorf("erun cloud provider %q is not fully configured; run `erun cloud init erun` first", provider.Alias)
 	}
@@ -175,7 +176,7 @@ func runERunLoginAttempt(ctx core.Context, scope, fallbackScope string, run func
 	return run(fallbackScope)
 }
 
-func persistERunLoginTokens(store CloudStore, provider model.CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (model.CloudProviderStatus, error) {
+func persistERunLoginTokens(store seam.CloudStore, provider model.CloudProviderConfig, deps CloudDependencies, tokens ERunTokens) (model.CloudProviderStatus, error) {
 	if deps.CloudSecretStore == nil {
 		return model.CloudProviderStatus{}, fmt.Errorf("cloud secret store is not configured")
 	}
@@ -357,7 +358,7 @@ type ErunAccessTokenCache struct {
 	ExpiresAt   time.Time `json:"expiresAt"`
 }
 
-func loadCachedERunAccessToken(store CloudSecretStore, alias string) (string, bool) {
+func loadCachedERunAccessToken(store seam.CloudSecretStore, alias string) (string, bool) {
 	if store == nil {
 		return "", false
 	}
@@ -375,7 +376,7 @@ func loadCachedERunAccessToken(store CloudSecretStore, alias string) (string, bo
 	return cached.AccessToken, true
 }
 
-func SaveCachedERunAccessToken(store CloudSecretStore, alias string, tokens ERunTokens) error {
+func SaveCachedERunAccessToken(store seam.CloudSecretStore, alias string, tokens ERunTokens) error {
 	if store == nil || tokens.AccessToken == "" {
 		return nil
 	}

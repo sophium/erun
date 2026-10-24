@@ -9,13 +9,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobstate"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -44,7 +44,7 @@ const (
 )
 
 type erunUIStore interface {
-	lifecycle.ListStore
+	seam.ListStore
 	SaveERunConfig(config.ERunConfig) error
 	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
@@ -57,13 +57,13 @@ type projectConfigStore interface {
 
 type erunUIDeps struct {
 	store                  erunUIStore
-	findProjectRoot        projectseam.ProjectFinderFunc
+	findProjectRoot        seam.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
 	resolveImageRegistry   func(context.Context, string, string) (model.RuntimeRegistryVersions, error)
 	cloudDeps              cloud.CloudDependencies
 	cloudContextDeps       cloud.CloudContextDependencies
-	deleteNamespace        lifecycle.NamespaceDeleterFunc
+	deleteNamespace        seam.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)

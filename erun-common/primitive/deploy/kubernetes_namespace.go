@@ -1,10 +1,11 @@
 package deploy
 
 import (
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-func WrapHelmChartDeployerWithNamespaceEnsure(ensure NamespaceEnsurerFunc, deploy HelmChartDeployerFunc) HelmChartDeployerFunc {
+func WrapHelmChartDeployerWithNamespaceEnsure(ensure seam.NamespaceEnsurerFunc, deploy HelmChartDeployerFunc) HelmChartDeployerFunc {
 	if deploy == nil {
 		deploy = DeployHelmChart
 	}

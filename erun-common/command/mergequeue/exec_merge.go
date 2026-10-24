@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -26,10 +27,10 @@ func (e *MergeConflictError) Error() string {
 
 // MergeWorkingTreeBranchDependencies lets tests replace the git plumbing.
 type MergeWorkingTreeBranchDependencies struct {
-	CurrentBranch   gitx.GitValueResolverFunc
-	CurrentCommit   gitx.GitValueResolverFunc
-	RunGit          gitx.GitCommandRunnerFunc
-	ConflictedFiles func(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error)
+	CurrentBranch   seam.GitValueResolverFunc
+	CurrentCommit   seam.GitValueResolverFunc
+	RunGit          seam.GitCommandRunnerFunc
+	ConflictedFiles func(root string, runGit seam.GitCommandRunnerFunc) ([]string, error)
 	RunAtlasHash    AtlasMigrateHashRunnerFunc
 }
 
@@ -120,7 +121,7 @@ func fetchAndMergeWorkingTree(ctx core.Context, root, target, remote, remoteRef 
 
 // gitMergeConflictedFiles distinguishes a real conflict from other merge failures by what
 // git left behind.
-func gitMergeConflictedFiles(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error) {
+func gitMergeConflictedFiles(root string, runGit seam.GitCommandRunnerFunc) ([]string, error) {
 	var stdout, stderr bytes.Buffer
 	if err := runGit(root, &stdout, &stderr, "diff", "--name-only", "--diff-filter=U"); err != nil {
 		return nil, fmt.Errorf("git diff --diff-filter=U: %w: %s", err, strings.TrimSpace(stderr.String()))

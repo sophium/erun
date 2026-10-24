@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // A cached no-op must not persist the freshly minted, never-pushed version.
@@ -27,7 +28,7 @@ func TestPersistRuntimeVersionFromDeploySpecs(t *testing.T) {
 			SkipHelm: skipHelm,
 		}
 	}
-	fixedRunningVersion := func(version string) HelmReleaseVersionResolverFunc {
+	fixedRunningVersion := func(version string) seam.HelmReleaseVersionResolverFunc {
 		return func(core.Context, string, string, string) (string, error) { return version, nil }
 	}
 
@@ -91,7 +92,7 @@ func capturingSave(savedTenant *string, saved **config.EnvConfig) func(string, c
 	}
 }
 
-func persistOrFatal(t *testing.T, ctx core.Context, specs []DeploySpec, save func(string, config.EnvConfig) error, resolve HelmReleaseVersionResolverFunc) {
+func persistOrFatal(t *testing.T, ctx core.Context, specs []DeploySpec, save func(string, config.EnvConfig) error, resolve seam.HelmReleaseVersionResolverFunc) {
 	t.Helper()
 	if err := PersistRuntimeVersionFromDeploySpecs(ctx, specs, save, resolve); err != nil {
 		t.Fatalf("persist: %v", err)

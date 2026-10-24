@@ -7,6 +7,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
 )
 
@@ -27,16 +28,9 @@ func ParseOrchestratorAliasFlag(value string) (string, error) {
 	return trimmed, nil
 }
 
-// OrchestratorAliasStore is the root-config store SetOrchestratorAlias needs; it resolves
-// aliases exactly as `erun platform --erun-alias` does.
-type OrchestratorAliasStore interface {
-	LoadERunConfig() (configpkg.ERunConfig, string, error)
-	SaveERunConfig(configpkg.ERunConfig) error
-}
-
 // ValidateOrchestratorAlias reports whether alias names a configured erun platform alias; ""
 // is valid. It is the single check shared by the CLI and the desktop.
-func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error {
+func ValidateOrchestratorAlias(store seam.OrchestratorAliasStore, alias string) error {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return nil
@@ -46,7 +40,7 @@ func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error
 }
 
 // SetOrchestratorAlias sets the erun platform alias an orchestrator acts as; "" clears it.
-func SetOrchestratorAlias(ctx core.Context, store OrchestratorAliasStore, params model.SetOrchestratorAliasParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorAlias(ctx core.Context, store seam.OrchestratorAliasStore, params model.SetOrchestratorAliasParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}

@@ -9,24 +9,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
-
-type (
-	NamespaceDeleterFunc func(string, string) error
-)
-
-type DeleteStore interface {
-	LoadTenantConfig(string) (model.TenantConfig, string, error)
-	SaveTenantConfig(model.TenantConfig) error
-	DeleteTenantConfig(string) error
-	LoadERunConfig() (config.ERunConfig, string, error)
-	SaveERunConfig(config.ERunConfig) error
-	LoadEnvConfig(string, string) (config.EnvConfig, string, error)
-	ListEnvConfigs(string) ([]config.EnvConfig, error)
-	DeleteEnvConfig(string, string) error
-}
 
 type DeleteEnvironmentResult struct {
 	Tenant               string `json:"tenant"`
@@ -49,7 +35,7 @@ func DeleteEnvironmentConfirmation(tenant, environment string) string {
 	return tenant + "-" + environment
 }
 
-func RunDeleteEnvironment(ctx core.Context, params model.DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
+func RunDeleteEnvironment(ctx core.Context, params model.DeleteEnvironmentParams, store seam.DeleteStore, deleteNamespace seam.NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
 	store, deleteNamespace = normalizeDeleteEnvironmentDependencies(store, deleteNamespace)
 
 	tenant := strings.TrimSpace(params.Tenant)
@@ -104,7 +90,7 @@ func removePortForwardStateFiles(ctx core.Context, tenant, environment string) e
 
 // A block that outlived its environment would connect to whichever env reuses the freed port.
 // Only removed while no other environment derives the same alias.
-func removeEnvironmentSSHConfigAlias(ctx core.Context, store DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
+func removeEnvironmentSSHConfigAlias(ctx core.Context, store seam.DeleteStore, tenant, environment string, result *DeleteEnvironmentResult) error {
 	alias := open.SSHHostAlias(tenant, environment)
 	if alias == "" {
 		return nil
@@ -141,7 +127,7 @@ func removeEnvironmentSSHConfigAlias(ctx core.Context, store DeleteStore, tenant
 }
 
 // Distinct names can sanitize to the same alias, so compare derived aliases.
-func sshAliasClaimedByOtherEnvironment(store DeleteStore, tenant, environment, alias string) (bool, error) {
+func sshAliasClaimedByOtherEnvironment(store seam.DeleteStore, tenant, environment, alias string) (bool, error) {
 	environments, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		return false, err
@@ -159,7 +145,7 @@ func sshAliasClaimedByOtherEnvironment(store DeleteStore, tenant, environment, a
 	return false, nil
 }
 
-func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteStore, NamespaceDeleterFunc) {
+func normalizeDeleteEnvironmentDependencies(store seam.DeleteStore, deleteNamespace seam.NamespaceDeleterFunc) (seam.DeleteStore, seam.NamespaceDeleterFunc) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -179,7 +165,7 @@ func deleteEnvironmentResult(tenant, environment string, envConfig config.EnvCon
 	}
 }
 
-func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
+func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace seam.NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
 	result.Namespace = config.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
 		return fmt.Errorf("delete environment %s/%s: %w", result.Tenant, result.Environment, err)
@@ -194,7 +180,7 @@ func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace Namespac
 	return nil
 }
 
-func removeTenantWhenLastEnvironmentDeleted(ctx core.Context, store DeleteStore, tenant, deletedEnvironment string) error {
+func removeTenantWhenLastEnvironmentDeleted(ctx core.Context, store seam.DeleteStore, tenant, deletedEnvironment string) error {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		return err
@@ -212,7 +198,7 @@ func removeTenantWhenLastEnvironmentDeleted(ctx core.Context, store DeleteStore,
 	return clearDeletedDefaultTenant(ctx, store, tenant)
 }
 
-func clearDeletedDefaultTenant(ctx core.Context, store DeleteStore, deletedTenant string) error {
+func clearDeletedDefaultTenant(ctx core.Context, store seam.DeleteStore, deletedTenant string) error {
 	toolConfig, _, err := store.LoadERunConfig()
 	if err != nil {
 		if errors.Is(err, config.ErrNotInitialized) {
@@ -228,7 +214,7 @@ func clearDeletedDefaultTenant(ctx core.Context, store DeleteStore, deletedTenan
 	return store.SaveERunConfig(toolConfig)
 }
 
-func clearDeletedDefaultEnvironment(ctx core.Context, store DeleteStore, tenant, deletedEnvironment string) error {
+func clearDeletedDefaultEnvironment(ctx core.Context, store seam.DeleteStore, tenant, deletedEnvironment string) error {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
 	if err != nil {
 		return err

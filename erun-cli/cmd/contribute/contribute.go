@@ -2,13 +2,13 @@ package contribute
 
 import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
 )
 
 // NewContributeCmd groups the `erun contribute …` subcommands.
-func NewContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
+func NewContributeCmd(runGit seam.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contribute",
 		Short: "Run contribute-mode workflows that target the ERun source repository",
@@ -17,7 +17,7 @@ func NewContributeCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	return cmd
 }
 
-func newContributeCloneCmd(runGit gitx.GitCommandRunnerFunc) *cobra.Command {
+func newContributeCloneCmd(runGit seam.GitCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "clone",
 		Short:         "Clone the ERun repository into $HOME/git/erun for contribute mode if it is not already present",

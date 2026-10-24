@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
 
@@ -20,13 +21,9 @@ type RemoteInitFinishParams struct {
 	Sleep              core.SleepFunc
 }
 
-// RemoteInitFinishPrompt asks for one value; label distinguishes the repository
-// URL from the CodeCommit SSH key ID.
-type RemoteInitFinishPrompt func(label string) (string, error)
-
 // RunRemoteInitFinish runs the missing recovery steps (tracing them under
 // dry-run), mirroring `erun init --remote`, and returns the updated inspection.
-func RunRemoteInitFinish(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (model.RemoteInitInspection, error) {
+func RunRemoteInitFinish(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt seam.RemoteInitFinishPrompt) (model.RemoteInitInspection, error) {
 	if inspection.HomeDir == "" {
 		return inspection, errors.New("home directory is required to finish remote init")
 	}
@@ -64,7 +61,7 @@ func RunRemoteInitFinish(ctx core.Context, inspection model.RemoteInitInspection
 	return saveRemoteInitCompletionMarker(ctx, inspection, repository, repositoryURL)
 }
 
-func resolveRemoteInitRepositoryURL(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, missing []model.RemoteInitInspectionItem) (string, error) {
+func resolveRemoteInitRepositoryURL(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt seam.RemoteInitFinishPrompt, missing []model.RemoteInitInspectionItem) (string, error) {
 	repositoryURL := strings.TrimSpace(params.RepositoryURL)
 	if repositoryURL == "" {
 		repositoryURL = strings.TrimSpace(inspection.Marker.RepositoryURL)
@@ -146,7 +143,7 @@ func applyRemoteInitMissingItem(ctx core.Context, inspection model.RemoteInitIns
 }
 
 // runRemoteInitGitCheckout may set repository's CodeCommit SSH key ID.
-func runRemoteInitGitCheckout(ctx core.Context, inspection model.RemoteInitInspection, repository *remoteinit.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
+func runRemoteInitGitCheckout(ctx core.Context, inspection model.RemoteInitInspection, repository *remoteinit.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt seam.RemoteInitFinishPrompt) error {
 	codeCommitKeyPath := state.codeCommitKeyPath
 	if repository.CodeCommitHost != "" {
 		if codeCommitKeyPath == "" {
@@ -190,7 +187,7 @@ func saveRemoteInitCompletionMarker(ctx core.Context, inspection model.RemoteIni
 
 // resolveCodeCommitSSHKeyID prints the public key before prompting, because IAM
 // issues the key ID only after the key is uploaded.
-func resolveCodeCommitSSHKeyID(ctx core.Context, repository *remoteinit.RemoteRepositorySpec, codeCommitKeyPath, tenant, environment, paramKeyID string, prompt RemoteInitFinishPrompt) error {
+func resolveCodeCommitSSHKeyID(ctx core.Context, repository *remoteinit.RemoteRepositorySpec, codeCommitKeyPath, tenant, environment, paramKeyID string, prompt seam.RemoteInitFinishPrompt) error {
 	if repository.CodeCommitSSHKeyID != "" || ctx.DryRun {
 		return nil
 	}

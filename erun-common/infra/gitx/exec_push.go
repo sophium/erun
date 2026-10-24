@@ -8,13 +8,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // PushWorkingTreeBranchDependencies lets tests replace the git plumbing.
 type PushWorkingTreeBranchDependencies struct {
-	CurrentBranch GitValueResolverFunc
-	CurrentCommit GitValueResolverFunc
-	RunGit        GitCommandRunnerFunc
+	CurrentBranch seam.GitValueResolverFunc
+	CurrentCommit seam.GitValueResolverFunc
+	RunGit        seam.GitCommandRunnerFunc
 }
 
 func normalizePushWorkingTreeBranchDependencies(deps PushWorkingTreeBranchDependencies) PushWorkingTreeBranchDependencies {

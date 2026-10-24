@@ -8,14 +8,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/cmd/shared/opentarget"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/orchestration/release"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewPublishCmd(store deploy.DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now projectseam.NowFunc) *cobra.Command {
+func NewPublishCmd(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) *cobra.Command {
 	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:   "publish [TENANT] [ENVIRONMENT]",

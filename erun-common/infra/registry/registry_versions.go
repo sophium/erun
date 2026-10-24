@@ -45,8 +45,6 @@ func isTransientRegistryError(err error) bool {
 	return false
 }
 
-type RuntimeRegistryVersionResolverFunc func(context.Context) (model.RuntimeRegistryVersions, error)
-
 type RuntimeVersionSuggestion struct {
 	Label   string `json:"label"`
 	Version string `json:"version"`

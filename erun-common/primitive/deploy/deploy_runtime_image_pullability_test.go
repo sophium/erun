@@ -11,7 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
@@ -19,7 +19,7 @@ func runtimeImagePullTraceContext(dryRun bool) (core.Context, *bytes.Buffer) {
 	return core.Context{Logger: core.NewLogger(core.VerbosityInfo).WithTraceSink(&buf), DryRun: dryRun}, &buf
 }
 
-func failingProbe(t *testing.T) dockerregistry.AnonymousPullProbeFunc {
+func failingProbe(t *testing.T) seam.AnonymousPullProbeFunc {
 	t.Helper()
 	return func(context.Context, *http.Client, string, string) (bool, error) {
 		t.Fatal("anonymous pullability probe must not run here")

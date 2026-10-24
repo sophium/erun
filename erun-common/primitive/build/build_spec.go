@@ -6,12 +6,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveDockerImageReference(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, buildDir string, target model.DockerCommandTarget) (model.DockerImageReference, error) {
+func ResolveDockerImageReference(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, buildDir string, target model.DockerCommandTarget) (model.DockerImageReference, error) {
 	store, findProjectRoot, _, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
@@ -34,7 +34,7 @@ func ResolveDockerImageReference(ctx core.Context, store projectseam.DockerStore
 
 // ResolveDockerBuildForComponent resolves a single image by its build context directory name.
 // It is not a components: selection, so version/context resolution stays project-global.
-func ResolveDockerBuildForComponent(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*dockerspec.DockerBuildSpec, error) {
+func ResolveDockerBuildForComponent(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, projectRoot, environment, componentName, versionOverride string, platformOverride []string) (*dockerspec.DockerBuildSpec, error) {
 	store, _, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
@@ -57,7 +57,7 @@ func ResolveDockerBuildForComponent(ctx core.Context, store projectseam.DockerSt
 	return &build, nil
 }
 
-func currentComponentDockerBuildContext(resolveBuildContext projectseam.BuildContextResolverFunc, componentName string) (model.DockerBuildContext, bool) {
+func currentComponentDockerBuildContext(resolveBuildContext seam.BuildContextResolverFunc, componentName string) (model.DockerBuildContext, bool) {
 	if resolveBuildContext == nil {
 		return model.DockerBuildContext{}, false
 	}
@@ -72,7 +72,7 @@ func currentComponentDockerBuildContext(resolveBuildContext projectseam.BuildCon
 	return buildContext, strings.TrimSpace(buildContext.DockerfilePath) != ""
 }
 
-func ResolveDockerBuildSpec(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, buildContext model.DockerBuildContext, target model.DockerCommandTarget) (dockerspec.DockerBuildSpec, error) {
+func ResolveDockerBuildSpec(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, buildContext model.DockerBuildContext, target model.DockerCommandTarget) (dockerspec.DockerBuildSpec, error) {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return dockerspec.DockerBuildSpec{}, err

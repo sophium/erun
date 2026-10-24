@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
@@ -116,7 +117,7 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 }
 
 // ResolveEnvironmentDetail returns ResolveListResult's entry for one tenant/environment.
-func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (ListEnvironmentResult, error) {
+func ResolveEnvironmentDetail(store seam.ListStore, tenant, environment string) (ListEnvironmentResult, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
@@ -139,7 +140,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 }
 
 // ResolveEnvironmentReadModel never refreshes live power state, and diagnoses only outside dry-run.
-func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
+func ResolveEnvironmentReadModel(ctx core.Context, store seam.ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if err := core.ErrMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {

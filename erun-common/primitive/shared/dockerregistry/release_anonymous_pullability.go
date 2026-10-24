@@ -19,9 +19,6 @@ const anonymousManifestAcceptHeaders = "application/vnd.oci.image.index.v1+json,
 
 const anonymousPullProbeTimeout = 15 * time.Second
 
-// AnonymousPullProbeFunc reports whether repoPath:tag pulls with no credential; injectable for tests.
-type AnonymousPullProbeFunc func(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error)
-
 // ProbeAnonymousManifestPull is the live ghcr.io AnonymousPullProbeFunc.
 func ProbeAnonymousManifestPull(ctx context.Context, client *http.Client, repoPath, tag string) (bool, error) {
 	if override, ok := os.LookupEnv(anonymousPullableOverrideEnv); ok {

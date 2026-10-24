@@ -10,7 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // The embedded Chart.yaml exists only to migrate legacy scaffolded tenant charts.
@@ -61,7 +61,7 @@ func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target config.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx core.Context, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target config.OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	// Before any --runtime-image override, a RuntimeImage here is a persisted memo, not this invocation's choice.
 	if target.RemoteRepo() {
 		return ResolvePublishedDevopsDeploySpecWithOverrides(ctx, target, "", "", false)

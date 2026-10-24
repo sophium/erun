@@ -4,36 +4,32 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
 type RuntimeStore interface {
-	setup.BootstrapStore
-	lifecycle.ListStore
-	projectseam.DockerStore
-	deploy.DeployStore
+	seam.BootstrapStore
+	seam.ListStore
+	seam.DockerStore
+	seam.DeployStore
 }
 
 type RuntimeConfig struct {
 	Context                        toolio.RuntimeContext
 	Store                          RuntimeStore
-	BuildScriptRunner              build.BuildScriptRunnerFunc
+	BuildScriptRunner              seam.BuildScriptRunnerFunc
 	BuildDockerImage               build.DockerImageBuilderFunc
-	PushDockerImage                dockerspec.DockerImagePusherFunc
+	PushDockerImage                seam.DockerImagePusherFunc
 	DeployHelmChart                deploy.HelmChartDeployerFunc
-	EnsureKubernetesNamespace      deploy.NamespaceEnsurerFunc
-	DeleteKubernetesNamespace      lifecycle.NamespaceDeleterFunc
-	WaitForRemoteRuntime           setup.RemoteRuntimeWaitFunc
+	EnsureKubernetesNamespace      seam.NamespaceEnsurerFunc
+	DeleteKubernetesNamespace      seam.NamespaceDeleterFunc
+	WaitForRemoteRuntime           seam.RemoteRuntimeWaitFunc
 	RunRemoteCommand               kube.RemoteCommandRunnerFunc
-	ResolveRuntimeRegistryVersions registry.RuntimeRegistryVersionResolverFunc
+	ResolveRuntimeRegistryVersions seam.RuntimeRegistryVersionResolverFunc
 }
 
 // ResolveLocalTarget resolves the tool's tenant/environment and refuses any other

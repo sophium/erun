@@ -8,8 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext model.DockerBuildContext) {
@@ -36,7 +36,7 @@ func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext 
 	return projectRoot, model.DockerBuildContext{Dir: contextDir, DockerfilePath: dockerfilePath}
 }
 
-func pushResolversForTest(projectRoot string, buildContext model.DockerBuildContext) (projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc) {
+func pushResolversForTest(projectRoot string, buildContext model.DockerBuildContext) (seam.ProjectFinderFunc, seam.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return projectRoot, "", nil }
 	resolveBuildContext := func() (model.DockerBuildContext, error) { return buildContext, nil }
 	return findProjectRoot, resolveBuildContext

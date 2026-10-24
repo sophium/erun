@@ -12,10 +12,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 var (
@@ -26,22 +26,11 @@ var (
 	ErrTenantSelectionCancelled           = errors.New("tenant selection cancelled by user")
 )
 
-type BootstrapStore interface {
-	LoadERunConfig() (configpkg.ERunConfig, string, error)
-	SaveERunConfig(configpkg.ERunConfig) error
-	ListTenantConfigs() ([]model.TenantConfig, error)
-	LoadTenantConfig(string) (model.TenantConfig, string, error)
-	SaveTenantConfig(model.TenantConfig) error
-	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
-	SaveEnvConfig(string, configpkg.EnvConfig) error
-}
-
 type (
 	WorkDirFunc            func() (string, error)
 	SelectTenantFunc       func([]model.TenantConfig) (model.TenantSelectionResult, error)
 	PromptValueFunc        func(string) (string, error)
 	ProjectConfigSaverFunc func(string, configpkg.ProjectConfig) error
-	RemoteRuntimeWaitFunc  func(configpkg.ShellLaunchParams) error
 )
 
 type (
@@ -74,8 +63,8 @@ type BootstrapInitResult struct {
 }
 
 type BootstrapInitDependencies struct {
-	Store           BootstrapStore
-	FindProjectRoot projectseam.ProjectFinderFunc
+	Store           seam.BootstrapStore
+	FindProjectRoot seam.ProjectFinderFunc
 	GetWorkingDir   WorkDirFunc
 	SelectTenant    SelectTenantFunc
 	// TenantSelectionUnavailable means nobody can be asked: a single tenant is
@@ -86,10 +75,10 @@ type BootstrapInitDependencies struct {
 	PromptContainerRegistry    PromptValueFunc
 	PromptRemoteRepositoryURL  PromptValueFunc
 	PromptCodeCommitSSHKeyID   PromptValueFunc
-	EnsureKubernetesNamespace  deploy.NamespaceEnsurerFunc
-	LoadProjectConfig          projectseam.ProjectConfigLoaderFunc
+	EnsureKubernetesNamespace  seam.NamespaceEnsurerFunc
+	LoadProjectConfig          seam.ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
-	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
+	WaitForRemoteRuntime       seam.RemoteRuntimeWaitFunc
 	RunRemoteCommand           kube.RemoteCommandRunnerFunc
 	DeployHelmChart            deploy.HelmChartDeployerFunc
 	Sleep                      core.SleepFunc
@@ -478,7 +467,7 @@ func (s BootstrapRunner) confirm(interaction model.BootstrapInitInteraction) (bo
 	return confirmed, nil
 }
 
-func saveEnvConfig(store BootstrapStore, tenant string, config configpkg.EnvConfig) error {
+func saveEnvConfig(store seam.BootstrapStore, tenant string, config configpkg.EnvConfig) error {
 	stored := config
 	if !stored.RemoteWorktree() {
 		stored.ContainerRegistries = nil

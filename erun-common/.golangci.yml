@@ -74,6 +74,16 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: base/config may import only base/core and base/model
+        base-seam:
+          list-mode: lax
+          files: ["**/erun-common/base/seam/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/model
+            - github.com/sophium/erun/erun-common/base/core
+            - github.com/sophium/erun/erun-common/base/config
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: base/seam may import only base/config, base/core and base/model
         infra-mcptools:
           list-mode: lax
           files: ["**/erun-common/infra/mcptools/*.go"]

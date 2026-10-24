@@ -12,8 +12,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, componentDir, suiteDir string) {
@@ -29,7 +29,7 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 	return projectRoot, componentDir, suiteDir
 }
 
-func boundaryResolvers(projectRoot, cwd string) (projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc) {
+func boundaryResolvers(projectRoot, cwd string) (seam.ProjectFinderFunc, seam.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
 	resolveBuildContext := func() (model.DockerBuildContext, error) { return dockerspec.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext

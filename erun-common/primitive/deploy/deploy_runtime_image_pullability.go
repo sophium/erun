@@ -8,12 +8,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 )
 
 // A var so tests avoid reaching live ghcr.io.
-var deployRuntimeImagePullProbe dockerregistry.AnonymousPullProbeFunc = dockerregistry.ProbeAnonymousManifestPull
+var deployRuntimeImagePullProbe seam.AnonymousPullProbeFunc = dockerregistry.ProbeAnonymousManifestPull
 
 // autoImagePullSecretName is distinct from operator-named secrets so it never
 // repurposes one.
@@ -25,7 +26,7 @@ func autoImagePullSecretName(tenant string) string {
 // mutation: Recreate tears the old pod down first, so an unpullable image takes
 // the env down. A resolved credential is always attached; otherwise a real run
 // probes anonymous pullability and refuses unless it is confirmed pullable.
-func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe dockerregistry.AnonymousPullProbeFunc) error {
+func ensureRuntimeImagePullSecret(ctx core.Context, deployInput *HelmDeploySpec, probe seam.AnonymousPullProbeFunc) error {
 	image := strings.TrimSpace(deployInput.ImageOverrides[config.DevopsComponentName])
 	if image == "" {
 		return nil

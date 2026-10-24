@@ -4,8 +4,8 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type (
@@ -38,11 +38,11 @@ type releaseArtifacts struct {
 	LinuxPackages []model.LinuxPackageSpec
 }
 
-func ResolveReleaseSpec(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, params ReleaseParams) (model.ReleaseSpec, error) {
+func ResolveReleaseSpec(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, params ReleaseParams) (model.ReleaseSpec, error) {
 	return resolveReleaseSpec(ctx, findProjectRoot, configpkg.LoadProjectConfig, gitx.GitCurrentBranch, gitx.GitShortCommit, GitBranchExists, gitx.GitCommandRunner, params)
 }
 
-func resolveReleaseSpec(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, loadProjectConfig projectseam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (model.ReleaseSpec, error) {
+func resolveReleaseSpec(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, loadProjectConfig seam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit seam.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit seam.GitCommandRunnerFunc, params ReleaseParams) (model.ReleaseSpec, error) {
 	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit)
 
 	inputs, err := resolveReleaseInputs(ctx, findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit, params)

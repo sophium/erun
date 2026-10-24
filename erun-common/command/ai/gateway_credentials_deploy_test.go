@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
@@ -19,7 +20,7 @@ func (s failingSecretStore) LoadCloudSecret(string) (string, error) {
 }
 func (s failingSecretStore) DeleteCloudSecret(string) error { return nil }
 
-func emptySecretStore(t *testing.T) cloud.CloudSecretStore {
+func emptySecretStore(t *testing.T) seam.CloudSecretStore {
 	t.Helper()
 	return cloud.NewFileCloudSecretStore(t.TempDir())
 }

@@ -53,6 +53,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -85,7 +86,7 @@ type rootDependencies struct {
 	runInit                   func(core.Context, openpkg.BootstrapInitParams) error
 	runInitForArgs            func(core.Context, []string) error
 	runInitForOpen            func(core.Context, model.OpenParams) error
-	dockerRegistryLogin       buildpkg.DockerRegistryLoginFunc
+	dockerRegistryLogin       seam.DockerRegistryLoginFunc
 	push                      buildpkg.DockerPushFunc
 	resolveOpen               func(model.OpenParams) (config.OpenResult, error)
 	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploypkg.DeploySpec, error)

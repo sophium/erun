@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // cloudflareAPIBaseURLEnv redirects Cloudflare API calls in tests; an env var because the
@@ -41,13 +42,6 @@ func cloudflareAPIBaseURL() string {
 	return defaultCloudflareAPIBaseURL
 }
 
-// CloudSecretStore keeps provider secrets outside the config, which carries only a ref.
-type CloudSecretStore interface {
-	SaveCloudSecret(ref, value string) error
-	LoadCloudSecret(ref string) (string, error)
-	DeleteCloudSecret(ref string) error
-}
-
 // CloudflareTokenInfo is the used subset of Cloudflare's tokens/verify response.
 type CloudflareTokenInfo struct {
 	ID     string
@@ -61,7 +55,7 @@ type CloudflareAccount struct {
 }
 
 // InitCloudflareCloudProvider verifies and stores the token, then saves the alias by TokenRef.
-func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params model.InitCloudflareCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
+func InitCloudflareCloudProvider(ctx core.Context, store seam.CloudStore, params model.InitCloudflareCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
 		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
@@ -385,14 +379,14 @@ type FileCloudSecretStore struct {
 }
 
 // NewFileCloudSecretStore stores secrets in 0600 files under dir.
-func NewFileCloudSecretStore(dir string) CloudSecretStore {
+func NewFileCloudSecretStore(dir string) seam.CloudSecretStore {
 	return FileCloudSecretStore{dir: strings.TrimSpace(dir)}
 }
 
 const CloudSecretStoreDirName = "cloud-secrets"
 
 // DefaultCloudSecretStore is rooted under the erun config dir.
-func DefaultCloudSecretStore() (CloudSecretStore, error) {
+func DefaultCloudSecretStore() (seam.CloudSecretStore, error) {
 	dir, err := config.ERunConfigDir()
 	if err != nil {
 		return nil, err

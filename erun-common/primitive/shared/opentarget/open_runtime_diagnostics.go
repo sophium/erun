@@ -6,8 +6,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-type OpenKubectlRunnerFunc func(args []string, stdout, stderr io.Writer) error
-
 func RunOpenKubectl(args []string, stdout, stderr io.Writer) error {
 	cmd := core.Command("kubectl", args...)
 	if stdout != nil {

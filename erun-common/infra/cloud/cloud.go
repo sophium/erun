@@ -12,21 +12,12 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // ErrCloudProviderNoOIDC marks a provider (Cloudflare) that has no OIDC issuer, so
 // issuer aggregation skips it.
 var ErrCloudProviderNoOIDC = errors.New("cloud provider does not support OIDC issuance")
-
-type CloudStore interface {
-	configpkg.CloudReadStore
-	SaveERunConfig(configpkg.ERunConfig) error
-}
-
-type EnvironmentCloudAliasStore interface {
-	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
-	SaveEnvConfig(string, configpkg.EnvConfig) error
-}
 
 type AWSIdentity struct {
 	Account string `json:"Account"`
@@ -76,7 +67,7 @@ type CloudDependencies struct {
 	// CloudSecretStore is nil unless a transport wires one.
 	VerifyCloudflareToken  func(core.Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(core.Context, string) ([]CloudflareAccount, error)
-	CloudSecretStore       CloudSecretStore
+	CloudSecretStore       seam.CloudSecretStore
 
 	FetchPlatformInfo            func(core.Context, string) (model.PlatformInfo, error)
 	FetchOIDCDiscovery           func(core.Context, string) (OIDCDiscovery, error)
@@ -255,7 +246,7 @@ func AttachTenantCloudProviderAlias(aliases []string, primary, alias string) ([]
 	return configpkg.NormalizeTenantCloudProviderAliases(attached, alias)
 }
 
-func SaveCloudProviderConfig(store CloudStore, provider model.CloudProviderConfig) (model.CloudProviderConfig, error) {
+func SaveCloudProviderConfig(store seam.CloudStore, provider model.CloudProviderConfig) (model.CloudProviderConfig, error) {
 	if store == nil {
 		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}

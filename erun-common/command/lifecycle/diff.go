@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -37,7 +38,7 @@ func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	}
 }
 
-func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (model.DiffResult, error) {
+func ResolveGitDiff(projectRoot string, runGit seam.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		return model.DiffResult{}, fmt.Errorf("project root is required")
@@ -61,7 +62,7 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (model
 	return result, nil
 }
 
-func ResolveGitDiffWithOptions(projectRoot string, options model.DiffOptions, runGit gitx.GitCommandRunnerFunc) (model.DiffResult, error) {
+func ResolveGitDiffWithOptions(projectRoot string, options model.DiffOptions, runGit seam.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
 		return model.DiffResult{}, fmt.Errorf("project root is required")
@@ -131,7 +132,7 @@ func rejectOptionShapedSelectedCommit(scope, selectedCommit string) error {
 }
 
 // Resolving through git ensures only a real commit sha reaches the diff argv.
-func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit gitx.GitCommandRunnerFunc) (string, error) {
+func resolveDiffSelectedCommit(projectRoot, scope, selectedCommit string, runGit seam.GitCommandRunnerFunc) (string, error) {
 	if scope != "commit" || selectedCommit == "" {
 		return selectedCommit, nil
 	}
@@ -173,12 +174,12 @@ func currentScopeGitDiffArgs(headFound bool) []string {
 	return append(args, gitEmptyTreeHash)
 }
 
-func gitDiffHeadFound(projectRoot string, runGit gitx.GitCommandRunnerFunc) bool {
+func gitDiffHeadFound(projectRoot string, runGit seam.GitCommandRunnerFunc) bool {
 	_, err := gitOutput(projectRoot, runGit, "rev-parse", "--verify", "--quiet", "HEAD")
 	return err == nil
 }
 
-func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFunc) (model.DiffReviewBase, bool, error) {
+func resolveGitDiffReviewBase(projectRoot string, runGit seam.GitCommandRunnerFunc) (model.DiffReviewBase, bool, error) {
 	var selected model.DiffReviewBase
 	selectedDistance := -1
 	for _, branch := range []string{"origin/HEAD", "origin/main", "origin/develop", "main", "develop"} {
@@ -207,7 +208,7 @@ func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFu
 	return model.DiffReviewBase{}, false, nil
 }
 
-func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) string {
+func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit seam.GitCommandRunnerFunc) string {
 	if branch != "origin/HEAD" {
 		return branch
 	}
@@ -218,7 +219,7 @@ func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitC
 	return resolved
 }
 
-func resolveGitDiffReviewCommits(projectRoot string, base model.DiffReviewBase, baseFound bool, runGit gitx.GitCommandRunnerFunc) ([]model.DiffCommit, error) {
+func resolveGitDiffReviewCommits(projectRoot string, base model.DiffReviewBase, baseFound bool, runGit seam.GitCommandRunnerFunc) ([]model.DiffCommit, error) {
 	if !baseFound {
 		return nil, nil
 	}
@@ -229,7 +230,7 @@ func resolveGitDiffReviewCommits(projectRoot string, base model.DiffReviewBase, 
 	return parseGitDiffReviewCommits(output), nil
 }
 
-func gitOutput(projectRoot string, runGit gitx.GitCommandRunnerFunc, args ...string) (string, error) {
+func gitOutput(projectRoot string, runGit seam.GitCommandRunnerFunc, args ...string) (string, error) {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, args...); err != nil {
@@ -261,7 +262,7 @@ func parseGitDiffReviewCommits(output string) []model.DiffCommit {
 	return commits
 }
 
-func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit gitx.GitCommandRunnerFunc) error {
+func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit seam.GitCommandRunnerFunc) error {
 	untrackedOutput := new(bytes.Buffer)
 	untrackedStderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, untrackedOutput, untrackedStderr, "ls-files", "--others", "--exclude-standard", "-z"); err != nil {

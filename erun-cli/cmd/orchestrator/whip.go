@@ -15,7 +15,7 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
@@ -23,7 +23,7 @@ import (
 
 // The manual, host-side fan-out of the desktop's automatic pacing nudge.
 
-func NewWhipCmd(store lifecycle.ListStore, resolveOpen envscope.OpenResolver) *cobra.Command {
+func NewWhipCmd(store seam.ListStore, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant string
 	var environment string
 	var jsonOutput bool
@@ -67,7 +67,7 @@ func NewWhipCmd(store lifecycle.ListStore, resolveOpen envscope.OpenResolver) *c
 	return cmd
 }
 
-func runWhipCommand(ctx context.Context, commandCtx core.Context, store lifecycle.ListStore, resolveOpen envscope.OpenResolver, tenant, environment string, jsonOutput bool) error {
+func runWhipCommand(ctx context.Context, commandCtx core.Context, store seam.ListStore, resolveOpen envscope.OpenResolver, tenant, environment string, jsonOutput bool) error {
 	scoped := strings.TrimSpace(tenant) != "" || strings.TrimSpace(environment) != ""
 	targets, err := resolveWhipEnvironmentTargets(store, tenant, environment)
 	if err != nil {
@@ -122,7 +122,7 @@ type whipEnvironmentTarget struct {
 
 // resolveWhipEnvironmentTargets lists every configured environment when unscoped,
 // never defaulting to the ambient scope.
-func resolveWhipEnvironmentTargets(store lifecycle.ListStore, tenant, environment string) ([]whipEnvironmentTarget, error) {
+func resolveWhipEnvironmentTargets(store seam.ListStore, tenant, environment string) ([]whipEnvironmentTarget, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if tenant != "" || environment != "" {

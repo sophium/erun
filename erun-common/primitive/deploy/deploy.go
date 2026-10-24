@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 const (
@@ -18,17 +19,9 @@ const (
 	WorktreeStorageNone = "none"
 )
 
-type DeployStore interface {
-	configpkg.OpenStore
-	ListTenantConfigs() ([]model.TenantConfig, error)
-	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
-}
-
 type (
-	DeployContextResolverFunc       func() (model.KubernetesDeployContext, error)
-	KubernetesDeploymentCheckerFunc func(core.Context, model.KubernetesDeploymentCheckParams) (bool, error)
-	HelmChartDeployerFunc           func(HelmDeployParams) error
-	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
+	HelmChartDeployerFunc    func(HelmDeployParams) error
+	HelmReleaseRecovererFunc func(HelmReleaseRecoveryParams) error
 )
 
 type deployKubernetesContextResolver interface {
@@ -169,11 +162,9 @@ type DeploySpec struct {
 	SkipHelm bool
 }
 
-type EnvConfigSaver func(tenant string, config configpkg.EnvConfig) error
-
 // PersistRuntimeVersionFromDeploySpecs writes the deployed runtime version and registry to the env
 // config. A SkipHelm version was never pushed, so it heals to the release's running version instead.
-func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []DeploySpec, save EnvConfigSaver, resolveDeployedVersion HelmReleaseVersionResolverFunc) error {
+func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []DeploySpec, save seam.EnvConfigSaver, resolveDeployedVersion seam.HelmReleaseVersionResolverFunc) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
 	}
@@ -203,7 +194,7 @@ func PersistRuntimeVersionFromDeploySpecs(ctx core.Context, specs []DeploySpec, 
 }
 
 // An empty result means unknown; the caller then leaves the persisted version alone.
-func resolveRunningRuntimeVersion(ctx core.Context, spec DeploySpec, resolveDeployedVersion HelmReleaseVersionResolverFunc) string {
+func resolveRunningRuntimeVersion(ctx core.Context, spec DeploySpec, resolveDeployedVersion seam.HelmReleaseVersionResolverFunc) string {
 	if resolveDeployedVersion == nil {
 		return ""
 	}
@@ -238,7 +229,7 @@ func runtimeDeployMemoUnchanged(envConfig configpkg.EnvConfig, version, registry
 		(runtimeChart == "" || strings.TrimSpace(envConfig.RuntimeChart) == runtimeChart)
 }
 
-func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
+func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save seam.EnvConfigSaver) error {
 	registry := RuntimeRegistryForDeploySpec(spec)
 	// The opt-out's clear is recorded only once the unauthenticated release rolled out.
 	mcpAuthKeyPath := strings.TrimSpace(spec.Deploy.MCPAuthPublicKeyPath)
@@ -339,9 +330,6 @@ func SplitChartReferenceVersion(raw string) (string, string) {
 	}
 	return raw[:cut+1] + last[:sep], last[sep+1:]
 }
-
-// HelmReleaseVersionResolverFunc reads a deployed release's appVersion.
-type HelmReleaseVersionResolverFunc func(ctx core.Context, releaseName, namespace, kubernetesContext string) (string, error)
 
 // ResolveDeployedHelmReleaseVersion returns a release's appVersion, or "" with nil error when unavailable.
 func ResolveDeployedHelmReleaseVersion(ctx core.Context, releaseName, namespace, kubernetesContext string) (string, error) {

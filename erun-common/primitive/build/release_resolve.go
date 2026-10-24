@@ -11,13 +11,13 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/sophium/erun/erun-common/primitive/shared/releaseflow"
 )
 
-func normalizeReleaseDependencies(findProjectRoot projectseam.ProjectFinderFunc, loadProjectConfig projectseam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc) (projectseam.ProjectFinderFunc, projectseam.ProjectConfigLoaderFunc, gitx.GitValueResolverFunc, gitx.GitValueResolverFunc, GitBranchCheckerFunc, gitx.GitCommandRunnerFunc) {
+func normalizeReleaseDependencies(findProjectRoot seam.ProjectFinderFunc, loadProjectConfig seam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit seam.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit seam.GitCommandRunnerFunc) (seam.ProjectFinderFunc, seam.ProjectConfigLoaderFunc, seam.GitValueResolverFunc, seam.GitValueResolverFunc, GitBranchCheckerFunc, seam.GitCommandRunnerFunc) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -39,7 +39,7 @@ func normalizeReleaseDependencies(findProjectRoot projectseam.ProjectFinderFunc,
 	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit
 }
 
-func resolveReleaseInputs(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, loadProjectConfig projectseam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (releaseInputs, error) {
+func resolveReleaseInputs(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, loadProjectConfig seam.ProjectConfigLoaderFunc, resolveBranch, resolveCommit seam.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit seam.GitCommandRunnerFunc, params ReleaseParams) (releaseInputs, error) {
 	ctx.Trace("release: resolving project root")
 	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
 	if err != nil {
@@ -103,7 +103,7 @@ func resolveReleaseInputs(ctx core.Context, findProjectRoot projectseam.ProjectF
 	}, nil
 }
 
-func loadReleaseConfig(projectRoot string, loadProjectConfig projectseam.ProjectConfigLoaderFunc) (configpkg.ReleaseConfig, error) {
+func loadReleaseConfig(projectRoot string, loadProjectConfig seam.ProjectConfigLoaderFunc) (configpkg.ReleaseConfig, error) {
 	projectConfig, _, err := loadProjectConfig(projectRoot)
 	if err != nil && !errors.Is(err, configpkg.ErrNotInitialized) {
 		return configpkg.ReleaseConfig{}, err
@@ -111,7 +111,7 @@ func loadReleaseConfig(projectRoot string, loadProjectConfig projectseam.Project
 	return projectConfig.NormalizedReleaseConfig(), nil
 }
 
-func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, string, error) {
+func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch, resolveCommit seam.GitValueResolverFunc, runGit seam.GitCommandRunnerFunc) (string, string, error) {
 	branch, err := resolveBranch(ctx, projectRoot)
 	if err != nil {
 		return "", "", err
@@ -123,7 +123,7 @@ func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch,
 	return branch, commit, nil
 }
 
-func resolveReleaseProjectRoot(findProjectRoot projectseam.ProjectFinderFunc, params ReleaseParams) (string, error) {
+func resolveReleaseProjectRoot(findProjectRoot seam.ProjectFinderFunc, params ReleaseParams) (string, error) {
 	if projectRoot := strings.TrimSpace(params.ProjectRoot); projectRoot != "" {
 		return filepath.Clean(projectRoot), nil
 	}

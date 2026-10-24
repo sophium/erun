@@ -11,6 +11,7 @@ import (
 	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
@@ -73,7 +74,7 @@ func confirmRemoteInitFinish(ctx core.Context, promptRunner promptpkg.PromptRunn
 		"Re-run with --finish-remote-init to run it without a prompt.")
 }
 
-func remoteInitPromptFunc(promptRunner promptpkg.PromptRunner) doctor.RemoteInitFinishPrompt {
+func remoteInitPromptFunc(promptRunner promptpkg.PromptRunner) seam.RemoteInitFinishPrompt {
 	return func(label string) (string, error) {
 		if promptRunner == nil {
 			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url and --codecommit-ssh-key-id when applicable")

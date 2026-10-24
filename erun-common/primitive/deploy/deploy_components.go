@@ -8,8 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // deployComponentBaseOrder orders component chart bases so backend charts precede dependents;
@@ -222,7 +222,7 @@ func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 
 // ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
 // The version, not the env's source, decides which charts exist. It never builds or pushes.
-func ResolveDeployableComponents(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
+func ResolveDeployableComponents(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 

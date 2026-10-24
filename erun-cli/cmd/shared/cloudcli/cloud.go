@@ -9,6 +9,7 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -17,7 +18,7 @@ func CloudDependencies() cloud.CloudDependencies {
 	return cloud.DefaultCloudDependencies()
 }
 
-func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunner promptpkg.PromptRunner, params model.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
+func RunCloudInitAWSCommand(ctx core.Context, store seam.CloudStore, promptRunner promptpkg.PromptRunner, params model.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
 	var err error
 	if strings.TrimSpace(params.Profile) == "" && awsInitParamsNeedPrompt(params) {
 		printAWSInitGuidance(ctx)
@@ -204,7 +205,7 @@ func traceAWSEnableOIDCCommand(ctx core.Context, profile string) {
 	ctx.TraceCommand("", "aws", args...)
 }
 
-func SelectCloudAliasPrompt(store cloud.CloudStore, selectRunner promptpkg.SelectRunner) (string, error) {
+func SelectCloudAliasPrompt(store seam.CloudStore, selectRunner promptpkg.SelectRunner) (string, error) {
 	providers, err := cloud.ListCloudProviders(store)
 	if err != nil {
 		return "", err

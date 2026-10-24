@@ -7,13 +7,13 @@ import (
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewE2ECmd(resolveOpen envscope.OpenResolver, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
+func NewE2ECmd(resolveOpen envscope.OpenResolver, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var tenant, environment, component, baseURL, version string
 	cmd := &cobra.Command{
 		Use:   "e2e",
@@ -66,7 +66,7 @@ func NewE2ECmd(resolveOpen envscope.OpenResolver, findProjectRoot projectseam.Pr
 	return cmd
 }
 
-func runE2ECommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, findProjectRoot projectseam.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen envscope.OpenResolver, params model.OpenParams, findProjectRoot seam.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err

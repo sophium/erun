@@ -9,16 +9,16 @@ import (
 	"github.com/sophium/erun/cmd/shared/deploynotice"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
+func NewUpgradeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc) *cobra.Command {
 	var versionOverride string
 	var tenant string
 	var environment string
@@ -103,7 +103,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target model.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
+func runUpgrade(ctx core.Context, store seam.DeployStore, target model.UpgradeTarget, deploy seam.UpgradeItemDeployer) error {
 	// Only a scoped run has one env to attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
@@ -154,7 +154,7 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 	return err
 }
 
-func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now projectseam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
+func newUpgradeDeployer(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) seam.UpgradeItemDeployer {
 	return func(ctx core.Context, item model.UpgradePlanItem) error {
 		deployTarget := model.DeployTarget{
 			Tenant:          item.Tenant,

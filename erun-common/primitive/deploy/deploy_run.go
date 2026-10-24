@@ -13,9 +13,9 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func runDeploySpecsPlan(ctx core.Context, executions []DeploySpec, deploy HelmChartDeployerFunc) error {
@@ -68,7 +68,7 @@ func loadProjectK8sPlanForRepo(repoPath, environment string) (configpkg.ProjectK
 
 // resolvePublishedDeployPlan falls back to the cwd project when the configured
 // repo path (the pod's own) is absent on this machine, tracing each branch.
-func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot projectseam.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
+func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot seam.ProjectFinderFunc, resolvedTarget configpkg.OpenResult) (configpkg.ProjectK8sConfig, error) {
 	configuredPath := strings.TrimSpace(resolvedTarget.RepoPath)
 	plan, err := loadProjectK8sPlanForRepo(configuredPath, resolvedTarget.Environment)
 	if err != nil {
@@ -99,7 +99,7 @@ func resolvePublishedDeployPlan(ctx core.Context, findProjectRoot projectseam.Pr
 	return fallbackPlan, nil
 }
 
-func resolveDeployPlanFallbackPath(findProjectRoot projectseam.ProjectFinderFunc, configuredPath string) string {
+func resolveDeployPlanFallbackPath(findProjectRoot seam.ProjectFinderFunc, configuredPath string) string {
 	_, fallbackPath, err := findProjectRoot()
 	fallbackPath = strings.TrimSpace(fallbackPath)
 	if err != nil || fallbackPath == "" || filepath.Clean(fallbackPath) == filepath.Clean(configuredPath) {
@@ -266,7 +266,7 @@ func runPublishedValuesPull(ctx core.Context, pull *publishedValuesPull, target 
 }
 
 // A var so a test can prove it runs before the secret applies.
-var ensureDeployNamespace NamespaceEnsurerFunc = kube.EnsureKubernetesNamespace
+var ensureDeployNamespace seam.NamespaceEnsurerFunc = kube.EnsureKubernetesNamespace
 
 // applyPreRolloutResources ensures the namespace first: on a first deploy the
 // secret applies below would otherwise fail with "namespaces not found".

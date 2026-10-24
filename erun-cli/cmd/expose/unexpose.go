@@ -9,13 +9,13 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
+func NewUnexposeCmd(store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var skipIfUnconfigured bool
 	var servicesZone string
 	var platformNamespace string
@@ -47,7 +47,7 @@ func NewUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, 
 	return cmd
 }
 
-func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot projectseam.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
+func runUnexposeCommand(ctx core.Context, store seam.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot seam.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// The zone/namespace overrides let a caller with no checkout (the hosted delete Job) run unexpose.

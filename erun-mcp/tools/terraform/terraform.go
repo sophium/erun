@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/terraform"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runcmd"
@@ -36,7 +37,7 @@ func TerraformTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.
 		}
 		projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		terraformStore, ok := any(runtime.Store).(terraform.TerraformStore)
+		terraformStore, ok := any(runtime.Store).(seam.TerraformStore)
 		if !ok {
 			terraformStore = config.ConfigStore{}
 		}

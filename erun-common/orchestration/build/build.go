@@ -7,13 +7,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveBuildExecution(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildpkg.RecommendBuildEnvIfMissing(ctx, findProjectRoot, target)
@@ -78,7 +78,7 @@ func finalizeBuildExecution(ctx core.Context, execution dockerspec.BuildExecutio
 	return execution, nil
 }
 
-func resolveBuildExecutionTargetAndScript(findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *dockerspec.ScriptSpec, error) {
+func resolveBuildExecutionTargetAndScript(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *dockerspec.ScriptSpec, error) {
 	target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
 		return model.DockerCommandTarget{}, nil, nil, err
@@ -96,7 +96,7 @@ func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []
 
 // resolveLinuxPackagesForExecution resolves a plain build's packages and which
 // reuse a recorded pass; releases export theirs instead.
-func resolveLinuxPackagesForExecution(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, target model.DockerCommandTarget, releaseSpec *model.ReleaseSpec) ([]model.LinuxPackageSpec, error) {
+func resolveLinuxPackagesForExecution(findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, target model.DockerCommandTarget, releaseSpec *model.ReleaseSpec) ([]model.LinuxPackageSpec, error) {
 	if releaseSpec != nil {
 		return nil, nil
 	}
@@ -121,7 +121,7 @@ func resolveLinuxPackagesForExecution(findProjectRoot projectseam.ProjectFinderF
 	return buildpkg.ApplyLinuxPackageReuse(packages), nil
 }
 
-func resolveBuildExecutionWithoutBuilds(findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
+func resolveBuildExecutionWithoutBuilds(findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (dockerspec.BuildExecutionSpec, error) {
 	script, err := buildpkg.ResolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return dockerspec.BuildExecutionSpec{}, err

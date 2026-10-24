@@ -2,7 +2,6 @@ package dockerspec
 
 import (
 	"errors"
-	"io"
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -15,10 +14,6 @@ var (
 	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
 	ErrLinuxPackageBuildNotFound  = errors.New("linux package Dockerfile not found in current directory")
 	MultiPlatformDockerBuilds     = []string{"linux/amd64", "linux/arm64"}
-)
-
-type (
-	DockerImagePusherFunc func(string, int, io.Writer, io.Writer) error
 )
 
 type DockerBuildSpec struct {

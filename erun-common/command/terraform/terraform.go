@@ -10,22 +10,11 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
-
-// TerraformStore is the config surface RunTerraform reads.
-type TerraformStore interface {
-	LoadERunConfig() (configpkg.ERunConfig, string, error)
-	LoadTenantConfig(string) (model.TenantConfig, string, error)
-	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
-	ResolveEffectiveKubernetesContext(environment, configured string) string
-}
-
-// TerraformConfirmFunc makes the operator restate the environment name before
-// apply/destroy; it is never called for plan or dry-run.
-type TerraformConfirmFunc func(ctx core.Context, environment string) error
 
 type terraformRootSource string
 
@@ -41,7 +30,7 @@ const terraformPlanFile = "apply.tfplan"
 // RunTerraform resolves and, unless dry-run, runs Terraform against a per-env
 // root, tracing everything first. dispatch runs it inside a remote env's own
 // pod; nil defaults to RunRemoteCommand.
-func RunTerraform(ctx core.Context, params model.TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
+func RunTerraform(ctx core.Context, params model.TerraformParams, store seam.TerraformStore, confirm seam.TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -195,7 +184,7 @@ type terraformTarget struct {
 
 // resolveTerraformTargetEnvironment confirms the env exists before deriving its
 // root, so a typo is a named error rather than a missing directory.
-func resolveTerraformTargetEnvironment(params model.TerraformParams, store TerraformStore) (terraformTarget, error) {
+func resolveTerraformTargetEnvironment(params model.TerraformParams, store seam.TerraformStore) (terraformTarget, error) {
 	tenant, environment, err := resolveTerraformScope(store, params)
 	if err != nil {
 		return terraformTarget{}, err
@@ -239,7 +228,7 @@ func requiresTerraformConfirmation(op model.TerraformOperation) bool {
 
 // dispatchTerraform runs `erun terraform <op>` in the target pod, behind the
 // same confirm gate as a local run.
-func dispatchTerraform(ctx core.Context, target terraformTarget, params model.TerraformParams, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
+func dispatchTerraform(ctx core.Context, target terraformTarget, params model.TerraformParams, confirm seam.TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
 		return model.TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
 	}
@@ -311,7 +300,7 @@ func terraformStateLocus(remoteWorktree bool) string {
 	return "this host's home directory"
 }
 
-func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, store TerraformStore) (model.TerraformResult, []terraformStep, error) {
+func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, store seam.TerraformStore) (model.TerraformResult, []terraformStep, error) {
 	op := params.Operation
 	if err := validateTerraformOperation(op); err != nil {
 		return model.TerraformResult{}, nil, err
@@ -428,7 +417,7 @@ func terraformRootNotFoundError(tenant, environment, configuredBase, configuredD
 		tenant, environment, tenant, environment, tenant, tenant, environment, environment)
 }
 
-func resolveTerraformScope(store TerraformStore, params model.TerraformParams) (tenant, environment string, err error) {
+func resolveTerraformScope(store seam.TerraformStore, params model.TerraformParams) (tenant, environment string, err error) {
 	tenant = strings.TrimSpace(params.Tenant)
 	environment = strings.TrimSpace(params.Environment)
 	if tenant == "" {

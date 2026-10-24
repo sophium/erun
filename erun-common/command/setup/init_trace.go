@@ -7,12 +7,12 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
 )
 
-func TraceBootstrapStore(ctx core.Context, store BootstrapStore) BootstrapStore {
+func TraceBootstrapStore(ctx core.Context, store seam.BootstrapStore) seam.BootstrapStore {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -41,7 +41,7 @@ func TraceProjectConfigSaver(ctx core.Context, save ProjectConfigSaverFunc) Proj
 	}
 }
 
-func TraceNamespaceEnsurer(ctx core.Context, ensure deploy.NamespaceEnsurerFunc) deploy.NamespaceEnsurerFunc {
+func TraceNamespaceEnsurer(ctx core.Context, ensure seam.NamespaceEnsurerFunc) seam.NamespaceEnsurerFunc {
 	if ensure == nil {
 		return nil
 	}
@@ -64,7 +64,7 @@ func traceYAMLWrite(ctx core.Context, path string, value any) error {
 }
 
 type tracedBootstrapStore struct {
-	BootstrapStore
+	seam.BootstrapStore
 	ctx core.Context
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -98,7 +99,7 @@ func ResolveGatewayCredential(gateway *config.OpenRouterConfig) (string, error) 
 
 // ResolveGatewayCredentialFromStore reuses the host key only when the host already
 // points at baseURL, since a credential is issued for one service.
-func ResolveGatewayCredentialFromStore(store cloud.CloudSecretStore, ref, baseURL string) (string, error) {
+func ResolveGatewayCredentialFromStore(store seam.CloudSecretStore, ref, baseURL string) (string, error) {
 	saved, loadErr := store.LoadCloudSecret(ref)
 	switch {
 	case loadErr == nil && strings.TrimSpace(saved) != "":

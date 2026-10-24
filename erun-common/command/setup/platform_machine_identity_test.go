@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -46,7 +47,7 @@ func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdenti
 }
 
 // machineIdentityDeps stubs login and OIDC discovery.
-func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, cloud.CloudSecretStore) {
+func machineIdentityDeps(t *testing.T, tokenEndpoint string, exchange func(clientID, clientSecret string) (cloud.ERunTokens, error)) (cloud.CloudDependencies, seam.CloudSecretStore) {
 	t.Helper()
 	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
 	deps := cloud.CloudDependencies{

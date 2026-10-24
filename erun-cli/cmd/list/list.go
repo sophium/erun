@@ -8,12 +8,12 @@ import (
 	"github.com/sophium/erun/cmd/shared/textfmt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewListCmd(store lifecycle.ListStore, findProjectRoot projectseam.ProjectFinderFunc) *cobra.Command {
+func NewListCmd(store seam.ListStore, findProjectRoot seam.ProjectFinderFunc) *cobra.Command {
 	var versionDriftTenant string
 	var gateEnvironment string
 	var controlPlanes bool
@@ -63,7 +63,7 @@ func validateListControlPlaneAliasFlag(controlPlanes bool, erunAlias string) err
 	return nil
 }
 
-func runListCommand(ctx core.Context, store lifecycle.ListStore, findProjectRoot projectseam.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
+func runListCommand(ctx core.Context, store seam.ListStore, findProjectRoot seam.ProjectFinderFunc, versionDriftTenant, gateEnvironment, erunAlias string, controlPlanes, failOnDrift bool) error {
 	ctx.TraceCommand("", "erun", "list")
 	versionDriftTenant = strings.TrimSpace(versionDriftTenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)

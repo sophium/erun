@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
@@ -204,7 +205,7 @@ func reconcileEnvironmentJob(dir string, job jobstate.EnvironmentJob, now time.T
 	return reconcileEnvironmentJobWithRestartCheck(dir, job, now, alive, hostname, opentarget.RunOpenKubectl)
 }
 
-func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
+func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.EnvironmentJob, now time.Time, alive func(int) bool, hostname string, restartRunner seam.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
 	// Never persisted: it is meaningless without the read time.
 	job.AliveAgeMs = environmentJobAliveAgeMs(job.LastAliveAt, now)
 	if job.State != EnvironmentJobStateRunning {
@@ -231,7 +232,7 @@ func reconcileEnvironmentJobWithRestartCheck(dir string, job jobstate.Environmen
 	return job
 }
 
-func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
+func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, hostname string, restartRunner seam.OpenKubectlRunnerFunc) jobstate.EnvironmentJob {
 	job.State = jobstate.EnvironmentJobStateUnknown
 	job.EndedAt = now
 	job.ExitCode = nil
@@ -254,7 +255,7 @@ func demoteEnvironmentJobToUnknown(job jobstate.EnvironmentJob, now time.Time, h
 
 // reconcileSamePodUnknownReason credits a container restart only when it lands
 // at or after the job was last alive.
-func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner opentarget.OpenKubectlRunnerFunc) (kind, reason string) {
+func reconcileSamePodUnknownReason(job jobstate.EnvironmentJob, hostname string, restartRunner seam.OpenKubectlRunnerFunc) (kind, reason string) {
 	restarted, terminatedReason, exitCode, finishedAt, ok := jobSupervisorContainerRestart(hostname, config.DevopsComponentName, restartRunner)
 	if !ok || !restarted || finishedAt.Before(jobLastKnownAliveAt(job)) {
 		reason := fmt.Sprintf("job supervisor %d is gone without recording an exit status; the pod was not replaced (same hostname), and why the supervisor process ended could not be determined", job.PID)

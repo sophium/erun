@@ -8,13 +8,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 func DockerPushExecutionSpecFromSpecs(builds []dockerspec.DockerBuildSpec, pushes []dockerspec.DockerPushSpec) dockerspec.DockerPushExecutionSpec {
@@ -64,7 +64,7 @@ func publishDockerTarget(target model.DockerCommandTarget) model.DockerCommandTa
 	return target
 }
 
-func ResolveDockerPushExecution(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushExecutionSpec, error) {
+func ResolveDockerPushExecution(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
@@ -99,7 +99,7 @@ func ResolveDockerPushExecution(ctx core.Context, store projectseam.DockerStore,
 	return dockerspec.DockerPushExecutionSpec{Builds: builds, Pushes: pushes, ComponentCharts: charts}, nil
 }
 
-func ResolveDockerPushSpec(ctx core.Context, store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, now projectseam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushSpec, *dockerspec.DockerBuildSpec, error) {
+func ResolveDockerPushSpec(ctx core.Context, store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, now seam.NowFunc, target model.DockerCommandTarget) (dockerspec.DockerPushSpec, *dockerspec.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = dockerbuild.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 

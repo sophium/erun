@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-mcp/tools/shared/clouddeps"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
@@ -37,7 +38,7 @@ func UnexposeTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.C
 		}
 		projectRoot := toolio.FirstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		exposeStore, ok := any(runtime.Store).(expose.ExposeStore)
+		exposeStore, ok := any(runtime.Store).(seam.ExposeStore)
 		if !ok {
 			exposeStore = config.ConfigStore{}
 		}

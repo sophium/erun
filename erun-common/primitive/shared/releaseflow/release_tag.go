@@ -9,7 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 )
 
@@ -17,7 +17,7 @@ func shouldSkipExistingReleaseTag(args []string) bool {
 	return len(args) >= 3 && args[0] == "tag" && args[1] == "-a" && strings.TrimSpace(args[2]) != ""
 }
 
-func prepareReleaseTag(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc, command model.ReleaseCommandSpec) (bool, error) {
+func prepareReleaseTag(ctx core.Context, spec model.ReleaseSpec, runGit seam.GitCommandRunnerFunc, command model.ReleaseCommandSpec) (bool, error) {
 	tag := strings.TrimSpace(command.Args[2])
 	if tag == "" {
 		return false, nil
@@ -31,7 +31,7 @@ func prepareReleaseTag(ctx core.Context, spec model.ReleaseSpec, runGit gitx.Git
 	return CanSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func CanSkipExistingReleaseTag(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
+func CanSkipExistingReleaseTag(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag string, runGit seam.GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
@@ -62,7 +62,7 @@ func CanSkipExistingReleaseTag(ctx core.Context, spec model.ReleaseSpec, project
 // releaseTagMismatchError diagnoses a tag not at HEAD. An unpushed tag origin never
 // incorporated is an interrupted release's leftover; the refusal names the remedy rather
 // than reclaiming it automatically.
-func releaseTagMismatchError(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit gitx.GitCommandRunnerFunc) error {
+func releaseTagMismatchError(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit seam.GitCommandRunnerFunc) error {
 	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
 	pushed, err := gitref.GitRemoteTagExists(ctx, projectRoot, "origin", tag)
 	if err != nil || pushed {
@@ -78,7 +78,7 @@ func releaseTagMismatchError(ctx core.Context, spec model.ReleaseSpec, projectRo
 
 // releaseBaseBranchIncorporates reports whether origin's branch contains commit; known is
 // false when inconclusive, which is never treated as either answer.
-func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (reachable bool, known bool) {
+func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit seam.GitCommandRunnerFunc) (reachable bool, known bool) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" || commit == "" {
 		return false, false
@@ -105,7 +105,7 @@ const releaseStampWalkLimit = 20
 
 // ResolveReleaseVersionCommit names the version after the change, skipping leftover
 // unpushed stamp commits at HEAD so a retry neither stacks stamps nor mints a new version.
-func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, error) {
+func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit seam.GitValueResolverFunc, runGit seam.GitCommandRunnerFunc) (string, error) {
 	base, found, err := FindLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
 	if err != nil {
 		return "", err
@@ -119,7 +119,7 @@ func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, r
 
 // FindLeftoverReleaseStampBase walks past leading unpushed stamp commits; found is false when
 // HEAD carries none.
-func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (string, bool, error) {
+func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit seam.GitCommandRunnerFunc) (string, bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return "", false, nil
@@ -156,7 +156,7 @@ func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, 
 }
 
 // isLeftoverReleaseStampCommit: a stamp subject that origin/branch has not incorporated.
-func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
+func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit seam.GitCommandRunnerFunc) (bool, error) {
 	subject, err := GitCommitSubject(projectRoot, commit)
 	if err != nil {
 		return false, err
@@ -168,7 +168,7 @@ func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit git
 	return known && !reachable, nil
 }
 
-func deleteExistingReleaseTag(ctx core.Context, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) error {
+func deleteExistingReleaseTag(ctx core.Context, projectRoot, tag string, runGit seam.GitCommandRunnerFunc) error {
 	localExists, err := gitref.GitTagExists(ctx, projectRoot, tag)
 	if err != nil {
 		return err

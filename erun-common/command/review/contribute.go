@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -56,7 +57,7 @@ type SymlinkFunc func(target, link string) error
 type RemoveFunc func(path string) error
 
 // ResolveContributeCloneStatus reports whether the contribute clone exists.
-func ResolveContributeCloneStatus(homeDir string, runGit gitx.GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
+func ResolveContributeCloneStatus(homeDir string, runGit seam.GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
 	target, err := core.ContributeClonePath(homeDir)
 	if err != nil {
 		return ContributeCloneStatus{}, err
@@ -113,12 +114,12 @@ type WriteFileFunc func(path string, data []byte, perm os.FileMode) error
 // in the contribute shell, agents included, runs the local build. The shim is a
 // script, not a symlink: run.sh derives its source dir from $0. Its trace lines
 // are locked by integration goldens.
-func RunContributeClone(ctx core.Context, homeDir string, runGit gitx.GitCommandRunnerFunc) error {
+func RunContributeClone(ctx core.Context, homeDir string, runGit seam.GitCommandRunnerFunc) error {
 	return RunContributeCloneWithIO(ctx, homeDir, runGit, ContributeCloneIO{})
 }
 
 // RunContributeCloneWithIO is RunContributeClone with injectable filesystem seams.
-func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit gitx.GitCommandRunnerFunc, io ContributeCloneIO) error {
+func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit seam.GitCommandRunnerFunc, io ContributeCloneIO) error {
 	io = defaultContributeCloneIO(io)
 	ctx.Info("==> Cloning ERun for contribute mode")
 	status, err := ResolveContributeCloneStatus(homeDir, runGit, io.Stat)
@@ -140,7 +141,7 @@ func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit gitx.GitC
 	return nil
 }
 
-func cloneContributeRepository(ctx core.Context, status ContributeCloneStatus, runGit gitx.GitCommandRunnerFunc, io ContributeCloneIO) error {
+func cloneContributeRepository(ctx core.Context, status ContributeCloneStatus, runGit seam.GitCommandRunnerFunc, io ContributeCloneIO) error {
 	ctx.TraceCommand("", "mkdir", "-p", status.ParentDir)
 	if !ctx.DryRun {
 		if err := io.MkdirAll(status.ParentDir, 0o755); err != nil {

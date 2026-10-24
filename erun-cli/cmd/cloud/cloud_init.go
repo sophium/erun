@@ -12,11 +12,12 @@ import (
 	promptpkg "github.com/sophium/erun/cmd/shared/prompt"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func newCloudInitCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitCmd(store seam.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	return clicmd.NewCommandGroup(
 		"init",
 		"Initialize cloud provider configuration",
@@ -26,7 +27,7 @@ func newCloudInitCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner
 	)
 }
 
-func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitAWSCmd(store seam.CloudStore, promptRunner promptpkg.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params model.InitAWSCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "aws",
@@ -51,7 +52,7 @@ func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRun
 	return cmd
 }
 
-func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitCloudflareCmd(store seam.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params model.InitCloudflareCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "cloudflare",
@@ -79,7 +80,7 @@ func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner promptpkg.Pr
 	return cmd
 }
 
-func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
+func runCloudInitCloudflareCommand(ctx core.Context, store seam.CloudStore, promptRunner promptpkg.PromptRunner, selectRunner promptpkg.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
 	switch {
 	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
 		var err error
@@ -105,7 +106,7 @@ func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, pro
 	return cloudcli.WriteCloudProviderSaved(ctx, provider)
 }
 
-func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *cobra.Command {
+func newCloudInitERunCmd(store seam.CloudStore, deps cloud.CloudDependencies) *cobra.Command {
 	var params model.InitERunCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "erun",
@@ -131,7 +132,7 @@ func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *
 	return cmd
 }
 
-func runCloudInitERunCommand(ctx core.Context, store cloud.CloudStore, params model.InitERunCloudProviderParams, deps cloud.CloudDependencies) error {
+func runCloudInitERunCommand(ctx core.Context, store seam.CloudStore, params model.InitERunCloudProviderParams, deps cloud.CloudDependencies) error {
 	provider, err := cloud.InitERunCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err

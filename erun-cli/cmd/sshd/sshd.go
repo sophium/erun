@@ -12,15 +12,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot projectseam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
+func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
 	target := model.OpenParams{}
@@ -82,7 +82,7 @@ func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 }
 
 // runSSHDSyncCommand runs one workspace-sync pass, naming each refused precondition.
-func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, findProjectRoot projectseam.ProjectFinderFunc) error {
+func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) error {
 	params, err := workspace.ResolveWorkspaceSyncParams(result, findProjectRoot)
 	if err != nil {
 		return fmt.Errorf("workspace sync for %s/%s: %w", result.Tenant, result.Environment, err)
@@ -104,7 +104,7 @@ func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.
 	return cmdCtx.WriteResult(synced)
 }
 
-func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot projectseam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	// The desktop's Local shell gives no PTY exit, so the activity entry and recorded outcome
 	// are its only completion signal.
 	ctx.Info(fmt.Sprintf("==> SSHD init %s/%s", result.Tenant, result.Environment))
@@ -116,7 +116,7 @@ func runSSHDInitCommand(ctx core.Context, result config.OpenResult, publicKeyPat
 	return nil
 }
 
-func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot projectseam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitForTarget(ctx core.Context, result config.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, config.EnvConfig) error, findProjectRoot seam.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func validateSSHDInitDependencies(result config.OpenResult, saveEnvConfig func(s
 	return nil
 }
 
-func resolveSSHDEnvConfig(result config.OpenResult, publicKeyPath string, localPort int, findProjectRoot projectseam.ProjectFinderFunc) (config.EnvConfig, error) {
+func resolveSSHDEnvConfig(result config.OpenResult, publicKeyPath string, localPort int, findProjectRoot seam.ProjectFinderFunc) (config.EnvConfig, error) {
 	if publicKeyPath == "" {
 		publicKeyPath = result.EnvConfig.SSHD.PublicKeyPath
 	}
@@ -183,7 +183,7 @@ func resolveSSHDEnvConfig(result config.OpenResult, publicKeyPath string, localP
 	return updatedEnv, nil
 }
 
-func resolveSSHDWorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot projectseam.ProjectFinderFunc) string {
+func resolveSSHDWorkspaceSyncLocalPath(result config.OpenResult, findProjectRoot seam.ProjectFinderFunc) string {
 	if findProjectRoot != nil {
 		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
 			return strings.TrimSpace(projectRoot)

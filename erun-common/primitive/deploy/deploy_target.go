@@ -9,19 +9,19 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type BuildDeployStore interface {
-	DeployStore
-	projectseam.DockerStore
+	seam.DeployStore
+	seam.DockerStore
 }
 
-func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
+func resolveDeployTarget(command string, scopesTenantByFlag bool, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
 	result, err := resolveDeployTargetOpenResult(command, scopesTenantByFlag, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
 		return configpkg.OpenResult{}, err
@@ -32,7 +32,7 @@ func resolveDeployTarget(command string, scopesTenantByFlag bool, store DeploySt
 	return result, nil
 }
 
-func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
+func resolveDeployTargetOpenResult(command string, scopesTenantByFlag bool, store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc, target model.DeployTarget) (configpkg.OpenResult, error) {
 	store, findProjectRoot, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	if strings.TrimSpace(target.Tenant) != "" || strings.TrimSpace(target.Environment) != "" || strings.TrimSpace(target.RepoPath) != "" {
@@ -72,7 +72,7 @@ func refuseHostEnvironmentOperation(operation string, target configpkg.OpenResul
 
 // ResolveDeployTargetScope names the target for diagnostics before spec resolution;
 // it never fails, degrading to whatever the target already carried.
-func ResolveDeployTargetScope(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DeployTarget) (string, string) {
+func ResolveDeployTargetScope(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, target model.DeployTarget) (string, string) {
 	tenant := strings.TrimSpace(target.Tenant)
 	environment := strings.TrimSpace(target.Environment)
 	if tenant != "" && environment != "" {
@@ -85,7 +85,7 @@ func ResolveDeployTargetScope(store DeployStore, findProjectRoot projectseam.Pro
 	return strings.TrimSpace(resolved.Tenant), strings.TrimSpace(resolved.Environment)
 }
 
-func normalizeDeployDependencies(store DeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc) (DeployStore, projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc, DeployContextResolverFunc, projectseam.NowFunc) {
+func normalizeDeployDependencies(store seam.DeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) (seam.DeployStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.DeployContextResolverFunc, seam.NowFunc) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -104,7 +104,7 @@ func normalizeDeployDependencies(store DeployStore, findProjectRoot projectseam.
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
 }
 
-func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot projectseam.ProjectFinderFunc, resolveDockerBuildContext projectseam.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now projectseam.NowFunc) (BuildDeployStore, projectseam.ProjectFinderFunc, projectseam.BuildContextResolverFunc, DeployContextResolverFunc, projectseam.NowFunc) {
+func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, resolveDockerBuildContext seam.BuildContextResolverFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, now seam.NowFunc) (BuildDeployStore, seam.ProjectFinderFunc, seam.BuildContextResolverFunc, seam.DeployContextResolverFunc, seam.NowFunc) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
@@ -125,7 +125,7 @@ func NormalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot pr
 
 // freezeNow pins now to one instant so every snapshot version minted in one
 // deploy matches the persisted RuntimeVersion. It is idempotent.
-func freezeNow(now projectseam.NowFunc) projectseam.NowFunc {
+func freezeNow(now seam.NowFunc) seam.NowFunc {
 	if now == nil {
 		now = time.Now
 	}
@@ -133,7 +133,7 @@ func freezeNow(now projectseam.NowFunc) projectseam.NowFunc {
 	return func() time.Time { return frozen }
 }
 
-func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
+func ResolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) (model.DeployTarget, error) {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return model.DeployTarget{}, err
@@ -174,7 +174,7 @@ func deployResetsDatabase(version string) bool {
 	return strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
 
-func resolveDeployContextForTarget(findProjectRoot projectseam.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, target configpkg.OpenResult, componentName string) (model.KubernetesDeployContext, error) {
+func resolveDeployContextForTarget(findProjectRoot seam.ProjectFinderFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, target configpkg.OpenResult, componentName string) (model.KubernetesDeployContext, error) {
 	componentName = strings.TrimSpace(componentName)
 	if componentName == "" {
 		return resolveDeployContext(findProjectRoot, resolveKubernetesDeployContext, componentName)
@@ -192,7 +192,7 @@ func resolveDeployContextForTarget(findProjectRoot projectseam.ProjectFinderFunc
 	}, nil
 }
 
-func resolveDeployContext(findProjectRoot projectseam.ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, componentName string) (model.KubernetesDeployContext, error) {
+func resolveDeployContext(findProjectRoot seam.ProjectFinderFunc, resolveKubernetesDeployContext seam.DeployContextResolverFunc, componentName string) (model.KubernetesDeployContext, error) {
 	componentName = strings.TrimSpace(componentName)
 	if componentName == "" {
 		context, err := resolveKubernetesDeployContext()
@@ -230,7 +230,7 @@ func resolveDeployContext(findProjectRoot projectseam.ProjectFinderFunc, resolve
 	}, nil
 }
 
-func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (bool, error) {
+func tenantOwnsProjectRoot(store seam.DeployStore, tenant, cleanProjectRoot string) (bool, error) {
 	envs, err := store.ListEnvConfigs(tenant)
 	if err != nil {
 		if errors.Is(err, configpkg.ErrNotInitialized) {
@@ -247,7 +247,7 @@ func tenantOwnsProjectRoot(store DeployStore, tenant, cleanProjectRoot string) (
 	return false, nil
 }
 
-func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string, error) {
+func resolveProjectTenantForRoot(store seam.DeployStore, projectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		return "", err
@@ -284,7 +284,7 @@ func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string,
 	return "", fmt.Errorf("no tenant is configured for project %q", cleanProjectRoot)
 }
 
-func loadDefaultTenant(store DeployStore) (string, error) {
+func loadDefaultTenant(store seam.DeployStore) (string, error) {
 	toolConfig, _, err := store.LoadERunConfig()
 	if err != nil {
 		return "", err

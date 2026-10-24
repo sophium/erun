@@ -7,12 +7,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/buildversion"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveDockerImageReferenceForProject(ctx core.Context, now projectseam.NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (model.DockerImageReference, error) {
+func ResolveDockerImageReferenceForProject(ctx core.Context, now seam.NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (model.DockerImageReference, error) {
 	registry, insecure, err := ResolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
 		return model.DockerImageReference{}, err
@@ -47,7 +47,7 @@ func ResolveDockerImageReferenceForProject(ctx core.Context, now projectseam.Now
 
 // resolveDockerImageVersion mints a snapshot unless an override or a
 // version-from-build-dir file pins the version.
-func resolveDockerImageVersion(now projectseam.NowFunc, projectRoot, buildDir, versionOverride, selectedComponent string) (string, string, bool, string, error) {
+func resolveDockerImageVersion(now seam.NowFunc, projectRoot, buildDir, versionOverride, selectedComponent string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := buildversion.ResolveDockerBuildVersion(buildDir, projectRoot, selectedComponent)
 	if err != nil {
 		return "", "", false, "", err
@@ -66,7 +66,7 @@ func resolveDockerImageVersion(now projectseam.NowFunc, projectRoot, buildDir, v
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
-func NewDockerBuildSpec(ctx core.Context, store projectseam.DockerStore, now projectseam.NowFunc, projectRoot, environment string, buildContext model.DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (dockerspec.DockerBuildSpec, error) {
+func NewDockerBuildSpec(ctx core.Context, store seam.DockerStore, now seam.NowFunc, projectRoot, environment string, buildContext model.DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (dockerspec.DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = dockerspec.DockerBuildContextAtDir(buildContext.Dir)

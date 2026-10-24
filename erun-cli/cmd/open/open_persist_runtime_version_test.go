@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -17,7 +18,7 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	const stalePersisted = "1.0.86-snapshot-00000000000000"
 	const registry = "ghcr.io/sophium"
 
-	newRunner := func(resolver deploy.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
+	newRunner := func(resolver seam.HelmReleaseVersionResolverFunc, save func(string, config.EnvConfig) error) *resolvedOpenRunner {
 		return &resolvedOpenRunner{
 			ctx: core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)},
 			result: config.OpenResult{

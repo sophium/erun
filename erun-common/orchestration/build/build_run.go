@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
@@ -21,7 +22,7 @@ func BuildExecutionProfile(ctx core.Context) *model.BuildProfileSummary {
 	return &summary
 }
 
-func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runScript buildpkg.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) (map[string]struct{}, error) {
+func RunBuildExecutionBuilds(ctx core.Context, execution dockerspec.BuildExecutionSpec, deploySpecs []deploypkg.DeploySpec, runScript seam.BuildScriptRunnerFunc, build buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc) (map[string]struct{}, error) {
 	pushedTags := make(map[string]struct{}, len(execution.DockerBuilds)+len(execution.DockerPushes))
 	if execution.Script != nil {
 		if len(deploySpecs) > 0 {

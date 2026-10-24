@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
 	corev1 "k8s.io/api/core/v1"
@@ -117,7 +118,7 @@ func dockerBuildResourceExhaustionDiagnosis(output string, buildErr error) (stri
 	return dockerBuildResourceExhaustionDiagnosisWithRunner(output, buildErr, os.Getenv, opentarget.RunOpenKubectl)
 }
 
-func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr error, getenv func(string) string, runner opentarget.OpenKubectlRunnerFunc) (string, bool) {
+func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr error, getenv func(string) string, runner seam.OpenKubectlRunnerFunc) (string, bool) {
 	evidence, ok := dockerBuildResourceExhaustionEvidence(output, buildErr)
 	if !ok {
 		return "", false
@@ -135,7 +136,7 @@ func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr er
 
 // dockerBuildBlamedContainer names the in-pod dind container and best-effort reads its memory
 // limit; ok is false off-pod or when the container is not in this pod's spec.
-func dockerBuildBlamedContainer(getenv func(string) string, runner opentarget.OpenKubectlRunnerFunc) (container, limit string, ok bool) {
+func dockerBuildBlamedContainer(getenv func(string) string, runner seam.OpenKubectlRunnerFunc) (container, limit string, ok bool) {
 	if getenv == nil || strings.TrimSpace(getenv("KUBERNETES_SERVICE_HOST")) == "" {
 		return "", "", false
 	}
@@ -164,7 +165,7 @@ type dockerBuildPodSpecDiagnostic struct {
 }
 
 // dockerBuildContainerMemoryLimit reads a container's memory limit from this pod's spec; found is false when untrustworthy.
-func dockerBuildContainerMemoryLimit(podName, containerName string, runner opentarget.OpenKubectlRunnerFunc) (limit string, found bool) {
+func dockerBuildContainerMemoryLimit(podName, containerName string, runner seam.OpenKubectlRunnerFunc) (limit string, found bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
 		return "", false
@@ -175,7 +176,7 @@ func dockerBuildContainerMemoryLimit(podName, containerName string, runner opent
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)
 }
 
-func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner opentarget.OpenKubectlRunnerFunc) (limit string, found bool) {
+func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner seam.OpenKubectlRunnerFunc) (limit string, found bool) {
 	if runner == nil {
 		return "", false
 	}

@@ -12,8 +12,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared/dockerregistry"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
 )
 
@@ -65,7 +65,7 @@ var AnonymousPullabilityBaseline = map[string]bool{}
 
 // verifyModuleReferencedImagesAnonymouslyPullable requires every module-referenced image
 // to pull without credentials at this version, unless baselined.
-func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRoot string, execution dockerspec.BuildExecutionSpec, probe dockerregistry.AnonymousPullProbeFunc) error {
+func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRoot string, execution dockerspec.BuildExecutionSpec, probe seam.AnonymousPullProbeFunc) error {
 	names, err := DiscoverModuleReferencedImageNames(filepath.Join(strings.TrimSpace(projectRoot), "erun-devops", "terraform-erun"))
 	if err != nil {
 		return fmt.Errorf("scan terraform modules for image references: %w", err)
@@ -91,7 +91,7 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 	return nil
 }
 
-func verifyImageAnonymouslyPullable(ctx core.Context, name string, image model.DockerImageReference, probe dockerregistry.AnonymousPullProbeFunc) error {
+func verifyImageAnonymouslyPullable(ctx core.Context, name string, image model.DockerImageReference, probe seam.AnonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
 	if !registry.IsGHCRRegistry(registry.DockerRegistryFromImageTag(tag)) {
 		return nil

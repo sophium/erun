@@ -76,8 +76,6 @@ type ShellLaunchPreview struct {
 	Script   string
 }
 
-type ShellLauncherFunc func(configpkg.ShellLaunchParams) error
-
 func OpenParamsForArgs(args []string) (model.OpenParams, error) {
 	switch len(args) {
 	case 0:

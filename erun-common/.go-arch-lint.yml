@@ -37,6 +37,8 @@ components:
     in: "base/core"
   base-model:
     in: "base/model"
+  base-seam:
+    in: "base/seam"
   cmd-buildcost:
     in: "cmd/buildcost"
   cmd-debpkg:
@@ -159,6 +161,11 @@ deps:
   base-core:
     mayDependOn:
       - base-model
+  base-seam:
+    mayDependOn:
+      - base-config
+      - base-core
+      - base-model
   cmd-pkgmove:
     canUse:
       - golang-org-x-tools
@@ -167,6 +174,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-podruntime
       - infra-cloud
       - primitive-deploy
@@ -176,6 +184,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
       - infra-gitx
       - infra-kube
@@ -190,17 +199,18 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - orchestration-clusterread
       - primitive-build
       - primitive-deploy
       - primitive-shared-dockerbuild
       - primitive-shared-dockerspec
-      - primitive-shared-projectseam
   command-expose:
     mayDependOn:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-observe
       - infra-cloud
       - infra-kube
@@ -220,6 +230,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-activity
       - infra-cloud
       - infra-codesign
@@ -242,6 +253,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-activity
       - infra-cloud
       - infra-gitx
@@ -253,13 +265,13 @@ deps:
       - primitive-open
       - primitive-shared-gitref
       - primitive-shared-opentarget
-      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
   command-mergequeue:
     mayDependOn:
       - base-core
       - base-model
+      - base-seam
       - infra-gitx
       - primitive-shared-gitref
       - primitive-shared-jobexclusive
@@ -275,6 +287,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-ai
       - infra-activity
       - infra-kube
@@ -316,6 +329,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
       - infra-gitx
       - infra-platformclient
@@ -326,6 +340,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - command-lifecycle
       - infra-activity
       - infra-cloud
@@ -336,7 +351,6 @@ deps:
       - infra-remoteinit
       - primitive-deploy
       - primitive-open
-      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -345,6 +359,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-kube
       - orchestration-clusterread
       - primitive-deploy
@@ -355,10 +370,10 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-codesign
       - infra-mcp
       - primitive-open
-      - primitive-shared-projectseam
   infra-activity:
     mayDependOn:
       - base-config
@@ -371,6 +386,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-activity
       - infra-kube
       - infra-platformclient
@@ -388,6 +404,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-kube
   infra-helm:
     mayDependOn:
@@ -410,6 +427,7 @@ deps:
   infra-mcp:
     mayDependOn:
       - base-model
+      - base-seam
       - infra-kube
   infra-mcpauth:
     mayDependOn:
@@ -439,6 +457,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-helm
       - primitive-build
       - primitive-deploy
@@ -446,7 +465,6 @@ deps:
       - primitive-shared-diskheadroom
       - primitive-shared-dockerbuild
       - primitive-shared-dockerspec
-      - primitive-shared-projectseam
   orchestration-clusterread:
     mayDependOn:
       - base-config
@@ -457,9 +475,9 @@ deps:
     mayDependOn:
       - base-core
       - base-model
+      - base-seam
       - primitive-build
       - primitive-deploy
-      - primitive-shared-projectseam
   orchestration-diagnosis:
     mayDependOn:
       - base-config
@@ -473,8 +491,8 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
-      - infra-gitx
       - orchestration-build
       - orchestration-deploy
       - orchestration-release
@@ -487,6 +505,7 @@ deps:
     mayDependOn:
       - base-core
       - base-model
+      - base-seam
       - infra-registry
       - orchestration-build
       - primitive-build
@@ -494,13 +513,13 @@ deps:
       - primitive-push
       - primitive-shared-dockerregistry
       - primitive-shared-dockerspec
-      - primitive-shared-projectseam
       - primitive-shared-releaseflow
   primitive-build:
     mayDependOn:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-cloud
       - infra-gitx
       - infra-helm
@@ -525,6 +544,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-activity
       - infra-cloud
       - infra-helm
@@ -537,7 +557,6 @@ deps:
       - primitive-shared-dockerspec
       - primitive-shared-jobstate
       - primitive-shared-opentarget
-      - primitive-shared-projectseam
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
@@ -547,6 +566,7 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-activity
       - infra-cloud
       - infra-kube
@@ -556,6 +576,7 @@ deps:
   primitive-push:
     mayDependOn:
       - base-core
+      - base-seam
       - infra-helm
       - infra-registry
       - primitive-shared-dockerregistry
@@ -564,7 +585,7 @@ deps:
     mayDependOn:
       - base-core
       - base-model
-      - infra-gitx
+      - base-seam
       - primitive-shared-releaseclaim
       - primitive-shared-releaseflow
     canUse:
@@ -587,12 +608,12 @@ deps:
       - base-config
       - base-core
       - base-model
+      - base-seam
       - infra-kube
       - infra-registry
       - primitive-shared-buildversion
       - primitive-shared-cloudconfig
       - primitive-shared-dockerspec
-      - primitive-shared-projectseam
   primitive-shared-dockerregistry:
     mayDependOn:
       - base-core
@@ -619,11 +640,7 @@ deps:
       - base-config
       - base-core
       - base-model
-      - primitive-shared-projectseam
-  primitive-shared-projectseam:
-    mayDependOn:
-      - base-config
-      - base-model
+      - base-seam
   primitive-shared-releaseclaim:
     mayDependOn:
       - base-core
@@ -635,6 +652,7 @@ deps:
     mayDependOn:
       - base-core
       - base-model
+      - base-seam
       - infra-gitx
       - infra-helm
       - primitive-shared-diskheadroom

@@ -9,11 +9,11 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared/opentarget"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 type ListResult struct {
@@ -60,7 +60,7 @@ type ListTenantResult struct {
 	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
-func ResolveListResult(store ListStore, findProjectRoot projectseam.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
+func ResolveListResult(store seam.ListStore, findProjectRoot seam.ProjectFinderFunc, params model.OpenParams) (ListResult, error) {
 	if store == nil {
 		return ListResult{}, fmt.Errorf("store is required")
 	}
@@ -171,7 +171,7 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective co
 	return current
 }
 
-func listTenantResult(store ListStore, tenant model.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) (ListTenantResult, error) {
+func listTenantResult(store seam.ListStore, tenant model.TenantConfig, defaultTenant string, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) (ListTenantResult, error) {
 	envs, err := store.ListEnvConfigs(tenant.Name)
 	if err != nil {
 		return ListTenantResult{}, err
@@ -205,7 +205,7 @@ func configuredTenantForRepo(repoName string, tenants []model.TenantConfig) stri
 	return ""
 }
 
-func detectCurrentRepo(findProjectRoot projectseam.ProjectFinderFunc) (string, string, error) {
+func detectCurrentRepo(findProjectRoot seam.ProjectFinderFunc) (string, string, error) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -222,7 +222,7 @@ func detectCurrentRepo(findProjectRoot projectseam.ProjectFinderFunc) (string, s
 	return "", "", err
 }
 
-func loadListDefaultTenant(store ListStore) (string, error) {
+func loadListDefaultTenant(store seam.ListStore) (string, error) {
 	config, _, err := store.LoadERunConfig()
 	if err != nil {
 		return "", err
@@ -230,7 +230,7 @@ func loadListDefaultTenant(store ListStore) (string, error) {
 	return strings.TrimSpace(config.DefaultTenant), nil
 }
 
-func loadListOrchestrators(store ListStore) ([]model.ListOrchestratorResult, error) {
+func loadListOrchestrators(store seam.ListStore) ([]model.ListOrchestratorResult, error) {
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
 		return nil, nil
@@ -264,7 +264,7 @@ func loadListOrchestrators(store ListStore) ([]model.ListOrchestratorResult, err
 	return results, nil
 }
 
-func loadListDefaultEnvironment(store ListStore, tenant string) (string, error) {
+func loadListDefaultEnvironment(store seam.ListStore, tenant string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
 		return "", opentarget.ErrDefaultEnvironmentNotConfigured
@@ -274,12 +274,6 @@ func loadListDefaultEnvironment(store ListStore, tenant string) (string, error) 
 		return "", err
 	}
 	return strings.TrimSpace(config.DefaultEnvironment), nil
-}
-
-type ListStore interface {
-	configpkg.OpenStore
-	ListTenantConfigs() ([]model.TenantConfig, error)
-	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 }
 
 type ListEnvironmentResult struct {
@@ -318,7 +312,7 @@ type ListEnvironmentResult struct {
 	AutoStart          *bool                             `json:"autoStart,omitempty"`
 }
 
-func NewListEnvironmentResult(store ListStore, tenant model.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) ListEnvironmentResult {
+func NewListEnvironmentResult(store seam.ListStore, tenant model.TenantConfig, env configpkg.EnvConfig, effective configpkg.OpenResult, effectiveErr error, portAllocations map[string]model.EnvironmentLocalPorts) ListEnvironmentResult {
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
 	runtimeVersionLine := listRuntimeVersionLine(tenant.Name, env)
 	return ListEnvironmentResult{

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared/gitref"
 	"github.com/sophium/erun/erun-common/primitive/shared/jobexclusive"
@@ -20,8 +21,8 @@ import (
 type GateMergeWorkingTreeDependencies struct {
 	WorkingTreeClean func(ctx core.Context, root string) (bool, error)
 	ResolveRef       func(ctx core.Context, root, ref string) (string, error)
-	RunGit           gitx.GitCommandRunnerFunc
-	ConflictedFiles  func(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error)
+	RunGit           seam.GitCommandRunnerFunc
+	ConflictedFiles  func(root string, runGit seam.GitCommandRunnerFunc) ([]string, error)
 	StagedPaths      func(ctx core.Context, root string) ([]string, error)
 	RunAtlasHash     AtlasMigrateHashRunnerFunc
 }

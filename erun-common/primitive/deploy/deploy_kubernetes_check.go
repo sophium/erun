@@ -10,9 +10,9 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"gopkg.in/yaml.v3"
 )
 
@@ -25,7 +25,7 @@ func ResolveKubernetesDeployContext() (model.KubernetesDeployContext, error) {
 	return KubernetesDeployContextAtDir(dir), nil
 }
 
-func ResolveCurrentKubernetesDeployContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]model.KubernetesDeployContext, error) {
+func ResolveCurrentKubernetesDeployContexts(findProjectRoot seam.ProjectFinderFunc, resolveDeployContext seam.DeployContextResolverFunc, projectRootOverride string) ([]model.KubernetesDeployContext, error) {
 	if resolveDeployContext == nil {
 		return nil, fmt.Errorf("helm chart not found in current directory")
 	}

@@ -8,9 +8,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
-func InitAWSCloudProvider(ctx core.Context, store CloudStore, params model.InitAWSCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
+func InitAWSCloudProvider(ctx core.Context, store seam.CloudStore, params model.InitAWSCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
 		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
@@ -102,7 +103,7 @@ func hasAWSProfileConfig(params model.InitAWSCloudProviderParams) bool {
 		strings.TrimSpace(params.Region) != ""
 }
 
-func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
+func LoginCloudProviderAlias(ctx core.Context, store seam.CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v flow=%s", strings.TrimSpace(params.Alias), params.Force, strings.TrimSpace(params.Flow)))
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
@@ -134,7 +135,7 @@ func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params model.Cl
 	return CloudProviderTokenStatus(provider, deps), nil
 }
 
-func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
+func LogoutCloudProviderAlias(ctx core.Context, store seam.CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
 		return model.CloudProviderStatus{}, err
@@ -161,7 +162,7 @@ func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params model.C
 	return CloudProviderTokenStatus(provider, deps), nil
 }
 
-func SetupCloudProviderOIDC(ctx core.Context, store CloudStore, params model.CloudBearerParams, deps CloudDependencies) (model.CloudProviderStatus, CloudBearerToken, error) {
+func SetupCloudProviderOIDC(ctx core.Context, store seam.CloudStore, params model.CloudBearerParams, deps CloudDependencies) (model.CloudProviderStatus, CloudBearerToken, error) {
 	if store == nil {
 		return model.CloudProviderStatus{}, CloudBearerToken{}, fmt.Errorf("store is required")
 	}
@@ -272,7 +273,7 @@ func ExportCloudProviderCredentials(ctx core.Context, store configpkg.CloudReadS
 	}
 }
 
-func SetEnvironmentCloudProviderAlias(ctx core.Context, store EnvironmentCloudAliasStore, params model.SetEnvironmentCloudAliasParams) (configpkg.EnvConfig, error) {
+func SetEnvironmentCloudProviderAlias(ctx core.Context, store seam.EnvironmentCloudAliasStore, params model.SetEnvironmentCloudAliasParams) (configpkg.EnvConfig, error) {
 	if store == nil {
 		return configpkg.EnvConfig{}, fmt.Errorf("store is required")
 	}
@@ -325,7 +326,7 @@ func normalizeEnvironmentCloudProviderAliasParams(params model.SetEnvironmentClo
 	}
 }
 
-func saveManagedCloudAliasIfNeeded(ctx core.Context, store EnvironmentCloudAliasStore, tenant string, config configpkg.EnvConfig) (configpkg.EnvConfig, error) {
+func saveManagedCloudAliasIfNeeded(ctx core.Context, store seam.EnvironmentCloudAliasStore, tenant string, config configpkg.EnvConfig) (configpkg.EnvConfig, error) {
 	if !config.RemoteWorktree() || config.ManagedCloud {
 		return config, nil
 	}

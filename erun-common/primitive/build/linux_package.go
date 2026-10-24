@@ -9,16 +9,16 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
 // A linux package component is never an image: a plain build runs its `test` stage to a cache-only
 // output, and only `erun build --release` exports and uploads its `dist` .deb files.
 
 // ResolveCurrentLinuxPackageContexts resolves the linux package components the current directory scopes a build to.
-func ResolveCurrentLinuxPackageContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, target model.DockerCommandTarget) ([]dockerspec.LinuxPackageContext, error) {
+func ResolveCurrentLinuxPackageContexts(findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, target model.DockerCommandTarget) ([]dockerspec.LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = dockerspec.ResolveDockerBuildContext
 	}
@@ -51,7 +51,7 @@ func ResolveCurrentLinuxPackageContexts(findProjectRoot projectseam.ProjectFinde
 	return nil, dockerspec.ErrLinuxPackageBuildNotFound
 }
 
-func resolveCurrentDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
+func resolveCurrentDevopsLinuxDir(findProjectRoot seam.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil
@@ -77,7 +77,7 @@ func resolveCurrentDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc,
 	return resolveProjectRootDevopsLinuxDir(findProjectRoot, projectRoot)
 }
 
-func resolveProjectRootDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func resolveProjectRootDevopsLinuxDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	if projectRoot == "" {
 		return "", false, nil
@@ -102,7 +102,7 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderF
 	}
 }
 
-func detectedProjectRootDevopsLinuxDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func detectedProjectRootDevopsLinuxDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	tenant, ok := dockerbuild.DetectedProjectTenant(findProjectRoot, projectRoot)
 	if !ok {
 		return "", false, nil

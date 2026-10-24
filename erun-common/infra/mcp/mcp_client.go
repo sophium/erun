@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 )
 
 // Client side of the per-environment MCP edge, over net/http rather than the MCP SDK so it
@@ -55,12 +56,9 @@ func MCPLocalEndpoint(port int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", port, MCPServerPath)
 }
 
-// MCPTokenMinter runs before every request so long calls never carry an expired token.
-type MCPTokenMinter func() (string, error)
-
 type MCPToolCallParams struct {
 	Endpoint      string
-	MintToken     MCPTokenMinter
+	MintToken     seam.MCPTokenMinter
 	ClientVersion string
 	Tool          string
 	Arguments     map[string]any
@@ -70,7 +68,7 @@ type MCPToolCallParams struct {
 
 type MCPToolListParams struct {
 	Endpoint      string
-	MintToken     MCPTokenMinter
+	MintToken     seam.MCPTokenMinter
 	ClientVersion string
 	// IdleProbe skips idle-timer activity; listing tools is read-only.
 	IdleProbe bool
@@ -133,7 +131,7 @@ func ListMCPTools(ctx context.Context, params MCPToolListParams) (model.MCPToolL
 
 type mcpSession struct {
 	endpoint      string
-	mintToken     MCPTokenMinter
+	mintToken     seam.MCPTokenMinter
 	clientVersion string
 	client        *http.Client
 	sessionID     string
@@ -155,7 +153,7 @@ type mcpSession struct {
 }
 
 // newMCPSession skips the handshake so a relay forwarding the client's own initialize shares framing.
-func newMCPSession(endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe, awaitStartup bool) (*mcpSession, error) {
+func newMCPSession(endpoint string, mintToken seam.MCPTokenMinter, clientVersion string, idleProbe, awaitStartup bool) (*mcpSession, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return nil, fmt.Errorf("MCP endpoint is required")
@@ -196,7 +194,7 @@ func localMCPEndpointPort(endpoint string) int {
 }
 
 // openMCPSession serves typed callers, which reattach and retry on their own, so no startup wait.
-func openMCPSession(ctx context.Context, endpoint string, mintToken MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
+func openMCPSession(ctx context.Context, endpoint string, mintToken seam.MCPTokenMinter, clientVersion string, idleProbe bool) (*mcpSession, error) {
 	session, err := newMCPSession(endpoint, mintToken, clientVersion, idleProbe, false)
 	if err != nil {
 		return nil, err

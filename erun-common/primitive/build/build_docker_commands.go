@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared/cloudconfig"
@@ -397,7 +398,7 @@ func isHostedRegistry(registry string) bool {
 
 // DockerRegistryLoginWithHostedRegistry logs in to the hosted registry with the operator's
 // erun-api bearer token, deferring to DockerRegistryLogin otherwise.
-func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps cloud.CloudDependencies) DockerRegistryLoginFunc {
+func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps cloud.CloudDependencies) seam.DockerRegistryLoginFunc {
 	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if isHostedRegistry(registry) {
 			return hostedRegistryDockerLogin(store, deps, stdout, stderr)
@@ -527,7 +528,7 @@ func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 	return errors.New(sb.String())
 }
 
-func RunScriptSpec(ctx core.Context, script dockerspec.ScriptSpec, run BuildScriptRunnerFunc) error {
+func RunScriptSpec(ctx core.Context, script dockerspec.ScriptSpec, run seam.BuildScriptRunnerFunc) error {
 	if run == nil {
 		run = BuildScriptRunner
 	}

@@ -11,14 +11,14 @@ import (
 	"github.com/sophium/erun/cmd/shared/envscope"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 	"github.com/spf13/cobra"
 )
 
-func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
+func NewResizeCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, resolveDeployContext seam.DeployContextResolverFunc, deployHelmChart deploy.HelmChartDeployerFunc, resolveOpen envscope.OpenResolver) *cobra.Command {
 	var tenant, environment, cpu, memory, dindCPU, dindMemory, orchestrator string
 	var applyRecommendation, overrideLease bool
 	cmd := &cobra.Command{

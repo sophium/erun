@@ -11,13 +11,14 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // ResolveControlPlaneVersionDrift compares each erun-hosted plane (or only alias) against the
 // published version; under DryRun it makes no network calls.
-func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished registry.RuntimeRegistryVersionResolverFunc) (model.ControlPlaneVersionDrift, error) {
+func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished seam.RuntimeRegistryVersionResolverFunc) (model.ControlPlaneVersionDrift, error) {
 	deps = cloud.NormalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
 	if err != nil {

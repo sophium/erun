@@ -8,12 +8,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/seam"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerbuild"
 	"github.com/sophium/erun/erun-common/primitive/shared/dockerspec"
-	"github.com/sophium/erun/erun-common/primitive/shared/projectseam"
 )
 
-func ResolveCurrentDockerBuildContexts(findProjectRoot projectseam.ProjectFinderFunc, resolveBuildContext projectseam.BuildContextResolverFunc, target model.DockerCommandTarget) ([]model.DockerBuildContext, error) {
+func ResolveCurrentDockerBuildContexts(findProjectRoot seam.ProjectFinderFunc, resolveBuildContext seam.BuildContextResolverFunc, target model.DockerCommandTarget) ([]model.DockerBuildContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = dockerspec.ResolveDockerBuildContext
 	}
@@ -45,7 +45,7 @@ func ResolveCurrentDockerBuildContexts(findProjectRoot projectseam.ProjectFinder
 	return nil, dockerspec.ErrDockerBuildContextNotFound
 }
 
-func resolveCurrentDevopsDockerDir(findProjectRoot projectseam.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
+func resolveCurrentDevopsDockerDir(findProjectRoot seam.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil
@@ -67,7 +67,7 @@ func resolveCurrentDevopsDockerDir(findProjectRoot projectseam.ProjectFinderFunc
 }
 
 // resolveConventionDevopsDockerDir tries the cwd -devops shortcut, then <tenant>-devops/docker from the project root.
-func resolveConventionDevopsDockerDir(findProjectRoot projectseam.ProjectFinderFunc, dir, projectRoot string) (string, bool, error) {
+func resolveConventionDevopsDockerDir(findProjectRoot seam.ProjectFinderFunc, dir, projectRoot string) (string, bool, error) {
 	dockerDir := filepath.Join(dir, "docker")
 	if strings.HasSuffix(filepath.Base(dir), "-devops") {
 		if ok, err := dockerbuild.IsDockerBuildModuleDir(dockerDir); err != nil {
@@ -96,7 +96,7 @@ func ResolveComponentAwareDockerDir(projectRoot, selectedComponent string) (stri
 	return dockerbuild.ResolveAndValidateDockerDir(projectRoot, paths.Docker, fmt.Sprintf("components.%s.docker", name))
 }
 
-func ResolveProjectRootDevopsDockerDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func ResolveProjectRootDevopsDockerDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	if projectRoot == "" {
 		return "", false, nil
@@ -121,7 +121,7 @@ func ResolveProjectRootDevopsDockerDir(findProjectRoot projectseam.ProjectFinder
 	}
 }
 
-func detectedProjectRootDevopsDockerDir(findProjectRoot projectseam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
+func detectedProjectRootDevopsDockerDir(findProjectRoot seam.ProjectFinderFunc, projectRoot string) (string, bool, error) {
 	tenant, ok := dockerbuild.DetectedProjectTenant(findProjectRoot, projectRoot)
 	if !ok {
 		return "", false, nil
@@ -179,7 +179,7 @@ func projectHasDevopsFolder(projectRoot string) (bool, error) {
 }
 
 // ResolveDockerBuildEnvConfig returns the saved EnvConfig a build resolves to, or nil on any miss or error.
-func ResolveDockerBuildEnvConfig(store projectseam.DockerStore, findProjectRoot projectseam.ProjectFinderFunc, target model.DockerCommandTarget) *config.EnvConfig {
+func ResolveDockerBuildEnvConfig(store seam.DockerStore, findProjectRoot seam.ProjectFinderFunc, target model.DockerCommandTarget) *config.EnvConfig {
 	projectRoot, err := dockerbuild.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return dockerbuild.InjectedDockerBuildEnvConfig(nil)
