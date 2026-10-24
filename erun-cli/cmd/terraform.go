@@ -8,10 +8,11 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/terraform"
 	"github.com/spf13/cobra"
 )
 
-func newTerraformCmd(store common.TerraformStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newTerraformCmd(store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "terraform",
 		Short: "Run a platform's per-env Terraform from the right folder automatically",
@@ -26,7 +27,7 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 		SilenceUsage: true,
 	}
 	cmd.AddCommand(
-		newTerraformOperationCmd(store, findProjectRoot, common.TerraformInit, "init [TENANT] [ENVIRONMENT]",
+		newTerraformOperationCmd(store, findProjectRoot, terraform.TerraformInit, "init [TENANT] [ENVIRONMENT]",
 			"Initialize the env's Terraform: download providers, wire state, and record the provider lock",
 			"Initialize the env's Terraform root before plan/apply/destroy.\n\n"+
 				"Downloads providers into the durable home directory and points the local backend at the env's state "+
@@ -36,7 +37,7 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 				"-lockfile=readonly and only refreshes the provider cache. Run this once, and again after changing "+
 				"providers; plan/apply/destroy no longer init implicitly.",
 			"  erun terraform init frs local\n  erun terraform init frs prod --dry-run"),
-		newTerraformOperationCmd(store, findProjectRoot, common.TerraformApply, "apply [TENANT] [ENVIRONMENT]",
+		newTerraformOperationCmd(store, findProjectRoot, terraform.TerraformApply, "apply [TENANT] [ENVIRONMENT]",
 			"Plan and apply the env's Terraform (prompts for the environment name)",
 			"Plan and apply the env's Terraform root.\n\n"+
 				"Resolves the env's Terraform root (terraform-<tenant>/<environment>/ or "+
@@ -46,9 +47,9 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 				"ingress, workloads); state is kept on the durable home directory. Pass --confirm-environment <env> for "+
 				"non-interactive use, or --dry-run to preview the resolved terraform commands.",
 			"  erun terraform apply frs prod\n  erun terraform apply frs prod --dry-run"),
-		newTerraformOperationCmd(store, findProjectRoot, common.TerraformPlan, "plan [TENANT] [ENVIRONMENT]",
+		newTerraformOperationCmd(store, findProjectRoot, terraform.TerraformPlan, "plan [TENANT] [ENVIRONMENT]",
 			"Show the env's Terraform plan without applying", "", "  erun terraform plan frs prod"),
-		newTerraformOperationCmd(store, findProjectRoot, common.TerraformDestroy, "destroy [TENANT] [ENVIRONMENT]",
+		newTerraformOperationCmd(store, findProjectRoot, terraform.TerraformDestroy, "destroy [TENANT] [ENVIRONMENT]",
 			"Plan and apply a destroy of the env's Terraform (prompts for the environment name)",
 			"Plan and apply a destroy of the env's Terraform root.\n\n"+
 				"Resolves the env's Terraform root (terraform-<tenant>/ or <tenant>-devops/terraform-<tenant>/), plans a destroy, then prompts you to type the environment "+
@@ -59,7 +60,7 @@ func newTerraformCmd(store common.TerraformStore, findProjectRoot common.Project
 	return cmd
 }
 
-func newTerraformOperationCmd(store common.TerraformStore, findProjectRoot common.ProjectFinderFunc, op common.TerraformOperation, use, short, long, example string) *cobra.Command {
+func newTerraformOperationCmd(store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc, op terraform.TerraformOperation, use, short, long, example string) *cobra.Command {
 	var tenantFlag, environmentFlag, confirmEnvironment string
 	cmd := &cobra.Command{
 		Use:          use,
@@ -75,13 +76,13 @@ func newTerraformOperationCmd(store common.TerraformStore, findProjectRoot commo
 	addDryRunFlag(cmd)
 	cmd.Flags().StringVar(&tenantFlag, "tenant", "", "Target a specific tenant (defaults to the current scope)")
 	cmd.Flags().StringVar(&environmentFlag, "environment", "", "Target a specific environment (defaults to the tenant's default)")
-	if op == common.TerraformApply || op == common.TerraformDestroy {
+	if op == terraform.TerraformApply || op == terraform.TerraformDestroy {
 		cmd.Flags().StringVar(&confirmEnvironment, "confirm-environment", "", "Confirm by restating the environment name, bypassing the interactive prompt (non-interactive use)")
 	}
 	return cmd
 }
 
-func runTerraformCommand(ctx core.Context, store common.TerraformStore, findProjectRoot common.ProjectFinderFunc, op common.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
+func runTerraformCommand(ctx core.Context, store terraform.TerraformStore, findProjectRoot common.ProjectFinderFunc, op terraform.TerraformOperation, args []string, tenantFlag, environmentFlag, confirmEnvironment string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}
@@ -92,7 +93,7 @@ func runTerraformCommand(ctx core.Context, store common.TerraformStore, findProj
 	tenant := terraformArgOrFlag(tenantFlag, args, 0)
 	environment := terraformArgOrFlag(environmentFlag, args, 1)
 
-	result, err := common.RunTerraform(ctx, common.TerraformParams{
+	result, err := terraform.RunTerraform(ctx, terraform.TerraformParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Operation:   op,
@@ -107,7 +108,7 @@ func runTerraformCommand(ctx core.Context, store common.TerraformStore, findProj
 // writeTerraformCommandOutput prints the dispatched run's captured output (a
 // dispatch has no local Directory to print progress against) and the final
 // status line, non-dry-run only — dry-run already traced the full plan.
-func writeTerraformCommandOutput(ctx core.Context, result common.TerraformResult) error {
+func writeTerraformCommandOutput(ctx core.Context, result terraform.TerraformResult) error {
 	stdout := strings.TrimSpace(result.Stdout)
 	stderr := strings.TrimSpace(result.Stderr)
 	if stdout != "" {
@@ -143,8 +144,8 @@ func terraformArgOrFlag(flag string, args []string, index int) string {
 
 // terraformConfirmer guards apply/destroy against hitting the wrong env; init
 // and plan never mutate cloud/cluster state, so they need no confirmation.
-func terraformConfirmer(op common.TerraformOperation, confirmEnvironment string) common.TerraformConfirmFunc {
-	if op != common.TerraformApply && op != common.TerraformDestroy {
+func terraformConfirmer(op terraform.TerraformOperation, confirmEnvironment string) terraform.TerraformConfirmFunc {
+	if op != terraform.TerraformApply && op != terraform.TerraformDestroy {
 		return nil
 	}
 	return func(ctx core.Context, environment string) error {

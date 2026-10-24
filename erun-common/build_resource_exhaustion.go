@@ -171,14 +171,14 @@ func dockerBuildResourceExhaustionEvidence(output string, buildErr error) (strin
 // not establish one, in which case the caller returns the plain build failure
 // reason unchanged.
 func dockerBuildResourceExhaustionDiagnosis(output string, buildErr error) (string, bool) {
-	return dockerBuildResourceExhaustionDiagnosisWithRunner(output, buildErr, os.Getenv, runOpenKubectl)
+	return dockerBuildResourceExhaustionDiagnosisWithRunner(output, buildErr, os.Getenv, RunOpenKubectl)
 }
 
 // dockerBuildResourceExhaustionDiagnosisWithRunner is
 // dockerBuildResourceExhaustionDiagnosis with the environment lookup and
 // Kubernetes call injectable, so a test can simulate being in-pod (or not)
 // and supply a fake pod response instead of shelling out to a real kubectl.
-func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr error, getenv func(string) string, runner openKubectlRunnerFunc) (string, bool) {
+func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr error, getenv func(string) string, runner OpenKubectlRunnerFunc) (string, bool) {
 	evidence, ok := dockerBuildResourceExhaustionEvidence(output, buildErr)
 	if !ok {
 		return "", false
@@ -200,19 +200,19 @@ func dockerBuildResourceExhaustionDiagnosisWithRunner(output string, buildErr er
 // Kubernetes API. ok is false off-pod (a plain workstation build has no
 // sidecar to blame) or when the container cannot be found in this pod's own
 // spec -- this never guesses a container or a limit it did not read back.
-func dockerBuildBlamedContainer(getenv func(string) string, runner openKubectlRunnerFunc) (container, limit string, ok bool) {
+func dockerBuildBlamedContainer(getenv func(string) string, runner OpenKubectlRunnerFunc) (container, limit string, ok bool) {
 	if getenv == nil || strings.TrimSpace(getenv("KUBERNETES_SERVICE_HOST")) == "" {
 		return "", "", false
 	}
-	podName := currentJobHostname()
+	podName := CurrentJobHostname()
 	if podName == "" {
 		return "", "", false
 	}
-	memory, found := dockerBuildContainerMemoryLimit(podName, runtimeDindContainerName, runner)
+	memory, found := dockerBuildContainerMemoryLimit(podName, RuntimeDindContainerName, runner)
 	if !found {
 		return "", "", false
 	}
-	return runtimeDindContainerName, memory, true
+	return RuntimeDindContainerName, memory, true
 }
 
 // dockerBuildPodSpecDiagnostic is the minimal `kubectl get pod -o json` shape
@@ -238,20 +238,20 @@ type dockerBuildPodSpecDiagnostic struct {
 // container is absent from the response. Dispatches to the subprocess or
 // library path per the kubectl-pod-get execution mode (see
 // execution_mode.go).
-func dockerBuildContainerMemoryLimit(podName, containerName string, runner openKubectlRunnerFunc) (limit string, found bool) {
+func dockerBuildContainerMemoryLimit(podName, containerName string, runner OpenKubectlRunnerFunc) (limit string, found bool) {
 	podName = strings.TrimSpace(podName)
 	if podName == "" {
 		return "", false
 	}
 	if config.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
-		return libraryDockerBuildContainerMemoryLimit(podName, containerName)
+		return LibraryDockerBuildContainerMemoryLimit(podName, containerName)
 	}
 	return defaultDockerBuildContainerMemoryLimit(podName, containerName, runner)
 }
 
 // defaultDockerBuildContainerMemoryLimit is the subprocess-backed path
 // dockerBuildContainerMemoryLimit dispatches to by default.
-func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner openKubectlRunnerFunc) (limit string, found bool) {
+func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runner OpenKubectlRunnerFunc) (limit string, found bool) {
 	if runner == nil {
 		return "", false
 	}
@@ -273,10 +273,10 @@ func defaultDockerBuildContainerMemoryLimit(podName, containerName string, runne
 	return "", false
 }
 
-// libraryDockerBuildContainerMemoryLimit is the library-backed alternative to
+// LibraryDockerBuildContainerMemoryLimit is the library-backed alternative to
 // defaultDockerBuildContainerMemoryLimit, resolving the same pod via
 // k8s.io/client-go instead of shelling out to kubectl.
-func libraryDockerBuildContainerMemoryLimit(podName, containerName string) (limit string, found bool) {
+func LibraryDockerBuildContainerMemoryLimit(podName, containerName string) (limit string, found bool) {
 	pod, err := kube.LibraryGetPod(podName)
 	if err != nil {
 		return "", false

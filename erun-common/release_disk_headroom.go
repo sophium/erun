@@ -396,7 +396,7 @@ func dockerReclaimableBytes(limit time.Duration) (uint64, error) {
 		if !found || strings.EqualFold(strings.TrimSpace(name), "local volumes") {
 			continue
 		}
-		bytes, ok := parseDockerSize(value)
+		bytes, ok := ParseDockerSize(value)
 		if !ok {
 			continue
 		}
@@ -454,7 +454,7 @@ func parseBuildxDuReclaimable(output string) (uint64, bool) {
 		if !found || !strings.EqualFold(strings.TrimSpace(name), "reclaimable") {
 			continue
 		}
-		return parseDockerSize(value)
+		return ParseDockerSize(value)
 	}
 	return 0, false
 }
@@ -468,9 +468,9 @@ var dockerSizeUnits = []struct {
 	{"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"KB", 1e3}, {"B", 1},
 }
 
-// parseDockerSize reads one docker-rendered size ("8.914GB", "0B"), ignoring
+// ParseDockerSize reads one docker-rendered size ("8.914GB", "0B"), ignoring
 // any trailing percentage docker appends to some rows ("77.29GB (100%)").
-func parseDockerSize(value string) (uint64, bool) {
+func ParseDockerSize(value string) (uint64, bool) {
 	value = strings.TrimSpace(value)
 	if idx := strings.Index(value, " "); idx >= 0 {
 		value = value[:idx]
@@ -692,10 +692,10 @@ func environmentPathsSharingFilesystem(limits diskHeadroomTimeouts, measured str
 		return nil
 	}
 	var candidates []string
-	if root, err := workCloneRoot(""); err == nil {
+	if root, err := WorkCloneRoot(""); err == nil {
 		candidates = append(candidates, root)
 	}
-	if home, err := workCloneUserHomeDir(); err == nil {
+	if home, err := WorkCloneUserHomeDir(); err == nil {
 		if resolved := strings.TrimSpace(home); resolved != "" {
 			candidates = append(candidates, filepath.Join(resolved, ".cache"))
 		}

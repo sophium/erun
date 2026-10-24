@@ -29,13 +29,13 @@ type ObservedServicePort struct {
 	Protocol string `json:"protocol,omitempty"`
 }
 
-// serviceList is a deliberately partial parse of `kubectl get service -o
+// ServiceList is a deliberately partial parse of `kubectl get service -o
 // json`, matching the ingressList idiom next door.
-type serviceList struct {
-	Items []serviceItem `json:"items"`
+type ServiceList struct {
+	Items []ServiceItem `json:"items"`
 }
 
-type serviceItem struct {
+type ServiceItem struct {
 	Metadata struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
@@ -49,29 +49,29 @@ type serviceItem struct {
 	} `json:"spec"`
 }
 
-// fetchObservedServices names the read, not the operation that asked for it:
+// FetchObservedServices names the read, not the operation that asked for it:
 // `erun services` and the desktop's Ports tab reach this through
 // ListEnvironmentServices as well as observe does, and an error that led with
 // "observe:" would name a command the caller never ran (root AGENTS.md's
 // diagnostic record). RunObservation prefixes its own name onto what it gets
 // back, so its output is unchanged.
-func fetchObservedServices(args []string) ([]ObservedService, error) {
-	raw, stderr, err := runObserveKubectl(args)
+func FetchObservedServices(args []string) ([]ObservedService, error) {
+	raw, stderr, err := RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get service: %w", kubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get service: %w", KubectlErrorMessage(err, stderr))
 	}
-	var list serviceList
+	var list ServiceList
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("parse service: %w", err)
 	}
-	return parseObservedServices(list), nil
+	return ParseObservedServices(list), nil
 }
 
-// parseObservedServices is split out as a pure function so the mapping is
+// ParseObservedServices is split out as a pure function so the mapping is
 // testable without a kubectl process. Services are sorted by name: the list
 // feeds a picker, and kubectl's own ordering is not something a UI should
 // inherit.
-func parseObservedServices(list serviceList) []ObservedService {
+func ParseObservedServices(list ServiceList) []ObservedService {
 	services := make([]ObservedService, 0, len(list.Items))
 	for _, item := range list.Items {
 		if item.Metadata.Name == "" {

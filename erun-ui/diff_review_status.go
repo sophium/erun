@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -176,7 +176,7 @@ func applyDiffReviewLadderState(ctx context.Context, client *platformclient.Plat
 func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
-			count := eruncommon.CountUnresolvedThreads(comments)
+			count := reviewpkg.CountUnresolvedThreads(comments)
 			status.UnresolvedThreads = &count
 		}
 	}

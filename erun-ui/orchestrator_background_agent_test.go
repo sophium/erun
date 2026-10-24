@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // agentTestApp is an orchestrator test app over a given fake Claude service,
@@ -31,7 +31,7 @@ func agentTestApp(t *testing.T, agents *fakeClaudeAgents) (*App, *agentLaunches,
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	launches := &agentLaunches{}
 	app.deps.claudeAgents = agents
-	app.deps.resolveOrchestratorLaunch = func(_ eruncommon.OrchestratorLaunch, agentID, _, _ string) (string, []string, error) {
+	app.deps.resolveOrchestratorLaunch = func(_ orchestrator.OrchestratorLaunch, agentID, _, _ string) (string, []string, error) {
 		launches.mu.Lock()
 		launches.agentIDs = append(launches.agentIDs, agentID)
 		launches.mu.Unlock()
@@ -209,7 +209,7 @@ func TestMovingEffortToMaxRecreatesTheAgentOnItsCurrentConversation(t *testing.T
 	first := agents.named(id)[0]
 	agents.clear(first.ID, "b4196e75-0000-4000-8000-000000000000")
 
-	_, err := eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: id, Effort: "max"})
+	_, err := orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{OrchestratorID: id, Effort: "max"})
 	mustNoErr(t, err, "SetOrchestratorEffort")
 	_, err = app.RestartOrchestrator(id, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")
@@ -238,7 +238,7 @@ func TestARestartAppliesSettingsWithoutRecreatingTheAgent(t *testing.T) {
 	id := startAgentOrchestrator(t, app, "erun")
 	agentID := agents.named(id)[0].ID
 
-	_, err := eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: id, Model: "sonnet"})
+	_, err := orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{OrchestratorID: id, Model: "sonnet"})
 	mustNoErr(t, err, "SetOrchestratorModel")
 	restarted, err := app.RestartOrchestrator(id, 80, 24)
 	mustNoErr(t, err, "RestartOrchestrator")

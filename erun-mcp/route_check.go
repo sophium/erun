@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 // route_check.go mirrors review.go's platform-call shape for
@@ -15,9 +15,9 @@ import (
 
 // RouteCheckToolResult is the route-check tool's result.
 type RouteCheckToolResult struct {
-	Preview bool                        `json:"preview"`
-	Result  eruncommon.RouteCheckResult `json:"result,omitempty"`
-	Trace   []string                    `json:"trace,omitempty"`
+	Preview bool                    `json:"preview"`
+	Result  expose.RouteCheckResult `json:"result,omitempty"`
+	Trace   []string                `json:"trace,omitempty"`
 }
 
 type ExecRouteCheckInput struct {
@@ -30,7 +30,7 @@ func execRouteCheckTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "exec_route-check"
-		result, err := eruncommon.RunRouteCheck(ctx, runtime.Store, input.Alias, eruncommon.RouteCheckParams{
+		result, err := expose.RunRouteCheck(ctx, runtime.Store, input.Alias, expose.RouteCheckParams{
 			RoutesDir: input.RoutesDir,
 		}, cloudDependencies())
 		if err != nil {

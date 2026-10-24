@@ -97,7 +97,7 @@ func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) 
 //
 // Reads a sibling module, so it must run uncached (go test -count=1).
 func TestRealDevopsDockerfileStillConsumesItsTestStage(t *testing.T) {
-	const path = "../erun-devops/docker/erun-devops/Dockerfile"
+	path := filepath.Join(erunRepoRoot(t), "erun-devops", "docker", "erun-devops", "Dockerfile")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the erun-devops Dockerfile is not readable at %s: %v", path, err)
 	}

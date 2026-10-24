@@ -15,6 +15,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
@@ -716,12 +717,12 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 	if err := errMissingTenantOrEnvironment("delete environment", selection.Tenant, selection.Environment); err != nil {
 		return deleteEnvironmentResult{}, err
 	}
-	expected := eruncommon.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
+	expected := lifecycle.DeleteEnvironmentConfirmation(selection.Tenant, selection.Environment)
 	if strings.TrimSpace(confirmation) != expected {
 		return deleteEnvironmentResult{}, fmt.Errorf("delete confirmation did not match %q", expected)
 	}
 
-	store, ok := a.deps.store.(eruncommon.DeleteStore)
+	store, ok := a.deps.store.(lifecycle.DeleteStore)
 	if !ok {
 		return deleteEnvironmentResult{}, fmt.Errorf("environment deletion is not supported by the configured store")
 	}
@@ -736,7 +737,7 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 
 	// A later re-create of this env must fire environment-initialized again.
 	a.clearInitEmitted(selection.Tenant, selection.Environment)
-	result, err := eruncommon.RunDeleteEnvironment(core.Context{}, eruncommon.DeleteEnvironmentParams{
+	result, err := lifecycle.RunDeleteEnvironment(core.Context{}, lifecycle.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}, store, a.deps.deleteNamespace)
@@ -854,19 +855,19 @@ func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFi
 	return pastedFileResult{Path: path}, nil
 }
 
-func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon.DiffResult, error) {
+func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	selection = normalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
 	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -874,7 +875,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	}
 	mcpPort := configpkg.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(
+		return lifecycle.DiffResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
@@ -883,7 +884,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
-		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return lifecycle.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return diff, err
 }

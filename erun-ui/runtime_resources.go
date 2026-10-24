@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
 func (a *App) LoadRuntimeResourceStatus(input uiRuntimeResourceInput) (uiRuntimeResourceStatus, error) {
@@ -358,7 +359,7 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 		// erun-dind sidecar, and the init phase's own peak -- including this
 		// environment's own pod, which is on the node and is holding its
 		// reservation right now.
-		podRequests, err := eruncommon.EffectiveKubernetesPodRequests(
+		podRequests, err := podruntime.EffectiveKubernetesPodRequests(
 			kubernetesContainerResources(pod.Spec.Containers),
 			kubernetesContainerResources(pod.Spec.InitContainers),
 		)
@@ -379,10 +380,10 @@ func accumulateRuntimePodUsage(pods kubernetesPodList, target runtimeResourceTar
 
 // kubernetesContainerResources projects a decoded pod spec onto erun-common's
 // request-rule input, so the desktop never re-derives the rule itself.
-func kubernetesContainerResources(containers []kubernetesContainer) []eruncommon.KubernetesContainerResources {
-	out := make([]eruncommon.KubernetesContainerResources, 0, len(containers))
+func kubernetesContainerResources(containers []kubernetesContainer) []podruntime.KubernetesContainerResources {
+	out := make([]podruntime.KubernetesContainerResources, 0, len(containers))
 	for _, container := range containers {
-		out = append(out, eruncommon.KubernetesContainerResources{
+		out = append(out, podruntime.KubernetesContainerResources{
 			Name:     container.Name,
 			Requests: container.Resources.Requests,
 		})

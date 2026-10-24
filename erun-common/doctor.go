@@ -11,123 +11,24 @@ import (
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-const runtimeDindContainerName = "erun-dind"
+const RuntimeDindContainerName = "erun-dind"
 
 type (
 	RuntimeContainerCommandRunnerFunc func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error)
-	DoctorAction                      string
 )
-
-const (
-	DoctorActionPruneImages     DoctorAction = "prune_images"
-	DoctorActionPruneBuildCache DoctorAction = "prune_build_cache"
-	DoctorActionPruneContainers DoctorAction = "prune_containers"
-)
-
-type DoctorInspectionResult struct {
-	Daemon DoctorDockerDaemon
-	Stdout string
-	Stderr string
-}
 
 func ResolveDoctorTarget(store config.OpenStore, params OpenParams) (config.OpenResult, error) {
 	return ResolveOpen(store, params)
 }
 
-func DoctorActions() []DoctorAction {
-	return []DoctorAction{
-		DoctorActionPruneImages,
-		DoctorActionPruneBuildCache,
-		DoctorActionPruneContainers,
-	}
-}
-
-func DoctorActionPromptLabel(action DoctorAction, result config.OpenResult) string {
-	target := result.Tenant + "/" + result.Environment
-	switch action {
-	case DoctorActionPruneImages:
-		return fmt.Sprintf("Prune unused Docker images in %s?", target)
-	case DoctorActionPruneBuildCache:
-		return fmt.Sprintf("Prune unused BuildKit cache in %s?", target)
-	case DoctorActionPruneContainers:
-		return fmt.Sprintf("Prune stopped Docker containers in %s?", target)
-	default:
-		return fmt.Sprintf("Run doctor action %q in %s?", action, target)
-	}
-}
-
-func DoctorActionDescription(action DoctorAction) string {
-	switch action {
-	case DoctorActionPruneImages:
-		return "Remove unused Docker images"
-	case DoctorActionPruneBuildCache:
-		return "Remove unused BuildKit cache"
-	case DoctorActionPruneContainers:
-		return "Remove stopped Docker containers"
-	default:
-		return string(action)
-	}
-}
-
-// RunDoctorInspection reads the environment's docker storage: disk and inode
-// usage at the daemon's root, and what the daemon's own stores reclaim. The
-// daemon is resolved from the environment (ResolveDoctorDockerDaemon) and is
-// named in the result, so the caller can say which daemon every figure below it
-// came from; an environment with no daemon holding build images refuses with
-// DoctorDockerDaemonUnavailableError rather than reading whatever daemon
-// happens to be reachable.
-func RunDoctorInspection(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
-	daemon := ResolveDoctorDockerDaemon(req)
-	if daemon.Unavailable() {
-		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
-	}
-	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
-		return DoctorInspectionResult{Daemon: daemon}, err
-	}
-	result, err := runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-inspect", doctorInspectionSteps())
-	return DoctorInspectionResult{Daemon: daemon, Stdout: result.Stdout, Stderr: result.Stderr}, err
-}
-
-// RunDoctorAction prunes the daemon that actually holds this environment's
-// build images, through the transport that daemon is reachable by. It returns
-// the daemon beside the output so the caller can name it, and the store
-// readings taken around the prune so a prune that freed nothing can be reported
-// as that instead of as a success.
-func RunDoctorAction(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
-	daemon := ResolveDoctorDockerDaemon(req)
-	if daemon.Unavailable() {
-		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
-	}
-	steps, err := doctorActionSteps(action)
-	if err != nil {
-		return DoctorDockerResult{Daemon: daemon}, err
-	}
-	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
-		return DoctorDockerResult{Daemon: daemon}, err
-	}
-	return runDoctorDockerSteps(ctx, runner, req, daemon, "doctor-"+string(action), steps)
-}
-
-// waitForDoctorDaemon waits for the pod a pod-hosted daemon lives in to be
-// available before exec'ing into it. A daemon this process reaches directly
-// (the host kind) needs no wait and no cluster: waiting on a deployment a host
-// environment does not have would fail the read for a reason that is not about
-// the daemon at all.
-func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon DoctorDockerDaemon) error {
-	if daemon.Kind == DoctorDockerDaemonHost {
-		return nil
-	}
-	return traceAndWaitForRuntime(ctx, req)
-}
-
-func traceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) error {
-	args := kubectlDeploymentWaitArgs(req)
+func TraceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) error {
+	args := KubectlDeploymentWaitArgs(req)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
 	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, config.RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, config.RuntimeReleaseName(req.Tenant), DefaultShellLaunchWaitTimeout); err != nil {
 			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
 			// pattern-match literal kubectl CLI stderr text, which a client-go
 			// error never produces, so library-mode failures return unadorned
@@ -140,7 +41,7 @@ func traceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) erro
 	if err == nil {
 		return nil
 	}
-	return normalizeDoctorKubectlError(req, stderr, err)
+	return NormalizeDoctorKubectlError(req, stderr, err)
 }
 
 func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) kube.RemoteCommandPreview {
@@ -166,7 +67,7 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerC
 	}
 	result, err := runner(req, container, script)
 	if err != nil {
-		return result, normalizeDoctorKubectlError(req, result.Stderr, err)
+		return result, NormalizeDoctorKubectlError(req, result.Stderr, err)
 	}
 	return result, nil
 }
@@ -195,7 +96,7 @@ func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
 	return stderr.String(), err
 }
 
-func normalizeDoctorKubectlError(req config.ShellLaunchParams, stderr string, err error) error {
+func NormalizeDoctorKubectlError(req config.ShellLaunchParams, stderr string, err error) error {
 	diagnostic := doctorKubectlDiagnostic(req, stderr)
 	stderr = strings.TrimSpace(stderr)
 	if diagnostic == "" {

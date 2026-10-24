@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // A turn boundary is not the only place an orchestrator needs the pacing
@@ -40,8 +40,8 @@ import (
 // install's actual runtime bound (orchestratorWhipConfig, below) always agrees
 // with what these tests stage against.
 const (
-	orchestratorPacingStaleAfter = eruncommon.DefaultWhipStaleAfter
-	orchestratorPacingMaxNudges  = eruncommon.DefaultWhipMaxNudges
+	orchestratorPacingStaleAfter = orchestrator.DefaultWhipStaleAfter
+	orchestratorPacingMaxNudges  = orchestrator.DefaultWhipMaxNudges
 )
 
 // orchestratorPacingNudgeSettle spaces the text write and the carriage return
@@ -53,7 +53,7 @@ var orchestratorPacingNudgeSettle = 150 * time.Millisecond
 // orchestratorPacingNudgeText is the unconfigured default nudge text. The
 // message is now editable via ~/.erun/config.yaml's `whip.message`; this
 // constant is what an install that configures nothing keeps getting, verbatim.
-const orchestratorPacingNudgeText = eruncommon.DefaultWhipMessage
+const orchestratorPacingNudgeText = orchestrator.DefaultWhipMessage
 
 // orchestratorWhipConfig is the pacing pass's resolved, live-reloadable
 // configuration (message/stale-threshold/cap), read from the operator's global
@@ -64,16 +64,16 @@ const orchestratorPacingNudgeText = eruncommon.DefaultWhipMessage
 // reconciler tick.
 var (
 	orchestratorWhipConfigMu sync.RWMutex
-	orchestratorWhipConfig   = eruncommon.ResolveWhipConfig(nil)
+	orchestratorWhipConfig   = orchestrator.ResolveWhipConfig(nil)
 )
 
-func setOrchestratorWhipConfig(cfg eruncommon.WhipConfig) {
+func setOrchestratorWhipConfig(cfg orchestrator.WhipConfig) {
 	orchestratorWhipConfigMu.Lock()
 	orchestratorWhipConfig = cfg
 	orchestratorWhipConfigMu.Unlock()
 }
 
-func getOrchestratorWhipConfig() eruncommon.WhipConfig {
+func getOrchestratorWhipConfig() orchestrator.WhipConfig {
 	orchestratorWhipConfigMu.RLock()
 	defer orchestratorWhipConfigMu.RUnlock()
 	return orchestratorWhipConfig
@@ -87,7 +87,7 @@ func getOrchestratorWhipConfig() eruncommon.WhipConfig {
 // makes for every transport.
 func refreshOrchestratorWhipConfig() {
 	config, _, _ := configpkg.LoadERunConfig()
-	setOrchestratorWhipConfig(eruncommon.ResolveWhipConfig(config.Whip))
+	setOrchestratorWhipConfig(orchestrator.ResolveWhipConfig(config.Whip))
 }
 
 // orchestratorPacingActivity is the parsed report, independent of the TTL
@@ -197,8 +197,8 @@ func decideOrchestratorPacing(c orchestratorPacingCandidate, now time.Time) (orc
 // or an already-capped session, exactly as DecideWhip's explicit contract
 // requires.
 func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
-	candidate := eruncommon.WhipCandidate{
-		Kind: eruncommon.WhipTargetOrchestrator,
+	candidate := orchestrator.WhipCandidate{
+		Kind: orchestrator.WhipTargetOrchestrator,
 		// The desktop holds this orchestrator's own PTY, so it can write a
 		// nudge into it — except for a configured orchestrator it holds no
 		// session for, which nothing here can reach (see
@@ -209,15 +209,15 @@ func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explic
 		NudgeCount:   c.nudgeCount,
 		Capped:       c.capped,
 	}
-	decision, reason := eruncommon.DecideWhip(candidate, now, getOrchestratorWhipConfig(), explicit)
+	decision, reason := orchestrator.DecideWhip(candidate, now, getOrchestratorWhipConfig(), explicit)
 	return orchestratorPacingDecisionFromWhip(decision), orchestratorPacingReasonFromWhip(reason)
 }
 
-func orchestratorPacingDecisionFromWhip(decision eruncommon.WhipDecision) orchestratorPacingDecision {
+func orchestratorPacingDecisionFromWhip(decision orchestrator.WhipDecision) orchestratorPacingDecision {
 	switch decision {
-	case eruncommon.WhipDecisionNudge:
+	case orchestrator.WhipDecisionNudge:
 		return orchestratorPacingNudge
-	case eruncommon.WhipDecisionCap:
+	case orchestrator.WhipDecisionCap:
 		return orchestratorPacingCap
 	default:
 		return orchestratorPacingNone
@@ -229,17 +229,17 @@ func orchestratorPacingDecisionFromWhip(decision eruncommon.WhipDecision) orches
 // orchestrator whose session this desktop does not hold (see
 // orchestratorPacingUnmanagedRows) — every other orchestrator row is one the
 // desktop holds the PTY of, which is what makes those candidates reachable.
-func orchestratorPacingReasonFromWhip(reason eruncommon.WhipReason) orchestratorPacingReason {
+func orchestratorPacingReasonFromWhip(reason orchestrator.WhipReason) orchestratorPacingReason {
 	switch reason {
-	case eruncommon.WhipReasonNotAlive:
+	case orchestrator.WhipReasonNotAlive:
 		return orchestratorPacingReasonNotAlive
-	case eruncommon.WhipReasonUnreachable:
+	case orchestrator.WhipReasonUnreachable:
 		return orchestratorPacingReasonUnreachable
-	case eruncommon.WhipReasonAlreadyCapped:
+	case orchestrator.WhipReasonAlreadyCapped:
 		return orchestratorPacingReasonAlreadyCapped
-	case eruncommon.WhipReasonCapCrossed:
+	case orchestrator.WhipReasonCapCrossed:
 		return orchestratorPacingReasonCapCrossed
-	case eruncommon.WhipReasonNudge:
+	case orchestrator.WhipReasonNudge:
 		return orchestratorPacingReasonNudge
 	default:
 		return orchestratorPacingReasonFresh
@@ -249,31 +249,31 @@ func orchestratorPacingReasonFromWhip(reason eruncommon.WhipReason) orchestrator
 // whipDecisionFromOrchestratorPacing is orchestratorPacingDecisionFromWhip's
 // inverse, used by WhipNow (whip.go) to fold an orchestrator outcome into the
 // same eruncommon.WhipResult shape the environment side reports in.
-func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) eruncommon.WhipDecision {
+func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) orchestrator.WhipDecision {
 	switch decision {
 	case orchestratorPacingNudge:
-		return eruncommon.WhipDecisionNudge
+		return orchestrator.WhipDecisionNudge
 	case orchestratorPacingCap:
-		return eruncommon.WhipDecisionCap
+		return orchestrator.WhipDecisionCap
 	default:
-		return eruncommon.WhipDecisionNone
+		return orchestrator.WhipDecisionNone
 	}
 }
 
 // whipReasonFromOrchestratorPacing is orchestratorPacingReasonFromWhip's
 // inverse; see whipDecisionFromOrchestratorPacing.
-func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) eruncommon.WhipReason {
+func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) orchestrator.WhipReason {
 	switch reason {
 	case orchestratorPacingReasonNotAlive:
-		return eruncommon.WhipReasonNotAlive
+		return orchestrator.WhipReasonNotAlive
 	case orchestratorPacingReasonAlreadyCapped:
-		return eruncommon.WhipReasonAlreadyCapped
+		return orchestrator.WhipReasonAlreadyCapped
 	case orchestratorPacingReasonCapCrossed:
-		return eruncommon.WhipReasonCapCrossed
+		return orchestrator.WhipReasonCapCrossed
 	case orchestratorPacingReasonNudge:
-		return eruncommon.WhipReasonNudge
+		return orchestrator.WhipReasonNudge
 	default:
-		return eruncommon.WhipReasonFresh
+		return orchestrator.WhipReasonFresh
 	}
 }
 

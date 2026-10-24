@@ -114,31 +114,31 @@ type podWatchOutcome struct {
 // podStatusList is a deliberately partial parse of `kubectl get pods -o json`:
 // unknown fields are ignored so kubectl version drift does not break the watcher.
 type podStatusList struct {
-	Items []podStatusItem `json:"items"`
+	Items []PodStatusItem `json:"items"`
 }
 
-type podStatusItem struct {
+type PodStatusItem struct {
 	Metadata struct {
 		Name        string            `json:"name"`
 		Annotations map[string]string `json:"annotations"`
 	} `json:"metadata"`
 	Spec struct {
-		Containers     []specContainerEntry `json:"containers"`
-		InitContainers []specContainerEntry `json:"initContainers"`
+		Containers     []SpecContainerEntry `json:"containers"`
+		InitContainers []SpecContainerEntry `json:"initContainers"`
 	} `json:"spec"`
 	Status struct {
 		Phase                 string                 `json:"phase"`
-		Conditions            []podConditionEntry    `json:"conditions"`
-		ContainerStatuses     []containerStatusEntry `json:"containerStatuses"`
-		InitContainerStatuses []containerStatusEntry `json:"initContainerStatuses"`
+		Conditions            []PodConditionEntry    `json:"conditions"`
+		ContainerStatuses     []ContainerStatusEntry `json:"containerStatuses"`
+		InitContainerStatuses []ContainerStatusEntry `json:"initContainerStatuses"`
 	} `json:"status"`
 }
 
-// specContainerEntry is `spec.containers[]`: the declared resource limits and
+// SpecContainerEntry is `spec.containers[]`: the declared resource limits and
 // requests a container asked for, which status.containerStatuses carries
 // neither of. Requests is what the scheduler admits the pod on, and no cgroup
 // file records it (see runtime_pod_requests.go).
-type specContainerEntry struct {
+type SpecContainerEntry struct {
 	Name      string `json:"name"`
 	Resources struct {
 		Limits   map[string]string `json:"limits"`
@@ -146,18 +146,18 @@ type specContainerEntry struct {
 	} `json:"resources"`
 }
 
-// podConditionEntry is a `status.conditions[]` entry. A pod that never gets
+// PodConditionEntry is a `status.conditions[]` entry. A pod that never gets
 // admitted to a node has no container statuses at all to report a waiting
 // reason from — the scheduler's own verdict lives only here, as
 // PodScheduled=False with reason Unschedulable.
-type podConditionEntry struct {
+type PodConditionEntry struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
 }
 
-type containerStatusEntry struct {
+type ContainerStatusEntry struct {
 	Name         string         `json:"name"`
 	Image        string         `json:"image"`
 	RestartCount int            `json:"restartCount"`
@@ -363,7 +363,7 @@ func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[s
 	if err != nil {
 		return nil, nil, nil, false
 	}
-	pods, ok := parsePodStatusList(output)
+	pods, ok := ParsePodStatusList(output)
 	if !ok {
 		return nil, nil, nil, false
 	}
@@ -377,10 +377,10 @@ func pollOnce(ctx context.Context, params podWatchParams, unscheduledSince map[s
 // permanently failed is excluded: that is a terminal failure the watcher aborts
 // on, not a rollout still working through its download, and reporting it as
 // progress would misdescribe the failure the abort already carries.
-func pullingContainers(pods []podStatusItem) []string {
+func pullingContainers(pods []PodStatusItem) []string {
 	var pulling []string
 	for _, pod := range pods {
-		all := append([]containerStatusEntry{}, pod.Status.InitContainerStatuses...)
+		all := append([]ContainerStatusEntry{}, pod.Status.InitContainerStatuses...)
 		all = append(all, pod.Status.ContainerStatuses...)
 		for _, container := range all {
 			if container.State.Waiting == nil {
@@ -410,7 +410,7 @@ func pullingContainers(pods []podStatusItem) []string {
 // deploying the right one, and no timeout makes it pull. Empty when the
 // container status carries no image, which the caller renders as the bare
 // locator rather than an empty parenthesis.
-func describePullingContainer(podName string, container containerStatusEntry) string {
+func describePullingContainer(podName string, container ContainerStatusEntry) string {
 	locator := podName + "/" + container.Name
 	image := strings.TrimSpace(container.Image)
 	if image == "" {
@@ -507,7 +507,7 @@ func defaultRunKubectlGetPods(parent context.Context, params podWatchParams) ([]
 	}
 }
 
-func parsePodStatusList(raw []byte) (podStatusList, bool) {
+func ParsePodStatusList(raw []byte) (podStatusList, bool) {
 	var list podStatusList
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return podStatusList{}, false
@@ -515,12 +515,12 @@ func parsePodStatusList(raw []byte) (podStatusList, bool) {
 	return list, true
 }
 
-func filterReleasePods(list podStatusList, releaseName string) []podStatusItem {
+func filterReleasePods(list podStatusList, releaseName string) []PodStatusItem {
 	releaseName = strings.TrimSpace(releaseName)
 	if releaseName == "" {
 		return nil
 	}
-	var out []podStatusItem
+	var out []PodStatusItem
 	for _, item := range list.Items {
 		if item.Metadata.Annotations["meta.helm.sh/release-name"] == releaseName {
 			out = append(out, item)
@@ -529,9 +529,9 @@ func filterReleasePods(list podStatusList, releaseName string) []podStatusItem {
 	return out
 }
 
-func classifyTerminalFailure(pods []podStatusItem, params podWatchParams, unscheduledSince map[string]time.Time) *HelmReleaseContainerFailureError {
+func classifyTerminalFailure(pods []PodStatusItem, params podWatchParams, unscheduledSince map[string]time.Time) *HelmReleaseContainerFailureError {
 	for _, pod := range pods {
-		all := append([]containerStatusEntry{}, pod.Status.InitContainerStatuses...)
+		all := append([]ContainerStatusEntry{}, pod.Status.InitContainerStatuses...)
 		all = append(all, pod.Status.ContainerStatuses...)
 		for _, container := range all {
 			if reason, message, ok := containerTerminalFailure(container); ok {
@@ -583,7 +583,7 @@ func classifyTerminalFailure(pods []podStatusItem, params podWatchParams, unsche
 // abort reaches both the deploy output and the recorded provision-error with
 // exactly what the scheduler said (e.g. "0/1 nodes are available: 1
 // Insufficient cpu, 1 Insufficient memory") rather than a generic timeout.
-func podUnschedulableMessage(pod podStatusItem) (string, bool) {
+func podUnschedulableMessage(pod PodStatusItem) (string, bool) {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == "PodScheduled" && condition.Status == "False" && condition.Reason == "Unschedulable" {
 			return condition.Message, true
@@ -592,7 +592,7 @@ func podUnschedulableMessage(pod podStatusItem) (string, bool) {
 	return "", false
 }
 
-func containerTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
+func containerTerminalFailure(c ContainerStatusEntry) (reason, message string, ok bool) {
 	if c.State.Waiting != nil {
 		if r, m, waitingOK := containerWaitingTerminalFailure(c); waitingOK {
 			return r, m, true
@@ -608,7 +608,7 @@ func containerTerminalFailure(c containerStatusEntry) (reason, message string, o
 	return "", "", false
 }
 
-func containerWaitingTerminalFailure(c containerStatusEntry) (reason, message string, ok bool) {
+func containerWaitingTerminalFailure(c ContainerStatusEntry) (reason, message string, ok bool) {
 	w := c.State.Waiting
 	if _, isPull := imagePullWaitingReasons[w.Reason]; isPull {
 		if permanentImagePullFailure(w.Message) {
@@ -634,7 +634,7 @@ type podSummary struct {
 	Line    string
 }
 
-func summarizePods(pods []podStatusItem) []podSummary {
+func summarizePods(pods []PodStatusItem) []podSummary {
 	out := make([]podSummary, 0, len(pods))
 	for _, pod := range pods {
 		out = append(out, podSummary{
@@ -646,7 +646,7 @@ func summarizePods(pods []podStatusItem) []podSummary {
 	return out
 }
 
-func formatPodStatusLine(pod podStatusItem) string {
+func formatPodStatusLine(pod PodStatusItem) string {
 	parts := make([]string, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses))
 	for _, c := range pod.Status.InitContainerStatuses {
 		parts = append(parts, "init/"+formatContainerStatus(c))
@@ -671,7 +671,7 @@ func formatPodStatusLine(pod podStatusItem) string {
 	return fmt.Sprintf("pod %s: %s", pod.Metadata.Name, strings.Join(parts, ", "))
 }
 
-func formatContainerStatus(c containerStatusEntry) string {
+func formatContainerStatus(c ContainerStatusEntry) string {
 	if c.State.Waiting != nil {
 		reason := c.State.Waiting.Reason
 		if reason == "" {

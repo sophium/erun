@@ -3,8 +3,8 @@ package erunmcp
 import (
 	"io"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // The tools converted here call shared erun-common logic directly in this
@@ -74,7 +74,7 @@ func runJobEnvelope(runtime RuntimeConfig, jobName string, envelope JobEnvelopeI
 		return JobEnvelopeOutput{CommandOutput: output, Wait: true}, err
 	}
 
-	job, err := eruncommon.StartTaskEnvironmentJob(eruncommon.TaskEnvironmentJobParams{
+	job, err := jobs.StartTaskEnvironmentJob(jobs.TaskEnvironmentJobParams{
 		Tenant:         runtime.Context.Tenant,
 		Environment:    runtime.Context.Environment,
 		Name:           jobName,

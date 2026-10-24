@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
 // runRuntimeConfigSync reconciles the in-pod erun config with the helm-injected
@@ -14,7 +14,7 @@ import (
 func runRuntimeConfigSync(ctx core.Context, promptRunner PromptRunner, options doctorOptions, configHome string) error {
 	_ = promptRunner
 	_ = options
-	inspection, err := common.InspectRuntimeConfigSync(configHome, os.Getenv)
+	inspection, err := doctor.InspectRuntimeConfigSync(configHome, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -29,7 +29,7 @@ func runRuntimeConfigSync(ctx core.Context, promptRunner PromptRunner, options d
 	if err := writeConfigSyncDriftReport(ctx, inspection); err != nil {
 		return err
 	}
-	if err := common.RunRuntimeConfigSync(ctx, inspection); err != nil {
+	if err := doctor.RunRuntimeConfigSync(ctx, inspection); err != nil {
 		return err
 	}
 	if ctx.DryRun {
@@ -40,7 +40,7 @@ func runRuntimeConfigSync(ctx core.Context, promptRunner PromptRunner, options d
 	return err
 }
 
-func writeConfigSyncDriftReport(ctx core.Context, inspection common.ConfigSyncInspection) error {
+func writeConfigSyncDriftReport(ctx core.Context, inspection doctor.ConfigSyncInspection) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "In-pod config drift for %s/%s:\n", inspection.Tenant, inspection.Environment); err != nil {
 		return err
 	}

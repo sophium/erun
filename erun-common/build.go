@@ -120,7 +120,7 @@ func buildEnvDisablesBuildScript(store DockerStore, findProjectRoot ProjectFinde
 // ResolveBuildExecution, so the advisory fires even when a bare Dockerfile build
 // would otherwise succeed. Best-effort: a detection failure never blocks the build.
 func recommendBuildEnvIfMissing(ctx core.Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
@@ -165,7 +165,7 @@ func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 // the project config itself is gitignored, since that silently voids the very
 // overrides it just traced.
 func traceConfiguredBuildPaths(ctx core.Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
 	}
@@ -229,7 +229,7 @@ func resolveLinuxPackagesForExecution(findProjectRoot ProjectFinderFunc, resolve
 	if err != nil {
 		return nil, err
 	}
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return nil, err
 	}

@@ -7,8 +7,8 @@ import (
 	"os"
 
 	"github.com/sophium/erun/cmd"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
@@ -26,7 +26,7 @@ const platformAliasUnusableExitCode = 127
 
 // Seams for the argv[0] dispatch test.
 var (
-	execClaude             = eruncommon.RunClaude
+	execClaude             = podruntime.RunClaude
 	executeERun            = cmd.Execute
 	claudeStderr io.Writer = os.Stderr
 )
@@ -41,7 +41,7 @@ func main() {
 // claude to erun so a bare `claude` resumes the directory's conversation, and
 // that path stays clear of the erun command tree.
 func run(argv []string) int {
-	if len(argv) > 0 && eruncommon.IsClaudeInvocation(argv[0]) {
+	if len(argv) > 0 && podruntime.IsClaudeInvocation(argv[0]) {
 		return runClaude(argv[1:])
 	}
 	return runERun()

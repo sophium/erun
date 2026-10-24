@@ -8,6 +8,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
@@ -152,16 +153,16 @@ func sshdSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) mcp.M
 			if err != nil {
 				return "", err
 			}
-			syncParams, err := common.ResolveWorkspaceSyncParams(result, nil)
+			syncParams, err := workspace.ResolveWorkspaceSyncParams(result, nil)
 			if err != nil {
 				return "", fmt.Errorf("workspace sync for %s/%s: %w", result.Tenant, result.Environment, err)
 			}
-			if err := common.WorkspaceSyncSSHReady(ctx, syncParams.HostAlias); err != nil {
+			if err := workspace.WorkspaceSyncSSHReady(ctx, syncParams.HostAlias); err != nil {
 				return "", fmt.Errorf("workspace sync for %s/%s: the SSH channel to the pod is not up (%s): %w", result.Tenant, result.Environment, syncParams.HostAlias, err)
 			}
-			pass := common.SyncWorkspaceOnce
+			pass := workspace.SyncWorkspaceOnce
 			if call.Preview {
-				pass = common.PreviewWorkspaceSync
+				pass = workspace.PreviewWorkspaceSync
 			}
 			synced, err := pass(ctx, syncParams)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
@@ -132,7 +133,7 @@ func environmentLeasesToUI(leases []activity.EnvironmentActivityLease, now time.
 	out := make([]uiEnvironmentLease, 0, len(leases))
 	for _, lease := range leases {
 		entry := uiEnvironmentLease{Name: strings.TrimSpace(lease.Name)}
-		if jobID, ok := eruncommon.EnvironmentJobIDFromLeaseID(lease.ID); ok {
+		if jobID, ok := jobspkg.EnvironmentJobIDFromLeaseID(lease.ID); ok {
 			entry.JobID = jobID
 		}
 		if !lease.StartedAt.IsZero() && now.After(lease.StartedAt) {

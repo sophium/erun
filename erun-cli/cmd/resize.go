@@ -7,6 +7,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +48,7 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
-			result, err := common.RunRuntimeResize(ctx, common.RuntimeResizeDependencies{
+			result, err := lifecycle.RunRuntimeResize(ctx, lifecycle.RuntimeResizeDependencies{
 				Store:                          store,
 				SaveEnvConfig:                  saveEnvConfig,
 				FindProjectRoot:                findProjectRoot,
@@ -56,10 +57,10 @@ func newResizeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 				Now:                            time.Now,
 				DeployHelmChart:                deployHelmChart,
 				LoadActivityLeases:             resizeActivityLeaseLoader(cmd.Context(), ctx, resolveOpen),
-			}, common.RuntimeResizeParams{
+			}, lifecycle.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
-				Input: common.RuntimeResizeInput{
+				Input: lifecycle.RuntimeResizeInput{
 					CPU:                 cpu,
 					Memory:              memory,
 					DindCPU:             dindCPU,
@@ -119,7 +120,7 @@ func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, res
 	}
 }
 
-func writeResizeResult(ctx core.Context, result common.RuntimeResizeResult) error {
+func writeResizeResult(ctx core.Context, result lifecycle.RuntimeResizeResult) error {
 	if ctx.DryRun {
 		return nil
 	}

@@ -41,10 +41,10 @@ type ObservedCertificateChallenge struct {
 // certificateList/certificateItem is a deliberately partial parse of
 // `kubectl get certificates.cert-manager.io -o json`.
 type certificateList struct {
-	Items []certificateItem `json:"items"`
+	Items []CertificateItem `json:"items"`
 }
 
-type certificateItem struct {
+type CertificateItem struct {
 	Metadata struct {
 		Name string `json:"name"`
 	} `json:"metadata"`
@@ -53,11 +53,11 @@ type certificateItem struct {
 		DNSNames   []string `json:"dnsNames"`
 	} `json:"spec"`
 	Status struct {
-		Conditions []certManagerCondition `json:"conditions"`
+		Conditions []CertManagerCondition `json:"conditions"`
 	} `json:"status"`
 }
 
-type certManagerCondition struct {
+type CertManagerCondition struct {
 	Type    string `json:"type"`
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
@@ -69,10 +69,10 @@ type certManagerCondition struct {
 // same state/reason status shape and a spec.type/dnsName (only Challenge sets
 // them). Fields the current kind does not have simply stay zero-valued.
 type ownedResourceList struct {
-	Items []ownedResourceItem `json:"items"`
+	Items []OwnedResourceItem `json:"items"`
 }
 
-type ownedResourceItem struct {
+type OwnedResourceItem struct {
 	Metadata struct {
 		Name              string            `json:"name"`
 		CreationTimestamp string            `json:"creationTimestamp"`
@@ -92,7 +92,7 @@ type ownedResourceItem struct {
 	} `json:"status"`
 }
 
-func certificateReady(item certificateItem) (ready bool, reason, message string) {
+func certificateReady(item CertificateItem) (ready bool, reason, message string) {
 	for _, cond := range item.Status.Conditions {
 		if cond.Type == "Ready" {
 			return cond.Status == "True", cond.Reason, cond.Message
@@ -101,7 +101,7 @@ func certificateReady(item certificateItem) (ready bool, reason, message string)
 	return false, "", ""
 }
 
-func anyCertificateNotReady(certs []certificateItem) bool {
+func anyCertificateNotReady(certs []CertificateItem) bool {
 	for _, cert := range certs {
 		if ready, _, _ := certificateReady(cert); !ready {
 			return true
@@ -110,7 +110,7 @@ func anyCertificateNotReady(certs []certificateItem) bool {
 	return false
 }
 
-func ownerReferenceName(item ownedResourceItem, kind string) (string, bool) {
+func ownerReferenceName(item OwnedResourceItem, kind string) (string, bool) {
 	for _, ref := range item.Metadata.OwnerReferences {
 		if ref.Kind == kind {
 			return ref.Name, true
@@ -119,13 +119,13 @@ func ownerReferenceName(item ownedResourceItem, kind string) (string, bool) {
 	return "", false
 }
 
-// latestCertificateRequestName returns the most recently created
+// LatestCertificateRequestName returns the most recently created
 // CertificateRequest cert-manager made for the named Certificate — the label
 // cert-manager.io/certificate-name is how cert-manager itself links them,
 // since a Certificate's status carries no direct pointer to it. RFC3339
 // creation timestamps sort correctly as plain strings.
-func latestCertificateRequestName(requests []ownedResourceItem, certificateName string) (string, bool) {
-	var latest ownedResourceItem
+func LatestCertificateRequestName(requests []OwnedResourceItem, certificateName string) (string, bool) {
+	var latest OwnedResourceItem
 	found := false
 	for _, cr := range requests {
 		if cr.Metadata.Labels["cert-manager.io/certificate-name"] != certificateName {
@@ -139,8 +139,8 @@ func latestCertificateRequestName(requests []ownedResourceItem, certificateName 
 	return latest.Metadata.Name, found
 }
 
-func resourcesOwnedBy(resources []ownedResourceItem, ownerKind, ownerName string) []ownedResourceItem {
-	var owned []ownedResourceItem
+func resourcesOwnedBy(resources []OwnedResourceItem, ownerKind, ownerName string) []OwnedResourceItem {
+	var owned []OwnedResourceItem
 	for _, resource := range resources {
 		if name, ok := ownerReferenceName(resource, ownerKind); ok && name == ownerName {
 			owned = append(owned, resource)
@@ -150,7 +150,7 @@ func resourcesOwnedBy(resources []ownedResourceItem, ownerKind, ownerName string
 	return owned
 }
 
-func buildObservedCertificates(certs []certificateItem, requests, orders, challenges []ownedResourceItem) []ObservedCertificate {
+func BuildObservedCertificates(certs []CertificateItem, requests, orders, challenges []OwnedResourceItem) []ObservedCertificate {
 	result := make([]ObservedCertificate, 0, len(certs))
 	for _, cert := range certs {
 		ready, reason, message := certificateReady(cert)
@@ -170,8 +170,8 @@ func buildObservedCertificates(certs []certificateItem, requests, orders, challe
 	return result
 }
 
-func observedOrdersForCertificate(certificateName string, requests, orders, challenges []ownedResourceItem) []ObservedCertificateOrder {
-	crName, ok := latestCertificateRequestName(requests, certificateName)
+func observedOrdersForCertificate(certificateName string, requests, orders, challenges []OwnedResourceItem) []ObservedCertificateOrder {
+	crName, ok := LatestCertificateRequestName(requests, certificateName)
 	if !ok {
 		return nil
 	}
@@ -193,12 +193,12 @@ func observedOrdersForCertificate(certificateName string, requests, orders, chal
 }
 
 func certificateChainArgs(req config.ShellLaunchParams) (certificateRequests, orders, challenges []string) {
-	return observeGetArgs(req, "certificaterequests.cert-manager.io"),
-		observeGetArgs(req, "orders.acme.cert-manager.io"),
-		observeGetArgs(req, "challenges.acme.cert-manager.io")
+	return ObserveGetArgs(req, "certificaterequests.cert-manager.io"),
+		ObserveGetArgs(req, "orders.acme.cert-manager.io"),
+		ObserveGetArgs(req, "challenges.acme.cert-manager.io")
 }
 
-func parseOwnedResourceList(raw []byte) ([]ownedResourceItem, error) {
+func parseOwnedResourceList(raw []byte) ([]OwnedResourceItem, error) {
 	var list ownedResourceList
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, err
@@ -206,36 +206,36 @@ func parseOwnedResourceList(raw []byte) ([]ownedResourceItem, error) {
 	return list.Items, nil
 }
 
-func fetchOwnedResourceList(args []string, kind string) ([]ownedResourceItem, error) {
-	raw, stderr, err := runObserveKubectl(args)
+func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, error) {
+	raw, stderr, err := RunObserveKubectl(args)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get %s: %w", kind, kubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get %s: %w", kind, KubectlErrorMessage(err, stderr))
 	}
 	return parseOwnedResourceList(raw)
 }
 
-// fetchObservedCertificates reads Certificates and, only for ones that are not
+// FetchObservedCertificates reads Certificates and, only for ones that are not
 // Ready, walks CertificateRequest -> Order -> Challenge for the failure
 // reason. ctx/req are needed here (unlike the other observe fetchers) because
 // that walk is itself conditional on what the first read finds, so its
 // kubectl calls are traced only when they actually run.
-func fetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
-	raw, stderr, err := runObserveKubectl(certArgs)
+func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
+	raw, stderr, err := RunObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("observe: get certificates: %w", kubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("observe: get certificates: %w", KubectlErrorMessage(err, stderr))
 	}
 	var list certificateList
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("observe: parse certificates: %w", err)
 	}
 	if !anyCertificateNotReady(list.Items) {
-		return buildObservedCertificates(list.Items, nil, nil, nil), nil
+		return BuildObservedCertificates(list.Items, nil, nil, nil), nil
 	}
 
 	crArgs, orderArgs, challengeArgs := certificateChainArgs(req)
@@ -255,5 +255,5 @@ func fetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, c
 	if err != nil {
 		return nil, err
 	}
-	return buildObservedCertificates(list.Items, requests, orders, challenges), nil
+	return BuildObservedCertificates(list.Items, requests, orders, challenges), nil
 }

@@ -580,7 +580,7 @@ func (w *world) collisions(d decisions) []string {
 	var errs []string
 	for _, key := range sortedKeys(w.objects) {
 		o := w.objects[key]
-		if o.member {
+		if o.member || neverCollides(o.name) {
 			continue
 		}
 		name := o.name
@@ -597,6 +597,12 @@ func (w *world) collisions(d decisions) []string {
 	}
 	sort.Strings(errs)
 	return errs
+}
+
+// neverCollides says whether a package may declare a name any number of
+// times: init functions and the blank identifier.
+func neverCollides(name string) bool {
+	return name == "init" || name == "_"
 }
 
 func (w *world) describeKey(key string) string {
@@ -629,7 +635,7 @@ func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 			continue
 		}
 		od := d.declAt(o.file, offsetOf(s.objKey))
-		if od == nil || len(od.dups) == 0 || d.declAt(s.file, s.start) == od {
+		if od == nil || len(od.dups) == 0 || d.declAt(s.file, s.start) == od || w.inOwnMethod(s, od, d) {
 			continue
 		}
 		if slices.Contains(w.siteDirs(s, d), od.dir) {
@@ -637,6 +643,22 @@ func (w *world) testHelpersUsedAtHome(d decisions) map[*declTarget]bool {
 		}
 	}
 	return used
+}
+
+// inOwnMethod says whether a site is inside a method of the type od declares:
+// a type's own methods go wherever the type goes, so they are not a use that
+// keeps it at home.
+func (w *world) inOwnMethod(s site, od *declTarget, d decisions) bool {
+	at := d.declAt(s.file, s.start)
+	if at == nil || at.method == "" {
+		return false
+	}
+	m, ok := w.objects[at.method]
+	if !ok || m.owner == "" {
+		return false
+	}
+	owner, ok := w.objects[m.owner]
+	return ok && d.declAt(owner.file, offsetOf(m.owner)) == od
 }
 
 // methodsFollowTheirTypes puts every method where its receiver type ended up,

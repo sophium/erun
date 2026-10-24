@@ -7,7 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 func TestHostOpenCommandPerOS(t *testing.T) {
@@ -120,7 +121,7 @@ func TestResolveEnvironmentHostPathMapsPodWorktreeToMirror(t *testing.T) {
 
 func TestResolveEnvironmentHostPathMapsOutputsToArtifactMirror(t *testing.T) {
 	local := t.TempDir()
-	outputs := filepath.Join(local, eruncommon.WorkspaceSyncArtifactsSubdir)
+	outputs := filepath.Join(local, workspace.WorkspaceSyncArtifactsSubdir)
 	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
 	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 

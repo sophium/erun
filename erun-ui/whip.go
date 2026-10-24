@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
@@ -97,12 +98,12 @@ func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 // nobody has opened. A requested id that no longer resolves against the
 // configured population is silently excluded rather than attempted, since
 // there is nothing real behind it to push.
-func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]eruncommon.WhipResult, error) {
+func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]orchestrator.WhipResult, error) {
 	targets, err := a.listWhipEnvironmentTargets()
 	if err != nil {
 		return nil, err
 	}
-	results := make([]eruncommon.WhipResult, 0, len(want))
+	results := make([]orchestrator.WhipResult, 0, len(want))
 	for _, target := range targets {
 		id := target.tenant + "/" + target.environment
 		if _, ok := want[id]; !ok {
@@ -123,31 +124,31 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 // session behind it, so reporting not-alive there would tell the operator
 // there is nothing to push when the true answer is "cannot tell" -- the same
 // distinction jobsReachability (environment_jobs.go) already draws.
-func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) eruncommon.WhipResult {
+func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) orchestrator.WhipResult {
 	id := tenant + "/" + environment
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
-		return eruncommon.WhipResult{
-			Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  eruncommon.WhipDecisionNone,
-			Reason:    eruncommon.WhipReasonNotAlive,
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonNotAlive,
 			Error:     err.Error(),
 		}
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		if a.classifyMCPUnreachable(mcpPort) == mcp.LocalMCPStaleForward {
-			return eruncommon.WhipResult{
-				Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
-				Decision:  eruncommon.WhipDecisionNone,
-				Reason:    eruncommon.WhipReasonUnreachable,
+			return orchestrator.WhipResult{
+				Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
+				Decision:  orchestrator.WhipDecisionNone,
+				Reason:    orchestrator.WhipReasonUnreachable,
 				Error:     mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort),
 			}
 		}
-		return eruncommon.WhipResult{
-			Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  eruncommon.WhipDecisionNone,
-			Reason:    eruncommon.WhipReasonNotAlive,
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonNotAlive,
 		}
 	}
 
@@ -160,10 +161,10 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 		// failure) -- a different problem asking for different operator action
 		// than "go start the session" (root AGENTS.md's "Smooth, Seamless, No
 		// Dead Ends" -- distinguish causes before writing copy).
-		return eruncommon.WhipResult{
-			Candidate: eruncommon.WhipCandidate{Kind: eruncommon.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  eruncommon.WhipDecisionNone,
-			Reason:    eruncommon.WhipReasonCallFailed,
+		return orchestrator.WhipResult{
+			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  orchestrator.WhipDecisionNone,
+			Reason:    orchestrator.WhipReasonCallFailed,
 			Error:     err.Error(),
 		}
 	}
@@ -171,7 +172,7 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 	// used it in every other return path. Stamp it here too rather than
 	// trusting the remote payload for host-side identity: a report row must
 	// never depend on what a pod chose to echo back.
-	decoded.Candidate.Kind = eruncommon.WhipTargetEnvironment
+	decoded.Candidate.Kind = orchestrator.WhipTargetEnvironment
 	decoded.Candidate.ID = id
 	decoded.Candidate.Name = id
 	return decoded
@@ -184,15 +185,15 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 // separately surface a nudge write failure or an in-flight typing deferral to
 // its caller today, so a decided nudge is reported pushed, matching what the
 // automatic pass has always assumed.
-func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) eruncommon.WhipResult {
+func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) orchestrator.WhipResult {
 	name := strings.TrimSpace(outcome.name)
 	if name == "" {
 		name = outcome.id
 	}
 	decision := whipDecisionFromOrchestratorPacing(outcome.decision)
-	return eruncommon.WhipResult{
-		Candidate: eruncommon.WhipCandidate{
-			Kind:      eruncommon.WhipTargetOrchestrator,
+	return orchestrator.WhipResult{
+		Candidate: orchestrator.WhipCandidate{
+			Kind:      orchestrator.WhipTargetOrchestrator,
 			ID:        outcome.id,
 			Name:      name,
 			Reachable: true,
@@ -200,6 +201,6 @@ func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) eruncommon
 		},
 		Decision: decision,
 		Reason:   whipReasonFromOrchestratorPacing(outcome.reason),
-		Pushed:   decision == eruncommon.WhipDecisionNudge,
+		Pushed:   decision == orchestrator.WhipDecisionNudge,
 	}
 }

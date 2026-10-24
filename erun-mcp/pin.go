@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // PinInput selects which erun version an environment's references move to.
@@ -32,9 +32,9 @@ type PinInput struct {
 // PinOutput is the resolved plan, so a caller sees exactly which references
 // moved rather than having to diff the tree afterwards.
 type PinOutput struct {
-	Plan    eruncommon.PinPlan `json:"plan"`
-	Changed int                `json:"changed"`
-	Applied bool               `json:"applied"`
+	Plan    lifecycle.PinPlan `json:"plan"`
+	Changed int               `json:"changed"`
+	Applied bool              `json:"applied"`
 }
 
 func pinTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PinInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
@@ -83,11 +83,11 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx core.Contex
 	if err != nil {
 		return nil, err
 	}
-	plan, err := eruncommon.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
+	plan, err := lifecycle.ResolvePinPlan(projectRoot, tenant, environment, envConfig, target)
 	if err != nil {
 		return nil, err
 	}
-	eruncommon.AnnotatePinPlanBaseFreshness(runCtx, &plan)
+	lifecycle.AnnotatePinPlanBaseFreshness(runCtx, &plan)
 	if note := plan.BaseFreshnessNote(); note != "" {
 		runCtx.Trace("pin " + note)
 	}
@@ -107,22 +107,22 @@ func runPinToolCommand(runtime RuntimeConfig, input PinInput, runCtx core.Contex
 // applyPinPlanUnlessPreviewing writes the plan unless this is a preview or the
 // tree is already aligned. The previous version is recorded before anything
 // moves, so a revert has somewhere to go even if the rewrite fails partway.
-func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx core.Context, plan eruncommon.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (PinOutput, error) {
+func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx core.Context, plan lifecycle.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (PinOutput, error) {
 	out := PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil
 	}
-	if err := eruncommon.RecordPinPrevious(workDir, tenant, environment, plan.Previous); err != nil {
+	if err := lifecycle.RecordPinPrevious(workDir, tenant, environment, plan.Previous); err != nil {
 		return PinOutput{}, err
 	}
-	if err := eruncommon.ApplyPinPlan(plan); err != nil {
+	if err := lifecycle.ApplyPinPlan(plan); err != nil {
 		return PinOutput{}, err
 	}
 	// The CLI transport's own runtimeversion/runtimeimage/runtimechart sites
 	// live in erun's config store, not a repo file, so ApplyPinPlan never
 	// touches them -- this half was missing here entirely, leaving even
 	// runtimeversion unmoved by an MCP-driven re-pin.
-	if updated, changed := eruncommon.ApplyPinnedEnvConfig(envConfig, plan); changed {
+	if updated, changed := lifecycle.ApplyPinnedEnvConfig(envConfig, plan); changed {
 		if err := runtime.Store.SaveEnvConfig(tenant, updated); err != nil {
 			return PinOutput{}, err
 		}
@@ -130,7 +130,7 @@ func applyPinPlanUnlessPreviewing(runtime RuntimeConfig, runCtx core.Context, pl
 	// The lock beside a rewritten Chart.yaml still names the old versions, and
 	// deploy refuses a lock that disagrees with its chart — so an agent that
 	// re-pinned and stopped here would have left a tree deploy cannot use.
-	if err := eruncommon.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
+	if err := lifecycle.RefreshPinnedChartLocks(runCtx, plan, nil); err != nil {
 		return PinOutput{}, err
 	}
 	out.Applied = true
@@ -157,7 +157,7 @@ func resolvePinToolProjectRoot(runtime RuntimeConfig, input PinInput) (string, e
 // terraform init or a chart pull, far from the thing that caused it.
 func resolvePinToolTarget(ctx context.Context, runtime RuntimeConfig, input PinInput, workDir, tenant, environment string) (string, error) {
 	if input.Revert {
-		previous, ok := eruncommon.PinPrevious(workDir, tenant, environment)
+		previous, ok := lifecycle.PinPrevious(workDir, tenant, environment)
 		if !ok {
 			return "", fmt.Errorf("no previous pin is recorded for %s/%s, so there is nothing to revert to", tenant, environment)
 		}

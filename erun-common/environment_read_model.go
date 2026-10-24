@@ -206,7 +206,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 	if err != nil {
 		return ListEnvironmentResult{}, err
 	}
-	return listEnvironmentResult(store, tenantConfig, envConfig, effective, effectiveErr, portAllocations), nil
+	return NewListEnvironmentResult(store, tenantConfig, envConfig, effective, effectiveErr, portAllocations), nil
 }
 
 // ResolveEnvironmentReadModel is the read model's one impure entrypoint: it

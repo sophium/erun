@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ import (
 // it, and the drift is invisible: the rung still goes green, just several
 // minutes and one emulated architecture later.
 var mergeReadyRungSkillPaths = []string{
-	"../erun-skills/skills/erun-merge/SKILL.md",
+	"erun-skills/skills/erun-merge/SKILL.md",
 }
 
 var (
@@ -39,7 +40,7 @@ var (
 // restructured, or moved out of a ```sh fence would satisfy vacuously.
 func mergeReadyRungBlocks(t *testing.T, path string) []string {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(filepath.Join(erunRepoRoot(t), path))
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

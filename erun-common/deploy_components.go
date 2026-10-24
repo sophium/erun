@@ -66,11 +66,11 @@ func componentBaseName(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// selectedPublishableComponents returns the selected non-runtime components,
+// SelectedPublishableComponents returns the selected non-runtime components,
 // ordered by plan when one was resolved (see resolvePublishedDeployPlan) or
 // else by the default rank (postgres → db → api → powerdns → docs), for the
 // sourceless by-reference deploy path; the runtime is resolved separately.
-func selectedPublishableComponents(selected []string, tenant string, plan config.ProjectK8sConfig) []string {
+func SelectedPublishableComponents(selected []string, tenant string, plan config.ProjectK8sConfig) []string {
 	runtimeAliases := runtimeComponentNames(tenant)
 	out := make([]string, 0, len(selected))
 	for _, name := range selected {
@@ -98,10 +98,10 @@ const (
 // empty result means no explicit selection, which the caller treats as the runtime
 // chart alone (bootstrap/heal).
 func resolveSelectedDeployComponents(flagComponents, savedComponents []string, plan config.ProjectK8sConfig) ([]string, string) {
-	if names := normalizeComponentNames(flagComponents); len(names) > 0 {
+	if names := NormalizeComponentNames(flagComponents); len(names) > 0 {
 		return names, deploySelectionSourceFlag
 	}
-	if names := normalizeComponentNames(savedComponents); len(names) > 0 {
+	if names := NormalizeComponentNames(savedComponents); len(names) > 0 {
 		return names, deploySelectionSourceSaved
 	}
 	if names := planComponentNameList(plan); len(names) > 0 {
@@ -110,7 +110,7 @@ func resolveSelectedDeployComponents(flagComponents, savedComponents []string, p
 	return nil, deploySelectionSourceDefault
 }
 
-func normalizeComponentNames(components []string) []string {
+func NormalizeComponentNames(components []string) []string {
 	out := make([]string, 0, len(components))
 	seen := make(map[string]struct{}, len(components))
 	for _, raw := range components {
@@ -132,7 +132,7 @@ func planComponentNameList(plan config.ProjectK8sConfig) []string {
 	for _, step := range plan.Deployments {
 		names = append(names, step.Components...)
 	}
-	return normalizeComponentNames(names)
+	return NormalizeComponentNames(names)
 }
 
 // filterDeployContextsBySelection is opt-in-only: a chart deploys iff its name is

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 // hostWorkspaceStore builds a remote-agent env whose workspace-sync mirror lives
@@ -52,7 +52,7 @@ func TestResolveHostWorkspaceRequiresSyncedMirror(t *testing.T) {
 
 func TestRunHostArtifactLaunchesArtifactWithinOutputsDir(t *testing.T) {
 	local := t.TempDir()
-	outputs := filepath.Join(local, eruncommon.WorkspaceSyncArtifactsSubdir)
+	outputs := filepath.Join(local, workspace.WorkspaceSyncArtifactsSubdir)
 	requireWorkspaceSyncNoError(t, os.MkdirAll(outputs, 0o755), "mkdir outputs")
 	requireWorkspaceSyncNoError(t, os.WriteFile(filepath.Join(outputs, "erun-app.exe"), []byte("x"), 0o644), "write artifact")
 

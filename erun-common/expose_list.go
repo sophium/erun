@@ -36,9 +36,9 @@ type ExposedService struct {
 	TLSNotReadyReason string `json:"tlsNotReadyReason,omitempty"`
 }
 
-// exposeIngressNamePrefix matches the name resolveExposeServicePlan gives
+// ExposeIngressNamePrefix matches the name resolveExposeServicePlan gives
 // every Ingress RunExposeService applies.
-const exposeIngressNamePrefix = "expose-"
+const ExposeIngressNamePrefix = "expose-"
 
 // ErrListExposedServicesForbidden reports that the caller's Kubernetes
 // credentials are not authorized to list the env namespace's Ingresses or
@@ -53,32 +53,32 @@ var ErrListExposedServicesForbidden = errors.New("list exposed services: forbidd
 // from the Ingress carrying a tls block alone, which is true well before
 // issuance actually completes.
 func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error) {
-	ingresses, err := fetchObservedIngresses(observeGetArgs(req, "ingress"))
+	ingresses, err := FetchObservedIngresses(ObserveGetArgs(req, "ingress"))
 	if err != nil {
-		if isForbiddenKubectlError(err) {
+		if IsForbiddenKubectlError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrListExposedServicesForbidden, err)
 		}
 		return nil, err
 	}
-	certs, err := fetchObservedCertificates(core.Context{}, req, observeGetArgs(req, "certificates.cert-manager.io"))
+	certs, err := FetchObservedCertificates(core.Context{}, req, ObserveGetArgs(req, "certificates.cert-manager.io"))
 	if err != nil {
-		if isForbiddenKubectlError(err) {
+		if IsForbiddenKubectlError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrListExposedServicesForbidden, err)
 		}
 		return nil, err
 	}
-	return filterExposedServices(ingresses, certs), nil
+	return FilterExposedServices(ingresses, certs), nil
 }
 
-// filterExposedServices maps observed Ingresses to the exposures erun-expose
+// FilterExposedServices maps observed Ingresses to the exposures erun-expose
 // created among them, split out from ListExposedServices as a pure function so
 // it can be tested without a kubectl process.
-func filterExposedServices(ingresses []ObservedIngress, certs []ObservedCertificate) []ExposedService {
-	tlsSecretByHost := tlsSecretsByHost(ingresses)
+func FilterExposedServices(ingresses []ObservedIngress, certs []ObservedCertificate) []ExposedService {
+	tlsSecretByHost := TlsSecretsByHost(ingresses)
 	certBySecret := certificatesBySecret(certs)
 	services := make([]ExposedService, 0, len(ingresses))
 	for _, ing := range ingresses {
-		service, ok := strings.CutPrefix(ing.Name, exposeIngressNamePrefix)
+		service, ok := strings.CutPrefix(ing.Name, ExposeIngressNamePrefix)
 		if !ok || service == "" || len(ing.Hosts) == 0 {
 			continue
 		}
@@ -96,9 +96,9 @@ func filterExposedServices(ingresses []ObservedIngress, certs []ObservedCertific
 	return services
 }
 
-// tlsSecretsByHost maps each TLS-terminated host to the Secret name its
+// TlsSecretsByHost maps each TLS-terminated host to the Secret name its
 // Ingress's tls block names, across every observed Ingress.
-func tlsSecretsByHost(ingresses []ObservedIngress) map[string]string {
+func TlsSecretsByHost(ingresses []ObservedIngress) map[string]string {
 	tlsSecretByHost := make(map[string]string)
 	for _, ing := range ingresses {
 		for _, tls := range ing.TLS {

@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // The whip surface's models -- one flat list of per-target outcomes, folded
@@ -93,7 +93,7 @@ type uiWhipReport struct {
 	Results []uiWhipResult `json:"results"`
 }
 
-func whipReportToUI(results []eruncommon.WhipResult) uiWhipReport {
+func whipReportToUI(results []orchestrator.WhipResult) uiWhipReport {
 	out := make([]uiWhipResult, 0, len(results))
 	for _, result := range results {
 		out = append(out, whipResultToUI(result))
@@ -101,9 +101,9 @@ func whipReportToUI(results []eruncommon.WhipResult) uiWhipReport {
 	return uiWhipReport{Results: out}
 }
 
-func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
+func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 	kind := uiWhipTargetKindEnvironment
-	if result.Candidate.Kind == eruncommon.WhipTargetOrchestrator {
+	if result.Candidate.Kind == orchestrator.WhipTargetOrchestrator {
 		kind = uiWhipTargetKindOrchestrator
 	}
 	name := strings.TrimSpace(result.Candidate.Name)
@@ -112,7 +112,7 @@ func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
 	}
 	ui := uiWhipResult{Kind: kind, ID: result.Candidate.ID, Name: name}
 	switch result.Decision {
-	case eruncommon.WhipDecisionNudge:
+	case orchestrator.WhipDecisionNudge:
 		if result.Pushed {
 			ui.Outcome = "pushed"
 			return ui
@@ -125,12 +125,12 @@ func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
 		ui.Reason = "push failed"
 		ui.Error = result.Error
 		return ui
-	case eruncommon.WhipDecisionCap:
+	case orchestrator.WhipDecisionCap:
 		ui.Outcome = "capped"
 		ui.Reason = "stopped nudging after repeated silence — reply in its pane or restart it"
 		return ui
 	default:
-		if result.Reason == eruncommon.WhipReasonCallFailed {
+		if result.Reason == orchestrator.WhipReasonCallFailed {
 			// A call that was actually attempted and failed is a write that was
 			// refused, not a benign skip -- same InlineAlert-territory distinction
 			// the decided-but-refused-nudge case above already draws, so it must
@@ -150,15 +150,15 @@ func whipResultToUI(result eruncommon.WhipResult) uiWhipResult {
 // whipSkipReasonText renders WhipReason as the sentence an operator reads,
 // mirroring the wording erun-cli's whipResultValue and the pacing-capped
 // notice already use for the same conditions.
-func whipSkipReasonText(reason eruncommon.WhipReason) string {
+func whipSkipReasonText(reason orchestrator.WhipReason) string {
 	switch reason {
-	case eruncommon.WhipReasonNotAlive:
+	case orchestrator.WhipReasonNotAlive:
 		return "not alive — no live session to push"
-	case eruncommon.WhipReasonUnreachable:
+	case orchestrator.WhipReasonUnreachable:
 		return "unreachable from this transport"
-	case eruncommon.WhipReasonAlreadyCapped:
+	case orchestrator.WhipReasonAlreadyCapped:
 		return "already capped — reply in its pane or restart it"
-	case eruncommon.WhipReasonFresh:
+	case orchestrator.WhipReasonFresh:
 		return "moved recently"
 	default:
 		return string(reason)

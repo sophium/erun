@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/manifoldco/promptui"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
@@ -93,7 +93,7 @@ func TestSelectTenantPromptSoleTenantStillPromptsOnATerminal(t *testing.T) {
 }
 
 func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
-	unavailable := common.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
+	unavailable := setup.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
 	tagged := bootstrapInitExitError(unavailable)
 	if got := internal.ExitCodeFor(tagged); got != tenantSelectionUnavailableExitCode {
 		t.Fatalf("exit code %d, want %d", got, tenantSelectionUnavailableExitCode)

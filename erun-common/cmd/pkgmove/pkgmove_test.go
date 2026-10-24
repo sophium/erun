@@ -294,3 +294,70 @@ func TestApplyGivesEverySplitPackageWithTestsAnIsolatingTestMain(t *testing.T) {
 	t.Setenv("ERUN_TENANT", "leaked")
 	goIn(t, dir, "test", "./...")
 }
+
+// TestApplyKeepsAMovedReentryHelperReachable is the reproduction of a moved
+// test that hung: its helper process is this test binary re-executed, which
+// only works while the package's TestMain hands the re-entered process to the
+// helper. A helper registers itself from an init in its own file, so the init
+// moves with it, and the TestMain generated for its new package has to run
+// the registry before the suite.
+func TestApplyKeepsAMovedReentryHelperReachable(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"base/core/timing.go": "package core\n\nconst TimingRecordDirEnv = \"FIXTURE_TIMING_DIR\"\n",
+		"root.go":             "package fixture\n\nfunc Seven() int { return 7 }\n",
+		"suite_main_test.go":  "package fixture\n\nimport (\n\t\"os\"\n\t\"testing\"\n)\n\nvar reentryHelpers []func() (int, bool)\n\nfunc TestMain(m *testing.M) {\n\tfor _, reenter := range reentryHelpers {\n\t\tif code, ok := reenter(); ok {\n\t\t\tos.Exit(code)\n\t\t}\n\t}\n\tos.Exit(m.Run())\n}\n",
+		"helper_test.go":      "package fixture\n\nimport (\n\t\"errors\"\n\t\"os\"\n\t\"os/exec\"\n\t\"testing\"\n)\n\nfunc init() {\n\treentryHelpers = append(reentryHelpers, func() (int, bool) {\n\t\tif os.Getenv(\"FIXTURE_HELPER\") == \"\" {\n\t\t\treturn 0, false\n\t\t}\n\t\treturn Seven(), true\n\t})\n}\n\nfunc TestHelperProcess(t *testing.T) {\n\tcmd := exec.Command(os.Args[0], \"-test.run=^$\")\n\tcmd.Env = append(os.Environ(), \"FIXTURE_HELPER=1\")\n\tvar exit *exec.ExitError\n\tif err := cmd.Run(); !errors.As(err, &exit) || exit.ExitCode() != 7 {\n\t\tt.Fatalf(\"the re-entered binary did not run the helper: %v\", err)\n\t}\n}\n",
+		"root_test.go":        "package fixture\n\nimport \"testing\"\n\nfunc TestRoot(t *testing.T) {\n\tif len(reentryHelpers) != 0 {\n\t\tt.Fatal(\"the helper left the root package\")\n\t}\n}\n",
+		"packages.map":        "sub helper_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "sub", "suite_main_test.go")), "reentryHelpers") {
+		t.Error("the generated TestMain must run the helpers its package registers")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
+
+// TestApplyMovesSeveralInitsIntoOnePackage pins that init is not a name two
+// declarations can collide on: a package may hold any number of them, so
+// files that each register something from an init move into one package.
+func TestApplyMovesSeveralInitsIntoOnePackage(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"a.go":         "package fixture\n\nvar names []string\n\nfunc init() { names = append(names, \"a\") }\n\nfunc Names() []string { return names }\n",
+		"b.go":         "package fixture\n\nfunc init() { names = append(names, \"b\") }\n",
+		"c.go":         "package fixture\n\nfunc init() {}\n",
+		"packages.map": "sub a.go\nsub b.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "c.go")), "func init()") {
+		t.Error("the init that stays must stay")
+	}
+	goIn(t, dir, "vet", "./...")
+}
+
+// TestApplyMovesAStubTypeOnlyAMovedTestUses is the reproduction of stub types
+// left behind unused: a test-only type with methods, declared in a file that
+// stays, used only by a test that moves. Its own methods are not a use that
+// keeps it at home, so the type moves with its methods instead of being
+// copied and leaving an unused original.
+func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"store.go":      "package fixture\n\ntype Store interface{ Load() int }\n\nfunc Read(s Store) int { return s.Load() }\n",
+		"stub_test.go":  "package fixture\n\ntype stub struct{}\n\nfunc (stub) Load() int { return 3 }\n\nfunc stays() int { return 1 }\n",
+		"store_test.go": "package fixture\n\nimport \"testing\"\n\nfunc TestRead(t *testing.T) {\n\tif Read(stub{}) != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"root_test.go":  "package fixture\n\nimport \"testing\"\n\nfunc TestStays(t *testing.T) {\n\tif stays() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub store.go\nsub store_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if root := readFile(t, filepath.Join(dir, "stub_test.go")); strings.Contains(root, "type stub") || strings.Contains(root, "Load()") {
+		t.Errorf("the stub only the moved test uses must leave with its methods:\n%s", root)
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}

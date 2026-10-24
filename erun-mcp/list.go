@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -53,9 +54,9 @@ type ListInput struct {
 // report; embedded (not wrapped) so existing callers reading ListResult
 // fields directly still find them at the top level.
 type ListToolResult struct {
-	eruncommon.ListResult
-	VersionDrift             *eruncommon.TenantVersionDrift       `json:"versionDrift,omitempty"`
-	ControlPlaneVersionDrift *eruncommon.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
+	lifecycle.ListResult
+	VersionDrift             *lifecycle.TenantVersionDrift       `json:"versionDrift,omitempty"`
+	ControlPlaneVersionDrift *lifecycle.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
 }
 
 func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ListInput) (*mcp.CallToolResult, ListToolResult, error) {
@@ -76,7 +77,7 @@ func listTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			return nil, ListToolResult{}, err
 		}
 
-		result, err := eruncommon.ResolveListResult(runtime.Store, func() (string, string, error) {
+		result, err := lifecycle.ResolveListResult(runtime.Store, func() (string, string, error) {
 			return runtimeFindProjectRoot(runtime.Context, workDir)
 		}, runtimeOpenParams(runtime.Context))
 		if err != nil {
@@ -100,17 +101,17 @@ func validateListInput(controlPlanes bool, tenant, gateEnvironment, alias string
 	return nil
 }
 
-func buildListToolResult(ctx core.Context, result eruncommon.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
+func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlPlanes bool, tenant, gateEnvironment, alias string) (*mcp.CallToolResult, ListToolResult, error) {
 	toolResult := ListToolResult{ListResult: result}
 	if controlPlanes {
-		drift, err := eruncommon.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
+		drift, err := lifecycle.ResolveControlPlaneVersionDrift(ctx, result, alias, cloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}
 		toolResult.ControlPlaneVersionDrift = &drift
 	}
 	if tenant != "" {
-		drift, err := eruncommon.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
+		drift, err := lifecycle.ResolveTenantVersionDrift(ctx, result, tenant, gateEnvironment)
 		if err != nil {
 			return nil, ListToolResult{}, err
 		}

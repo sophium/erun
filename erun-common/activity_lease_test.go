@@ -18,6 +18,3 @@ func isolateActivityCache(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(xdg.Reload)
 }
-
-func alwaysAlive(int) bool { return true }
-func neverAlive(int) bool  { return false }

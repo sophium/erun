@@ -10,6 +10,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
@@ -86,13 +87,13 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath string, limit int, run common.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	list, err := common.ResolveRuntimeOutputs(ctx, req, common.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
+	list, err := jobs.ResolveRuntimeOutputs(ctx, req, jobs.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
 	if err != nil {
 		return err
 	}
@@ -105,7 +106,7 @@ func runOutputsListCommand(ctx core.Context, resolveOpen OpenResolver, params co
 	return writeOutputsListText(ctx, list)
 }
 
-func writeOutputsListText(ctx core.Context, list common.RuntimeOutputsListResult) error {
+func writeOutputsListText(ctx core.Context, list jobs.RuntimeOutputsListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Outputs in %s:\n", list.Dir); err != nil {
 		return err
 	}
@@ -142,13 +143,13 @@ type outputsDownloadCLIResult struct {
 	Signing *common.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run common.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen OpenResolver, params common.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	out, err := common.DownloadRuntimeOutput(ctx, req, common.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
+	out, err := jobs.DownloadRuntimeOutput(ctx, req, jobs.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
 	if err != nil {
 		return err
 	}
@@ -199,7 +200,7 @@ func resolveOutputsDest(dest, name string) string {
 	return dest
 }
 
-func writeOutputDownloadToDisk(out common.RuntimeOutputResult, dest string, force bool) (string, error) {
+func writeOutputDownloadToDisk(out jobs.RuntimeOutputResult, dest string, force bool) (string, error) {
 	destPath := resolveOutputsDest(dest, out.Name)
 	if !force {
 		if _, err := os.Stat(destPath); err == nil {

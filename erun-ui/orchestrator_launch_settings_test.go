@@ -10,9 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/ai"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 const (
@@ -26,7 +27,7 @@ const (
 // and the environment a session actually received.
 type orchestratorLaunchRecorder struct {
 	mu       sync.Mutex
-	launches []eruncommon.OrchestratorLaunch
+	launches []orchestrator.OrchestratorLaunch
 	args     [][]string
 	envs     [][]string
 	token    string
@@ -34,7 +35,7 @@ type orchestratorLaunchRecorder struct {
 	tokenFor []*configpkg.OpenRouterConfig
 }
 
-func (r *orchestratorLaunchRecorder) last(t *testing.T) (eruncommon.OrchestratorLaunch, []string, []string) {
+func (r *orchestratorLaunchRecorder) last(t *testing.T) (orchestrator.OrchestratorLaunch, []string, []string) {
 	t.Helper()
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -62,7 +63,7 @@ func launchSettingsTestApp(t *testing.T) (*App, *orchestratorLaunchRecorder) {
 	t.Helper()
 	app := orchestratorTestApp(t)
 	rec := &orchestratorLaunchRecorder{token: testGatewayToken}
-	app.deps.resolveOrchestratorLaunch = func(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
+	app.deps.resolveOrchestratorLaunch = func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error) {
 		shell, args := buildOrchestratorLaunch("linux", launch, initialPrompt, mcpConfigPath)
 		if agentID != "" {
 			shell, args = orchestratorAttachCommand("linux", agentID)
@@ -110,7 +111,7 @@ func editStoredOrchestrator(app *App, id string, edit func(*configpkg.Orchestrat
 	}
 }
 
-func requireDefaultOrchestratorLaunch(t *testing.T, launch eruncommon.OrchestratorLaunch) {
+func requireDefaultOrchestratorLaunch(t *testing.T, launch orchestrator.OrchestratorLaunch) {
 	t.Helper()
 	if launch.Model != "opus" || launch.EffortFlags != ` --settings '{"ultracode":true}'` || launch.Gateway != nil {
 		t.Fatalf("expected the default launch, got %+v", launch)
@@ -252,8 +253,8 @@ func TestAnOrchestratorWithNoSettingsLaunchesOnTheDefaults(t *testing.T) {
 }
 
 func TestEveryEffortLevelReachesTheLaunchFlags(t *testing.T) {
-	for _, level := range eruncommon.ClaudeEffortLevels() {
-		launch, err := eruncommon.ResolveOrchestratorLaunch(configpkg.OrchestratorConfig{Model: "sonnet", Effort: level}, nil)
+	for _, level := range ai.ClaudeEffortLevels() {
+		launch, err := orchestrator.ResolveOrchestratorLaunch(configpkg.OrchestratorConfig{Model: "sonnet", Effort: level}, nil)
 		if err != nil {
 			t.Fatalf("effort %q: %v", level, err)
 		}
@@ -419,7 +420,7 @@ func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.
 	}
 
 	// The terminal writer, over the same store, while the session runs.
-	_, err = eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{
+	_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{
 		OrchestratorID: created.ID, Effort: "low",
 	})
 	mustNoErr(t, err, "SetOrchestratorEffort")
@@ -485,7 +486,7 @@ func TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit(t *testing.T) {
 	requireStoredLaunchSettings(t, app, "after rename", want)
 
 	// A value the terminal wrote reaches the dialog and survives its next save.
-	_, err = eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{
+	_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{
 		OrchestratorID: created.ID, Model: "",
 	})
 	mustNoErr(t, err, "SetOrchestratorModel")
@@ -573,11 +574,11 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 		_, err := app.StartOrchestrator(created.ID, 80, 24)
 		mustNoErr(t, err, "StartOrchestrator")
 
-		_, err = eruncommon.SetOrchestratorModel(core.Context{}, app.deps.store, eruncommon.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
+		_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
 		mustNoErr(t, err, "SetOrchestratorModel")
 		requireLoneLaunchSettingsRow(t, app, "after set-model opus", orchestratorLaunchInput{Model: "opus"}, false)
 
-		_, err = eruncommon.SetOrchestratorEffort(core.Context{}, app.deps.store, eruncommon.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
+		_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
 		mustNoErr(t, err, "SetOrchestratorEffort")
 		explicit := orchestratorLaunchInput{Model: "opus", Effort: "ultracode"}
 		requireLoneLaunchSettingsRow(t, app, "after set-effort ultracode", explicit, false)

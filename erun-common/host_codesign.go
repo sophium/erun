@@ -174,25 +174,25 @@ func localCodesignKeychain() string {
 	return path
 }
 
-// hostArtifactSigningSummary folds a batch of signings into the counts one
+// HostArtifactSigningSummary folds a batch of signings into the counts one
 // bounded log line can carry, so a mirror pass reports what it signed without
 // emitting a line per file.
-type hostArtifactSigningSummary struct {
-	signed int
-	note   string
+type HostArtifactSigningSummary struct {
+	Signed int
+	Note   string
 }
 
-// signHostArtifacts signs every artifact a mirror pass just materialised. It
+// SignHostArtifacts signs every artifact a mirror pass just materialised. It
 // keeps the first diagnostic so a batch that could not be signed still says why.
-func signHostArtifacts(paths []string) hostArtifactSigningSummary {
-	var summary hostArtifactSigningSummary
+func SignHostArtifacts(paths []string) HostArtifactSigningSummary {
+	var summary HostArtifactSigningSummary
 	for _, path := range paths {
 		signing := SignHostArtifact(path)
 		if signing.Signed {
-			summary.signed++
+			summary.Signed++
 		}
-		if summary.note == "" {
-			summary.note = signing.Note
+		if summary.Note == "" {
+			summary.Note = signing.Note
 		}
 	}
 	return summary

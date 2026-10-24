@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // isolateOrchestratorWhipConfig points the shared xdg config dir at a temp
@@ -22,7 +22,7 @@ func isolateOrchestratorWhipConfig(t *testing.T) {
 	xdg.Reload()
 	t.Cleanup(func() {
 		xdg.Reload()
-		setOrchestratorWhipConfig(eruncommon.ResolveWhipConfig(nil))
+		setOrchestratorWhipConfig(orchestrator.ResolveWhipConfig(nil))
 	})
 }
 

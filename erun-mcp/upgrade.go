@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -25,18 +26,18 @@ type UpgradeInput struct {
 func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
-			target := eruncommon.UpgradeTarget{
+			target := lifecycle.UpgradeTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				VersionOverride: strings.TrimSpace(input.Version),
 				Force:           input.Force,
 			}
-			plan, err := eruncommon.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, eruncommon.UpgradeVersionsResolverForStore(runtime.Store, registry.ResolveRuntimeImageRegistryVersions))
+			plan, err := lifecycle.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, lifecycle.UpgradeVersionsResolverForStore(runtime.Store, registry.ResolveRuntimeImageRegistryVersions))
 			if err != nil {
 				return err
 			}
 
-			deployer := func(ctx core.Context, item eruncommon.UpgradePlanItem) error {
+			deployer := func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
 				findProjectRoot := func() (string, string, error) {
 					return runtimeFindProjectRoot(runtime.Context, workDir)
 				}
@@ -63,7 +64,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				return eruncommon.PersistRuntimeVersionFromDeploySpecs(ctx, specs, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
 			}
 
-			result := eruncommon.RunUpgradePlan(runCtx, plan, deployer)
+			result := lifecycle.RunUpgradePlan(runCtx, plan, deployer)
 			if len(result.Failed) > 0 {
 				names := make([]string, 0, len(result.Failed))
 				for _, failure := range result.Failed {

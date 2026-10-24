@@ -128,7 +128,7 @@ func isGitPushArgs(args []string) bool {
 	return len(args) > 0 && args[0] == "push"
 }
 
-// runReleaseBranchPush pushes the release's generated commits, absorbing a base
+// RunReleaseBranchPush pushes the release's generated commits, absorbing a base
 // branch that moved while the release was building.
 //
 // By the time this runs the version's tag is public, and so are its images and
@@ -141,7 +141,7 @@ func isGitPushArgs(args []string) bool {
 // conflict-free by construction, so rebasing onto the branch as it stands now and
 // retrying is strictly better than stopping. It stays bounded: a rebase that
 // cannot apply, or a push that keeps failing, still surfaces the push's own error.
-func runReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
+func RunReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
 	err := runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
@@ -350,7 +350,7 @@ func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot 
 	}
 	tag := "v" + version
 
-	tagCommit, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{commit}")
+	tagCommit, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{commit}")
 	if err != nil || !ok {
 		return nil
 	}

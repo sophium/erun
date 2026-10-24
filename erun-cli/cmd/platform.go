@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
@@ -44,7 +44,7 @@ func newPlatformWhoamiCmd(store config.CloudReadStore, alias *string, deps cloud
 		Example:      "  erun platform whoami\n  erun platform whoami --erun-alias erun+api.acme.services.erunpaas.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			whoami, err := common.RunPlatformWhoami(ctx, store, *alias, deps)
+			whoami, err := platform.RunPlatformWhoami(ctx, store, *alias, deps)
 			if err != nil {
 				return err
 			}
@@ -78,7 +78,7 @@ func newPlatformVersionCmd(store config.CloudReadStore, alias *string, deps clou
 		Example:      "  erun platform version\n  erun platform version --erun-alias erun+api.acme.services.erunpaas.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			info, err := common.RunPlatformVersion(ctx, store, *alias, deps)
+			info, err := platform.RunPlatformVersion(ctx, store, *alias, deps)
 			if err != nil {
 				return err
 			}
@@ -122,7 +122,7 @@ func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps
 		Example:      "  erun platform tenant create --name acme --issuer https://acme.example.com --display-name Acme",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			tenant, err := common.RunPlatformCreateTenant(ctx, store, *alias, params, deps)
+			tenant, err := platform.RunPlatformCreateTenant(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -156,7 +156,7 @@ func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps c
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			tenants, err := common.RunPlatformListTenants(ctx, store, *alias, deps)
+			tenants, err := platform.RunPlatformListTenants(ctx, store, *alias, deps)
 			if err != nil {
 				return err
 			}
@@ -233,7 +233,7 @@ func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *st
 		Example:      "  erun platform tenant repair-org-mapping --tenant-id 01... --issuer https://auth.example --org-field-key urn:zitadel:iam:user:resourceowner:id --org-field-value 42",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			issuer, err := common.RunPlatformRepairTenantIssuerOrgMapping(ctx, store, *alias, params, deps)
+			issuer, err := platform.RunPlatformRepairTenantIssuerOrgMapping(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -289,7 +289,7 @@ func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string,
 		Example:      "  erun platform identity org create --name acme",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			org, err := common.RunPlatformCreateOrg(ctx, store, *alias, params, deps)
+			org, err := platform.RunPlatformCreateOrg(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -338,7 +338,7 @@ func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, dep
 		Example:      "  erun platform user grant-role --user-id 019a7fa5-c2c0-7c55-bc70-714873a71f60 --role-id 019a7fa5-c2c0-7c55-bc70-714873a71f70",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			if err := common.RunPlatformGrantUserRole(ctx, store, *alias, params, deps); err != nil {
+			if err := platform.RunPlatformGrantUserRole(ctx, store, *alias, params, deps); err != nil {
 				return err
 			}
 			if ctx.DryRun {
@@ -379,7 +379,7 @@ func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps c
 		Example:      "  erun platform user enroll --username jane --issuer https://acme.example.com --subject jane@acme.com",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			user, err := common.RunPlatformCreateUser(ctx, store, *alias, params, deps)
+			user, err := platform.RunPlatformCreateUser(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -418,7 +418,7 @@ func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps clo
 		Example:      "  erun platform user list\n  erun platform user list --tenant-id 018f...  # operations-tenant callers only",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			users, err := common.RunPlatformListUsers(ctx, store, *alias, params, deps)
+			users, err := platform.RunPlatformListUsers(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -475,7 +475,7 @@ func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			environments, err := common.RunPlatformListEnvironments(ctx, store, *alias, deps)
+			environments, err := platform.RunPlatformListEnvironments(ctx, store, *alias, deps)
 			if err != nil {
 				return err
 			}
@@ -531,7 +531,7 @@ func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			environment, err := common.RunPlatformGetEnvironment(ctx, store, *alias, args[0], deps)
+			environment, err := platform.RunPlatformGetEnvironment(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -573,15 +573,15 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 		Example:      "  erun platform env register --name prod --type runtime --context-id 018f... --runtime-version 1.4.2\n  erun platform env register --name dev --type local-agent --adopt --kubernetes-context kind-dev --definition acme/dev",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			var local *common.EnvDefinitionAdoptParams
+			var local *platform.EnvDefinitionAdoptParams
 			if strings.TrimSpace(localDefinition) != "" {
 				tenant, environment, err := parseLocalEnvironmentRef(localDefinition)
 				if err != nil {
 					return err
 				}
-				local = &common.EnvDefinitionAdoptParams{Tenant: tenant, Environment: environment}
+				local = &platform.EnvDefinitionAdoptParams{Tenant: tenant, Environment: environment}
 			}
-			environment, definition, err := common.RunPlatformRegisterEnvironmentWithDefinition(ctx, store, *alias, params, local, deps)
+			environment, definition, err := platform.RunPlatformRegisterEnvironmentWithDefinition(ctx, store, *alias, params, local, deps)
 			if err != nil {
 				return err
 			}
@@ -648,7 +648,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 		Example:      "  erun platform env push acme dev\n  erun platform env push acme dev --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			result, err := common.RunPlatformPushEnvDefinition(ctx, store, *alias, common.EnvDefinitionPushParams{
+			result, err := platform.RunPlatformPushEnvDefinition(ctx, store, *alias, platform.EnvDefinitionPushParams{
 				Tenant:      args[0],
 				Environment: args[1],
 			}, deps)
@@ -675,7 +675,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 // newPlatformEnvPullCmd pulls the platform's stored definition into a local
 // environment, creating it first when it does not exist on this machine.
 func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
-	var params common.EnvDefinitionPullParams
+	var params platform.EnvDefinitionPullParams
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "pull TENANT ENVIRONMENT",
@@ -699,7 +699,7 @@ func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRun
 			params.Tenant = args[0]
 			params.Environment = args[1]
 			confirm := pullConfirmation(ctx, promptRunner, args[0], args[1], yes)
-			result, err := common.RunPlatformPullEnvDefinition(ctx, store, *alias, params, confirm, deps)
+			result, err := platform.RunPlatformPullEnvDefinition(ctx, store, *alias, params, confirm, deps)
 			if err != nil {
 				return err
 			}
@@ -743,7 +743,7 @@ func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cl
 		Example:      "  erun platform env deploy 018f...\n  erun platform env deploy 018f... --version 1.4.2",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			environment, err := common.RunPlatformDeployEnvironment(ctx, store, *alias, args[0], params, deps)
+			environment, err := platform.RunPlatformDeployEnvironment(ctx, store, *alias, args[0], params, deps)
 			if err != nil {
 				return err
 			}
@@ -776,7 +776,7 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			environment, err := common.RunPlatformStopEnvironment(ctx, store, *alias, args[0], deps)
+			environment, err := platform.RunPlatformStopEnvironment(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -846,7 +846,7 @@ func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptR
 					return fmt.Errorf("delete cancelled")
 				}
 			}
-			environment, err := common.RunPlatformDeleteEnvironment(ctx, store, *alias, args[0], deps)
+			environment, err := platform.RunPlatformDeleteEnvironment(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -892,7 +892,7 @@ func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, dep
 		Example:      "  erun platform context create --name prod --alias aws-main --region eu-west-2 --preview\n  erun platform context create --name prod --alias aws-main --region eu-west-2",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			result, err := common.RunPlatformCreateContext(ctx, store, *alias, params, deps)
+			result, err := platform.RunPlatformCreateContext(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -940,7 +940,7 @@ func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			contexts, err := common.RunPlatformListContexts(ctx, store, *alias, deps)
+			contexts, err := platform.RunPlatformListContexts(ctx, store, *alias, deps)
 			if err != nil {
 				return err
 			}
@@ -981,7 +981,7 @@ func newPlatformContextGetCmd(store config.CloudReadStore, alias *string, deps c
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			cloudContext, err := common.RunPlatformGetContext(ctx, store, *alias, args[0], deps)
+			cloudContext, err := platform.RunPlatformGetContext(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -1017,7 +1017,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 			"  erun platform provision --env-name prod --env-type runtime --context-name prod --context-alias aws-main --context-region eu-west-2",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			result, err := common.RunPlatformProvision(ctx, store, *alias, params, deps)
+			result, err := platform.RunPlatformProvision(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}

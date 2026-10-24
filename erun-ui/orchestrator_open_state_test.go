@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // openStateTestApp is orchestratorTestApp with the durable open record and the
@@ -26,7 +26,7 @@ func openStateTestApp(t *testing.T) (*App, string, string) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		resolveOrchestratorLaunch: func(eruncommon.OrchestratorLaunch, string, string, string) (string, []string, error) {
+		resolveOrchestratorLaunch: func(orchestrator.OrchestratorLaunch, string, string, string) (string, []string, error) {
 			return "claude-stub", nil, nil
 		},
 		orchestratorOpenPath:        openPath,

@@ -10,13 +10,15 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/podruntime"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
 type rootStore interface {
-	common.BootstrapStore
+	setup.BootstrapStore
 	config.OpenStore
 	common.DockerStore
 	common.DeployStore
@@ -108,19 +110,19 @@ func bootstrapInitExitError(err error) error {
 	if errors.Is(err, config.ErrNotInGitRepository) {
 		return internal.MarkReported(config.ErrNotInGitRepository)
 	}
-	var unavailable common.TenantSelectionUnavailableError
+	var unavailable setup.TenantSelectionUnavailableError
 	if errors.As(err, &unavailable) {
 		return internal.WithExitCode(err, tenantSelectionUnavailableExitCode)
 	}
 	return err
 }
 
-func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
+func newRunInit(store setup.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime setup.RemoteRuntimeWaitFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(core.Context, common.BootstrapInitParams) error {
 	return func(ctx core.Context, params common.BootstrapInitParams) error {
 		ctx = withCloudContextPreflight(ctx, store)
 		params.RuntimeVersionDefault = currentBuildInfo().Version
-		_, err := common.RunBootstrapInitWithDependencies(common.BootstrapInitDependencies{
-			Store:           common.TraceBootstrapStore(ctx, store),
+		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
+			Store:           setup.TraceBootstrapStore(ctx, store),
 			FindProjectRoot: findProjectRoot,
 			SelectTenant: func(tenants []config.TenantConfig) (common.TenantSelectionResult, error) {
 				return selectTenantPrompt(selectRunner, tenants)
@@ -141,9 +143,9 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			PromptCodeCommitSSHKeyID: func(label string) (string, error) {
 				return codeCommitSSHKeyIDPrompt(promptRunner, label)
 			},
-			EnsureKubernetesNamespace: common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
+			EnsureKubernetesNamespace: setup.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
 			LoadProjectConfig:         config.LoadProjectConfig,
-			SaveProjectConfig:         common.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
+			SaveProjectConfig:         setup.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
 			WaitForRemoteRuntime:      waitForRemoteRuntime,
 			RunRemoteCommand:          runRemoteCommand,
 			DeployHelmChart:           deployHelmChart,
@@ -159,7 +161,7 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 		}
 		if homeDir, ensureErr := os.UserHomeDir(); ensureErr != nil {
 			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
-		} else if ensureErr := common.EnsureGlobalAgentInstructions(homeDir); ensureErr != nil {
+		} else if ensureErr := podruntime.EnsureGlobalAgentInstructions(homeDir); ensureErr != nil {
 			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
 		}
 		if ensureErr := internal.EnsureClaudeSettings(); ensureErr != nil {

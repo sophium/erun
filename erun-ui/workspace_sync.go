@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 const defaultWorkspaceSyncInterval = 2 * time.Second
@@ -37,7 +38,7 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	if err != nil || !result.RemoteRepo() || !result.EnvConfig.SSHD.Enabled || !result.EnvConfig.SSHD.WorkspaceSync.Enabled {
 		return
 	}
-	localPath := eruncommon.WorkspaceSyncLocalPath(result, a.deps.findProjectRoot)
+	localPath := workspace.WorkspaceSyncLocalPath(result, a.deps.findProjectRoot)
 	if localPath == "" {
 		a.emitEnvNotification("warning", selection.Tenant, selection.Environment, notificationSourceWorkspaceSyncNoPath,
 			fmt.Sprintf("Workspace sync for %s/%s has no local path.", selection.Tenant, selection.Environment), "")
@@ -161,7 +162,7 @@ func (a *App) stopWorkspaceSyncForKey(key string) {
 }
 
 func (a *App) runWorkspaceSyncLoop(ctx context.Context, key string, selection uiSelection, result config.OpenResult, localPath string) {
-	params := eruncommon.WorkspaceSyncParams{
+	params := workspace.WorkspaceSyncParams{
 		HostAlias:  eruncommon.SSHConnectionInfoForResult(result).HostAlias,
 		RemotePath: eruncommon.SSHConnectionInfoForResult(result).WorkspacePath,
 		LocalPath:  localPath,
@@ -205,7 +206,7 @@ const (
 
 // prepareWorkspaceSyncPass sleeps one interval itself before signalling retry, so
 // the sync loop's continue does not busy-spin on an unreachable SSHD.
-func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result config.OpenResult, params eruncommon.WorkspaceSyncParams) workspaceSyncPassOutcome {
+func (a *App) prepareWorkspaceSyncPass(ctx context.Context, key string, result config.OpenResult, params workspace.WorkspaceSyncParams) workspaceSyncPassOutcome {
 	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(config.SSHLocalPortForResult(result)) && a.deps.ensureSSHD != nil {
 		if err := a.deps.ensureSSHD(ctx, result); err != nil {
 			a.setWorkspaceSyncError(key, result.Tenant, result.EnvConfig.Name, err)

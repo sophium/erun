@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/e2e"
 )
 
 type E2EInput struct {
@@ -32,7 +32,7 @@ func e2eTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 		version := strings.TrimSpace(input.Version)
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
 			runCtx.MCPTool = "e2e"
-			plan, err := eruncommon.ResolveE2EPlan(config.FindProjectRoot, component)
+			plan, err := e2e.ResolveE2EPlan(config.FindProjectRoot, component)
 			if err != nil {
 				return err
 			}
@@ -40,9 +40,9 @@ func e2eTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 				runCtx.Info("e2e: no e2e/<component>/Dockerfile suite found; nothing to run")
 				return nil
 			}
-			_, err = eruncommon.RunE2E(runCtx, eruncommon.E2EParams{
+			_, err = e2e.RunE2E(runCtx, e2e.E2EParams{
 				Plan: plan,
-				Target: eruncommon.E2ETarget{
+				Target: e2e.E2ETarget{
 					Tenant:            runtime.Context.Tenant,
 					Environment:       runtime.Context.Environment,
 					Namespace:         config.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),

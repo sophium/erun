@@ -11,6 +11,8 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 // A host workspace is the operator's host-machine copy of an env's worktree. For
@@ -27,7 +29,7 @@ func hostWorkspacePath(result config.OpenResult, findProjectRoot eruncommon.Proj
 		return strings.TrimSpace(result.RepoPath)
 	}
 	if result.EnvConfig.SSHD.Enabled && result.EnvConfig.SSHD.WorkspaceSync.Enabled {
-		return eruncommon.WorkspaceSyncLocalPath(result, findProjectRoot)
+		return workspace.WorkspaceSyncLocalPath(result, findProjectRoot)
 	}
 	return ""
 }
@@ -60,25 +62,25 @@ func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, st
 //
 // The path is validated here so a mistyped directory fails naming the path, at
 // this edge, rather than surfacing as git's own error from a layer down.
-func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	path := strings.TrimSpace(directory)
 	if path == "" {
-		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
+		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff %s: %w", path, err)
+		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff %s: %w", path, err)
 	}
 	if !info.IsDir() {
-		return eruncommon.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
+		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
 	}
 	// The contribute-clone target has no meaning for a bare directory: there is no
 	// environment whose clone it could be, so the diff is always the directory's
 	// own working tree.
-	return eruncommon.ResolveGitDiffWithOptions(path, eruncommon.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
-		Target:         eruncommon.DiffTargetEnv,
+		Target:         lifecycle.DiffTargetEnv,
 	}, nil)
 }
 
@@ -87,21 +89,21 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (erunco
 // Unlike LoadDiff it never dials the in-pod MCP, so it works for a remote-agent
 // env whose runtime pod is stopped or unforwarded — the review reads the synced
 // mirror directly.
-func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (eruncommon.DiffResult, error) {
+func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	// The host mirror is the env worktree; the contribute-clone target has no
 	// host-side meaning, so the host diff is always scoped to the env worktree.
-	return eruncommon.ResolveGitDiffWithOptions(path, eruncommon.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
-		Target:         eruncommon.DiffTargetEnv,
+		Target:         lifecycle.DiffTargetEnv,
 	}, nil)
 }
 
@@ -160,8 +162,8 @@ func (a *App) ListHostArtifacts(selection uiSelection) ([]hostArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
-	rels, err := eruncommon.ListLocalArtifactFiles(dir)
+	dir := filepath.Join(path, workspace.WorkspaceSyncArtifactsSubdir)
+	rels, err := workspace.ListLocalArtifactFiles(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -189,14 +191,14 @@ func (a *App) RunHostArtifact(selection uiSelection, relPath string) error {
 	if err := errMissingTenantOrEnvironment("run host artifact", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
-	if !eruncommon.SafeWorkspaceSyncPath(relPath) {
+	if !workspace.SafeWorkspaceSyncPath(relPath) {
 		return fmt.Errorf("invalid artifact path %q", relPath)
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Join(path, eruncommon.WorkspaceSyncArtifactsSubdir)
+	dir := filepath.Join(path, workspace.WorkspaceSyncArtifactsSubdir)
 	exePath := filepath.Join(dir, filepath.FromSlash(relPath))
 	rel, relErr := filepath.Rel(dir, exePath)
 	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {

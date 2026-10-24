@@ -11,11 +11,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 func (a *App) LoadState() (uiState, error) {
-	result, err := eruncommon.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -254,7 +255,7 @@ func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersio
 	return labeled
 }
 
-func stateFromListResult(result eruncommon.ListResult, info model.BuildInfo) uiState {
+func stateFromListResult(result lifecycle.ListResult, info model.BuildInfo) uiState {
 	state := uiState{
 		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
 		Build:          buildDetailsFrom(info),

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 // hostOpenCommand and hostRevealCommand return the OS opener invocation for a
@@ -137,7 +138,7 @@ func (a *App) ResolveEnvironmentHostPath(selection uiSelection, podPath string) 
 	if rel, ok := relUnderPodDir(cleanPodPath, eruncommon.DefaultRuntimeOutputsDir); ok {
 		return resolveHostMirrorPath(
 			"artifact",
-			filepath.Join(hostRoot, eruncommon.WorkspaceSyncArtifactsSubdir, filepath.FromSlash(rel)),
+			filepath.Join(hostRoot, workspace.WorkspaceSyncArtifactsSubdir, filepath.FromSlash(rel)),
 			"no matching file has synced to this environment's outputs yet",
 		), nil
 	}

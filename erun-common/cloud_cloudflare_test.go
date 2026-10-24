@@ -5,13 +5,6 @@ import (
 	"testing"
 )
 
-func mustNoErr(t *testing.T, err error, what string) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("%s: %v", what, err)
-	}
-}
-
 func TestRenderCloudflareCredentialsSecretRedactsAndQuotes(t *testing.T) {
 	manifest := renderCloudflareCredentialsSecret("acme-dev-cloudflare", "acme-dev", `tok"with\quote`)
 	if !strings.Contains(manifest, "CLOUDFLARE_API_TOKEN: \"tok\\\"with\\\\quote\"") {

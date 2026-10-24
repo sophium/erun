@@ -12,7 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
@@ -181,7 +182,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -213,7 +214,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -251,7 +252,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -285,7 +286,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -320,7 +321,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -348,7 +349,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -370,7 +371,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -393,7 +394,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -413,7 +414,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -447,11 +448,11 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
-		statuses := map[string]common.DiffFile{}
+		statuses := map[string]lifecycle.DiffFile{}
 		for _, f := range parsed.Files {
 			statuses[f.Path] = f
 		}
@@ -475,7 +476,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -561,7 +562,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.DiffResult
+		var parsed lifecycle.DiffResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 		}
@@ -1286,7 +1287,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.MergeWorkingTreeBranchResult
+		var parsed mergequeue.MergeWorkingTreeBranchResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1535,7 +1536,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1663,7 +1664,7 @@ func TestExec(t *testing.T) {
 		// The other half of the guarantee: the run says what it carried, so a
 		// carriage that found nothing is never left to be counted out of the
 		// squash message afterwards.
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1721,7 +1722,7 @@ func TestExec(t *testing.T) {
 			t.Fatalf("expected the landed commit to carry the branch's wrapped trailer whole, got:\n%s", body)
 		}
 
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1759,7 +1760,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1804,7 +1805,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1860,7 +1861,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("expected exit 0 — a source that contributes nothing must not fail the batch:\n%s", result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -1926,7 +1927,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("expected exit 0 — the batch still lands two of three sources:\n%s", result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -2029,7 +2030,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("expected the batch to land with nothing for a human to resolve, got exit %d:\n%s", result.ExitCode, result.Combined)
 		}
-		var parsed common.GateMergeWorkingTreeResult
+		var parsed mergequeue.GateMergeWorkingTreeResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}
@@ -2101,7 +2102,7 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("expected the merge to land with nothing for a human to resolve, got exit %d:\n%s", result.ExitCode, result.Combined)
 		}
-		var parsed common.MergeWorkingTreeBranchResult
+		var parsed mergequeue.MergeWorkingTreeBranchResult
 		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 			t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 		}

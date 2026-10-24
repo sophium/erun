@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/mergequeue"
 )
 
 // ExecMergeInput names the branch to bring into the runtime repo's current
@@ -19,12 +19,12 @@ type ExecMergeInput struct {
 
 func execMergeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecMergeInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var merged *eruncommon.MergeWorkingTreeBranchResult
+		var merged *mergequeue.MergeWorkingTreeBranchResult
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
-			result, err := eruncommon.MergeWorkingTreeBranch(runCtx, workDir, eruncommon.MergeWorkingTreeBranchParams{
+			result, err := mergequeue.MergeWorkingTreeBranch(runCtx, workDir, mergequeue.MergeWorkingTreeBranchParams{
 				TargetBranch: input.TargetBranch,
 				Remote:       input.Remote,
-			}, eruncommon.MergeWorkingTreeBranchDependencies{})
+			}, mergequeue.MergeWorkingTreeBranchDependencies{})
 			if err != nil {
 				return err
 			}

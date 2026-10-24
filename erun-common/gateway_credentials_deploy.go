@@ -120,7 +120,7 @@ func gatewayCredentialForDeploy(gateway *config.OpenRouterConfig) (string, error
 	if err != nil {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
 	}
-	return resolveGatewayCredential(store, gateway.AuthTokenRefName(), gateway.Endpoint())
+	return ResolveGatewayCredentialFromStore(store, gateway.AuthTokenRefName(), gateway.Endpoint())
 }
 
 // ResolveGatewayCredential resolves the credential a host-side session sends to
@@ -132,13 +132,13 @@ func ResolveGatewayCredential(gateway *config.OpenRouterConfig) (string, error) 
 	return gatewayCredentialForDeploy(gateway)
 }
 
-// resolveGatewayCredential is the decision itself, separated from the store's
+// ResolveGatewayCredentialFromStore is the decision itself, separated from the store's
 // construction so it can be exercised against a store a test owns.
 //
 // baseURL is the gateway the credential is destined for. It is what scopes the
 // host fallback: a credential is issued for one service, so the host's own key
 // is reused only when the host is already pointed at this same endpoint.
-func resolveGatewayCredential(store cloud.CloudSecretStore, ref, baseURL string) (string, error) {
+func ResolveGatewayCredentialFromStore(store cloud.CloudSecretStore, ref, baseURL string) (string, error) {
 	saved, loadErr := store.LoadCloudSecret(ref)
 	switch {
 	case loadErr == nil && strings.TrimSpace(saved) != "":
@@ -150,8 +150,8 @@ func resolveGatewayCredential(store cloud.CloudSecretStore, ref, baseURL string)
 		// case, which the host key below answers.
 		return "", fmt.Errorf("load gateway credential %q: %w", ref, loadErr)
 	}
-	hostToken, hostEndpoint := hostClaudeGatewayCredential()
-	if hostToken != "" && sameGatewayEndpoint(hostEndpoint, baseURL) {
+	hostToken, hostEndpoint := HostClaudeGatewayCredential()
+	if hostToken != "" && SameGatewayEndpoint(hostEndpoint, baseURL) {
 		return hostToken, nil
 	}
 	return "", noGatewayCredentialError(ref, baseURL, hostToken, hostEndpoint)

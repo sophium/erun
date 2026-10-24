@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // WhipInput mirrors the CLI's `erun whip` flags. tenant/environment must name
@@ -22,21 +22,21 @@ type WhipInput struct {
 // pass. It always acts explicitly (ignores staleness) but never bypasses the
 // consecutive-nudge cap: a capped session stays capped until it shows fresh
 // activity on its own.
-func whipTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, eruncommon.WhipResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input WhipInput) (*mcp.CallToolResult, eruncommon.WhipResult, error) {
+func whipTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, orchestrator.WhipResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input WhipInput) (*mcp.CallToolResult, orchestrator.WhipResult, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.WhipResult{}, err
+			return nil, orchestrator.WhipResult{}, err
 		}
 		// Best-effort: a missing or unreadable root config resolves to the
 		// zero ERunConfig, whose nil Whip override keeps ResolveWhipConfig on
 		// today's defaults -- the same "unconfigured install is unaffected"
 		// contract the CLI and the desktop both rely on.
 		globalConfig, _, _ := runtime.Store.LoadERunConfig()
-		cfg := eruncommon.ResolveWhipConfig(globalConfig.Whip)
-		result, err := eruncommon.RunLocalEnvironmentWhip(time.Now(), eruncommon.RunWhipCommand, tenant, environment, cfg, true, input.Preview)
+		cfg := orchestrator.ResolveWhipConfig(globalConfig.Whip)
+		result, err := orchestrator.RunLocalEnvironmentWhip(time.Now(), orchestrator.RunWhipCommand, tenant, environment, cfg, true, input.Preview)
 		if err != nil {
-			return nil, eruncommon.WhipResult{}, err
+			return nil, orchestrator.WhipResult{}, err
 		}
 		return nil, result, nil
 	}

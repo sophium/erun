@@ -168,7 +168,7 @@ func guardRuntimeChartLineSwitch(ctx core.Context, target config.OpenResult, res
 // its erun base cannot be read off its tag and it is not checked here: the
 // erun-build-env contract re-pins its base with the chart.
 func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) error {
-	if strings.TrimSpace(chartName) != config.DevopsComponentName || !runtimeImageIsStockDevops(image) {
+	if strings.TrimSpace(chartName) != config.DevopsComponentName || !RuntimeImageIsStockDevops(image) {
 		return nil
 	}
 	_, _, tag, ok := parseDockerImageReference(strings.TrimSpace(image))

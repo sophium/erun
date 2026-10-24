@@ -11,6 +11,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -444,7 +445,7 @@ func retainRuntimeUsage(tenant, environment, cgroupRoot string) error {
 	if err != nil {
 		return err
 	}
-	return common.SaveRuntimeUsageHistory(tenant, environment, common.AppendRuntimeUsageSample(history, sample, time.Now()))
+	return podruntime.SaveRuntimeUsageHistory(tenant, environment, podruntime.AppendRuntimeUsageSample(history, sample, time.Now()))
 }
 
 // missingTenantOrEnvironmentFlags names which of the shared --tenant/--environment

@@ -7,6 +7,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
 
@@ -69,7 +70,7 @@ func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams
 		return err
 	}
 
-	stopResult, err := common.RunStopEnvironment(ctx, common.StopEnvironmentParams{
+	stopResult, err := lifecycle.RunStopEnvironment(ctx, lifecycle.StopEnvironmentParams{
 		Result:        result,
 		SaveEnvConfig: saveEnvConfig,
 	})
@@ -91,7 +92,7 @@ func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams
 // pod with no explanation is read as a failed stop; on an already-stopped
 // environment they are the whole explanation for why pressing Stop changed
 // nothing.
-func stopCommandSummary(result common.StopEnvironmentResult) string {
+func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
 	kept := stopCommandKeptComponents(result)
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped%s", result.Tenant, result.Environment, kept)
@@ -106,7 +107,7 @@ func stopCommandSummary(result common.StopEnvironmentResult) string {
 // stopCommandKeptComponents renders the components a stop left running, or an
 // empty string when the environment deploys none — a stop on a runtime-only
 // environment has nothing to explain and must not gain a line saying so.
-func stopCommandKeptComponents(result common.StopEnvironmentResult) string {
+func stopCommandKeptComponents(result lifecycle.StopEnvironmentResult) string {
 	if len(result.RemainingComponents) == 0 {
 		return ""
 	}

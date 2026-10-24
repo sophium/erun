@@ -5,10 +5,10 @@ import (
 	"io"
 	"strings"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
@@ -44,7 +44,7 @@ func newReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *co
 }
 
 func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params common.ReviewListParams
+	var params reviewpkg.ReviewListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List reviews on the erun platform",
@@ -64,7 +64,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 			"  erun review list --repository git@github.com:org/repo.git --status READY",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			reviews, err := common.RunReviewList(ctx, store, *alias, params, deps)
+			reviews, err := reviewpkg.RunReviewList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -149,7 +149,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			detail, err := common.RunReviewShow(ctx, store, *alias, args[0], deps)
+			detail, err := reviewpkg.RunReviewShow(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -169,7 +169,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	return cmd
 }
 
-func writeReviewDetail(ctx core.Context, detail common.ReviewDetail) error {
+func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
 	if err := writeReviewLine(ctx, detail.Review); err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 			"  erun review create --name \"Add widget\" --repository https://github.com/org/repo.git --source-branch feature/add-widget --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewCreate(ctx, store, *alias, params, deps)
+			review, err := reviewpkg.RunReviewCreate(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -271,7 +271,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 			if err != nil {
 				return fmt.Errorf("read comment body from stdin: %w", err)
 			}
-			comment, err := common.RunReviewComment(ctx, store, *alias, common.ReviewCommentParams{
+			comment, err := reviewpkg.RunReviewComment(ctx, store, *alias, reviewpkg.ReviewCommentParams{
 				ReviewID:        args[0],
 				CommitID:        commitID,
 				FilePath:        filePath,
@@ -315,7 +315,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 		Example:      "  erun review resolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			comment, err := common.RunReviewResolve(ctx, store, *alias, args[0], args[1], deps)
+			comment, err := reviewpkg.RunReviewResolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
 			}
@@ -348,7 +348,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 		Example:      "  erun review unresolve 018f... 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			comment, err := common.RunReviewUnresolve(ctx, store, *alias, args[0], args[1], deps)
+			comment, err := reviewpkg.RunReviewUnresolve(ctx, store, *alias, args[0], args[1], deps)
 			if err != nil {
 				return err
 			}
@@ -376,7 +376,7 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewClose(ctx, store, *alias, args[0], deps)
+			review, err := reviewpkg.RunReviewClose(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -435,7 +435,7 @@ func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cl
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			build, err := common.RunReviewRecordBuild(ctx, store, *alias, common.ReviewRecordBuildParams{
+			build, err := reviewpkg.RunReviewRecordBuild(ctx, store, *alias, reviewpkg.ReviewRecordBuildParams{
 				ReviewID:      args[0],
 				CommitID:      commitID,
 				Version:       version,
@@ -501,7 +501,7 @@ func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps c
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewReportMerged(ctx, store, *alias, args[0], buildID, remoteURL, deps)
+			review, err := reviewpkg.RunReviewReportMerged(ctx, store, *alias, args[0], buildID, remoteURL, deps)
 			if err != nil {
 				return err
 			}
@@ -539,7 +539,7 @@ func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.
 		Example:      "  erun review requeue 018f...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewRequeue(ctx, store, *alias, args[0], deps)
+			review, err := reviewpkg.RunReviewRequeue(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -589,7 +589,7 @@ func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps 
 		Example:      "  erun review reviewers list 018f...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			reviewers, err := common.RunReviewReviewersList(ctx, store, *alias, args[0], deps)
+			reviewers, err := reviewpkg.RunReviewReviewersList(ctx, store, *alias, args[0], deps)
 			if err != nil {
 				return err
 			}
@@ -631,7 +631,7 @@ func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps c
 		Example:      "  erun review reviewers add 018f... --user-id 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			reviewer, err := common.RunReviewReviewerAdd(ctx, store, *alias, args[0], userID, deps)
+			reviewer, err := reviewpkg.RunReviewReviewerAdd(ctx, store, *alias, args[0], userID, deps)
 			if err != nil {
 				return err
 			}
@@ -662,7 +662,7 @@ func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, dep
 		Example:      "  erun review reviewers remove 018f... --user-id 018g...",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			err := common.RunReviewReviewerRemove(ctx, store, *alias, args[0], userID, deps)
+			err := reviewpkg.RunReviewReviewerRemove(ctx, store, *alias, args[0], userID, deps)
 			if err != nil {
 				return err
 			}
@@ -710,7 +710,7 @@ func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps
 			"  erun review queue list --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			reviews, err := common.RunReviewMergeQueueList(ctx, store, *alias, params, deps)
+			reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -752,7 +752,7 @@ func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, d
 			"  erun review queue advance --repository https://github.com/org/repo.git --target-branch main",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewMergeQueueAdvance(ctx, store, *alias, params, deps)
+			review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, store, *alias, params, deps)
 			if err != nil {
 				return err
 			}
@@ -792,7 +792,7 @@ func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *s
 		Example:      "  erun review queue override-advance --target-branch main --reason \"hotfix, reviewers unavailable\"",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
-			review, err := common.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, params, reason, deps)
+			review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, store, *alias, params, reason, deps)
 			if err != nil {
 				return err
 			}

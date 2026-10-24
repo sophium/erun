@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // TestUpgradeToolPreviewResolvesPlan verifies the upgrade preview path resolves
 // the plan without deploying, so callers can inspect the work with no side effects.
 func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
-	t.Setenv(eruncommon.UpgradeVersionsOverrideEnv, "stable=3.0.0")
+	t.Setenv(lifecycle.UpgradeVersionsOverrideEnv, "stable=3.0.0")
 	projectRoot := t.TempDir()
 	handler := upgradeTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},

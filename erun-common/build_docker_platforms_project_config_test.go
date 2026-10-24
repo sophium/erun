@@ -4,23 +4,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-// repoRootForDockerPlatformsProjectConfigTest returns the repo root. erun-common
-// sits directly under the root, so the grandparent of this file is the root
-// regardless of the test's working directory.
+// repoRootForDockerPlatformsProjectConfigTest returns the repo root.
 func repoRootForDockerPlatformsProjectConfigTest(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	return filepath.Dir(filepath.Dir(file))
+	return erunRepoRoot(t)
 }
 
 // TestProjectConfigPinsAmd64OnlyPlatformsForConfirmedAmd64Environments locks in

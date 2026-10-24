@@ -31,7 +31,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 	return string(pem), true, nil
 }
 
-// applyMCPAuthToRuntimeSpec applies MCP-auth metadata only to the runtime
+// ApplyMCPAuthToRuntimeSpec applies MCP-auth metadata only to the runtime
 // release: the MCP edge is served by the runtime container, so
 // backend component charts never carry mcpAuth. Auth is sticky — a redeploy that
 // does not re-supply the key rethreads the env's persisted one — and turning it
@@ -44,7 +44,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // (mcptoken.Signer) so the edge trusts tokens the backend mints for the
 // console. No key resolved (and no explicit opt-out) leaves the deploy
 // unauthenticated, matching every deploy before this existed.
-func applyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *DeploySpec) error {
+func ApplyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *DeploySpec) error {
 	if spec == nil || spec.Deploy.ReleaseName != config.RuntimeReleaseName(target.Tenant) {
 		return nil
 	}

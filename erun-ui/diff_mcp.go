@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 )
@@ -63,11 +63,11 @@ func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.Streamable
 	}
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (eruncommon.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (lifecycle.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -82,16 +82,16 @@ func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDif
 		},
 	})
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
-	var diff eruncommon.DiffResult
+	var diff lifecycle.DiffResult
 	if err := json.Unmarshal(data, &diff); err != nil {
-		return eruncommon.DiffResult{}, err
+		return lifecycle.DiffResult{}, err
 	}
 	return diff, nil
 }

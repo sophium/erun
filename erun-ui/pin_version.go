@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -115,7 +115,7 @@ func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, e
 		return uiPinPlan{}, err
 	}
 
-	var resolved eruncommon.PinPlan
+	var resolved lifecycle.PinPlan
 	if unmarshalErr := json.Unmarshal(stdout, &resolved); unmarshalErr != nil {
 		return uiPinPlan{}, fmt.Errorf("read the pin result: %w", unmarshalErr)
 	}
@@ -136,7 +136,7 @@ func lastMeaningfulLine(detail string) string {
 	return strings.TrimSpace(detail)
 }
 
-func toUIPinPlan(plan eruncommon.PinPlan) uiPinPlan {
+func toUIPinPlan(plan lifecycle.PinPlan) uiPinPlan {
 	out := uiPinPlan{
 		Tenant:      plan.Tenant,
 		Environment: plan.Environment,
@@ -163,7 +163,7 @@ func toUIPinPlan(plan eruncommon.PinPlan) uiPinPlan {
 
 // pinSiteLabel names the reference in the terms the repo uses, so a site in the
 // dialog can be found on disk without translation.
-func pinSiteLabel(site eruncommon.PinSite) string {
+func pinSiteLabel(site lifecycle.PinSite) string {
 	path := strings.TrimSpace(site.Path)
 	detail := strings.TrimSpace(site.Detail)
 	switch {

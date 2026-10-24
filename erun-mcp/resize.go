@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -57,17 +58,17 @@ func resizeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			resolveDeployContext := func() (eruncommon.KubernetesDeployContext, error) {
 				return eruncommon.KubernetesDeployContextAtDir(workDir), nil
 			}
-			_, err := eruncommon.RunRuntimeResize(runCtx, eruncommon.RuntimeResizeDependencies{
+			_, err := lifecycle.RunRuntimeResize(runCtx, lifecycle.RuntimeResizeDependencies{
 				Store:                          runtime.Store,
 				SaveEnvConfig:                  runtime.Store.SaveEnvConfig,
 				FindProjectRoot:                findProjectRoot,
 				ResolveDockerBuildContext:      resolveBuildContext,
 				ResolveKubernetesDeployContext: resolveDeployContext,
 				DeployHelmChart:                runtime.DeployHelmChart,
-			}, eruncommon.RuntimeResizeParams{
+			}, lifecycle.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
-				Input: eruncommon.RuntimeResizeInput{
+				Input: lifecycle.RuntimeResizeInput{
 					CPU:                 strings.TrimSpace(input.CPU),
 					Memory:              strings.TrimSpace(input.Memory),
 					DindCPU:             strings.TrimSpace(input.DindCPU),

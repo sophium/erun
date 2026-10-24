@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // A tool started with wait:false runs its work inside this server's own
@@ -93,7 +94,7 @@ func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	if job.Succeeded {
 		t.Fatalf("job = %+v, want a failure", job)
 	}
-	output, err := eruncommon.ReadEnvironmentJobOutput(eruncommon.ReadEnvironmentJobOutputParams{
+	output, err := jobs.ReadEnvironmentJobOutput(jobs.ReadEnvironmentJobOutputParams{
 		Tenant: "acme", Environment: "dev", ID: job.ID,
 	})
 	if err != nil {
@@ -195,7 +196,7 @@ func startEnvelopeJob(t *testing.T, runtime RuntimeConfig, name string, input Jo
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		job, err := eruncommon.LoadEnvironmentJob(runtime.Context.Tenant, runtime.Context.Environment, envelope.JobID, time.Now())
+		job, err := jobs.LoadEnvironmentJob(runtime.Context.Tenant, runtime.Context.Environment, envelope.JobID, time.Now())
 		if err != nil {
 			t.Fatalf("LoadEnvironmentJob: %v", err)
 		}

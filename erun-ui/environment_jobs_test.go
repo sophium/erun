@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // isolateJobsCache points the job store at a temp dir for one test, so a test
@@ -61,7 +62,7 @@ func TestLoadEnvironmentJobsReadsThroughAReachablePodEdge(t *testing.T) {
 		loadEnvironmentJobs: func(_ context.Context, endpoint, _ string) ([]eruncommon.EnvironmentJob, error) {
 			gotEndpoint = endpoint
 			return []eruncommon.EnvironmentJob{
-				{ID: "finish-1350", Name: "Finish #1350 desktop jobs surface", State: eruncommon.EnvironmentJobStateRunning},
+				{ID: "finish-1350", Name: "Finish #1350 desktop jobs surface", State: jobspkg.EnvironmentJobStateRunning},
 			}, nil
 		},
 	})
@@ -116,7 +117,7 @@ func TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty(t *testing.T) {
 // real (not a consolation) answer.
 func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 	isolateJobsCache(t)
-	if _, err := eruncommon.AttachEnvironmentJob(core.Context{}, eruncommon.AttachEnvironmentJobParams{
+	if _, err := jobspkg.AttachEnvironmentJob(core.Context{}, jobspkg.AttachEnvironmentJobParams{
 		Tenant:      "erun",
 		Environment: "ux",
 		Name:        "Investigate ux",

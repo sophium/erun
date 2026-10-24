@@ -65,7 +65,7 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 		return "", false, nil
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return "", false, err
 	}
@@ -89,7 +89,7 @@ func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string
 // whether the project has images at all, which is a different question from
 // whether the current directory resolves any.
 func resolveProjectDockerModuleDir(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (string, bool, error) {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return "", false, err
 	}
@@ -257,7 +257,7 @@ func isDockerBuildModuleDir(dir string) (bool, error) {
 	return len(buildContexts) > 0, nil
 }
 
-func resolveDockerBuildProjectRoot(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (string, error) {
+func ResolveDockerBuildProjectRoot(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (string, error) {
 	if projectRoot := strings.TrimSpace(target.ProjectRoot); projectRoot != "" {
 		return filepath.Clean(projectRoot), nil
 	}
@@ -351,7 +351,7 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 // Best-effort: any store error or a miss yields nil so the build proceeds with
 // default behaviour.
 func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *config.EnvConfig {
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return injectedDockerBuildEnvConfig(nil)
 	}
@@ -401,7 +401,7 @@ func injectedDockerBuildEnvConfig(onDisk *config.EnvConfig) *config.EnvConfig {
 	if onDisk != nil {
 		base = *onDisk
 	}
-	merged := overlayInjectedEnvConfig(base, injected.Env)
+	merged := OverlayInjectedEnvConfig(base, injected.Env)
 	return &merged
 }
 

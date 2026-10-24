@@ -7,11 +7,12 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func newUnexposeCmd(store common.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newUnexposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var skipIfUnconfigured bool
 	var servicesZone string
 	var platformNamespace string
@@ -43,7 +44,7 @@ func newUnexposeCmd(store common.ExposeStore, cloudStore config.CloudReadStore, 
 	return cmd
 }
 
-func runUnexposeCommand(ctx core.Context, store common.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
+func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, tenant, environment string, skipIfUnconfigured bool, servicesZone, platformNamespace, erunAlias string) error {
 	servicesZone = strings.TrimSpace(servicesZone)
 	platformNamespace = strings.TrimSpace(platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
@@ -66,7 +67,7 @@ func runUnexposeCommand(ctx core.Context, store common.ExposeStore, cloudStore c
 			projectRoot = root
 		}
 	}
-	result, err := common.RunUnexposeService(ctx, common.UnexposeParams{
+	result, err := expose.RunUnexposeService(ctx, expose.UnexposeParams{
 		Tenant:             strings.TrimSpace(tenant),
 		Environment:        strings.TrimSpace(environment),
 		ProjectRoot:        projectRoot,

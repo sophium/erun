@@ -9,6 +9,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
@@ -120,14 +121,14 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 		return err
 	}
 
-	plan, err := common.ResolvePinPlan(projectRoot, result.Tenant, result.Environment, result.EnvConfig, targetVersion)
+	plan, err := lifecycle.ResolvePinPlan(projectRoot, result.Tenant, result.Environment, result.EnvConfig, targetVersion)
 	if err != nil {
 		return err
 	}
 	if viaCwdFallback {
-		plan.ProjectRootNote = common.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
+		plan.ProjectRootNote = lifecycle.DescribeCwdFallbackProjectRoot(cmdCtx, plan)
 	}
-	common.AnnotatePinPlanBaseFreshness(cmdCtx, &plan)
+	lifecycle.AnnotatePinPlanBaseFreshness(cmdCtx, &plan)
 	tracePinPlan(cmdCtx, plan)
 
 	if plan.Aligned() {
@@ -144,13 +145,13 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 // version, rewrites every file site, persists the env's own runtimeversion
 // when the plan carries that site, and refreshes any chart lock a rewritten
 // dependency left stale.
-func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan common.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
+func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	// Recorded before anything moves, so a revert has somewhere to go even if the
 	// rewrite fails partway.
-	if err := common.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
+	if err := lifecycle.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
 		return err
 	}
-	if err := common.ApplyPinPlan(plan); err != nil {
+	if err := lifecycle.ApplyPinPlan(plan); err != nil {
 		return err
 	}
 	if err := savePinnedEnvConfig(result, plan, saveEnvConfig); err != nil {
@@ -158,7 +159,7 @@ func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.Open
 	}
 	// The rewritten Chart.yaml and the lock beside it have to agree, or the next
 	// deploy fails on a tree this command just called aligned.
-	if err := common.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
+	if err := lifecycle.RefreshPinnedChartLocks(cmdCtx, plan, nil); err != nil {
 		return err
 	}
 
@@ -173,7 +174,7 @@ func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.Open
 // that only fails later, at terraform init or a chart pull, far from the cause.
 func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.OpenResult, request pinRequest, projectRoot string) (string, error) {
 	if request.Revert {
-		previous, ok := common.PinPrevious(projectRoot, result.Tenant, result.Environment)
+		previous, ok := lifecycle.PinPrevious(projectRoot, result.Tenant, result.Environment)
 		if !ok {
 			return "", fmt.Errorf("no previous pin recorded for %s/%s — nothing to revert to", result.Tenant, result.Environment)
 		}
@@ -268,11 +269,11 @@ func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string)
 // that line's own release, not erun's, and ResolvePinPlan already decided to
 // leave those alone (plan.Skipped names why); writing them here regardless
 // would silently undo that decision.
-func savePinnedEnvConfig(result config.OpenResult, plan common.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
+func savePinnedEnvConfig(result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
 	}
-	updated, changed := common.ApplyPinnedEnvConfig(result.EnvConfig, plan)
+	updated, changed := lifecycle.ApplyPinnedEnvConfig(result.EnvConfig, plan)
 	if !changed {
 		return nil
 	}
@@ -282,7 +283,7 @@ func savePinnedEnvConfig(result config.OpenResult, plan common.PinPlan, saveEnvC
 // tracePinPlan renders every site and its old→new value. Emitted for a real run
 // too, not only a dry run: a re-pin edits files across a repo, and the operator
 // should see which without diffing afterwards.
-func tracePinPlan(cmdCtx core.Context, plan common.PinPlan) {
+func tracePinPlan(cmdCtx core.Context, plan lifecycle.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
 	if plan.ProjectRootNote != "" {
 		cmdCtx.Trace("  " + plan.ProjectRootNote)
@@ -302,7 +303,7 @@ func tracePinPlan(cmdCtx core.Context, plan common.PinPlan) {
 	}
 }
 
-func pinSiteLabel(site common.PinSite) string {
+func pinSiteLabel(site lifecycle.PinSite) string {
 	if strings.TrimSpace(site.Path) == "" {
 		return site.Detail
 	}

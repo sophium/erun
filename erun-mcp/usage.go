@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
 type UsageInput struct {
@@ -31,7 +32,7 @@ type UsageInput struct {
 // body of evidence. A warning that named the problem while a separately
 // computed recommendation named a different one would be worse than either
 // alone, and two structs is exactly how that starts.
-type UsageOutput = eruncommon.RuntimeUsageReport
+type UsageOutput = podruntime.RuntimeUsageReport
 
 // usageSizingSurfaces names the surfaces that render the standing sizing
 // recommendation from the same retained history this tool reads. The `usage`
@@ -78,15 +79,15 @@ func usageTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		}
 		req := eruncommon.ShellLaunchParamsFromResult(target)
 		runCtx := runtimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		params := eruncommon.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
-		result, err := eruncommon.RunRuntimeUsage(runCtx, nil, nil, req, params)
+		params := podruntime.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
+		result, err := podruntime.RunRuntimeUsage(runCtx, nil, nil, req, params)
 		if err != nil {
 			return nil, UsageOutput{}, err
 		}
 		// The reading is paired with the recommendation in one call, so the
 		// warnings in `result` and the sizing advice beside them are derived
 		// from the same evidence and cannot contradict each other.
-		return nil, eruncommon.ResolveRuntimeUsageReport(target.Tenant, target.EnvConfig, result), nil
+		return nil, podruntime.ResolveRuntimeUsageReport(target.Tenant, target.EnvConfig, result), nil
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -68,7 +69,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
 
-	reading, err := eruncommon.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, eruncommon.RuntimeUsageParams{})
+	reading, err := podruntime.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, podruntime.RuntimeUsageParams{})
 	if err != nil {
 		return uiRuntimeUsage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
 	}
@@ -105,7 +106,7 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 // unreachable API server cannot hold the Runtime tab open past the probe's own
 // deadline. The invocation itself is erun-common's (RuntimePodRequestsArgs) so
 // the desktop reads the identical pod spec the CLI and the MCP tool read.
-func runtimePodRequestsRunner(ctx context.Context) eruncommon.RuntimePodRequestsRunnerFunc {
+func runtimePodRequestsRunner(ctx context.Context) podruntime.RuntimePodRequestsRunnerFunc {
 	return func(args []string) ([]byte, error) {
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		core.HideConsoleWindow(cmd)

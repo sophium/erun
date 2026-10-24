@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -124,8 +124,8 @@ func gatewayCredentialStatus(catalog *configpkg.OpenRouterConfig) uiGatewayCrede
 		status.Hint = credentialHint(saved)
 		return status
 	}
-	status.HostEndpoint = eruncommon.HostClaudeGatewayEndpoint()
-	if token, ok := eruncommon.HostClaudeGatewayCredentialFor(catalog.Endpoint()); ok {
+	status.HostEndpoint = ai.HostClaudeGatewayEndpoint()
+	if token, ok := ai.HostClaudeGatewayCredentialFor(catalog.Endpoint()); ok {
 		status.Source = gatewayCredentialSourceHost
 		status.Hint = credentialHint(token)
 	}

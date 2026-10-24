@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/review"
 )
 
 // ExecClosePRInput closes branch's open pull request on GitHub, once `erun
@@ -24,15 +24,15 @@ type ExecClosePRInput struct {
 
 func execClosePRTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecClosePRInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecClosePRInput) (*mcp.CallToolResult, CommandOutput, error) {
-		var closed *eruncommon.ClosePullRequestResult
+		var closed *review.ClosePullRequestResult
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
-			result, err := eruncommon.ClosePullRequest(runCtx, eruncommon.ClosePullRequestParams{
+			result, err := review.ClosePullRequest(runCtx, review.ClosePullRequestParams{
 				RemoteURL:     input.RemoteURL,
 				Branch:        input.Branch,
 				TargetBranch:  input.TargetBranch,
 				GatedCommit:   input.GatedCommit,
 				LandingCommit: input.LandingCommit,
-			}, eruncommon.ClosePullRequestDependencies{})
+			}, review.ClosePullRequestDependencies{})
 			if err != nil {
 				return err
 			}

@@ -8,6 +8,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 )
 
 // doctorResourceInterval is the CPU sample window the resources section reads
@@ -40,7 +41,7 @@ func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, resul
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
-	usage, err := common.RunRuntimeUsage(ctx, nil, nil, req, common.RuntimeUsageParams{Interval: doctorResourceInterval})
+	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, podruntime.RuntimeUsageParams{Interval: doctorResourceInterval})
 	if err != nil {
 		return reportPodUnreachable(ctx, "Resources", err)
 	}
@@ -57,7 +58,7 @@ func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, resul
 	if !usage.HasCounters() {
 		return writeDoctorResourcesNotObserved(ctx, usage)
 	}
-	report := common.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
+	report := podruntime.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
 	if err := writeUsageResult(ctx, report); err != nil {
 		return err
 	}

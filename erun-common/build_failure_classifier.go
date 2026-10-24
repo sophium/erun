@@ -65,11 +65,11 @@ func classifyBuildFailureText(text string) (signature string, matched bool) {
 	return "", false
 }
 
-// ensureNotKnownInfrastructureBuildFailure refuses to record a failed build
+// EnsureNotKnownInfrastructureBuildFailure refuses to record a failed build
 // whose failure detail names a known infrastructure signature. The review
 // stays where it is, and the remedy is to re-run the build once the signature
 // clears rather than to record a FAILED verdict on the change.
-func ensureNotKnownInfrastructureBuildFailure(successful bool, failureDetail string) error {
+func EnsureNotKnownInfrastructureBuildFailure(successful bool, failureDetail string) error {
 	if successful {
 		return nil
 	}

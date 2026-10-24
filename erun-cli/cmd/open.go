@@ -11,6 +11,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
@@ -639,7 +640,7 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 		r.ctx.Trace("open: --reconnect, so any recorded stop stays recorded and a stopped runtime is not started")
 		return nil
 	}
-	updated, err := common.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
+	updated, err := lifecycle.ClearEnvironmentStopIntent(r.ctx, r.result, r.options.SaveEnvConfig)
 	if err != nil {
 		return err
 	}
@@ -653,7 +654,7 @@ func (r *resolvedOpenRunner) clearStopIntent() error {
 // scales — a stopped environment fails the reattach instead of being restarted
 // behind the operator.
 func (r *resolvedOpenRunner) ensureRuntimeAwake() error {
-	wake, err := common.EnsureEnvironmentAwake(r.ctx, common.WakeEnvironmentParams{
+	wake, err := lifecycle.EnsureEnvironmentAwake(r.ctx, lifecycle.WakeEnvironmentParams{
 		Result:        r.result,
 		SaveEnvConfig: r.options.SaveEnvConfig,
 		Reconnect:     r.options.Reconnect,

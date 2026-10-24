@@ -38,7 +38,7 @@ const (
 	// host-side `erun list` is always in.
 	runtimeSizingRaiseMemoryPercent = RuntimeUsageMemoryWarnPercent
 
-	// runtimeSizingMemoryHeadroom is the multiple of the observed peak every
+	// RuntimeSizingMemoryHeadroom is the multiple of the observed peak every
 	// memory recommendation targets and no shrink may cross — the whole safety
 	// margin of the shrink direction. 1.5 rather than 2.0 because 2.0 makes the
 	// recommender useless in practice: an environment can only be shrunk when
@@ -52,7 +52,7 @@ const (
 	// shrink needs the peak under 1/1.5 of the limit and a raise needs it over
 	// 0.90, so the band between is hold, and a shrink lands exactly on the
 	// shrink boundary rather than past it.
-	runtimeSizingMemoryHeadroom = 1.5
+	RuntimeSizingMemoryHeadroom = 1.5
 
 	// runtimeSizingCPUHeadroom plays the same role for CPU, and is deliberately
 	// larger than the memory multiple. memory.peak is a true instantaneous
@@ -67,7 +67,7 @@ const (
 	// deliberate half-step rather than the doubling a shrink's headroom uses.
 	runtimeSizingCPURaiseMultiple = 1.5
 
-	// runtimeSizingThrottleRatio is the share of scheduling periods that must
+	// RuntimeSizingThrottleRatio is the share of scheduling periods that must
 	// be throttled before erun says raise CPU. Measured on a live environment,
 	// an ordinary week of work sat at 0.14% throttled — present but harmless —
 	// so a threshold anywhere near zero would recommend growing every
@@ -84,7 +84,7 @@ const (
 	// reads runtimeSizingThrottlePeriods; the build-starvation warning reads
 	// the much lower runtimeBuildThrottleMinPeriods, since it answers about
 	// the build running now rather than about a pod size to hold for a day.
-	runtimeSizingThrottleRatio = 0.05
+	RuntimeSizingThrottleRatio = 0.05
 
 	// runtimeSizingShrinkWindow is how long an environment must have been
 	// watched before erun will suggest making it smaller. A day covers a normal
@@ -130,7 +130,7 @@ const (
 // wildly, and a recommendation to change a pod's size is a steady-state
 // judgement that can wait for the sampling noise to settle out.
 func runtimeThrottleIsMaterial(throttled, periods int64) bool {
-	return periods >= runtimeSizingThrottlePeriods && float64(throttled) >= float64(periods)*runtimeSizingThrottleRatio
+	return periods >= runtimeSizingThrottlePeriods && float64(throttled) >= float64(periods)*RuntimeSizingThrottleRatio
 }
 
 // RuntimeSizingAction is the direction a recommendation points.
@@ -328,18 +328,18 @@ func runtimeLivePeakMemoryBytes(usage config.RuntimeUsage) int64 {
 	return max(usage.Memory.PeakBytes, usage.Memory.CurrentBytes)
 }
 
-// runtimeMemoryRaiseVerdict is the single place a memory raise is decided and
+// RuntimeMemoryRaiseVerdict is the single place a memory raise is decided and
 // worded. Both the retained history and a live reading funnel through it, so
 // the two can never reach different conclusions from the same evidence, and
 // the figure it tests against is the same one the memory warning fires on.
-func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
+func RuntimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.NamespaceResourceQuota) (RuntimeSizingVerdict, bool) {
 	verdict := RuntimeSizingVerdict{Resource: "memory", Current: config.FormatBytesAsMi(limit)}
 	if oomKills > 0 {
 		// A kill is evidence of harm, and one is enough. The observed peak is
 		// also the wrong basis after a kill: the allocation that triggered it
 		// was refused, so it never landed in memory.peak. Size from the limit
 		// that proved too small instead.
-		suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(limit, runtimeSizingMemoryHeadroom), ceiling)
+		suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(limit, RuntimeSizingMemoryHeadroom), ceiling)
 		verdict.Action = RuntimeSizingRaise
 		verdict.Confidence = RuntimeSizingConfidenceHigh
 		verdict.Suggested = suggested
@@ -349,7 +349,7 @@ func runtimeMemoryRaiseVerdict(limit, peak, oomKills int64, ceiling config.Names
 	if float64(peak) < float64(limit)*runtimeSizingRaiseMemoryPercent/100 {
 		return RuntimeSizingVerdict{}, false
 	}
-	suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(peak, runtimeSizingMemoryHeadroom), ceiling)
+	suggested, bounded := boundRuntimeMemorySuggestion(scaleBytesToMi(peak, RuntimeSizingMemoryHeadroom), ceiling)
 	verdict.Action = RuntimeSizingRaise
 	verdict.Confidence = RuntimeSizingConfidenceHigh
 	verdict.Suggested = suggested
@@ -367,7 +367,7 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest config.RuntimeUs
 	}
 	verdict.Current = config.FormatBytesAsMi(limit)
 
-	if raise, ok := runtimeMemoryRaiseVerdict(limit, peak, oomKills, ceiling); ok {
+	if raise, ok := RuntimeMemoryRaiseVerdict(limit, peak, oomKills, ceiling); ok {
 		return raise
 	}
 
@@ -377,10 +377,10 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest config.RuntimeUs
 		return verdict
 	}
 
-	suggested := scaleBytesToMi(peak, runtimeSizingMemoryHeadroom)
+	suggested := scaleBytesToMi(peak, RuntimeSizingMemoryHeadroom)
 	if suggested >= limit {
 		verdict.Action = RuntimeSizingHold
-		verdict.Reason = fmt.Sprintf("peak %s of %s (%s) leaves no room to shrink at %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
+		verdict.Reason = fmt.Sprintf("peak %s of %s (%s) leaves no room to shrink at %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), RuntimeSizingMemoryHeadroom)
 		return verdict
 	}
 	verdict.Action = RuntimeSizingLower
@@ -388,7 +388,7 @@ func recommendRuntimeMemory(history RuntimeUsageHistory, latest config.RuntimeUs
 	// no harm, not that none is possible.
 	verdict.Confidence = RuntimeSizingConfidenceLow
 	verdict.Suggested = config.FormatBytesAsMi(suggested)
-	verdict.Reason = fmt.Sprintf("peak %s of %s (%s), no oom kills, keeping %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), runtimeSizingMemoryHeadroom)
+	verdict.Reason = fmt.Sprintf("peak %s of %s (%s), no oom kills, keeping %gx headroom", config.FormatBytesAsMi(peak), config.FormatBytesAsMi(limit), formatPercent(peak, limit), RuntimeSizingMemoryHeadroom)
 	return verdict
 }
 

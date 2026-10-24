@@ -7,11 +7,12 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
-func newExposeCmd(store common.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
+func newExposeCmd(store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc) *cobra.Command {
 	var targetIP string
 	var backendService string
 	var servicePort int
@@ -103,7 +104,7 @@ type exposeCommandArgs struct {
 	erunAlias                                                                    string
 }
 
-func runExposeCommand(ctx core.Context, store common.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
+func runExposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, findProjectRoot common.ProjectFinderFunc, a exposeCommandArgs) error {
 	servicesZone := strings.TrimSpace(a.servicesZone)
 	platformNamespace := strings.TrimSpace(a.platformNamespace)
 	// --services-zone/--platform-namespace supply what a project checkout would
@@ -131,7 +132,7 @@ func runExposeCommand(ctx core.Context, store common.ExposeStore, cloudStore con
 			projectRoot = root
 		}
 	}
-	result, err := common.RunExposeService(ctx, common.ExposeServiceParams{
+	result, err := expose.RunExposeService(ctx, expose.ExposeServiceParams{
 		Tenant:             strings.TrimSpace(a.tenant),
 		Environment:        strings.TrimSpace(a.environment),
 		Service:            strings.TrimSpace(a.service),
@@ -145,7 +146,7 @@ func runExposeCommand(ctx core.Context, store common.ExposeStore, cloudStore con
 		SkipIfUnconfigured: a.skipIfUnconfigured,
 		ServicesZone:       servicesZone,
 		PlatformNamespace:  platformNamespace,
-		TLS: common.TLSCertParams{
+		TLS: expose.TLSCertParams{
 			DNS01TokenPath:        strings.TrimSpace(a.dns01TokenFile),
 			DNS01BrokerURL:        strings.TrimSpace(a.dns01BrokerURL),
 			DNS01WebhookGroupName: strings.TrimSpace(a.dns01WebhookGroupName),

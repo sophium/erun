@@ -12,20 +12,20 @@ import (
 
 const (
 	defaultAITool       = "claude"
-	defaultClaudeEffort = "ultracode"
-	// claudeEffortUltracode is not a `claude --effort` value (Claude Code
+	DefaultClaudeEffort = "ultracode"
+	// ClaudeEffortUltracode is not a `claude --effort` value (Claude Code
 	// rejects it) but a settings key meaning "everything on" — xhigh thinking
 	// plus standing multi-agent workflow orchestration.
-	claudeEffortUltracode = "ultracode"
+	ClaudeEffortUltracode = "ultracode"
 )
 
-// claudeEffortLevels lists the selectable effort levels; all but ultracode are
+// ClaudeEffortLevels lists the selectable effort levels; all but ultracode are
 // real `claude --effort` values (ultracode launches through --settings).
-var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", claudeEffortUltracode}
+var ClaudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", ClaudeEffortUltracode}
 
-func validClaudeEffort(level string) bool {
+func ValidClaudeEffort(level string) bool {
 	level = strings.TrimSpace(level)
-	for _, candidate := range claudeEffortLevels {
+	for _, candidate := range ClaudeEffortLevels {
 		if candidate == level {
 			return true
 		}
@@ -33,16 +33,16 @@ func validClaudeEffort(level string) bool {
 	return false
 }
 
-func resolveClaudeEffort(config configpkg.EnvironmentClaudeConfig) string {
+func ResolveClaudeEffort(config configpkg.EnvironmentClaudeConfig) string {
 	if config.Effort != nil {
-		if level := strings.TrimSpace(*config.Effort); validClaudeEffort(level) {
+		if level := strings.TrimSpace(*config.Effort); ValidClaudeEffort(level) {
 			return level
 		}
 	}
-	return defaultClaudeEffort
+	return DefaultClaudeEffort
 }
 
-// resolveClaudeLaunchModel picks the model the managed AI session starts on,
+// ResolveClaudeLaunchModel picks the model the managed AI session starts on,
 // never the agent's own default: the environment may not be able to serve it.
 //
 // With a gateway configured the catalog supplies the selectable set, but an
@@ -51,19 +51,19 @@ func resolveClaudeEffort(config configpkg.EnvironmentClaudeConfig) string {
 // here would silently launch a different model than the tab shows. Without a
 // gateway the previous rule stands: the choice must be one of the environment's
 // available models.
-func resolveClaudeLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
+func ResolveClaudeLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
 	// Resolved through the environment's own opt-out, so an environment that
 	// stays on its own Claude sign-in is never handed a catalog model.
 	if effective := configpkg.EffectiveGateway(config, gateway); effective.Configured() {
-		return resolveGatewayLaunchModel(config, effective)
+		return ResolveGatewayLaunchModel(config, effective)
 	}
 	return resolveAvailableClaudeModel(config)
 }
 
-// claudeConfiguredModel returns the environment's own model choice when it is a
+// ClaudeConfiguredModel returns the environment's own model choice when it is a
 // token the launch can pass safely, and "" otherwise. A choice that is not a
 // safe token is ignored rather than passed through.
-func claudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
+func ClaudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
 	if config.DefaultModel == nil {
 		return ""
 	}
@@ -74,7 +74,7 @@ func claudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
 	return model
 }
 
-// resolveGatewayLaunchModel resolves against a gateway: the environment's choice
+// ResolveGatewayLaunchModel resolves against a gateway: the environment's choice
 // wins even when the catalog does not list it, because typing an uncurated id is
 // a supported act and silently substituting another model would launch
 // something other than what the tab shows.
@@ -87,8 +87,8 @@ func claudeConfiguredModel(config configpkg.EnvironmentClaudeConfig) string {
 // the rule above guards against — the id cannot be launched at all, and
 // ModelIDs no longer offers it, so the resolved default is the only model the
 // tab can present as selectable.
-func resolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
-	if model := claudeConfiguredModel(config); model != "" && !gateway.RequiresReasoningEcho(model) {
+func ResolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
+	if model := ClaudeConfiguredModel(config); model != "" && !gateway.RequiresReasoningEcho(model) {
 		return model
 	}
 	return gateway.ResolveDefaultModel()
@@ -100,9 +100,9 @@ func resolveGatewayLaunchModel(config configpkg.EnvironmentClaudeConfig, gateway
 func resolveAvailableClaudeModel(config configpkg.EnvironmentClaudeConfig) string {
 	available := config.NormalizedModels()
 	if len(available) == 0 {
-		available = DefaultClaudeAvailableModels()
+		available = configpkg.DefaultClaudeAvailableModels()
 	}
-	if model := claudeConfiguredModel(config); model != "" {
+	if model := ClaudeConfiguredModel(config); model != "" {
 		for _, candidate := range available {
 			if candidate == model {
 				return model
@@ -125,18 +125,6 @@ func ValidateClaudeModelID(id string) error {
 	}
 	return nil
 }
-
-// ClaudeEffortLevels returns the selectable effort levels in ascending order.
-// A fresh copy, so a caller offering them as choices cannot reorder the source.
-func ClaudeEffortLevels() []string {
-	out := make([]string, len(claudeEffortLevels))
-	copy(out, claudeEffortLevels)
-	return out
-}
-
-// DefaultClaudeEffortLevel is the effort a session launches with when nothing
-// chose one.
-const DefaultClaudeEffortLevel = defaultClaudeEffort
 
 // AISessionLaunchCommand returns the shell command the AI tab's persistent
 // remote session runs as its program — for claude, a guard that resumes the
@@ -184,8 +172,8 @@ func AISessionLaunchLines(aiTool string, claude configpkg.EnvironmentClaudeConfi
 }
 
 func claudeLaunchFlags(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig, tenant, environment string) string {
-	flags := claudeEffortFlags(resolveClaudeEffort(claude))
-	if model := resolveClaudeLaunchModel(claude, gateway); model != "" {
+	flags := ClaudeEffortFlags(ResolveClaudeEffort(claude))
+	if model := ResolveClaudeLaunchModel(claude, gateway); model != "" {
 		flags += " --model " + model
 	}
 	if claude.VerboseDebug {
@@ -256,7 +244,7 @@ var claudeSessionNameTokenPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._
 // deploy writes from OpenRouterConfig.AuthTokenRef. Only non-secret routing
 // values belong in this prefix.
 func claudeLaunchEnvPrefix(claude configpkg.EnvironmentClaudeConfig, gateway *configpkg.OpenRouterConfig) string {
-	model := resolveClaudeLaunchModel(claude, gateway)
+	model := ResolveClaudeLaunchModel(claude, gateway)
 	if model == "" {
 		return ""
 	}
@@ -269,32 +257,15 @@ func claudeLaunchEnvPrefix(claude configpkg.EnvironmentClaudeConfig, gateway *co
 	return prefix
 }
 
-// claudeEffortFlags maps a resolved effort level to its launch flags. ultracode
+// ClaudeEffortFlags maps a resolved effort level to its launch flags. ultracode
 // launches as `--settings '{"ultracode":true}'`, single-quoted because the
 // guard is a sh one-liner in which nothing may interpolate.
-func claudeEffortFlags(effort string) string {
+func ClaudeEffortFlags(effort string) string {
 	switch {
-	case effort == claudeEffortUltracode:
+	case effort == ClaudeEffortUltracode:
 		return ` --settings '{"ultracode":true}'`
-	case validClaudeEffort(effort):
+	case ValidClaudeEffort(effort):
 		return " --effort " + effort
 	}
 	return ""
-}
-
-// ClaudeBackgroundEffort splits a resolved effort level between the two places
-// a Claude background session carries it: settings keys, which the session
-// re-reads on every restart, and launch flags, which only a recreated session
-// picks up. The effortLevel setting rejects "max" (and ignores the effort
-// environment variable), so that one level stays a flag.
-func ClaudeBackgroundEffort(effort string) (map[string]any, []string) {
-	switch {
-	case effort == claudeEffortUltracode:
-		return map[string]any{"ultracode": true}, nil
-	case effort == "max":
-		return map[string]any{}, []string{"--effort", "max"}
-	case validClaudeEffort(effort):
-		return map[string]any{"effortLevel": effort}, nil
-	}
-	return map[string]any{}, nil
 }

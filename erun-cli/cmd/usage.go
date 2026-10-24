@@ -5,6 +5,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
 
@@ -84,7 +85,7 @@ func runUsageCommand(ctx core.Context, resolveOpen OpenResolver, params common.O
 		return err
 	}
 	req := common.ShellLaunchParamsFromResult(result)
-	usage, err := common.RunRuntimeUsage(ctx, nil, nil, req, common.RuntimeUsageParams{
+	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, podruntime.RuntimeUsageParams{
 		Interval: time.Duration(intervalSeconds * float64(time.Second)),
 	})
 	if err != nil {
@@ -93,7 +94,7 @@ func runUsageCommand(ctx core.Context, resolveOpen OpenResolver, params common.O
 	if ctx.DryRun {
 		return nil
 	}
-	report := common.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
+	report := podruntime.ResolveRuntimeUsageReport(result.Tenant, result.EnvConfig, usage)
 	if ctx.Output == core.OutputJSON {
 		return ctx.WriteResult(report)
 	}

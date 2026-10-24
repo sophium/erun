@@ -62,14 +62,14 @@ type ingressItem struct {
 	} `json:"spec"`
 }
 
-// fetchObservedIngresses names the read rather than the operation, for the
+// FetchObservedIngresses names the read rather than the operation, for the
 // same reason fetchObservedServices does: the services listing reads Ingresses
 // too, so "observe:" here would name a command its caller never ran.
 // RunObservation prefixes its own name onto what it gets back.
-func fetchObservedIngresses(args []string) ([]ObservedIngress, error) {
-	raw, stderr, err := runObserveKubectl(args)
+func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
+	raw, stderr, err := RunObserveKubectl(args)
 	if err != nil {
-		return nil, fmt.Errorf("get ingress: %w", kubectlErrorMessage(err, stderr))
+		return nil, fmt.Errorf("get ingress: %w", KubectlErrorMessage(err, stderr))
 	}
 	var list ingressList
 	if err := json.Unmarshal(raw, &list); err != nil {

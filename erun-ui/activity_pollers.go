@@ -4,7 +4,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // activityPollerInterval is short enough that deploy state transitions
@@ -58,7 +59,7 @@ func (a *App) seedConfiguredKubeContexts() {
 	if a.deps.store == nil {
 		return
 	}
-	result, err := eruncommon.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{})
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, eruncommon.OpenParams{})
 	if err != nil {
 		return
 	}

@@ -10,6 +10,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
@@ -183,7 +184,7 @@ func containerRegistryPrompt(run PromptRunner, label string) (string, error) {
 			return "", fmt.Errorf("container registry configuration interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return "", common.ErrContainerRegistryCancelled
+			return "", setup.ErrContainerRegistryCancelled
 		}
 		return "", err
 	}
@@ -322,14 +323,14 @@ func manualKubernetesContextPrompt(run PromptRunner, label string) (string, erro
 			return "", fmt.Errorf("kubernetes context association interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return "", common.ErrKubernetesContextCancelled
+			return "", setup.ErrKubernetesContextCancelled
 		}
 		return "", err
 	}
 
 	result = strings.TrimSpace(result)
 	if result == "" {
-		return "", common.ErrKubernetesContextCancelled
+		return "", setup.ErrKubernetesContextCancelled
 	}
 	return result, nil
 }
@@ -348,7 +349,7 @@ func selectKubernetesContextPrompt(run SelectRunner, label string, contexts []st
 			return "", false, fmt.Errorf("kubernetes context selection interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return "", false, common.ErrKubernetesContextCancelled
+			return "", false, setup.ErrKubernetesContextCancelled
 		}
 		return "", false, err
 	}

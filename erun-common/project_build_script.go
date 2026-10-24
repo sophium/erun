@@ -25,7 +25,7 @@ func resolveProjectRootBuildScript(findProjectRoot ProjectFinderFunc, target Doc
 	if target.DisableBuildScriptDiscovery {
 		return nil, nil
 	}
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +53,7 @@ func resolveNestedProjectBuildScript(findProjectRoot ProjectFinderFunc, target D
 	if target.DisableBuildScriptDiscovery {
 		return nil, nil
 	}
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return nil, err
 	}

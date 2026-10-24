@@ -7,6 +7,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +59,7 @@ func runRuntimeInitCommand(ctx core.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve the runtime container's home directory: %w", err)
 	}
-	code, err := common.RunRuntimeEntrypoint(ctx, common.RuntimeEntrypointParams{
+	code, err := podruntime.RunRuntimeEntrypoint(ctx, podruntime.RuntimeEntrypointParams{
 		Command:  args,
 		ERunPath: erunPath,
 		HomeDir:  homeDir,
@@ -108,7 +109,7 @@ func runTrimCacheCommand(ctx core.Context, args []string, maxBytes int64, maxByt
 	if err != nil {
 		return fmt.Errorf("resolve the home directory holding the go build cache: %w", err)
 	}
-	dir, configured, _ := common.RuntimeGoBuildCacheTrimSettings(os.Getenv, homeDir)
+	dir, configured, _ := podruntime.RuntimeGoBuildCacheTrimSettings(os.Getenv, homeDir)
 	if len(args) == 1 {
 		dir = args[0]
 	}
@@ -119,7 +120,7 @@ func runTrimCacheCommand(ctx core.Context, args []string, maxBytes int64, maxByt
 		}
 		maxBytes = configured
 	}
-	result, err := common.TrimGoBuildCache(ctx, dir, maxBytes)
+	result, err := podruntime.TrimGoBuildCache(ctx, dir, maxBytes)
 	if err != nil {
 		return err
 	}
@@ -150,7 +151,7 @@ func newInstallSkillsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&skillsDir, "skills-dir", common.RuntimeBakedSkillsDir, "Directory holding one subdirectory per skill")
-	cmd.Flags().StringVar(&agentsDir, "agents-dir", common.RuntimeBakedAgentsDir, "Directory holding one <name>.md per agent")
+	cmd.Flags().StringVar(&agentsDir, "agents-dir", podruntime.RuntimeBakedAgentsDir, "Directory holding one <name>.md per agent")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -160,7 +161,7 @@ func runInstallSkillsCommand(ctx core.Context, skillsDir, agentsDir string) erro
 	if err != nil {
 		return fmt.Errorf("resolve the home directory to install skills into: %w", err)
 	}
-	result, err := common.InstallRuntimeAgentAssets(ctx, skillsDir, agentsDir, common.RuntimeAgentAssetTargetsFor(homeDir))
+	result, err := podruntime.InstallRuntimeAgentAssets(ctx, skillsDir, agentsDir, podruntime.RuntimeAgentAssetTargetsFor(homeDir))
 	if err != nil {
 		return err
 	}
@@ -173,7 +174,7 @@ func runInstallSkillsCommand(ctx core.Context, skillsDir, agentsDir string) erro
 	return nil
 }
 
-func formatAgentAssetsInstall(result common.AgentAssetsInstallResult) string {
+func formatAgentAssetsInstall(result podruntime.AgentAssetsInstallResult) string {
 	parts := []string{
 		fmt.Sprintf("%d installed", len(result.Installed)),
 		fmt.Sprintf("%d refreshed", len(result.Refreshed)),

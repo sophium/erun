@@ -121,22 +121,3 @@ func TestEnvConfigAndItsBackupsAreWrittenRestricted(t *testing.T) {
 	}
 	assertBackupsAreRestricted(t, backups)
 }
-
-// TestDoctorSyncConfigWritesRestrictedConfig covers the other writer of these
-// files: `erun doctor --sync-config` rewrites the root and environment config
-// through its own path, so a reconcile must not restore the wide mode.
-func TestDoctorSyncConfigWritesRestrictedConfig(t *testing.T) {
-	requirePOSIXFileModes(t)
-	configHome := t.TempDir()
-	env := syncConfigTestEnv(map[string]string{"ERUN_CLOUD_CONTEXT_NAME": ""})
-
-	inspection, err := InspectRuntimeConfigSync(configHome, env)
-	mustNoErr(t, err, "inspect")
-	mustNoErr(t, RunRuntimeConfigSync(testTraceContext(false), inspection), "sync")
-
-	rootPath := filepath.Join(configHome, config.ConfigRoot, config.ConfigFile)
-	envPath := filepath.Join(configHome, config.ConfigRoot, "team", "prod", config.ConfigFile)
-	for _, path := range []string{rootPath, envPath} {
-		assertConfigFileMode(t, path, 0o600)
-	}
-}

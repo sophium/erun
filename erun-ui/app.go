@@ -12,6 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
@@ -42,7 +46,7 @@ const (
 	envUsageEvent                 = "env-usage"
 	envNodeEvent                  = "env-node"
 	appCloseGateEvent             = "app-close-gate"
-	appSessionEnvVar              = eruncommon.DesktopSessionEnvVar
+	appSessionEnvVar              = orchestrator.DesktopSessionEnvVar
 )
 
 type erunUIStore interface {
@@ -65,14 +69,14 @@ type erunUIDeps struct {
 	resolveImageRegistry   func(context.Context, string, string) (registry.RuntimeRegistryVersions, error)
 	cloudDeps              cloud.CloudDependencies
 	cloudContextDeps       cloud.CloudContextDependencies
-	deleteNamespace        eruncommon.NamespaceDeleterFunc
+	deleteNamespace        lifecycle.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime func(core.Context, eruncommon.StopEnvironmentParams) (eruncommon.StopEnvironmentResult, error)
-	readRuntimeRunState    func(core.Context, eruncommon.RuntimeScaleTarget) (eruncommon.RuntimeRunState, error)
+	stopEnvironmentRuntime func(core.Context, lifecycle.StopEnvironmentParams) (lifecycle.StopEnvironmentResult, error)
+	readRuntimeRunState    func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error)
 	ensureMCP              func(context.Context, config.OpenResult) error
 	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
 	ensureSSHD             func(context.Context, config.OpenResult) error
@@ -87,7 +91,7 @@ type erunUIDeps struct {
 	runIDECommand             func(context.Context, startTerminalSessionParams) (string, error)
 	launchHostArtifact        func(exePath, dir string) error
 	launchHostOpener          func(executable string, args []string) error
-	resolveOrchestratorLaunch func(launch eruncommon.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
+	resolveOrchestratorLaunch func(launch orchestrator.OrchestratorLaunch, agentID, initialPrompt, mcpConfigPath string) (string, []string, error)
 	// claudeAgents drives the Claude background agents persisted orchestrators
 	// run as, injectable so no test ever starts or stops a real one.
 	claudeAgents claudeAgentCLI
@@ -95,19 +99,19 @@ type erunUIDeps struct {
 	// the gateway sends, injectable so a test never reads the real secret store.
 	resolveGatewayCredential func(*config.OpenRouterConfig) (string, error)
 	savePastedFile           func(pastedFileSaveParams) (string, error)
-	listAgentOutputs         func(config.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
-	downloadAgentOutput      func(config.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
-	loadDiff                 func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	listAgentOutputs         func(config.OpenResult, jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error)
+	downloadAgentOutput      func(config.OpenResult, jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error)
+	loadDiff                 func(context.Context, string, string, uiDiffOptions) (lifecycle.DiffResult, error)
 	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
 	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
 	loadIdleStatus           func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
 	loadEnvironmentJobs      func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
-	readEnvironmentJobOutput func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
-	cancelEnvironmentJob     func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
-	whipEnvironment          func(context.Context, string, string, string, string) (eruncommon.WhipResult, error)
+	readEnvironmentJobOutput func(context.Context, string, string, jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
+	cancelEnvironmentJob     func(context.Context, string, string, jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
+	whipEnvironment          func(context.Context, string, string, string, string) (orchestrator.WhipResult, error)
 	loadAPILog               func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady       func(context.Context, string) error
-	syncWorkspace            func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
+	syncWorkspace            func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error)
 	workspaceSyncInterval    time.Duration
 	recordActivity           func(activity.EnvironmentActivityParams) error
 	runWorkingIssueCommand   workingIssueCommandRunner
@@ -424,10 +428,10 @@ func withDefaultRuntimeResolutionDeps(deps erunUIDeps) erunUIDeps {
 		deps.checkRuntimeDeployed = checkRuntimeDeployed
 	}
 	if deps.stopEnvironmentRuntime == nil {
-		deps.stopEnvironmentRuntime = eruncommon.RunStopEnvironment
+		deps.stopEnvironmentRuntime = lifecycle.RunStopEnvironment
 	}
 	if deps.readRuntimeRunState == nil {
-		deps.readRuntimeRunState = eruncommon.ReadRuntimeRunState
+		deps.readRuntimeRunState = lifecycle.ReadRuntimeRunState
 	}
 	deps = withDefaultReachabilityDeps(deps)
 	if deps.setRemoteCloudAlias == nil {
@@ -603,10 +607,10 @@ func withDefaultWorkspaceDeps(deps erunUIDeps) erunUIDeps {
 		deps.loadAPILog = loadAPILog
 	}
 	if deps.workspaceSyncReady == nil {
-		deps.workspaceSyncReady = eruncommon.WorkspaceSyncSSHReady
+		deps.workspaceSyncReady = workspace.WorkspaceSyncSSHReady
 	}
 	if deps.syncWorkspace == nil {
-		deps.syncWorkspace = eruncommon.SyncWorkspaceOnce
+		deps.syncWorkspace = workspace.SyncWorkspaceOnce
 	}
 	if deps.workspaceSyncInterval <= 0 {
 		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval

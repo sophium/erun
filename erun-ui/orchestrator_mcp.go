@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // orchestratorMCPServer is one Claude Code MCP server entry: a linked env's erun
@@ -471,7 +471,7 @@ func (a *App) writeOrchestratorMCPConfig(id string, envs []configpkg.Orchestrato
 	}
 	// No erun binary means no proxy to launch, so the session launches without
 	// its envs rather than with entries that would fail on first use.
-	executable, err := eruncommon.ResolveErunExecutable()
+	executable, err := jobs.ResolveErunExecutable()
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("%w: %w", errOrchestratorMCPExecutable, err)
 	}

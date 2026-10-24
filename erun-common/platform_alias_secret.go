@@ -31,9 +31,9 @@ import (
 // cannot sign itself in to a platform alias" for what that costs and the
 // machine-user design that would replace it.
 
-// platformAliasSecretName derives the per-environment Secret `erun init` mints
+// PlatformAliasSecretName derives the per-environment Secret `erun init` mints
 // from the operator's own signed-in erun platform alias.
-func platformAliasSecretName(tenant string) string {
+func PlatformAliasSecretName(tenant string) string {
 	return config.RuntimeReleaseName(tenant) + "-platform-alias"
 }
 
@@ -46,24 +46,24 @@ func platformAliasSecretName(tenant string) string {
 // ~/.config/erun/config.yaml, and the token is written to the path the file
 // secret store resolves that alias's refresh-token ref to.
 const (
-	// platformAliasEntryKey holds one `cloudproviders:` list *item* -- the alias
+	// PlatformAliasEntryKey holds one `cloudproviders:` list *item* -- the alias
 	// entry, and nothing else. Deliberately not the whole `cloudproviders:` key:
 	// the pod's root config already emits that key for the infrastructure
 	// provider the chart injected, and a second one is a duplicate mapping key,
 	// which the config reader refuses outright rather than merging. The item is
 	// rendered here, where the values are typed, and the boot only has to add
 	// it to the list that already exists.
-	platformAliasEntryKey = "cloud-provider-entry.yaml"
-	// platformAliasSecretFileKey holds the *basename* the token must be saved
+	PlatformAliasEntryKey = "cloud-provider-entry.yaml"
+	// PlatformAliasSecretFileKey holds the *basename* the token must be saved
 	// as. The store names a secret file after a hash of its ref; init computes
 	// it with the store's own function and ships it, so the pod never derives
 	// it.
-	platformAliasSecretFileKey = "cloud-secret-file"
-	// platformAliasSecretTokenKey holds the refresh token itself.
-	platformAliasSecretTokenKey = "cloud-secret-token"
+	PlatformAliasSecretFileKey = "cloud-secret-file"
+	// PlatformAliasSecretTokenKey holds the refresh token itself.
+	PlatformAliasSecretTokenKey = "cloud-secret-token"
 )
 
-// renderPlatformAliasEntry renders the provisioned alias as one list item of the
+// RenderPlatformAliasEntry renders the provisioned alias as one list item of the
 // pod's `cloudproviders:` sequence, indented to sit under that key.
 //
 // It marshals a bare sequence and re-indents it rather than marshalling the
@@ -72,7 +72,7 @@ const (
 // sequence to share one indentation -- mixing the two is a parse error, not a
 // cosmetic difference. The current runtime boot parses the item instead, so it
 // reads either indent.
-func renderPlatformAliasEntry(provider config.CloudProviderConfig) (string, error) {
+func RenderPlatformAliasEntry(provider config.CloudProviderConfig) (string, error) {
 	// The refresh-token reference travels with the alias, exactly as it does in
 	// an operator's own config.yaml. The token itself never appears here -- it
 	// goes to the secret store, under a ref the alias points at.
@@ -91,7 +91,7 @@ func renderPlatformAliasEntry(provider config.CloudProviderConfig) (string, erro
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
-// resolveHostPlatformAlias resolves which erun platform alias this run should
+// ResolveHostPlatformAlias resolves which erun platform alias this run should
 // delegate to the pod, together with the refresh token the invoking host is
 // signed in with.
 //
@@ -118,8 +118,8 @@ func renderPlatformAliasEntry(provider config.CloudProviderConfig) (string, erro
 // one silent-looking no-op the operator can actually lift. Every other unnamed
 // decline -- no alias, no session, no readable store -- is nil, so a caller
 // that names no alias keeps the silence it has always had.
-func resolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
-	explicit := hostAliasSelected(alias)
+func ResolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
+	explicit := HostAliasSelected(alias)
 	if store == nil || deps.CloudSecretStore == nil {
 		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(
 			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
@@ -138,12 +138,12 @@ func resolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDepen
 	return provider, token, true, nil
 }
 
-// hostAliasSelected reports whether the operator named the alias themselves.
+// HostAliasSelected reports whether the operator named the alias themselves.
 // Both answers a resolve can give turn on it -- a named alias that cannot be
 // honoured is a failure, an unnamed one that cannot be is a no-op -- so the
 // callers that have to tell those apart read it here instead of repeating the
 // test and drifting from it.
-func hostAliasSelected(alias string) bool {
+func HostAliasSelected(alias string) bool {
 	return strings.TrimSpace(alias) != ""
 }
 
@@ -166,7 +166,7 @@ func hostAliasUnusable(explicit bool, alias string, cause error) error {
 	if explicit {
 		return fmt.Errorf("--erun-alias %q: %w", alias, cause)
 	}
-	if isPlatformAliasAmbiguity(cause) {
+	if IsPlatformAliasAmbiguity(cause) {
 		return cause
 	}
 	return nil
@@ -201,10 +201,10 @@ func noStoredSessionError(alias string) error {
 	return fmt.Errorf("this host holds no session for it; run `erun cloud login %s` first", alias)
 }
 
-// renderPlatformAliasSecret wraps the entry and token in an Opaque Secret.
+// RenderPlatformAliasSecret wraps the entry and token in an Opaque Secret.
 // `kubectl apply` upserts by name, so re-running init refreshes a stale token
 // rather than failing on an existing Secret.
-func renderPlatformAliasSecret(name, namespace, entry, secretFile, token string) string {
+func RenderPlatformAliasSecret(name, namespace, entry, secretFile, token string) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: Secret
 metadata:
@@ -218,12 +218,12 @@ stringData:
   %s: %q
   %s: %q
 `, name, namespace,
-		platformAliasEntryKey, entry,
-		platformAliasSecretFileKey, secretFile,
-		platformAliasSecretTokenKey, token)
+		PlatformAliasEntryKey, entry,
+		PlatformAliasSecretFileKey, secretFile,
+		PlatformAliasSecretTokenKey, token)
 }
 
-// provisionPlatformAliasSecret resolves the invoking host's signed-in erun
+// ProvisionPlatformAliasSecret resolves the invoking host's signed-in erun
 // platform alias and, when the host has one to give, mints or refreshes the
 // Secret the runtime chart mounts so the pod can call the platform API. It
 // returns the secret name to record on the environment, or "" when the host had
@@ -233,10 +233,10 @@ stringData:
 // Host alias resolution is a local, read-only lookup (the caller's config store
 // plus the secret store), so it still runs under dry-run: the decision it makes
 // belongs in the trace either way.
-func provisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore, tenant, namespace, kubernetesContext string, deps cloud.CloudDependencies) (string, error) {
-	provider, token, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+func ProvisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore, tenant, namespace, kubernetesContext string, deps cloud.CloudDependencies) (string, error) {
+	provider, token, ok, cause := ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if !ok {
-		if hostAliasSelected(ctx.PlatformAlias) {
+		if HostAliasSelected(ctx.PlatformAlias) {
 			// The one decline that is a failure: the operator named the alias, so
 			// ignoring it would leave them with an environment that cannot call
 			// the platform and nothing saying why.
@@ -245,18 +245,18 @@ func provisionPlatformAliasSecret(ctx core.Context, store config.CloudReadStore,
 		ctx.Trace(platformAliasDeclineLine(cause))
 		return "", nil
 	}
-	entry, err := renderPlatformAliasEntry(provider)
+	entry, err := RenderPlatformAliasEntry(provider)
 	if err != nil {
 		return "", err
 	}
-	name := platformAliasSecretName(tenant)
+	name := PlatformAliasSecretName(tenant)
 	args := kube.KubectlApplyStdinArgs(namespace, kubernetesContext)
 	ctx.Trace("apply platform alias secret " + name + " (alias " + provider.Alias + ", token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return name, nil
 	}
-	manifest := renderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef), token)
+	manifest := RenderPlatformAliasSecret(name, namespace, entry, cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef), token)
 	if err := kube.ApplySecretManifest(kubernetesContext, namespace, "platform alias secret", manifest, args); err != nil {
 		return "", err
 	}
@@ -334,9 +334,9 @@ func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec)
 	// is still theirs to lift, so it gets the one line a deploy may add here;
 	// every other unnamed decline adds nothing, which is the rule this gate
 	// exists to keep.
-	_, _, ok, cause := resolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
+	_, _, ok, cause := ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if !ok {
-		if hostAliasSelected(ctx.PlatformAlias) {
+		if HostAliasSelected(ctx.PlatformAlias) {
 			return cause
 		}
 		if cause != nil {
@@ -344,7 +344,7 @@ func reconcilePlatformAliasSecret(ctx core.Context, deployInput *HelmDeploySpec)
 		}
 		return nil
 	}
-	name, err := provisionPlatformAliasSecret(ctx, store, deployInput.Tenant, deployInput.Namespace, deployInput.KubernetesContext, deps)
+	name, err := ProvisionPlatformAliasSecret(ctx, store, deployInput.Tenant, deployInput.Namespace, deployInput.KubernetesContext, deps)
 	if err != nil {
 		return err
 	}

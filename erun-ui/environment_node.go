@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
 // The node an environment's cluster runs on is already measured and cached by
@@ -42,7 +42,7 @@ func (a *App) environmentNodeSnapshot(cloudProviderAlias, kubernetesContext stri
 // exists: the env-node event only fires on a transition, so a boot from a clean
 // store has nothing to replay and would render every row as if no node had ever
 // been observed.
-func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result eruncommon.ListResult) {
+func (a *App) seedEnvironmentNodeSnapshots(state *uiState, result lifecycle.ListResult) {
 	links := cloudContextLinksByEnvironment(result)
 	for ti := range state.Tenants {
 		tenant := &state.Tenants[ti]
@@ -62,7 +62,7 @@ type cloudContextLink struct {
 	kubernetesContext  string
 }
 
-func cloudContextLinksByEnvironment(result eruncommon.ListResult) map[string]cloudContextLink {
+func cloudContextLinksByEnvironment(result lifecycle.ListResult) map[string]cloudContextLink {
 	links := make(map[string]cloudContextLink)
 	for _, tenant := range result.Tenants {
 		for _, environment := range tenant.Environments {

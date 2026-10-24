@@ -352,7 +352,7 @@ func dockerBuildCacheBytes(limit time.Duration) (uint64, error) {
 		if !found || !strings.EqualFold(strings.TrimSpace(name), "build cache") {
 			continue
 		}
-		size, ok := parseDockerSize(value)
+		size, ok := ParseDockerSize(value)
 		if !ok {
 			return 0, errors.New("docker system df reported an unreadable build-cache size")
 		}

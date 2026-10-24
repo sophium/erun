@@ -12,6 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/command/mergequeue"
+	"github.com/sophium/erun/erun-common/command/review"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -27,7 +31,7 @@ type RuntimeContext struct {
 }
 
 type runtimeStore interface {
-	eruncommon.BootstrapStore
+	setup.BootstrapStore
 	eruncommon.ListStore
 	eruncommon.DockerStore
 	eruncommon.DeployStore
@@ -41,8 +45,8 @@ type RuntimeConfig struct {
 	PushDockerImage                eruncommon.DockerImagePusherFunc
 	DeployHelmChart                eruncommon.HelmChartDeployerFunc
 	EnsureKubernetesNamespace      eruncommon.NamespaceEnsurerFunc
-	DeleteKubernetesNamespace      eruncommon.NamespaceDeleterFunc
-	WaitForRemoteRuntime           eruncommon.RemoteRuntimeWaitFunc
+	DeleteKubernetesNamespace      lifecycle.NamespaceDeleterFunc
+	WaitForRemoteRuntime           setup.RemoteRuntimeWaitFunc
 	RunRemoteCommand               kube.RemoteCommandRunnerFunc
 	ResolveRuntimeRegistryVersions registry.RuntimeRegistryVersionResolverFunc
 }
@@ -67,19 +71,19 @@ type CommandOutput struct {
 	// Push carries what a `push` call actually pushed.
 	Push *gitx.PushWorkingTreeBranchResult `json:"push,omitempty"`
 	// Merge carries what an `exec_merge` call actually merged.
-	Merge *eruncommon.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
+	Merge *mergequeue.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
 	// GateMerge carries what an `exec_gate-merge` call actually squash-merged.
-	GateMerge *eruncommon.GateMergeWorkingTreeResult `json:"gateMerge,omitempty"`
+	GateMerge *mergequeue.GateMergeWorkingTreeResult `json:"gateMerge,omitempty"`
 	// ReportCommitStatus carries what an `exec_report-commit-status` call
 	// actually reported.
-	ReportCommitStatus *eruncommon.ReportCommitStatusResult `json:"reportCommitStatus,omitempty"`
+	ReportCommitStatus *review.ReportCommitStatusResult `json:"reportCommitStatus,omitempty"`
 	// ClosePullRequest carries what an `exec_close-pr` call actually did.
-	ClosePullRequest *eruncommon.ClosePullRequestResult `json:"closePullRequest,omitempty"`
+	ClosePullRequest *review.ClosePullRequestResult `json:"closePullRequest,omitempty"`
 	// Spec carries the resolved release plan `release` publishes.
 	Spec *eruncommon.ReleaseSpec `json:"spec,omitempty"`
 	// Interaction carries a structured question `init` needs answered in a
 	// follow-up call, when it cannot resolve one from the input given.
-	Interaction *eruncommon.BootstrapInitInteraction `json:"interaction,omitempty"`
+	Interaction *setup.BootstrapInitInteraction `json:"interaction,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)

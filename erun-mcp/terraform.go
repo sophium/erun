@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/terraform"
 )
 
 type TerraformInput struct {
@@ -31,12 +31,12 @@ func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		}
 		projectRoot := firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath))
 
-		terraformStore, ok := any(runtime.Store).(eruncommon.TerraformStore)
+		terraformStore, ok := any(runtime.Store).(terraform.TerraformStore)
 		if !ok {
 			terraformStore = config.ConfigStore{}
 		}
 
-		operation := eruncommon.TerraformOperation(strings.TrimSpace(input.Operation))
+		operation := terraform.TerraformOperation(strings.TrimSpace(input.Operation))
 		// MCP is non-interactive: the confirmation is the explicit Confirm input,
 		// which must equal the environment name to apply/destroy.
 		confirm := func(_ core.Context, env string) error {
@@ -47,7 +47,7 @@ func terraformTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		}
 
 		execute := simpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
-			_, err := eruncommon.RunTerraform(runCtx, eruncommon.TerraformParams{
+			_, err := terraform.RunTerraform(runCtx, terraform.TerraformParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Operation:   operation,

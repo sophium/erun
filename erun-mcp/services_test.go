@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/expose"
 )
 
 // servicesKubectlStub points ERUN_KUBECTL_BIN at a script answering the two
@@ -87,12 +88,12 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 	// pw-api is matched to the Ingress by the backend it routes to, not by the
 	// derived name -- the exposure's label is "validator", which no
 	// <tenant>-<service> derivation would produce from it.
-	want := []eruncommon.EnvironmentService{
+	want := []expose.EnvironmentService{
 		{Name: "frs-web", Type: "ClusterIP", Ports: []eruncommon.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
 		{
 			Name: "pw-api", Type: "ClusterIP",
 			Ports:    []eruncommon.ObservedServicePort{{Name: "http", Port: 8080, Protocol: "TCP"}},
-			Exposure: &eruncommon.ServiceExposure{Label: "validator", Hostname: "validator.frs-dev.services.example.com", Scheme: "https"},
+			Exposure: &expose.ServiceExposure{Label: "validator", Hostname: "validator.frs-dev.services.example.com", Scheme: "https"},
 		},
 	}
 	if !reflect.DeepEqual(output.Services, want) {

@@ -29,7 +29,7 @@ func TestGitResolvedRefIncludesGitOutputForNonExitError(t *testing.T) {
 	// failure (e.g. the git binary itself missing) reaches the bare-error
 	// path, so point ERUN_GIT_BIN at a binary that cannot run at all.
 	t.Setenv("ERUN_GIT_BIN", t.TempDir()+"/does-not-exist")
-	_, ok, err := gitResolvedRef(testTraceContext(false), t.TempDir(), "HEAD")
+	_, ok, err := GitResolvedRef(testTraceContext(false), t.TempDir(), "HEAD")
 	if ok {
 		t.Fatal("expected ok=false when git could not even be started")
 	}
@@ -62,7 +62,7 @@ func TestGitShortCommitIncludesGitStderr(t *testing.T) {
 
 func TestGitWorktreeCleanIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
-	_, err := gitWorktreeClean(testTraceContext(false), t.TempDir())
+	_, err := GitWorktreeClean(testTraceContext(false), t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

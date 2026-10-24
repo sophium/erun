@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
 // whipEnvironmentViaMCP calls the environment's own "whip" MCP tool -- the
@@ -22,11 +22,11 @@ import (
 // stronger assertion the resolveLocalTarget contract (erun-mcp/runtime.go)
 // asks callers to make: a stale edge pointed at the wrong environment then
 // surfaces as a named mismatch instead of a silent act on the wrong one.
-func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (eruncommon.WhipResult, error) {
+func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (orchestrator.WhipResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return eruncommon.WhipResult{}, err
+		return orchestrator.WhipResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -37,7 +37,7 @@ func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, b
 		Arguments: map[string]any{"preview": false, "tenant": tenant, "environment": environment},
 	})
 	if err != nil {
-		return eruncommon.WhipResult{}, formatWhipMCPError(err)
+		return orchestrator.WhipResult{}, formatWhipMCPError(err)
 	}
 	return decodeWhipMCPResult(result)
 }
@@ -45,7 +45,7 @@ func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, b
 // decodeWhipMCPResult turns one "whip" tool CallToolResult into a
 // eruncommon.WhipResult, pulled out of whipEnvironmentViaMCP so the decode
 // path can be driven directly in tests without a live MCP round trip.
-func decodeWhipMCPResult(result *mcp.CallToolResult) (eruncommon.WhipResult, error) {
+func decodeWhipMCPResult(result *mcp.CallToolResult) (orchestrator.WhipResult, error) {
 	// A tool-reported failure comes back as a populated CallToolResult with
 	// IsError set and no StructuredContent, not as a JSON-RPC error -- the SDK
 	// server wraps a returned error this way (server.go's "for regular errors,
@@ -53,26 +53,26 @@ func decodeWhipMCPResult(result *mcp.CallToolResult) (eruncommon.WhipResult, err
 	// nil-StructuredContent case below decode straight into a zero-valued
 	// success: CallTool's own err was nil, so nothing signalled failure at all.
 	if result.IsError {
-		return eruncommon.WhipResult{}, formatWhipMCPError(fmt.Errorf("%s", mcpResultText(result)))
+		return orchestrator.WhipResult{}, formatWhipMCPError(fmt.Errorf("%s", mcpResultText(result)))
 	}
 	// json.Unmarshal into a struct is a documented no-op for a nil/"null"
 	// input, so a nil StructuredContent must be rejected before it decodes
 	// into an indistinguishable-from-real zero WhipResult.
 	if result.StructuredContent == nil {
-		return eruncommon.WhipResult{}, fmt.Errorf("whip: environment returned no result")
+		return orchestrator.WhipResult{}, fmt.Errorf("whip: environment returned no result")
 	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return eruncommon.WhipResult{}, err
+		return orchestrator.WhipResult{}, err
 	}
-	var decoded eruncommon.WhipResult
+	var decoded orchestrator.WhipResult
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return eruncommon.WhipResult{}, err
+		return orchestrator.WhipResult{}, err
 	}
 	// The pod always stamps Candidate.ID/Name (RunLocalEnvironmentWhip); an
 	// empty ID means the payload was not a real decision, whatever decoded.
 	if decoded.Candidate.ID == "" {
-		return eruncommon.WhipResult{}, fmt.Errorf("whip: environment returned an empty result")
+		return orchestrator.WhipResult{}, fmt.Errorf("whip: environment returned an empty result")
 	}
 	return decoded, nil
 }

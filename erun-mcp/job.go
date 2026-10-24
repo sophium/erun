@@ -8,7 +8,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 )
 
 // The job tools are the host-side half of the job surface. An orchestrator
@@ -46,7 +47,7 @@ func jobAttachTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		}
 		trace := new(bytes.Buffer)
 		ctx := runtimeCallContext(input.Preview, 0, nil, trace, trace)
-		job, err := eruncommon.AttachEnvironmentJob(ctx, eruncommon.AttachEnvironmentJobParams{
+		job, err := jobspkg.AttachEnvironmentJob(ctx, jobspkg.AttachEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Name:        input.Name,
@@ -122,7 +123,7 @@ func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		result := JobStatusResult{Tenant: tenant, Environment: environment, Jobs: []eruncommon.EnvironmentJob{}}
 		now := time.Now()
 		if strings.TrimSpace(input.ID) != "" {
-			job, err := eruncommon.LoadEnvironmentJob(tenant, environment, input.ID, now)
+			job, err := jobspkg.LoadEnvironmentJob(tenant, environment, input.ID, now)
 			if err != nil {
 				return nil, JobStatusResult{}, err
 			}
@@ -130,7 +131,7 @@ func jobStatusTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			result.Job = &preview
 			return nil, result, nil
 		}
-		jobs, err := eruncommon.LoadEnvironmentJobs(tenant, environment, now)
+		jobs, err := jobspkg.LoadEnvironmentJobs(tenant, environment, now)
 		if err != nil {
 			return nil, JobStatusResult{}, err
 		}
@@ -149,20 +150,20 @@ type JobAwaitInput struct {
 	TimeoutSeconds int64  `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning still-running; defaults to 30 and may not exceed 600 (a larger value is refused, not capped silently), so no call is ever held open for the work's lifetime. For a job that can run longer than 600s, call this tool again each time it reports timedOut=true rather than requesting one longer wait"`
 }
 
-func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, eruncommon.AwaitEnvironmentJobResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAwaitInput) (*mcp.CallToolResult, eruncommon.AwaitEnvironmentJobResult, error) {
+func jobAwaitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobAwaitInput) (*mcp.CallToolResult, jobspkg.AwaitEnvironmentJobResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input JobAwaitInput) (*mcp.CallToolResult, jobspkg.AwaitEnvironmentJobResult, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.AwaitEnvironmentJobResult{}, err
+			return nil, jobspkg.AwaitEnvironmentJobResult{}, err
 		}
-		result, err := eruncommon.AwaitEnvironmentJob(eruncommon.AwaitEnvironmentJobParams{
+		result, err := jobspkg.AwaitEnvironmentJob(jobspkg.AwaitEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,
 			Timeout:     time.Duration(input.TimeoutSeconds) * time.Second,
 		})
 		if err != nil {
-			return nil, eruncommon.AwaitEnvironmentJobResult{}, err
+			return nil, jobspkg.AwaitEnvironmentJobResult{}, err
 		}
 		result.Job = previewJobForStatus(result.Job)
 		return nil, result, nil
@@ -178,13 +179,13 @@ type JobOutputInput struct {
 	MaxBytes    int64  `json:"maxBytes,omitempty" jsonschema:"most bytes to return in this read; defaults to 65536"`
 }
 
-func jobOutputTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobOutputInput) (*mcp.CallToolResult, eruncommon.EnvironmentJobOutput, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input JobOutputInput) (*mcp.CallToolResult, eruncommon.EnvironmentJobOutput, error) {
+func jobOutputTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobOutputInput) (*mcp.CallToolResult, jobspkg.EnvironmentJobOutput, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input JobOutputInput) (*mcp.CallToolResult, jobspkg.EnvironmentJobOutput, error) {
 		tenant, environment, err := resolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, eruncommon.EnvironmentJobOutput{}, err
+			return nil, jobspkg.EnvironmentJobOutput{}, err
 		}
-		output, err := eruncommon.ReadEnvironmentJobOutput(eruncommon.ReadEnvironmentJobOutputParams{
+		output, err := jobspkg.ReadEnvironmentJobOutput(jobspkg.ReadEnvironmentJobOutputParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,
@@ -192,7 +193,7 @@ func jobOutputTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 			MaxBytes:    input.MaxBytes,
 		})
 		if err != nil {
-			return nil, eruncommon.EnvironmentJobOutput{}, err
+			return nil, jobspkg.EnvironmentJobOutput{}, err
 		}
 		return nil, output, nil
 	}
@@ -209,10 +210,10 @@ type JobCancelInput struct {
 
 // JobCancelResult reports what the cancel did.
 type JobCancelResult struct {
-	Tenant      string                                `json:"tenant"`
-	Environment string                                `json:"environment"`
-	Cancel      eruncommon.CancelEnvironmentJobResult `json:"cancel"`
-	Trace       []string                              `json:"trace,omitempty"`
+	Tenant      string                             `json:"tenant"`
+	Environment string                             `json:"environment"`
+	Cancel      jobspkg.CancelEnvironmentJobResult `json:"cancel"`
+	Trace       []string                           `json:"trace,omitempty"`
 }
 
 func jobCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, JobCancelInput) (*mcp.CallToolResult, JobCancelResult, error) {
@@ -223,7 +224,7 @@ func jobCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReq
 		}
 		trace := new(bytes.Buffer)
 		ctx := runtimeCallContext(input.Preview, 0, nil, trace, trace)
-		cancel, err := eruncommon.CancelEnvironmentJob(ctx, eruncommon.CancelEnvironmentJobParams{
+		cancel, err := jobspkg.CancelEnvironmentJob(ctx, jobspkg.CancelEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,

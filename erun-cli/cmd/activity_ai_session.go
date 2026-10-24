@@ -9,6 +9,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -76,7 +77,7 @@ func runActivityAISessionHook(cmd *cobra.Command, tenant, environment, tool, eve
 		if readErr != nil {
 			return fmt.Errorf("read the hook payload from stdin: %w", readErr)
 		}
-		sessionID, err = common.AISessionHookSessionID(payload)
+		sessionID, err = ai.AISessionHookSessionID(payload)
 		if err != nil {
 			return fmt.Errorf("%s hook: %w", toolLabelForHook(tool), err)
 		}

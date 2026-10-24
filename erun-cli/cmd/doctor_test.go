@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/manifoldco/promptui"
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
 // forceStdinTerminal drives the stdinIsTerminal seam for one test. It is the
@@ -54,7 +54,7 @@ func TestDoctorSkipsOptionalPrunePromptsWithoutTerminal(t *testing.T) {
 	}
 
 	report := out.String()
-	for _, action := range common.DoctorActions() {
+	for _, action := range doctor.DoctorActions() {
 		if !strings.Contains(report, "skipped: "+string(action)) {
 			t.Errorf("report does not name %s as skipped:\n%s", action, report)
 		}
@@ -85,7 +85,7 @@ func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("terminal doctor failed: %v", err)
 	}
-	want := common.DoctorActions()
+	want := doctor.DoctorActions()
 	if len(actions) != len(want) {
 		t.Fatalf("answered prompts selected %v, want %v", actions, want)
 	}
@@ -95,7 +95,7 @@ func TestDoctorPromptsForOptionalPrunesOnTerminal(t *testing.T) {
 		}
 		// confirmPrompt trims the trailing "?" before handing the label to the
 		// prompt, which supplies its own.
-		wantLabel := strings.TrimRight(common.DoctorActionPromptLabel(action, doctorActionResult()), "?")
+		wantLabel := strings.TrimRight(doctor.DoctorActionPromptLabel(action, doctorActionResult()), "?")
 		if !strings.Contains(asked[i], wantLabel) {
 			t.Errorf("prompt %d = %q, want it to offer %q", i, asked[i], wantLabel)
 		}
@@ -120,7 +120,7 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	if len(actions) != 0 {
 		t.Fatalf("EOF selected %v, want nothing selected", actions)
 	}
-	if !strings.Contains(out.String(), "skipped: "+string(common.DoctorActionPruneImages)) {
+	if !strings.Contains(out.String(), "skipped: "+string(doctor.DoctorActionPruneImages)) {
 		t.Errorf("EOF was not reported as a skipped optional step:\n%s", out.String())
 	}
 	// The cause differs from a run that never had a terminal, and the report

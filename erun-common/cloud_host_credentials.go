@@ -77,7 +77,7 @@ func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, re
 	ctx.Trace("cloud refresh: credentials are exported from the host profile and streamed to the pod on stdin (never an argument or a trace line)")
 
 	req := ShellLaunchParamsFromResult(result)
-	if err := traceAndWaitForRuntime(ctx, req); err != nil {
+	if err := TraceAndWaitForRuntime(ctx, req); err != nil {
 		return HostCredentialsRefresh{}, err
 	}
 	script := hostAWSCredentialsWriteScript()

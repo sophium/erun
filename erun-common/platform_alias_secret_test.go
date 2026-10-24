@@ -2,7 +2,6 @@ package eruncommon
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +43,7 @@ func signedInHostStore() staticCloudStore {
 }
 
 func TestPlatformAliasSecretName(t *testing.T) {
-	if got, want := platformAliasSecretName("team"), "team-devops-platform-alias"; got != want {
+	if got, want := PlatformAliasSecretName("team"), "team-devops-platform-alias"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
@@ -57,7 +56,7 @@ func TestPlatformAliasSecretName(t *testing.T) {
 // arrive as another *item*, indented to match, and the pair must parse back as
 // two aliases rather than fail or silently drop one.
 func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing.T) {
-	entry, err := renderPlatformAliasEntry(testPlatformAliasProvider())
+	entry, err := RenderPlatformAliasEntry(testPlatformAliasProvider())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,79 +108,6 @@ func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	}
 }
 
-// TestProvisionedAliasResolvesInThePod is the reproduction of the reported
-// failure. Before this change an agent pod's root config carried no erun alias
-// and nothing could give it one, so every platform call resolved through
-// newPlatformClientForAlias and aborted with "no erun platform cloud provider
-// alias is configured" before its first network call -- `erun review show` among
-// them, exiting 127, with no remedy reachable from inside the pod.
-//
-// This drives the pod's side for real: the entry init rendered, mounted where
-// the chart mounts it, seeded by the runtime boot into the root config it wrote
-// for an env whose chart injected an infrastructure provider, and the token
-// written at the filename init shipped. It then asserts the pod's own alias
-// resolution gets past the point that used to fail. It is the seam between the
-// two halves -- init's render and the boot's seed -- which neither half's own
-// test can cover.
-func TestProvisionedAliasResolvesInThePod(t *testing.T) {
-	boot := newTestRuntimeBoot(t, map[string]string{
-		"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev",
-		"ERUN_CLOUD_PROVIDER": "aws", "ERUN_CLOUD_PROVIDER_ALIAS": "dev-aws",
-	})
-	provider := writePlatformAliasSecret(t, boot)
-	if err := writeRuntimeBootConfig(core.Context{}, boot, nil); err != nil {
-		t.Fatalf("write the pod's config: %v", err)
-	}
-	rootPath := runtimeRootConfigPath(boot.configHome())
-	unprovisioned, err := os.ReadFile(rootPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The reported state, asserted rather than assumed.
-	assertUnprovisionedAliasIsUnusable(t, string(unprovisioned))
-
-	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {
-		t.Fatalf("seed the platform alias: %v", err)
-	}
-	var podConfig configpkg.ERunConfig
-	readTestYAML(t, rootPath, &podConfig)
-
-	resolved, err := ResolveERunPlatformAlias(staticCloudStore{config: podConfig}, "")
-	if err != nil {
-		t.Fatalf("the pod still cannot resolve a platform alias after provisioning: %v", err)
-	}
-	if resolved.Alias != provider.Alias {
-		t.Fatalf("got alias %q, want %q", resolved.Alias, provider.Alias)
-	}
-	store := cloud.NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
-	token, err := store.LoadCloudSecret(resolved.ERun.RefreshTokenRef)
-	if err != nil {
-		t.Fatalf("the pod's secret store cannot read the token at the ref the resolved alias names: %v", err)
-	}
-	if token != "refresh-token-value" {
-		t.Fatalf("got token %q, want the provisioned refresh token", token)
-	}
-}
-
-// assertUnprovisionedAliasIsUnusable asserts the reported state rather than
-// assuming it: a pod config carrying an infrastructure provider but no platform
-// alias aborts at alias resolution, with the message and sentinel the report
-// quoted, before any network call.
-func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
-	t.Helper()
-	var before configpkg.ERunConfig
-	if err := yaml.Unmarshal([]byte(document), &before); err != nil {
-		t.Fatalf("the unprovisioned config does not parse: %v", err)
-	}
-	_, err := ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
-	if !errors.Is(err, cloud.ErrPlatformAliasUnusable) {
-		t.Fatalf("expected the reported unusable-alias failure before provisioning, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "no erun platform cloud provider alias is configured") {
-		t.Fatalf("the pre-provisioning failure should be the reported one, got: %v", err)
-	}
-}
-
 func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 	secretsDir := t.TempDir()
 	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(secretsDir, cloud.CloudSecretStoreDirName))}
@@ -207,7 +133,7 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 		if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 			t.Fatalf("save: %v", err)
 		}
-		got, token, ok, err := resolveHostPlatformAlias(signedInHostStore(), deps, "")
+		got, token, ok, err := ResolveHostPlatformAlias(signedInHostStore(), deps, "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -231,7 +157,7 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 // turn into a line a routine deploy carries.
 func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps cloud.CloudDependencies, what string) {
 	t.Helper()
-	_, _, ok, cause := resolveHostPlatformAlias(store, deps, "")
+	_, _, ok, cause := ResolveHostPlatformAlias(store, deps, "")
 	if ok {
 		t.Fatalf("%s must resolve to nothing", what)
 	}
@@ -248,7 +174,7 @@ func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
 		{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 	}}}
-	if _, _, ok, _ := resolveHostPlatformAlias(store, deps, ""); ok {
+	if _, _, ok, _ := ResolveHostPlatformAlias(store, deps, ""); ok {
 		t.Fatal("an infrastructure alias must not be provisioned as a platform alias")
 	}
 }
@@ -257,7 +183,7 @@ func TestProvisionPlatformAliasSecretNoSignedInHostAlias(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
 	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 
-	name, err := provisionPlatformAliasSecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "", deps)
+	name, err := ProvisionPlatformAliasSecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "", deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,7 +204,7 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
-	name, err := provisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", cloud.DefaultCloudDependencies())
+	name, err := ProvisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", cloud.DefaultCloudDependencies())
 	if err != nil {
 		t.Fatalf("an ambiguous host is a decline for init, not a failure: %v", err)
 	}
@@ -298,7 +224,7 @@ func TestProvisionPlatformAliasSecretDryRunSkipsApply(t *testing.T) {
 		t.Fatalf("save: %v", err)
 	}
 
-	name, err := provisionPlatformAliasSecret(testTraceContext(true), signedInHostStore(), "team", "team-dev", "", deps)
+	name, err := ProvisionPlatformAliasSecret(testTraceContext(true), signedInHostStore(), "team", "team-dev", "", deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -319,7 +245,7 @@ func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) 
 		t.Fatalf("save: %v", err)
 	}
 
-	name, err := provisionPlatformAliasSecret(testTraceContext(false), signedInHostStore(), "team", "team-dev", "", deps)
+	name, err := ProvisionPlatformAliasSecret(testTraceContext(false), signedInHostStore(), "team", "team-dev", "", deps)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -332,9 +258,9 @@ func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) 
 		"name: team-devops-platform-alias",
 		"namespace: team-dev",
 		"type: Opaque",
-		platformAliasEntryKey,
-		platformAliasSecretFileKey,
-		platformAliasSecretTokenKey,
+		PlatformAliasEntryKey,
+		PlatformAliasSecretFileKey,
+		PlatformAliasSecretTokenKey,
 		"alias: erun+api.erunpaas.com@erun",
 		"apiurl: " + cloud.HostedPlatformAPIURL,
 		"refresh-token-value",
@@ -601,7 +527,7 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 	deps := cloud.DefaultCloudDependencies()
 	chosen := secondPlatformAliasProvider()
 
-	got, token, ok, err := resolveHostPlatformAlias(store, deps, chosen.Alias)
+	got, token, ok, err := ResolveHostPlatformAlias(store, deps, chosen.Alias)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -615,11 +541,11 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 		t.Fatalf("got token %q, want the named alias's stored refresh token", token)
 	}
 
-	_, _, ok, cause := resolveHostPlatformAlias(store, deps, "")
+	_, _, ok, cause := ResolveHostPlatformAlias(store, deps, "")
 	if ok {
 		t.Fatal("an ambiguous host must not pick one of its aliases without a selection")
 	}
-	if !isPlatformAliasAmbiguity(cause) {
+	if !IsPlatformAliasAmbiguity(cause) {
 		t.Fatalf("an ambiguous host must report the ambiguity rather than decline as an absence, got %v", cause)
 	}
 }
@@ -639,7 +565,7 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 	if err == nil {
 		t.Fatal("several configured aliases with none selected must not resolve")
 	}
-	if !isPlatformAliasAmbiguity(err) {
+	if !IsPlatformAliasAmbiguity(err) {
 		t.Fatalf("several configured aliases must report the ambiguity, got: %v", err)
 	}
 
@@ -647,7 +573,7 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 	if err == nil {
 		t.Fatal("a host with no erun alias must not resolve")
 	}
-	if isPlatformAliasAmbiguity(err) {
+	if IsPlatformAliasAmbiguity(err) {
 		t.Fatalf("an absent alias must not be reported as the ambiguity, got: %v", err)
 	}
 }
@@ -694,7 +620,7 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 // it.
 func assertSelectionRejected(t *testing.T, store staticCloudStore, deps cloud.CloudDependencies, alias, wantCause string) {
 	t.Helper()
-	_, _, ok, err := resolveHostPlatformAlias(store, deps, alias)
+	_, _, ok, err := ResolveHostPlatformAlias(store, deps, alias)
 	if err == nil {
 		t.Fatalf("the selection %q cannot be honoured, so it must fail rather than decline", alias)
 	}

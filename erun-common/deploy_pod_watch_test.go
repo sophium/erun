@@ -17,24 +17,24 @@ import (
 // unschedulablePod builds a pod that never got past scheduling: no container
 // statuses at all, only the PodScheduled=False condition the real kubelet
 // would report.
-func unschedulablePod(name, message string) podStatusItem {
-	pod := podStatusItem{}
+func unschedulablePod(name, message string) PodStatusItem {
+	pod := PodStatusItem{}
 	pod.Metadata.Name = name
 	pod.Status.Phase = "Pending"
-	pod.Status.Conditions = []podConditionEntry{
+	pod.Status.Conditions = []PodConditionEntry{
 		{Type: "PodScheduled", Status: "False", Reason: "Unschedulable", Message: message},
 	}
 	return pod
 }
 
-func scheduledPod(name string) podStatusItem {
-	pod := podStatusItem{}
+func scheduledPod(name string) PodStatusItem {
+	pod := PodStatusItem{}
 	pod.Metadata.Name = name
 	pod.Status.Phase = "Running"
-	pod.Status.Conditions = []podConditionEntry{
+	pod.Status.Conditions = []PodConditionEntry{
 		{Type: "PodScheduled", Status: "True"},
 	}
-	pod.Status.ContainerStatuses = []containerStatusEntry{
+	pod.Status.ContainerStatuses = []ContainerStatusEntry{
 		{Name: "app", Ready: true, State: containerState{Running: &containerStateRunning{}}},
 	}
 	return pod
@@ -56,17 +56,17 @@ func TestClassifyTerminalFailureUnschedulablePod(t *testing.T) {
 	unscheduledSince := map[string]time.Time{}
 	pod := unschedulablePod("team-devops-0", "0/1 nodes are available: 1 Insufficient cpu, 1 Insufficient memory")
 
-	if failure := classifyTerminalFailure([]podStatusItem{pod}, params, unscheduledSince); failure != nil {
+	if failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince); failure != nil {
 		t.Fatalf("first observation must not fail immediately, got: %v", failure)
 	}
 
 	clock.advance(defaultUnscheduledGracePeriod - time.Second)
-	if failure := classifyTerminalFailure([]podStatusItem{pod}, params, unscheduledSince); failure != nil {
+	if failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince); failure != nil {
 		t.Fatalf("must stay within grace right up to the boundary, got: %v", failure)
 	}
 
 	clock.advance(2 * time.Second)
-	failure := classifyTerminalFailure([]podStatusItem{pod}, params, unscheduledSince)
+	failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince)
 	if failure == nil {
 		t.Fatalf("expected a terminal failure once the grace period elapses")
 	}
@@ -90,12 +90,12 @@ func TestClassifyTerminalFailureUnschedulablePodRecoversResetsGrace(t *testing.T
 	unscheduledSince := map[string]time.Time{}
 	name := "team-devops-0"
 
-	if failure := classifyTerminalFailure([]podStatusItem{unschedulablePod(name, "waiting")}, params, unscheduledSince); failure != nil {
+	if failure := classifyTerminalFailure([]PodStatusItem{unschedulablePod(name, "waiting")}, params, unscheduledSince); failure != nil {
 		t.Fatalf("first observation must not fail immediately, got: %v", failure)
 	}
 
 	clock.advance(defaultUnscheduledGracePeriod + time.Second)
-	if failure := classifyTerminalFailure([]podStatusItem{scheduledPod(name)}, params, unscheduledSince); failure != nil {
+	if failure := classifyTerminalFailure([]PodStatusItem{scheduledPod(name)}, params, unscheduledSince); failure != nil {
 		t.Fatalf("a scheduled pod must never be reported as unschedulable, got: %v", failure)
 	}
 	if _, tracked := unscheduledSince[name]; tracked {
@@ -104,7 +104,7 @@ func TestClassifyTerminalFailureUnschedulablePodRecoversResetsGrace(t *testing.T
 
 	// Unschedulable again later: the grace period must restart from now, not
 	// from the original observation over a minute ago.
-	if failure := classifyTerminalFailure([]podStatusItem{unschedulablePod(name, "waiting again")}, params, unscheduledSince); failure != nil {
+	if failure := classifyTerminalFailure([]PodStatusItem{unschedulablePod(name, "waiting again")}, params, unscheduledSince); failure != nil {
 		t.Fatalf("re-observing unschedulable must restart the grace period, got: %v", failure)
 	}
 }
@@ -117,13 +117,13 @@ func TestClassifyTerminalFailurePrefersContainerFailureOverUnschedulable(t *test
 	params := podWatchParams{ReleaseName: "team-devops", Namespace: "team-dev", Now: clock.now}
 	unscheduledSince := map[string]time.Time{"team-devops-0": clock.now()}
 
-	pod := podStatusItem{}
+	pod := PodStatusItem{}
 	pod.Metadata.Name = "team-devops-0"
-	pod.Status.ContainerStatuses = []containerStatusEntry{
+	pod.Status.ContainerStatuses = []ContainerStatusEntry{
 		{Name: "app", State: containerState{Waiting: &containerStateWaiting{Reason: "InvalidImageName", Message: "bad ref"}}},
 	}
 
-	failure := classifyTerminalFailure([]podStatusItem{pod}, params, unscheduledSince)
+	failure := classifyTerminalFailure([]PodStatusItem{pod}, params, unscheduledSince)
 	if failure == nil || failure.Reason != "InvalidImageName" {
 		t.Fatalf("expected the container failure to take precedence, got: %v", failure)
 	}
@@ -143,7 +143,7 @@ func TestPodUnschedulableMessage(t *testing.T) {
 		t.Fatalf("a scheduled pod must not report as unschedulable")
 	}
 
-	if _, ok := podUnschedulableMessage(podStatusItem{}); ok {
+	if _, ok := podUnschedulableMessage(PodStatusItem{}); ok {
 		t.Fatalf("a pod with no conditions must not report as unschedulable")
 	}
 }
@@ -198,7 +198,7 @@ func TestLibraryListReleasePodsMatchesSubprocessObservableResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("libraryListReleasePods: %v", err)
 	}
-	list, ok := parsePodStatusList(raw)
+	list, ok := ParsePodStatusList(raw)
 	if !ok {
 		t.Fatalf("parsePodStatusList: could not parse %s", raw)
 	}
@@ -257,19 +257,19 @@ func TestExecutionModeReportListsKubectlPodWatchOperation(t *testing.T) {
 // pullingPod builds a pod whose container is still fetching its image, the way
 // a cold node reports a large one: kubelet alternates between ErrImagePull and
 // ImagePullBackOff while it retries.
-func pullingPod(name, container, reason, message string) podStatusItem {
+func pullingPod(name, container, reason, message string) PodStatusItem {
 	return pullingPodOfImage(name, container, "", reason, message)
 }
 
 // pullingPodOfImage is pullingPod with the image kubelet reports the container
 // is using, which `kubectl get pods -o json` carries in
 // status.containerStatuses[].image for a container still waiting on its pull.
-func pullingPodOfImage(name, container, image, reason, message string) podStatusItem {
-	pod := podStatusItem{}
+func pullingPodOfImage(name, container, image, reason, message string) PodStatusItem {
+	pod := PodStatusItem{}
 	pod.Metadata.Name = name
 	pod.Status.Phase = "Pending"
-	pod.Status.Conditions = []podConditionEntry{{Type: "PodScheduled", Status: "True"}}
-	pod.Status.ContainerStatuses = []containerStatusEntry{
+	pod.Status.Conditions = []PodConditionEntry{{Type: "PodScheduled", Status: "True"}}
+	pod.Status.ContainerStatuses = []ContainerStatusEntry{
 		{Name: container, Image: image, State: containerState{Waiting: &containerStateWaiting{Reason: reason, Message: message}}},
 	}
 	return pod
@@ -293,7 +293,7 @@ func pullingPodOfImage(name, container, image, reason, message string) podStatus
 // parenthesis.
 func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T) {
 	rejected := pullingPod("team-devops-ghi", "erun-devops", "ErrImagePull", "manifest unknown: manifest unknown")
-	pods := []podStatusItem{
+	pods := []PodStatusItem{
 		pullingPodOfImage("team-devops-abc", "erun-devops", "ghcr.io/sophium/erun-devops:1.0.296", "ImagePullBackOff", `Back-off pulling image "ghcr.io/sophium/erun-devops:1.0.296"`),
 		pullingPodOfImage("team-devops-def", "erun-dind", "ghcr.io/sophium/erun-dind:1.0.296", "ErrImagePull", "rpc error: code = DeadlineExceeded"),
 		rejected,

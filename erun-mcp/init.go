@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -125,24 +126,24 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 		params.CodeCommitSSHKeyID = strings.TrimSpace(input.CodeCommitSSHKeyID)
 		params.ConfirmRemoteKeyImport = input.ConfirmRemoteKeyImport
 
-		_, err := eruncommon.RunBootstrapInitWithDependencies(eruncommon.BootstrapInitDependencies{
-			Store: eruncommon.TraceBootstrapStore(ctx, runtime.Store),
+		_, err := setup.RunBootstrapInitWithDependencies(setup.BootstrapInitDependencies{
+			Store: setup.TraceBootstrapStore(ctx, runtime.Store),
 			FindProjectRoot: func() (string, string, error) {
 				return config.FindProjectRootFromDir(workDir)
 			},
 			GetWorkingDir: func() (string, error) {
 				return workDir, nil
 			},
-			EnsureKubernetesNamespace: eruncommon.TraceNamespaceEnsurer(ctx, runtime.EnsureKubernetesNamespace),
+			EnsureKubernetesNamespace: setup.TraceNamespaceEnsurer(ctx, runtime.EnsureKubernetesNamespace),
 			LoadProjectConfig:         config.LoadProjectConfig,
-			SaveProjectConfig:         eruncommon.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
+			SaveProjectConfig:         setup.TraceProjectConfigSaver(ctx, config.SaveProjectConfig),
 			WaitForRemoteRuntime:      runtime.WaitForRemoteRuntime,
 			RunRemoteCommand:          runtime.RunRemoteCommand,
 			DeployHelmChart:           runtime.DeployHelmChart,
 			Context:                   ctx,
 		}, params)
 		if err != nil {
-			if interaction, ok := eruncommon.AsBootstrapInitInteraction(err); ok {
+			if interaction, ok := setup.AsBootstrapInitInteraction(err); ok {
 				return CommandOutput{
 					Executed:         false,
 					WorkingDirectory: workDir,

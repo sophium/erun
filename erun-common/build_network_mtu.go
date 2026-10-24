@@ -177,7 +177,7 @@ func dockerDefaultBridgeMTU() (int, bool) {
 // iproute2 and no privileges, matching what `erun dind-entrypoint` does
 // from the other side of the same namespace.
 func localEgressMTU() (int, string, bool) {
-	return egressMTUUnder(procRootForMTU(), sysRootForMTU())
+	return EgressMTUUnder(procRootForMTU(), sysRootForMTU())
 }
 
 func procRootForMTU() string {
@@ -194,7 +194,7 @@ func sysRootForMTU() string {
 	return "/sys"
 }
 
-func egressMTUUnder(procRoot, sysRoot string) (int, string, bool) {
+func EgressMTUUnder(procRoot, sysRoot string) (int, string, bool) {
 	iface, ok := defaultRouteInterface(filepath.Join(procRoot, "net", "route"))
 	if !ok {
 		return 0, "", false

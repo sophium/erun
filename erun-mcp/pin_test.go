@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -51,7 +51,7 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 // caller names the repository since it has no cwd to fall back on.
 func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 	root := t.TempDir()
-	if err := eruncommon.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
+	if err := lifecycle.RecordPinPrevious(root, "frs", "prod", "1.0.100"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 	runtime := RuntimeConfig{
@@ -108,7 +108,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 }
 `)
 
-	if err := eruncommon.RecordPinPrevious(frsRoot, "frs", "prod", "1.0.050"); err != nil {
+	if err := lifecycle.RecordPinPrevious(frsRoot, "frs", "prod", "1.0.050"); err != nil {
 		t.Fatalf("seed previous pin: %v", err)
 	}
 

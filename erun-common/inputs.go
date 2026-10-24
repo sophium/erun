@@ -127,14 +127,14 @@ func verifyRuntimeInputUpload(target, localSHA string, localSize int64, stdout s
 // the directory the script writes into and the sanitized entry name, reusing
 // the same path validation outputs relies on for its own pod-side paths.
 func splitRuntimeInputDestination(remotePath string) (dir, name string, err error) {
-	cleaned, err := validateAbsolutePodPath(remotePath, "remote path")
+	cleaned, err := ValidateAbsolutePodPath(remotePath, "remote path")
 	if err != nil {
 		return "", "", err
 	}
 	if cleaned == "/" {
 		return "", "", fmt.Errorf("remote path must include a file name: %q", remotePath)
 	}
-	name, err = sanitizeOutputEntryName(path.Base(cleaned))
+	name, err = SanitizeOutputEntryName(path.Base(cleaned))
 	if err != nil {
 		return "", "", err
 	}

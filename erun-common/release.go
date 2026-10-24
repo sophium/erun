@@ -229,7 +229,7 @@ func runReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRu
 		syncPackagingChecksums = syncReleasePackagingChecksums
 	}
 
-	release, err := claimReleaseVersion(ctx, spec, os.Getenv)
+	release, err := ClaimReleaseVersion(ctx, spec, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -390,7 +390,7 @@ func traceReleaseSpec(ctx core.Context, spec ReleaseSpec) {
 }
 
 func ensureReleaseWorktreeClean(ctx core.Context, projectRoot string) error {
-	clean, err := gitWorktreeClean(ctx, projectRoot)
+	clean, err := GitWorktreeClean(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func runReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, c
 		return fmt.Errorf("unsupported release command %q", command.Name)
 	}
 	if branchPush {
-		return runReleaseBranchPush(ctx, spec, command, runGit)
+		return RunReleaseBranchPush(ctx, spec, command, runGit)
 	}
 	return runReleaseStageCommand(ctx, command, runGit)
 }
@@ -510,16 +510,16 @@ func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit gitx.GitComman
 		}
 		return false, nil
 	}
-	return canSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
+	return CanSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func canSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
+func CanSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
 	}
 
-	tagCommit, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{}")
+	tagCommit, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{}")
 	if err != nil {
 		return false, err
 	}
@@ -527,7 +527,7 @@ func canSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, 
 		return false, nil
 	}
 
-	headCommit, ok, err := gitResolvedRef(ctx, projectRoot, "HEAD")
+	headCommit, ok, err := GitResolvedRef(ctx, projectRoot, "HEAD")
 	if err != nil {
 		return false, err
 	}
@@ -588,10 +588,10 @@ func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit gi
 	return false, false
 }
 
-// releaseStampCommitPrefix is the subject newReleaseStage's stamp commit
+// ReleaseStampCommitPrefix is the subject newReleaseStage's stamp commit
 // always carries ("[skip ci] release <version>"), so a retry can recognize
 // its own leftover stamp commits sitting at HEAD.
-const releaseStampCommitPrefix = "[skip ci] release "
+const ReleaseStampCommitPrefix = "[skip ci] release "
 
 // releaseStampWalkLimit bounds how many leading stamp commits are ever
 // walked past when looking for a leftover. A release stamps at most once per
@@ -600,7 +600,7 @@ const releaseStampCommitPrefix = "[skip ci] release "
 // turning this into an unbounded run of fetches.
 const releaseStampWalkLimit = 20
 
-// resolveReleaseVersionCommit is the commit whose short sha names a
+// ResolveReleaseVersionCommit is the commit whose short sha names a
 // candidate/prerelease version (resolveReleaseVersion). Root AGENTS.md
 // "Release Rules" calls the pre-publish stages "recoverable by re-running",
 // but a release that fails after its "release" stage stamp leaves that stamp
@@ -612,8 +612,8 @@ const releaseStampWalkLimit = 20
 // while each one is unpushed and origin's branch history has never
 // incorporated it — the same leftover-vs-real-collision boundary
 // releaseTagMismatchError already draws for the release tag.
-func resolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, error) {
-	base, found, err := findLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
+func ResolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, error) {
+	base, found, err := FindLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
 	if err != nil {
 		return "", err
 	}
@@ -624,19 +624,19 @@ func resolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, r
 	return gitShortCommitOf(ctx, projectRoot, base)
 }
 
-// findLeftoverReleaseStampBase walks HEAD's parents past a leading run of
+// FindLeftoverReleaseStampBase walks HEAD's parents past a leading run of
 // the release stage's own stamp commits, stopping at the first commit that
 // either is not a stamp or is already reachable from origin/branch — a real,
 // previously published stamp, not an interrupted attempt's leftover. found
 // is false when HEAD carries no such leftover, meaning version resolution
 // should keep using HEAD as before.
-func findLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (string, bool, error) {
+func FindLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (string, bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return "", false, nil
 	}
 
-	base, ok, err := gitResolvedRef(ctx, projectRoot, "HEAD")
+	base, ok, err := GitResolvedRef(ctx, projectRoot, "HEAD")
 	if err != nil || !ok {
 		return "", false, err
 	}
@@ -650,7 +650,7 @@ func findLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, 
 		if !leftover {
 			break
 		}
-		parent, ok, err := gitResolvedRef(ctx, projectRoot, base+"^")
+		parent, ok, err := GitResolvedRef(ctx, projectRoot, base+"^")
 		if err != nil {
 			return "", false, err
 		}
@@ -676,7 +676,7 @@ func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit git
 	if err != nil {
 		return false, err
 	}
-	if !strings.HasPrefix(subject, releaseStampCommitPrefix) {
+	if !strings.HasPrefix(subject, ReleaseStampCommitPrefix) {
 		return false, nil
 	}
 	reachable, known := releaseBaseBranchIncorporates(projectRoot, branch, commit, runGit)
@@ -727,7 +727,7 @@ func deleteExistingReleaseTag(ctx core.Context, projectRoot, tag string, runGit 
 }
 
 func gitTagExists(ctx core.Context, projectRoot, tag string) (bool, error) {
-	_, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{}")
+	_, ok, err := GitResolvedRef(ctx, projectRoot, tag+"^{}")
 	return ok, err
 }
 
@@ -749,7 +749,7 @@ func gitRemoteTagExists(ctx core.Context, projectRoot, remote, tag string) (bool
 	return strings.TrimSpace(string(output)) != "", nil
 }
 
-func gitResolvedRef(ctx core.Context, projectRoot, ref string) (string, bool, error) {
+func GitResolvedRef(ctx core.Context, projectRoot, ref string) (string, bool, error) {
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", ref)
 	output, err := core.Command("git", "-C", projectRoot, "rev-parse", ref).CombinedOutput()
 	if err == nil {
@@ -800,7 +800,7 @@ func gitRefExists(ctx core.Context, projectRoot, ref string) (bool, error) {
 	return false, err
 }
 
-func gitWorktreeClean(ctx core.Context, projectRoot string) (bool, error) {
+func GitWorktreeClean(ctx core.Context, projectRoot string) (bool, error) {
 	// Only tracked-file changes gate the release: release publishes HEAD,
 	// not the working tree, so untracked files (e.g. IDE state under
 	// .idea/, generator output) cannot affect what would be released and
@@ -895,7 +895,7 @@ func resolveReleaseInputs(ctx core.Context, findProjectRoot ProjectFinderFunc, l
 		Branch:              branch,
 		Commit:              commit,
 		BaseVersion:         baseVersion,
-		Version:             resolveReleaseVersion(baseVersion, commit, mode),
+		Version:             ResolveReleaseVersion(baseVersion, commit, mode),
 		VersionFilePath:     versionFilePath,
 		Mode:                mode,
 		DevelopBranchExists: developBranchExists,
@@ -915,7 +915,7 @@ func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch,
 	if err != nil {
 		return "", "", err
 	}
-	commit, err := resolveReleaseVersionCommit(ctx, projectRoot, branch, resolveCommit, runGit)
+	commit, err := ResolveReleaseVersionCommit(ctx, projectRoot, branch, resolveCommit, runGit)
 	if err != nil {
 		return "", "", err
 	}
@@ -970,7 +970,7 @@ var requiredScoopBinaries = []string{"erun.exe", "emcp.exe", "eapi.exe", "erun-a
 // the bailout precedes any git mutation.
 func validateStableScoopManifest(ctx core.Context, projectRoot string) error {
 	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
-	if !fileExists(scoopPath) {
+	if !FileExists(scoopPath) {
 		return nil
 	}
 	ctx.Trace("release: validating scoop manifest " + scoopPath)
@@ -1121,7 +1121,7 @@ func classifyReleaseMode(branch string, config configpkg.ReleaseConfig) ReleaseM
 	}
 }
 
-func resolveReleaseVersion(baseVersion, commit string, mode ReleaseMode) string {
+func ResolveReleaseVersion(baseVersion, commit string, mode ReleaseMode) string {
 	baseVersion = strings.TrimSpace(baseVersion)
 	commit = strings.TrimSpace(commit)
 
@@ -1317,7 +1317,7 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	if err != nil {
 		return nil, nil, err
 	}
-	if fileExists(formulaPath) {
+	if FileExists(formulaPath) {
 		syncSpec.FormulaPath = formulaPath
 	}
 
@@ -1326,12 +1326,12 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	if err != nil {
 		return nil, nil, err
 	}
-	if fileExists(scoopPath) {
+	if FileExists(scoopPath) {
 		syncSpec.ScoopPath = scoopPath
 	}
 
 	marketplacePath := filepath.Join(projectRoot, ".claude-plugin", "marketplace.json")
-	if fileExists(marketplacePath) {
+	if FileExists(marketplacePath) {
 		syncSpec.MarketplacePath = marketplacePath
 	}
 
@@ -1867,7 +1867,7 @@ func releaseGitPath(projectRoot, path string) string {
 	return filepath.ToSlash(filepath.Clean(relative))
 }
 
-func fileExists(path string) bool {
+func FileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }

@@ -8,6 +8,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
@@ -78,18 +79,18 @@ func newSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 // refuses on is named, because "the mirror did not change" is the one symptom
 // they all share.
 func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.OpenResult, findProjectRoot common.ProjectFinderFunc) error {
-	params, err := common.ResolveWorkspaceSyncParams(result, findProjectRoot)
+	params, err := workspace.ResolveWorkspaceSyncParams(result, findProjectRoot)
 	if err != nil {
 		return fmt.Errorf("workspace sync for %s/%s: %w", result.Tenant, result.Environment, err)
 	}
 	cmdCtx.Trace(fmt.Sprintf("resolve workspace sync %s:%s -> %s", params.HostAlias, params.RemotePath, params.LocalPath))
-	if err := common.WorkspaceSyncSSHReady(ctx, params.HostAlias); err != nil {
+	if err := workspace.WorkspaceSyncSSHReady(ctx, params.HostAlias); err != nil {
 		return fmt.Errorf("workspace sync for %s/%s: the SSH channel to the pod is not up (%s): %w", result.Tenant, result.Environment, params.HostAlias, err)
 	}
-	pass := common.SyncWorkspaceOnce
+	pass := workspace.SyncWorkspaceOnce
 	if cmdCtx.DryRun {
 		cmdCtx.Trace("dry run: reporting what one pass would change, without touching the mirror")
-		pass = common.PreviewWorkspaceSync
+		pass = workspace.PreviewWorkspaceSync
 	}
 	synced, err := pass(ctx, params)
 	if err != nil {
@@ -99,7 +100,7 @@ func runSSHDSyncCommand(ctx context.Context, cmdCtx core.Context, result config.
 	return cmdCtx.WriteResult(synced)
 }
 
-func sshdSyncSummary(dryRun bool, synced common.WorkspaceSyncResult) string {
+func sshdSyncSummary(dryRun bool, synced workspace.WorkspaceSyncResult) string {
 	if dryRun {
 		return fmt.Sprintf("workspace sync would copy %d files, delete %d, and deliver %d artifacts", synced.FilesCopied, synced.FilesDeleted, synced.ArtifactsCopied)
 	}
