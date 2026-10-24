@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -20,7 +19,7 @@ func RunRuntimeCommand(runtime runtimecfg.RuntimeConfig, preview bool, verbosity
 	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
 	// The env trace feeds the desktop's Diagnostics console; read-only tools bypass
 	// RunRuntimeCommand so probe polls don't flood it.
-	ctx, closeEnvTrace := e2e.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
+	ctx, closeEnvTrace := core.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
 	defer closeEnvTrace()
 
 	workDir, err := toolio.RuntimeRepoPath(runtime.Context)

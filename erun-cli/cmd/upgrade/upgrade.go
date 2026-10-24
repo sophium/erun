@@ -10,7 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -107,7 +106,7 @@ func runUpgrade(ctx core.Context, store seam.DeployStore, target model.UpgradeTa
 	// Only a scoped run has one env to attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
-		ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
+		ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
 		defer closeEnvTrace()
 	}
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",

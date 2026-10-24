@@ -1,4 +1,4 @@
-package e2e
+package core
 
 import (
 	"os"
@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // setTestHomeDir sets USERPROFILE too, which os.UserHomeDir reads on Windows.
@@ -24,7 +22,7 @@ func TestActivateEnvTrace(t *testing.T) {
 	t.Run("tee captures suppressed trace lines, stamped, with no opt-in", func(t *testing.T) {
 		home := t.TempDir()
 		setTestHomeDir(t, home)
-		ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)}
+		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		// The sink sees TraceCommand even without -vv.
 		teeCtx.TraceCommand("", "kubectl", "get", "pods")
@@ -43,8 +41,8 @@ func TestActivateEnvTrace(t *testing.T) {
 	t.Run("dry-run names the path and writes nothing", func(t *testing.T) {
 		home := t.TempDir()
 		setTestHomeDir(t, home)
-		ctx := core.Context{
-			Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr),
+		ctx := Context{
+			Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
 			DryRun: true,
 		}
 		_, closeTee := ActivateEnvTrace(ctx, "team", "dev")
@@ -57,7 +55,7 @@ func TestActivateEnvTrace(t *testing.T) {
 	t.Run("a blank tenant or environment deactivates the tee", func(t *testing.T) {
 		home := t.TempDir()
 		setTestHomeDir(t, home)
-		ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)}
+		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, " ", "dev")
 		teeCtx.Trace("invisible")
 		closeTee()
@@ -77,7 +75,7 @@ func TestActivateEnvTrace(t *testing.T) {
 		if err := os.WriteFile(path, make([]byte, envTraceLogMaxBytes+1), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, os.Stderr, os.Stderr)}
+		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
 		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		teeCtx.Trace("fresh after rotation")
 		closeTee()

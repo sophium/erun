@@ -479,7 +479,7 @@ func e2eLogPath(target model.E2ETarget, component string) (string, error) {
 		}
 		return filepath.Join(home, ".erun", "e2e", component+".log"), nil
 	}
-	tracePath, err := EnvTraceLogPath(target.Tenant, target.Environment)
+	tracePath, err := core.EnvTraceLogPath(target.Tenant, target.Environment)
 	if err != nil {
 		return "", err
 	}

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -61,7 +61,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 
 // A missing file is normal; only real read failures return an issue.
 func hostEnvTraceTail(result config.OpenResult) (string, string) {
-	path, err := e2e.EnvTraceLogPath(result.Tenant, result.Environment)
+	path, err := core.EnvTraceLogPath(result.Tenant, result.Environment)
 	if err != nil {
 		return "", err.Error()
 	}

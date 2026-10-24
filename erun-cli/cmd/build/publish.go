@@ -7,9 +7,9 @@ import (
 	"github.com/sophium/erun/cmd/shared/clicmd"
 	"github.com/sophium/erun/cmd/shared/cloudcli"
 	"github.com/sophium/erun/cmd/shared/opentarget"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +41,7 @@ func NewPublishCmd(store seam.DeployStore, findProjectRoot seam.ProjectFinderFun
 				return fmt.Errorf("publish requires a version: pass --version <version> produced by `erun build`/`erun push`")
 			}
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
+			ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, publishTarget.Tenant, publishTarget.Environment)
 			defer closeEnvTrace()
 			return release.RunPublish(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, publishTarget)
 		},

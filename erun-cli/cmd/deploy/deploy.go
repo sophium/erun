@@ -11,7 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/base/seam"
-	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/spf13/cobra"
@@ -68,7 +67,7 @@ func NewDeployCmd(store seam.DeployStore, saveEnvConfig seam.EnvConfigSaver, fin
 			// Resolve the scope up front so failure traces name the env.
 			tenant, environment := deploy.ResolveDeployTargetScope(store, findProjectRoot, deployTarget)
 			var closeEnvTrace func()
-			ctx, closeEnvTrace = e2e.ActivateEnvTrace(ctx, tenant, environment)
+			ctx, closeEnvTrace = core.ActivateEnvTrace(ctx, tenant, environment)
 			defer closeEnvTrace()
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v current=%v",
 				tenant, environment, deployTarget.VersionOverride,
