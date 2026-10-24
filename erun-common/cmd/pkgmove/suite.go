@@ -28,10 +28,13 @@ var (
 
 // writeSuiteMains gives every package the split created that has tests but
 // no TestMain one generated from suite_main_test.go.tmpl, so its tests are
-// isolated from the machine as the root package's are. It only runs in a
-// module whose base/core declares the timing seam the suite redirects.
-func writeSuiteMains(rootDir string) (int, error) {
-	timingEnv := timingSeamValue(filepath.Join(rootDir, filepath.FromSlash(coreDir)))
+// isolated from the machine as the root package's are. It only runs where the
+// timing seam the suite redirects is known: named by timingEnv, or declared by
+// the module's own base/core.
+func writeSuiteMains(rootDir, timingEnv string) (int, error) {
+	if timingEnv == "" {
+		timingEnv = timingSeamValue(filepath.Join(rootDir, filepath.FromSlash(coreDir)))
+	}
 	if timingEnv == "" {
 		return 0, nil
 	}

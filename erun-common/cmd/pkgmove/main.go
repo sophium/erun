@@ -38,6 +38,9 @@ type options struct {
 	dir       string
 	importers []string
 	limit     int
+	// timingEnv is the timing seam a generated suite redirects, for a module
+	// with no base/core of its own to read it from.
+	timingEnv string
 }
 
 func run(args []string, out io.Writer) error {
@@ -77,6 +80,7 @@ func parseOptions(args []string) (options, error) {
 	fs.StringVar(&opts.dir, "dir", ".", "module directory")
 	fs.StringVar(&importers, "importers", "", "comma-separated directories of importing modules")
 	fs.IntVar(&opts.limit, "limit", 20, "references printed per cycle edge")
+	fs.StringVar(&opts.timingEnv, "timing-env", "", "timing seam a generated suite redirects, when -dir has no base/core declaring it")
 	if err := fs.Parse(args); err != nil {
 		return options{}, err
 	}
