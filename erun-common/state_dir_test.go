@@ -11,6 +11,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // The state ERun keeps under the user's config directory is two trees, not
@@ -80,7 +81,7 @@ func goFuncBody(t *testing.T, fileName, funcName string) string {
 // no assertion about what exists on disk can tell the two names apart. What
 // can be checked is which name the code resolved through.
 func TestPortForwardStatePathNamesTheConfigRootThroughItsOneConstant(t *testing.T) {
-	body := goFuncBody(t, "port_forward_state.go", "PortForwardStatePath")
+	body := goFuncBody(t, "infra/kube/port_forward_state.go", "PortForwardStatePath")
 	if !strings.Contains(body, "ConfigRoot") {
 		t.Errorf("PortForwardStatePath must resolve the config tree through ConfigRoot rather than a name of its own:\n%s", body)
 	}
@@ -101,7 +102,7 @@ func TestPortForwardStateLivesInsideTheConfigTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ERunConfigDir: %v", err)
 	}
-	statePath, err := PortForwardStatePath("mcp", "acme", "dev")
+	statePath, err := kube.PortForwardStatePath("mcp", "acme", "dev")
 	if err != nil {
 		t.Fatalf("PortForwardStatePath: %v", err)
 	}

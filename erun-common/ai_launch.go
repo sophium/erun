@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 const (
@@ -178,7 +179,7 @@ func AISessionLaunchLines(aiTool string, claude configpkg.EnvironmentClaudeConfi
 		`if [ "$ai_status" = 137 ]; then printf '\n\033[2;33m── ` + label + ` was killed (exit 137) — likely out of memory; consider raising Memory in the environment Runtime settings ──\033[0m\n'; elif [ "$ai_status" != 0 ]; then printf '\n\033[2;33m── ` + label + ` exited (exit %s) ──\033[0m\n' "$ai_status"; else printf '\n\033[2;33m── ` + label + ` session ended ──\033[0m\n'; fi`,
 		// shellQuote, not inlining: the resume command can carry single quotes
 		// (the ultracode --settings JSON) that would break the printf format.
-		`printf '\033[2;33m── resume with: %s — or use this shell ──\033[0m\n' ` + shellQuote(resume),
+		`printf '\033[2;33m── resume with: %s — or use this shell ──\033[0m\n' ` + core.ShellQuote(resume),
 	}
 }
 

@@ -9,12 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
-
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // This is the whole capability contract driven end to end: the real handler,
@@ -98,7 +96,7 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 	db, tenantID, userID := capabilityAPIDatabase(t)
 	grantReadOnlyRole(t, db, tenantID, userID)
 	server := capabilityAPIServer(t, db, tenantID, userID)
-	client := eruncommon.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
+	client := platformclient.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
 
 	whoami, err := client.Whoami(context.Background())
 	mustNoErr(t, err, "read whoami")
@@ -126,10 +124,10 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 	if whoami.Capabilities.Allows(http.MethodPost, "/v1/reviews") {
 		t.Fatal("expected the write surface to be omitted for a read-only role")
 	}
-	_, err = client.CreateReview(context.Background(), eruncommon.PlatformCreateReviewParams{
+	_, err = client.CreateReview(context.Background(), platformclient.PlatformCreateReviewParams{
 		Name: "capability probe", TargetBranch: "main", SourceBranch: "feature/capability-probe",
 	})
-	if !errors.Is(err, eruncommon.ErrPlatformForbidden) {
+	if !errors.Is(err, platformclient.ErrPlatformForbidden) {
 		t.Fatalf("expected the omitted write to be forbidden, got %v", err)
 	}
 }
@@ -139,13 +137,13 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 func TestACapabilitySetIsEmptyForAUserWithNoRoles(t *testing.T) {
 	db, tenantID, userID := capabilityAPIDatabase(t)
 	server := capabilityAPIServer(t, db, tenantID, userID)
-	client := eruncommon.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
+	client := platformclient.NewPlatformClient(server.URL, func() (string, error) { return "token", nil })
 
 	// Whoami itself is authorized like every other route, so a user with no
 	// roles at all cannot read it. That refusal is the honest answer, and it is
 	// distinguishable from an empty capability set.
 	_, err := client.Whoami(context.Background())
-	if !errors.Is(err, eruncommon.ErrPlatformForbidden) {
+	if !errors.Is(err, platformclient.ErrPlatformForbidden) {
 		t.Fatalf("expected a role-less caller to be refused, got %v", err)
 	}
 }

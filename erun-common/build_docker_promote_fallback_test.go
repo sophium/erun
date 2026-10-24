@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // newFakeDockerOnPath puts a fake `docker` executable ahead of PATH so these
@@ -176,7 +177,7 @@ func testPromoteBuildInput() DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
-		Image: DockerImageReference{
+		Image: helm.DockerImageReference{
 			Registry:  "ghcr.io/sophium",
 			ImageName: "erun-console",
 			Tag:       "ghcr.io/sophium/erun-console:1.0.246",

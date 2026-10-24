@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type DoctorInput struct {
@@ -320,7 +321,7 @@ func runDoctorAliasRepairs(runtime RuntimeConfig, input DoctorInput, runCtx core
 			OIDCIssuerURL: strings.TrimSpace(entry.OIDCIssuerURL),
 			SkipLogin:     entry.SkipLogin,
 		}
-		if _, err := eruncommon.RepairOrphanedAlias(runCtx, runtime.Store, params, eruncommon.CloudDependencies{}); err != nil {
+		if _, err := eruncommon.RepairOrphanedAlias(runCtx, runtime.Store, params, cloud.CloudDependencies{}); err != nil {
 			return fmt.Errorf("repair alias %s: %w", alias, err)
 		}
 		report.RepairedAliases = append(report.RepairedAliases, alias)
@@ -365,7 +366,7 @@ func firstNonBlank(values ...string) string {
 // section that needs the runtime pod (git push access, docker storage) can
 // skip its own probe instead of independently rediscovering the same
 // unreachable cluster.
-func writeDoctorDeployDiagnosis(runCtx core.Context, req eruncommon.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
+func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (eruncommon.DeployDiagnosisResult, error) {
 	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
@@ -401,7 +402,7 @@ func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 // tool-call failure — nothing there is broken or transient, and the reason
 // carries the next step — unless the caller asked for a prune against it, which
 // cannot run at all: that one fails the call, the same as the CLI refusing it.
-func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req eruncommon.ShellLaunchParams, pruneRequested bool) error {
+func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, pruneRequested bool) error {
 	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
 	var unavailable eruncommon.DoctorDockerDaemonUnavailableError
 	daemonUnavailable := errors.As(err, &unavailable)
@@ -425,7 +426,7 @@ func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req er
 
 // runDoctorRecoveryToolActions runs the caller-requested deploy-recovery actions
 // (clear pending helm / rollback). Mutates the live release.
-func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req config.ShellLaunchParams) error {
 	for _, action := range deployRecoveryActionsFromInput(input) {
 		if !runCtx.DryRun {
 			if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DeployRecoveryActionDescription(action)); err != nil {
@@ -456,7 +457,7 @@ func deployRecoveryActionsFromInput(input DoctorInput) []eruncommon.DeployRecove
 	return actions
 }
 
-func runDoctorToolActions(runCtx core.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.ShellLaunchParams) error {
 	for _, action := range doctorActionsFromInput(input) {
 		if err := writeDoctorAction(runCtx, req, action); err != nil {
 			return err
@@ -482,7 +483,7 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req eruncommon
 // writeDoctorAction names the action and the daemon it acts on: an action run
 // against a daemon that does not hold this environment's build images reclaims
 // nothing, and the reader has to be able to tell which daemon ran.
-func writeDoctorAction(runCtx core.Context, req eruncommon.ShellLaunchParams, action eruncommon.DoctorAction) error {
+func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action eruncommon.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
 	}

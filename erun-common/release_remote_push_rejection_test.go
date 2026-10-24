@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // The two directions of the misdiagnosed release push, as unit tests over the
@@ -36,7 +37,7 @@ const movedMainRejection = "To github.com:sophium/erun.git\n" +
 // with the given rejection, then succeeds, recording every invocation so a test
 // can assert which remediation ran — the point is that the wrong
 // one did.
-func recordingReleasePushRunner(rejection string) (GitCommandRunnerFunc, *[][]string) {
+func recordingReleasePushRunner(rejection string) (gitx.GitCommandRunnerFunc, *[][]string) {
 	calls := &[][]string{}
 	pushed := false
 	runner := func(root string, stdout, stderr io.Writer, args ...string) error {

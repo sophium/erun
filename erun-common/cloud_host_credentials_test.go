@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // runHostAWSCredentialsWriteScript executes the real pod-side write script
@@ -28,7 +30,7 @@ func runHostAWSCredentialsWriteScript(t *testing.T, homeDir, payload string) err
 }
 
 func hostAWSCredentialsTestPayload(sessionToken string) string {
-	return renderHostAWSCredentialsProfile(CloudProviderCredentials{
+	return renderHostAWSCredentialsProfile(cloud.CloudProviderCredentials{
 		AccessKeyID:     "AKIAEXAMPLE",
 		SecretAccessKey: "example-secret",
 		SessionToken:    sessionToken,

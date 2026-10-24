@@ -22,6 +22,10 @@ import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
@@ -177,24 +181,24 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 		},
 		findProjectRoot:  func() (string, string, error) { return "frs", projectRoot, nil },
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "frs-devops":
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
 					LatestStable:   "1.0.11",
 					LatestSnapshot: "1.0.12-snapshot-20260414165809",
 				}, nil
 			case configpkg.DefaultRuntimeImageName:
-				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
+			return registry.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -245,11 +249,11 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 			},
 		},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			switch repository {
 			case "team-devops":
 				tenantImageNamespace = namespace
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.11", "1.0.12-snapshot-20260608120000"},
 					LatestStable:   "1.0.11",
@@ -259,11 +263,11 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 				if namespace != configpkg.DefaultContainerRegistry {
 					t.Fatalf("ERun fallback image must use the default registry, got %s", namespace)
 				}
-				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
+			return registry.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -292,12 +296,12 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 			},
 		},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == "team-devops" {
 				queried[namespace] = true
-				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
+				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
 			}
-			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+			return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 		},
 	})
 
@@ -311,15 +315,15 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 	}
 }
 
-func missingTenantImageRegistry(t *testing.T) func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
+func missingTenantImageRegistry(t *testing.T) func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
 	t.Helper()
 
-	return func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+	return func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 		if namespace != configpkg.DefaultContainerRegistry {
 			t.Fatalf("unexpected registry namespace: %s", namespace)
 		}
 		if repository == "frs-devops" {
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
 				LatestStable:   "1.0.11",
@@ -327,14 +331,14 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 			}, nil
 		}
 		if repository == configpkg.DefaultRuntimeImageName {
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:        namespace + "/" + repository,
 				Tags:         []string{"1.0.50", "1.0.49"},
 				LatestStable: "1.0.50",
 			}, nil
 		}
 		t.Fatalf("unexpected registry repository: %s", repository)
-		return eruncommon.RuntimeRegistryVersions{}, nil
+		return registry.RuntimeRegistryVersions{}, nil
 	}
 }
 
@@ -343,7 +347,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
@@ -351,7 +355,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"},
 				LatestStable:   "1.0.48",
@@ -379,15 +383,15 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "test-devops":
-				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			case configpkg.DefaultRuntimeImageName:
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"},
 					LatestStable:   "1.0.50",
@@ -396,7 +400,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
+			return registry.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -416,12 +420,12 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			if repository == "test-devops" {
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					Image:        namespace + "/" + repository,
 					Tags:         []string{"1.0.48"},
 					LatestStable: "1.0.48",
@@ -430,7 +434,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"},
 				LatestStable:   "1.0.50",
@@ -458,11 +462,11 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
-				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", eruncommon.ErrRegistryAuthRequired)
+				return registry.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", registry.ErrRegistryAuthRequired)
 			}
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:        namespace + "/" + repository,
 				Tags:         []string{"1.0.50", "1.0.49"},
 				LatestStable: "1.0.50",
@@ -491,11 +495,11 @@ func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
-				return eruncommon.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
+				return registry.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
 			}
-			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
+			return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
 		},
 	})
 
@@ -1410,7 +1414,7 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	wantPath := eruncommon.DesktopIdentityPublicKeyPath(identityDir)
+	wantPath := mcpauth.DesktopIdentityPublicKeyPath(identityDir)
 	written := sessions[0].WrittenString()
 	// Derive the expectation from the production builder so the platform's shell
 	// prefix, per-arg quoting (the temp path needs it on Windows), and line ending
@@ -1456,7 +1460,7 @@ func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19", NoGit: true}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-	wantPath := eruncommon.DesktopIdentityPublicKeyPath(identityDir)
+	wantPath := mcpauth.DesktopIdentityPublicKeyPath(identityDir)
 	wantFlag := "--mcp-auth-public-key " + shellQuoteIfNeeded(wantPath)
 	written := sessions[0].WrittenString()
 	if !strings.Contains(written, wantFlag) {
@@ -1809,15 +1813,15 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 	store := stubUIStore{config: &rootConfig}
 	app := NewApp(erunUIDeps{
 		store: store,
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
 				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
 				}
 				return testUIJWT("https://sts.aws.example/.well-known/openid-configuration"), nil
 			},
-			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) cloud.CloudProviderStatus {
+				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -1841,15 +1845,15 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	}}}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(_ core.Context, profile, audience string) (string, error) {
 				if profile != "team" || audience != configpkg.CloudProviderBearerAudience {
 					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
 				}
 				return jwt, nil
 			},
-			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) cloud.CloudProviderStatus {
+				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -2470,7 +2474,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             eruncommon.DefaultCloudContextRegion,
+				Region:             cloud.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
 				KubernetesContext:  "cluster-prod",
 			},
@@ -2479,7 +2483,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	var awsCalls []string
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: rootConfig},
-		cloudContextDeps: eruncommon.CloudContextDependencies{
+		cloudContextDeps: cloud.CloudContextDependencies{
 			RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 				awsCalls = append(awsCalls, strings.Join(args, " "))
 				return "i-test\tstopped\n", nil
@@ -2491,7 +2495,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCloudContextStatuses failed: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].Status != eruncommon.CloudContextStatusStopped {
+	if len(statuses) != 1 || statuses[0].Status != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected stale running status to be replaced with live stopped, got %+v", statuses)
 	}
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
@@ -2500,7 +2504,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	// The settings refresh must populate the in-memory cache that the
 	// idle widget and respawn gate now read from — otherwise the
 	// titlebar would only converge to truth on the next 10s poll.
-	if got := app.cloudContextStatus("team-context"); got != eruncommon.CloudContextStatusStopped {
+	if got := app.cloudContextStatus("team-context"); got != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
 	}
 }
@@ -2516,45 +2520,45 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
 
-	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
+	app.applyCloudContextStatusesToCache([]configpkg.CloudContextStatus{
 		{
 			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
-			Status:             eruncommon.CloudContextStatusRunning,
+			Status:             cloud.CloudContextStatusRunning,
 		},
 		{
 			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
-			Status:             eruncommon.CloudContextStatusStopped,
+			Status:             cloud.CloudContextStatusStopped,
 		},
 	})
-	if got := app.cloudContextStatus("ctx-a"); got != eruncommon.CloudContextStatusRunning {
+	if got := app.cloudContextStatus("ctx-a"); got != cloud.CloudContextStatusRunning {
 		t.Fatalf("seed running, got %q", got)
 	}
-	if got := app.cloudContextStatus("ctx-b"); got != eruncommon.CloudContextStatusStopped {
+	if got := app.cloudContextStatus("ctx-b"); got != cloud.CloudContextStatusStopped {
 		t.Fatalf("seed stopped, got %q", got)
 	}
 
-	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
+	app.applyCloudContextStatusesToCache([]configpkg.CloudContextStatus{
 		{
 			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
-			Status:             eruncommon.CloudContextStatusUnknown,
+			Status:             cloud.CloudContextStatusUnknown,
 			Message:            "status refresh failed: token expired",
 		},
 		{
 			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
-			Status:             eruncommon.CloudContextStatusRunning,
+			Status:             cloud.CloudContextStatusRunning,
 		},
 		{
 			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-c"},
-			Status:             eruncommon.CloudContextStatusUnknown,
+			Status:             cloud.CloudContextStatusUnknown,
 		},
 	})
-	if got := app.cloudContextStatus("ctx-a"); got != eruncommon.CloudContextStatusRunning {
+	if got := app.cloudContextStatus("ctx-a"); got != cloud.CloudContextStatusRunning {
 		t.Fatalf("transient unknown should not overwrite running, got %q", got)
 	}
-	if got := app.cloudContextStatus("ctx-b"); got != eruncommon.CloudContextStatusRunning {
+	if got := app.cloudContextStatus("ctx-b"); got != cloud.CloudContextStatusRunning {
 		t.Fatalf("authoritative transition stopped->running should overwrite, got %q", got)
 	}
-	if got := app.cloudContextStatus("ctx-c"); got != eruncommon.CloudContextStatusUnknown {
+	if got := app.cloudContextStatus("ctx-c"); got != cloud.CloudContextStatusUnknown {
 		t.Fatalf("first-observation unknown should populate empty slot, got %q", got)
 	}
 }
@@ -2570,11 +2574,11 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             eruncommon.DefaultCloudContextRegion,
+				Region:             cloud.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
-				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
-				DiskType:           eruncommon.DefaultCloudContextDiskType,
-				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				InstanceType:       configpkg.DefaultCloudContextInstanceType,
+				DiskType:           configpkg.DefaultCloudContextDiskType,
+				DiskSizeGB:         configpkg.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-old",
 			},
 		},
@@ -2613,7 +2617,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	app := NewApp(erunUIDeps{store: store})
 	// Cloud-context Status is no longer persisted; seed the in-memory
 	// cache that production code consults via linkedCloudContext.
-	app.setCloudContextStatusInCache("team-context", eruncommon.CloudContextStatusStopped)
+	app.setCloudContextStatusInCache("team-context", cloud.CloudContextStatusStopped)
 
 	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: " frs ", Environment: " prod "})
 	if err != nil {
@@ -2727,11 +2731,11 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
-			return eruncommon.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
+			return registry.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
 		},
 	})
 
@@ -2801,11 +2805,11 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
-			return eruncommon.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
+			return registry.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
 		},
 	})
 
@@ -2862,8 +2866,8 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 		t.Helper()
 		app := NewApp(erunUIDeps{
 			store: store,
-			resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-				return eruncommon.RuntimeRegistryVersions{Tags: tags[repository]}, nil
+			resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+				return registry.RuntimeRegistryVersions{Tags: tags[repository]}, nil
 			},
 		})
 		components, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.20"})
@@ -2896,7 +2900,7 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, pro
 	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
-	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != eruncommon.CloudContextStatusStopped {
+	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != cloud.CloudContextStatusStopped {
 		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
 	}
 	if loaded.RuntimePod.CPU != "4" || loaded.RuntimePod.Memory != "8916Mi" {
@@ -3541,11 +3545,11 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             eruncommon.DefaultCloudContextRegion,
+				Region:             cloud.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
-				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
-				DiskType:           eruncommon.DefaultCloudContextDiskType,
-				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				InstanceType:       configpkg.DefaultCloudContextInstanceType,
+				DiskType:           configpkg.DefaultCloudContextDiskType,
+				DiskSizeGB:         configpkg.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-prod",
 				AdminToken:         "test-token",
 			},
@@ -3604,11 +3608,11 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
 				CloudProviderAlias: "team-cloud",
-				Region:             eruncommon.DefaultCloudContextRegion,
+				Region:             cloud.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
-				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
-				DiskType:           eruncommon.DefaultCloudContextDiskType,
-				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				InstanceType:       configpkg.DefaultCloudContextInstanceType,
+				DiskType:           configpkg.DefaultCloudContextDiskType,
+				DiskSizeGB:         configpkg.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-prod",
 				AdminToken:         "test-token",
 			},
@@ -3863,7 +3867,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	}
 
 	var recordMu sync.Mutex
-	var recorded []eruncommon.EnvironmentActivityParams
+	var recorded []activity.EnvironmentActivityParams
 	app := NewApp(erunUIDeps{
 		store:          store,
 		resolveCLIPath: func() string { return "/tmp/erun" },
@@ -3874,7 +3878,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 			// event against the assertion below.
 			return newSilentStubTerminalSession(), nil
 		},
-		recordActivity: func(params eruncommon.EnvironmentActivityParams) error {
+		recordActivity: func(params activity.EnvironmentActivityParams) error {
 			recordMu.Lock()
 			defer recordMu.Unlock()
 			recorded = append(recorded, params)
@@ -3924,7 +3928,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		recordActivity: func(eruncommon.EnvironmentActivityParams) error { return nil },
+		recordActivity: func(activity.EnvironmentActivityParams) error { return nil },
 	})
 	defer app.shutdown(context.Background())
 
@@ -3955,15 +3959,15 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 
 func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 	now := time.Now()
-	remote := eruncommon.EnvironmentIdleStatus{
-		Markers: []eruncommon.EnvironmentIdleMarker{
+	remote := activity.EnvironmentIdleStatus{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
 			{Name: configpkg.ActivityKindCLI, LastActivity: now.Add(-4 * time.Minute), SecondsRemaining: 60},
 			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-1 * time.Minute), SecondsRemaining: 240},
 		},
 	}
-	local := eruncommon.EnvironmentIdleStatus{
-		Markers: []eruncommon.EnvironmentIdleMarker{
+	local := activity.EnvironmentIdleStatus{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, LastActivity: now, SecondsRemaining: 300},
 			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-2 * time.Minute), SecondsRemaining: 180},
 		},
@@ -3982,16 +3986,16 @@ func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 
 func TestMergeNewerActivityMarkersAddsMissingLocalTerminalActivity(t *testing.T) {
 	now := time.Now()
-	remote := eruncommon.EnvironmentIdleStatus{
+	remote := activity.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
 			{Name: configpkg.ActivityKindMCP, Idle: true, LastActivity: now.Add(-10 * time.Minute), SecondsRemaining: 0},
 		},
 	}
-	local := eruncommon.EnvironmentIdleStatus{
+	local := activity.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, Idle: false, LastActivity: now, SecondsRemaining: 60},
 		},
 	}
@@ -4026,16 +4030,16 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	remote := eruncommon.EnvironmentIdleStatus{
+	remote := activity.EnvironmentIdleStatus{
 		Policy: configpkg.EnvironmentIdlePolicy{
 			Timeout:      5 * time.Minute,
 			WorkingHours: "00:00-23:59",
 		},
 		ManagedCloud: true,
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, Idle: false, SecondsRemaining: 295},
 		},
-		Activity: map[string]eruncommon.EnvironmentActivitySnapshot{
+		Activity: map[string]activity.EnvironmentActivitySnapshot{
 			configpkg.ActivityKindCLI: {LastActivity: now.Add(-5 * time.Second), LastSeen: now.Add(-5 * time.Second)},
 		},
 	}
@@ -4138,14 +4142,14 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 		},
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-			return eruncommon.EnvironmentIdleStatus{
+		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+			return activity.EnvironmentIdleStatus{
 				ManagedCloud: true,
 				StopEligible: true,
 				Policy: configpkg.EnvironmentIdlePolicy{
 					Timeout: 5 * time.Minute,
 				},
-				Markers: []eruncommon.EnvironmentIdleMarker{
+				Markers: []activity.EnvironmentIdleMarker{
 					{Name: "working-hours", Idle: true},
 					{Name: configpkg.ActivityKindSSH, Idle: true},
 					{Name: configpkg.ActivityKindMCP, Idle: true},
@@ -4154,9 +4158,9 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 				},
 			}, nil
 		},
-		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
+		stopCloudContext: func(_ context.Context, name string) (configpkg.CloudContextStatus, error) {
 			stopped <- name
-			return eruncommon.CloudContextStatus{}, nil
+			return configpkg.CloudContextStatus{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -4176,7 +4180,7 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 }
 
 func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
-	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+	status := idleStatusToUI(activity.EnvironmentIdleStatus{
 		ManagedCloud:      true,
 		StopEligible:      false,
 		StopBlockedReason: "waiting for activity timeout",
@@ -4184,7 +4188,7 @@ func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
 		Policy: configpkg.EnvironmentIdlePolicy{
 			Timeout: 5 * time.Minute,
 		},
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindSSH, Idle: false, Reason: "recent activity", SecondsRemaining: 42},
 			{Name: configpkg.ActivityKindMCP, Idle: true, Reason: "last activity exceeded timeout"},
 		},
@@ -4222,15 +4226,15 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 	// SSH proxy is the only kind that populates Clients today, but the
 	// projection is generic so any future per-client surface gets the
 	// same treatment without re-plumbing.
-	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+	status := idleStatusToUI(activity.EnvironmentIdleStatus{
 		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{
 				Name:             configpkg.ActivityKindSSH,
 				Idle:             false,
 				Reason:           "recent activity",
 				SecondsRemaining: 50,
-				Clients: []eruncommon.EnvironmentIdleMarkerClient{
+				Clients: []activity.EnvironmentIdleMarkerClient{
 					{Address: "10.0.4.7", Bytes: 1500, SecondsAgo: 2},
 					{Address: "127.0.0.1", Bytes: 548, SecondsAgo: 9},
 				},
@@ -4262,9 +4266,9 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 // #1241) both read this field, so a silent regression here breaks them too.
 func TestIdleStatusToUICarriesLeases(t *testing.T) {
 	now := time.Now()
-	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+	status := idleStatusToUI(activity.EnvironmentIdleStatus{
 		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
-		Leases: []eruncommon.EnvironmentActivityLease{
+		Leases: []activity.EnvironmentActivityLease{
 			{ID: "job-fix-1201", Name: "job-fix-1201", PID: 4242, StartedAt: now.Add(-90 * time.Second)},
 		},
 	})
@@ -4589,8 +4593,8 @@ type stubUIStore struct {
 	listTenantsErr error
 }
 
-func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
-	return eruncommon.CloudContextDependencies{
+func testCloudContextDeps(actions *[]string) cloud.CloudContextDependencies {
+	return cloud.CloudContextDependencies{
 		RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
 			*actions = append(*actions, "aws "+strings.Join(args, " "))
 			if strings.Join(args, " ") == "ec2 describe-instances --instance-ids i-test --query Reservations[0].Instances[0].PublicIpAddress --output text" {
@@ -5074,7 +5078,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
@@ -5145,7 +5149,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24, false)
@@ -5230,16 +5234,16 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		store:               store,
 		canConnectLocalPort: func(int) bool { return false },
 		canReachMCPEndpoint: func(int) bool { return false },
-		loadIdleStatus: func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error) {
-			return eruncommon.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
+		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+			return activity.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
 		},
-		stopCloudContext: func(context.Context, string) (eruncommon.CloudContextStatus, error) {
+		stopCloudContext: func(context.Context, string) (configpkg.CloudContextStatus, error) {
 			t.Fatal("stop should not fire while context is running")
-			return eruncommon.CloudContextStatus{}, nil
+			return configpkg.CloudContextStatus{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
 	key := selectionKey(uiSelection{Tenant: "erun", Environment: "remote"})
 	app.mu.Lock()
@@ -5288,20 +5292,20 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
 	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
+	ui := app.idleStatusToUI(result, activity.EnvironmentIdleStatus{
 		ManagedCloud: true,
 		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
-	if ui.CloudContextStatus != eruncommon.CloudContextStatusRunning {
-		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusRunning, ui.CloudContextStatus)
+	if ui.CloudContextStatus != cloud.CloudContextStatusRunning {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", cloud.CloudContextStatusRunning, ui.CloudContextStatus)
 	}
 	if ui.StopError != "" {
 		t.Fatalf("expected StopError to be cleared when context is running, got %q", ui.StopError)
@@ -5336,20 +5340,20 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
 	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
+	ui := app.idleStatusToUI(result, activity.EnvironmentIdleStatus{
 		ManagedCloud: true,
 		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
-	if ui.CloudContextStatus != eruncommon.CloudContextStatusStopped {
-		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusStopped, ui.CloudContextStatus)
+	if ui.CloudContextStatus != cloud.CloudContextStatusStopped {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", cloud.CloudContextStatusStopped, ui.CloudContextStatus)
 	}
 	if ui.StopError == "" {
 		t.Fatal("expected StopError to be preserved when context is stopped")

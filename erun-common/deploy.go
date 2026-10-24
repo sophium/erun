@@ -22,10 +22,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"gopkg.in/yaml.v3"
 )
-
-const DevopsComponentName = "erun-devops"
 
 const (
 	WorktreeStorageHost = "host"
@@ -533,7 +536,7 @@ func applyRuntimeChartOverride(ctx core.Context, target DeployTarget, spec *Depl
 	if override == "" || spec == nil {
 		return
 	}
-	if spec.Deploy.ReleaseName != RuntimeReleaseName(spec.Target.Tenant) {
+	if spec.Deploy.ReleaseName != configpkg.RuntimeReleaseName(spec.Target.Tenant) {
 		return
 	}
 	reference, version := splitChartReferenceVersion(override)
@@ -634,7 +637,7 @@ func ResolveDeployedHelmReleaseVersion(ctx core.Context, releaseName, namespace,
 
 func specDeploysRuntimeChart(spec DeploySpec) bool {
 	tenant := strings.TrimSpace(spec.Target.Tenant)
-	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == RuntimeReleaseName(tenant)
+	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == configpkg.RuntimeReleaseName(tenant)
 }
 
 // RunDeploySpecs starts the step-timing root for the whole `erun deploy`
@@ -884,19 +887,19 @@ func runDeployStep(ctx core.Context, stepIndex int, specs []DeploySpec, deploy H
 // pure consume primitive: the build pulls already-published dependency charts
 // pinned in Chart.lock (it mints nothing) and branches on the chart artifact
 // (does it declare deps), never on env type or name.
-func chartDependencyBuildPlan(ctx core.Context, deployInput HelmDeploySpec) (*commandSpec, error) {
+func chartDependencyBuildPlan(ctx core.Context, deployInput HelmDeploySpec) (*helm.CommandSpec, error) {
 	chartPath := strings.TrimSpace(deployInput.ChartPath)
 	if chartPath == "" || isOCIChartReference(chartPath) {
 		return nil, nil
 	}
-	declares, err := helmChartDeclaresDependencies(chartPath)
+	declares, err := helm.HelmChartDeclaresDependencies(chartPath)
 	if err != nil {
 		return nil, err
 	}
 	if !declares {
 		return nil, nil
 	}
-	build := commandSpec{Name: "helm", Args: []string{"dependency", "build", chartPath}}
+	build := helm.CommandSpec{Name: "helm", Args: []string{"dependency", "build", chartPath}}
 	ctx.TraceCommand(build.Dir, build.Name, build.Args...)
 	return &build, nil
 }
@@ -904,12 +907,12 @@ func chartDependencyBuildPlan(ctx core.Context, deployInput HelmDeploySpec) (*co
 // runChartDependencyBuild executes the planned dependency build (a no-op when
 // there is nothing to build). Called after the single-flight acquire so a
 // deduped or parallel deploy never races on the shared charts/ dir.
-func runChartDependencyBuild(ctx core.Context, deployInput HelmDeploySpec, build *commandSpec, target string) error {
+func runChartDependencyBuild(ctx core.Context, deployInput HelmDeploySpec, build *helm.CommandSpec, target string) error {
 	if build == nil {
 		return nil
 	}
 	ctx.Info("==> Building chart dependencies for " + target)
-	if err := runHelmCommand(ctx, *build); err != nil {
+	if err := helm.RunHelmCommand(ctx, *build); err != nil {
 		return fmt.Errorf("deploy %s: helm dependency build: %w", deployInput.ReleaseName, err)
 	}
 	return nil
@@ -919,7 +922,7 @@ func runChartDependencyBuild(ctx core.Context, deployInput HelmDeploySpec, build
 // by-reference umbrella, plus the temp dir it unpacks into (removed after the
 // rollout).
 type publishedValuesPull struct {
-	command commandSpec
+	command helm.CommandSpec
 	dest    string
 }
 
@@ -943,7 +946,7 @@ func planPublishedValuesPull(ctx core.Context, deployInput *HelmDeploySpec) *pub
 	dest := filepath.Join(os.TempDir(), "erun-deploy-values-"+chartName)
 	envSlug := strings.ToLower(strings.TrimSpace(deployInput.Environment))
 	deployInput.PulledValuesFilePath = filepath.Join(dest, chartName, "values."+envSlug+".yaml")
-	pull := commandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.resolvedChartVersion(), "--untar", "--untardir", dest}}
+	pull := helm.CommandSpec{Name: "helm", Args: []string{"pull", ref, "--version", deployInput.resolvedChartVersion(), "--untar", "--untardir", dest}}
 	ctx.TraceCommand(pull.Dir, pull.Name, pull.Args...)
 	return &publishedValuesPull{command: pull, dest: dest}
 }
@@ -963,7 +966,7 @@ func runPublishedValuesPull(ctx core.Context, pull *publishedValuesPull, target 
 		return cleanup, fmt.Errorf("prepare chart-values dir: %w", err)
 	}
 	ctx.Info("==> Fetching " + target + " chart values")
-	if err := runHelmCommand(ctx, pull.command); err != nil {
+	if err := helm.RunHelmCommand(ctx, pull.command); err != nil {
 		return cleanup, fmt.Errorf("helm pull chart values: %w", err)
 	}
 	return cleanup, nil
@@ -973,7 +976,7 @@ func runPublishedValuesPull(ctx core.Context, pull *publishedValuesPull, target 
 // so a test can prove it runs before the secret applies that require it --
 // trace order cannot, because the trace already claimed this order while the
 // code did not follow it.
-var ensureDeployNamespace NamespaceEnsurerFunc = EnsureKubernetesNamespace
+var ensureDeployNamespace NamespaceEnsurerFunc = kube.EnsureKubernetesNamespace
 
 // applyPreRolloutResources creates the namespace and applies everything that
 // must exist in it before the chart rollout, including the credentials the
@@ -1024,8 +1027,8 @@ func RunHelmDeploy(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChar
 	if err := ensureRuntimeImagePullSecret(ctx, &deployInput, deployRuntimeImagePullProbe); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
-	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
-	TraceApplyKubernetesResourceQuota(ctx, deployInput.KubernetesContext, deployInput.Namespace, deployInput.NamespaceQuota)
+	kube.TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
+	kube.TraceApplyKubernetesResourceQuota(ctx, deployInput.KubernetesContext, deployInput.Namespace, deployInput.NamespaceQuota)
 	announceWorktreeVolumeChange(ctx, deployInput)
 	if err := applyPreRolloutResources(ctx, &deployInput); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
@@ -1066,7 +1069,7 @@ func RunHelmDeploy(ctx core.Context, deployInput HelmDeploySpec, deploy HelmChar
 // pull a by-reference umbrella's bundled values, build a local umbrella's
 // dependencies, then upgrade. Split out of RunHelmDeploy so the orchestrator
 // stays a thin trace-then-execute shell.
-func runHelmDeployExecute(ctx core.Context, deployInput HelmDeploySpec, valuesPull *publishedValuesPull, depBuild *commandSpec, deploy HelmChartDeployerFunc, target string) error {
+func runHelmDeployExecute(ctx core.Context, deployInput HelmDeploySpec, valuesPull *publishedValuesPull, depBuild *helm.CommandSpec, deploy HelmChartDeployerFunc, target string) error {
 	cleanupValues, err := runPublishedValuesPull(ctx, valuesPull, target)
 	if err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
@@ -1092,7 +1095,7 @@ func runHelmDeployExecute(ctx core.Context, deployInput HelmDeploySpec, valuesPu
 // persistence.
 func helmDeployTargetLabel(deployInput HelmDeploySpec) string {
 	target := deployInput.Tenant + "/" + deployInput.Environment
-	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != RuntimeReleaseName(deployInput.Tenant) {
+	if release := strings.TrimSpace(deployInput.ReleaseName); release != "" && release != configpkg.RuntimeReleaseName(deployInput.Tenant) {
 		target += " · " + release
 	}
 	if version := strings.TrimSpace(deployInput.Version); version != "" {
@@ -1169,7 +1172,7 @@ func ResolveDeploySpec(ctx core.Context, store DeployStore, findProjectRoot Proj
 		spec.Deploy.Timeout = override
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
 			return DeploySpec{}, fmt.Errorf("namespace quota override: %w", err)
 		}
 		spec.Deploy.NamespaceQuota = target.NamespaceQuotaOverride
@@ -1198,7 +1201,7 @@ func ResolveCurrentDeploySpecs(ctx core.Context, store DeployStore, findProjectR
 		}
 	}
 	if !target.NamespaceQuotaOverride.IsZero() {
-		if err := ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
+		if err := configpkg.ValidateNamespaceResourceQuota(target.NamespaceQuotaOverride); err != nil {
 			return nil, fmt.Errorf("namespace quota override: %w", err)
 		}
 		for i := range specs {
@@ -1286,7 +1289,7 @@ func resolveDeploySpecsForResolvedTarget(ctx core.Context, store DeployStore, fi
 	// chart probe runs: the tenant-chart check below reads a registry ahead of the
 	// runtime-chart ladder, and both must authenticate rather than probe
 	// anonymously and be refused. Idempotent, so the ladder's own call is fine.
-	configureInPodDeclaredRegistryAuth(ctx, resolvedTarget)
+	registrypkg.ConfigureInPodDeclaredRegistryAuth(ctx, resolvedTarget)
 	if resolvedTarget.RemoteRepo() {
 		return resolvePublishedDeploySpecs(ctx, store, findProjectRoot, resolvedTarget, target)
 	}
@@ -1511,7 +1514,7 @@ func appendPublishedRuntimeDeploySpecs(ctx core.Context, store DeployStore, reso
 // push` actually publishes them to, then runs that verification. Returns the
 // concretized target so the caller's subsequent chart resolution reuses it.
 func ensureTenantChartsPublishedFromDeployRegistry(ctx core.Context, target configpkg.OpenResult, versionOverride string, runtimeSelected bool, tenantComponents []string) (configpkg.OpenResult, error) {
-	target, err := concretizeDeployTargetRegistries(ctx, target)
+	target, err := kube.ConcretizeDeployTargetRegistries(ctx, target)
 	if err != nil {
 		return configpkg.OpenResult{}, err
 	}
@@ -1529,7 +1532,7 @@ func appendRuntimeFallbackSpecs(ctx core.Context, store DeployStore, resolvedTar
 	if !runtimeSelected || hasLocalRuntime {
 		return specs, nil
 	}
-	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + DevopsComponentName + " chart")
+	ctx.Trace("deploy: runtime selected with no repo-local runtime chart; installing the published " + configpkg.DevopsComponentName + " chart")
 	publishedSpecs, err := resolvePublishedDevopsDeploySpecs(ctx, store, resolvedTarget, versionOverride, runtimeChartOverride, runtimeImageExplicit)
 	if err != nil {
 		return nil, err
@@ -1621,7 +1624,7 @@ func resolveDeploySpecForContext(ctx core.Context, store DeployStore, findProjec
 	// dependencies are kept on the signature for the shared resolution contract.
 	store, _, _, _, _ = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
-	target, err := concretizeDeployTargetRegistries(ctx, target)
+	target, err := kube.ConcretizeDeployTargetRegistries(ctx, target)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -1774,12 +1777,12 @@ func confirmDeployImagePresent(ctx core.Context, tag, version string, insecure b
 }
 
 func configureDeployInputMetadata(store DeployStore, target configpkg.OpenResult, deployInput *HelmDeploySpec) error {
-	issuers, err := ResolveTenantCloudProviderIssuers(store, target.TenantConfig)
+	issuers, err := cloud.ResolveTenantCloudProviderIssuers(store, target.TenantConfig)
 	if err != nil {
 		return err
 	}
 	deployInput.OIDCAllowedIssuers = joinOIDCAllowedIssuers(issuers, deployInput.Platform)
-	managedCloud, err := managedCloudEnvironment(store, target.EnvConfig)
+	managedCloud, err := activity.ManagedCloudEnvironment(store, target.EnvConfig)
 	if err != nil {
 		return err
 	}
@@ -1846,7 +1849,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.
 	deployInput.ImageOverrides = map[string]string{
 		build.Image.ImageName: build.Image.Tag,
 	}
-	if build.Image.ImageName == DevopsComponentName {
+	if build.Image.ImageName == configpkg.DevopsComponentName {
 		deployInput.ResolvedRuntimeImage = build.Image.Tag
 		// A build --deploy of the devops component is itself the operator's
 		// explicit choice of which image this env runs -- record it the same
@@ -2146,7 +2149,7 @@ func resolveDeployContextForTarget(findProjectRoot ProjectFinderFunc, resolveKub
 		return resolveDeployContext(findProjectRoot, resolveKubernetesDeployContext, componentName)
 	}
 
-	chartPath, err := findComponentHelmChartPath(target.RepoPath, componentName)
+	chartPath, err := helm.FindComponentHelmChartPath(target.RepoPath, componentName)
 	if err != nil {
 		return KubernetesDeployContext{}, err
 	}
@@ -2184,7 +2187,7 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 		return KubernetesDeployContext{}, fmt.Errorf("cannot determine project root for Helm deployment")
 	}
 
-	chartPath, err := findComponentHelmChartPath(projectRoot, componentName)
+	chartPath, err := helm.FindComponentHelmChartPath(projectRoot, componentName)
 	if err != nil {
 		return KubernetesDeployContext{}, err
 	}
@@ -2301,7 +2304,7 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext Kube
 	// so its key is set by the published-spec resolvers instead.
 	subchartKey := ""
 	if deployContextOwnsRuntimeChart(deployContext, target.Tenant) && !isOCIChartReference(deployContext.ChartPath) {
-		subchartKey, err = helmChartRuntimeSubchartKey(deployContext.ChartPath)
+		subchartKey, err = helm.HelmChartRuntimeSubchartKey(deployContext.ChartPath)
 		if err != nil {
 			return HelmDeploySpec{}, err
 		}
@@ -2326,7 +2329,7 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext Kube
 		SubchartKey:         subchartKey,
 		Tenant:              target.Tenant,
 		Environment:         target.Environment,
-		Namespace:           KubernetesNamespaceName(target.Tenant, target.Environment),
+		Namespace:           configpkg.KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext:   target.EnvConfig.KubernetesContext,
 		WorktreeStorage:     resolveWorktreeStorage(target),
 		WorktreeRepoName:    resolveWorktreeRepoName(target.RepoPath),
@@ -2346,8 +2349,8 @@ func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext Kube
 		ImagePullSecrets:    append([]string(nil), target.EnvConfig.ImagePullSecrets...),
 		Idle:                target.EnvConfig.Idle,
 		Claude:              target.EnvConfig.Claude,
-		RuntimePod:          NormalizeRuntimePodResources(resolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, DefaultCgroupRoot)),
-		RuntimeDindPod:      NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
+		RuntimePod:          configpkg.NormalizeRuntimePodResources(configpkg.ResolveRuntimePodResourcesForDeploy(target.EnvConfig.RuntimePod, target.Tenant, target.Environment, nil, configpkg.DefaultCgroupRoot)),
+		RuntimeDindPod:      configpkg.NormalizeRuntimeDindPodResources(target.EnvConfig.RuntimeDindPod),
 		NamespaceQuota:      target.EnvConfig.NamespaceQuota,
 		Stopped:             target.EnvConfig.Stopped,
 		Version:             version,
@@ -2400,11 +2403,11 @@ func resolveProjectPlatform(projectRoot string) configpkg.PlatformConfig {
 	return projectConfig.Platform.Resolve()
 }
 
-func applyCloudContextStopMetadata(store CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudContextStopMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
-	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return
 	}
@@ -2415,7 +2418,7 @@ func applyCloudContextStopMetadata(store CloudReadStore, env configpkg.EnvConfig
 	deployInput.CloudInstanceID = status.InstanceID
 }
 
-func applyCloudProviderDeployMetadata(store CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudProviderDeployMetadata(store configpkg.CloudReadStore, env configpkg.EnvConfig, deployInput *HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -2425,7 +2428,7 @@ func applyCloudProviderDeployMetadata(store CloudReadStore, env configpkg.EnvCon
 		deployInput.CloudProvider = resolveCloudProviderForAlias(store, alias, deployInput.CloudProvider)
 	}
 
-	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err == nil && ok {
 		if alias == "" || strings.TrimSpace(status.CloudProviderAlias) == alias {
 			deployInput.CloudContextName = status.Name
@@ -2447,8 +2450,8 @@ func applyCloudProviderDeployMetadata(store CloudReadStore, env configpkg.EnvCon
 // alias, preferring the store's configured provider and falling back to the
 // provider parsed from the alias suffix. When neither resolves, the existing
 // value is preserved.
-func resolveCloudProviderForAlias(store CloudReadStore, alias, current string) string {
-	if provider, err := ResolveCloudProvider(store, alias); err == nil {
+func resolveCloudProviderForAlias(store configpkg.CloudReadStore, alias, current string) string {
+	if provider, err := cloud.ResolveCloudProvider(store, alias); err == nil {
 		return provider.Provider
 	}
 	if provider := cloudProviderFromAlias(alias); provider != "" {
@@ -2471,7 +2474,7 @@ func cloudProviderFromAlias(alias string) string {
 
 func cloudContextRegionFromName(name string) string {
 	name = strings.TrimSpace(name)
-	for _, region := range CloudContextRegions() {
+	for _, region := range cloud.CloudContextRegions() {
 		if strings.HasSuffix(name, "-"+region) || name == region {
 			return region
 		}
@@ -2590,7 +2593,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 	return HelmDeployParams{HelmDeploySpec: d, Stdout: stdout, Stderr: stderr}
 }
 
-func (d HelmDeploySpec) command() commandSpec {
+func (d HelmDeploySpec) command() helm.CommandSpec {
 	args := []string{
 		"upgrade",
 		"--install",
@@ -2696,10 +2699,10 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
 		"--set-string", "idle.timezone="+helmIdleTimezone(d.Idle),
 		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
-		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
-		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
-		"--set-string", "runtime.dind.resources.limits.cpu="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
-		"--set-string", "runtime.dind.resources.limits.memory="+NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
+		"--set-string", "runtime.resources.limits.cpu="+configpkg.NormalizeRuntimePodResources(d.RuntimePod).CPU,
+		"--set-string", "runtime.resources.limits.memory="+configpkg.NormalizeRuntimePodResources(d.RuntimePod).Memory,
+		"--set-string", "runtime.dind.resources.limits.cpu="+configpkg.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).CPU,
+		"--set-string", "runtime.dind.resources.limits.memory="+configpkg.NormalizeRuntimeDindPodResources(d.RuntimeDindPod).Memory,
 	)
 	args = append(args, helmClaudeSetArgs(d.Claude, d.OpenRouter)...)
 	// When the chart is an umbrella wrapping a canonical erun-<base> chart, every
@@ -2721,7 +2724,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		dir = ""
 	}
 
-	return commandSpec{
+	return helm.CommandSpec{
 		Dir:  dir,
 		Name: "helm",
 		Args: args,
@@ -2752,7 +2755,7 @@ func prefixHelmSetKeys(args []string, prefix string) {
 	}
 }
 
-func (p HelmReleaseRecoveryParams) command() commandSpec {
+func (p HelmReleaseRecoveryParams) command() helm.CommandSpec {
 	args := []string{}
 	if p.Verbosity >= core.VerbosityDebug {
 		args = append(args, "--v=4")
@@ -2768,7 +2771,7 @@ func (p HelmReleaseRecoveryParams) command() commandSpec {
 		"--ignore-not-found",
 	)
 
-	return commandSpec{
+	return helm.CommandSpec{
 		Name: "kubectl",
 		Args: args,
 	}
@@ -3423,7 +3426,7 @@ func detectedProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectR
 	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
 		return "", false, nil
 	}
-	k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
+	k8sDir := filepath.Join(projectRoot, configpkg.RuntimeReleaseName(tenant), "k8s")
 	if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
 		return "", false, err
 	} else if ok {
@@ -3490,7 +3493,7 @@ func resolveHelmDeployChartPath(params HelmDeployParams) (string, func(), error)
 	return chartPath, cleanup, nil
 }
 
-func helmDeployCommandSpec(params HelmDeployParams, chartPath string) commandSpec {
+func helmDeployCommandSpec(params HelmDeployParams, chartPath string) helm.CommandSpec {
 	// The embedded spec is the traced spec verbatim; only the resolved chart path
 	// differs (a local umbrella unpacks to a temp dir). Building the command from
 	// it guarantees the executed helm command matches what RunHelmDeploy traced.
@@ -3723,7 +3726,7 @@ func searchedTenantRuntimeChart(params HelmDeployParams) string {
 	if len(params.ChartCandidates) == 0 {
 		return ""
 	}
-	if chart := RuntimeReleaseName(params.Tenant); chart != DevopsComponentName {
+	if chart := configpkg.RuntimeReleaseName(params.Tenant); chart != configpkg.DevopsComponentName {
 		return chart
 	}
 	return ""
@@ -3843,16 +3846,16 @@ func recreateDeploymentAndRetry(ctx core.Context, deployInput HelmDeploySpec, de
 	return err
 }
 
-func deleteDeploymentCommand(deployment, namespace, kubernetesContext string) commandSpec {
+func deleteDeploymentCommand(deployment, namespace, kubernetesContext string) helm.CommandSpec {
 	args := []string{}
 	if c := strings.TrimSpace(kubernetesContext); c != "" {
 		args = append(args, "--context", c)
 	}
 	args = append(args, "--namespace", namespace, "delete", "deployment", deployment, "--ignore-not-found")
-	return commandSpec{Name: "kubectl", Args: args}
+	return helm.CommandSpec{Name: "kubectl", Args: args}
 }
 
-func runDeleteDeploymentCommand(command commandSpec, verbosity int, stdout, stderr io.Writer) error {
+func runDeleteDeploymentCommand(command helm.CommandSpec, verbosity int, stdout, stderr io.Writer) error {
 	cmd := core.Command(command.Name, command.Args...)
 	cmd.Dir = command.Dir
 	capture := new(bytes.Buffer)
@@ -4047,7 +4050,7 @@ func checkKubernetesDeploymentWithContext(ctx core.Context, params KubernetesDep
 		return deployed, output, matchErr
 	}
 
-	if KubernetesResourceNotFound(output) || strings.Contains(strings.ToLower(output), "no resources found") {
+	if kube.KubernetesResourceNotFound(output) || strings.Contains(strings.ToLower(output), "no resources found") {
 		return false, output, nil
 	}
 
@@ -4329,12 +4332,12 @@ func matchesExpectedRuntimePod(value, expected configpkg.RuntimePodResources) bo
 	if expected == (configpkg.RuntimePodResources{}) {
 		return true
 	}
-	value = NormalizeRuntimePodResources(value)
-	expected = NormalizeRuntimePodResources(expected)
-	valueCPU, valueCPUErr := ParseKubernetesCPUToMilli(value.CPU)
-	expectedCPU, expectedCPUErr := ParseKubernetesCPUToMilli(expected.CPU)
-	valueMemory, valueMemoryErr := ParseKubernetesMemoryToMi(value.Memory)
-	expectedMemory, expectedMemoryErr := ParseKubernetesMemoryToMi(expected.Memory)
+	value = configpkg.NormalizeRuntimePodResources(value)
+	expected = configpkg.NormalizeRuntimePodResources(expected)
+	valueCPU, valueCPUErr := configpkg.ParseKubernetesCPUToMilli(value.CPU)
+	expectedCPU, expectedCPUErr := configpkg.ParseKubernetesCPUToMilli(expected.CPU)
+	valueMemory, valueMemoryErr := configpkg.ParseKubernetesMemoryToMi(value.Memory)
+	expectedMemory, expectedMemoryErr := configpkg.ParseKubernetesMemoryToMi(expected.Memory)
 	return valueCPUErr == nil &&
 		expectedCPUErr == nil &&
 		valueMemoryErr == nil &&
@@ -4356,47 +4359,6 @@ func resolveKubernetesDeployValuesFile(chartPath, environment string) (string, e
 		return "", fmt.Errorf("values file path is a directory: %s", valuesFilePath)
 	}
 	return valuesFilePath, nil
-}
-
-func findComponentHelmChartPath(projectRoot, componentName string) (string, error) {
-	componentName = strings.TrimSpace(componentName)
-	if componentName == "" {
-		return "", fmt.Errorf("component name is required")
-	}
-
-	// A declared components: entry scopes the walk to that component's own k8s
-	// root instead of the whole project, so a monorepo's chart resolves
-	// deterministically rather than by a same-named directory found elsewhere.
-	searchRoot := projectRoot
-	declared, ok, err := configpkg.DeclaredComponentPaths(projectRoot, componentName)
-	if err != nil {
-		return "", err
-	}
-	if ok {
-		if k8sRoot := configpkg.ResolveProjectPath(projectRoot, declared.K8s); k8sRoot != "" {
-			searchRoot = k8sRoot
-		}
-	}
-
-	matches := make([]string, 0, 1)
-	err = filepath.WalkDir(searchRoot, func(path string, d fs.DirEntry, err error) error {
-		chartPath, ok, walkErr := componentHelmChartCandidate(path, d, componentName, err)
-		if ok {
-			matches = append(matches, chartPath)
-		}
-		return walkErr
-	})
-	if err != nil {
-		return "", err
-	}
-
-	if len(matches) == 0 {
-		return "", fmt.Errorf("helm chart not found for component %q", componentName)
-	}
-	if len(matches) > 1 {
-		return "", fmt.Errorf("multiple Helm charts found for component %q", componentName)
-	}
-	return matches[0], nil
 }
 
 // discoverComponentChartDirs returns the component-chart directories under the
@@ -4487,26 +4449,6 @@ func declaredDevopsModuleK8sDir(dockerDir string) (string, bool, error) {
 		return "", false, err
 	}
 	return k8sDir, true, nil
-}
-
-func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {
-	if err != nil {
-		return "", false, err
-	}
-	if d.IsDir() {
-		if d.Name() == ".git" {
-			return "", false, fs.SkipDir
-		}
-		return "", false, nil
-	}
-	if d.Name() != "Chart.yaml" {
-		return "", false, nil
-	}
-	chartPath := filepath.Dir(path)
-	if filepath.Base(chartPath) != componentName || filepath.Base(filepath.Dir(chartPath)) != "k8s" {
-		return "", false, nil
-	}
-	return chartPath, true, nil
 }
 
 func ValidateHelmChartPath(chartPath string) error {

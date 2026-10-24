@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
@@ -2444,7 +2444,7 @@ func SeedSignedInERunPlatformAlias(t testing.TB, setup env.Setup, tenant, alias,
 			"      clientid: cli-test-client\n"+
 			"      refreshtokenref: "+ref+"\n",
 	)
-	store := eruncommon.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
+	store := cloud.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
 	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
 		t.Fatalf("save host refresh token: %v", err)
 	}
@@ -2460,7 +2460,7 @@ func SeedMachineIdentityCredential(t testing.TB, setup env.Setup, alias, clientS
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", root, err)
 	}
-	store := eruncommon.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
+	store := cloud.NewFileCloudSecretStore(filepath.Join(root, "cloud-secrets"))
 	if err := store.SaveCloudSecret("erun/clientsecret/"+alias, clientSecret); err != nil {
 		t.Fatalf("save machine identity client secret: %v", err)
 	}

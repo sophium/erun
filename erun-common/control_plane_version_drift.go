@@ -2,17 +2,17 @@ package eruncommon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // control_plane_version_drift.go answers a question neither `erun exec
@@ -160,8 +160,8 @@ type ControlPlaneVersionDrift struct {
 // probing every configured one even when the caller only cares about a
 // single plane. An alias that is not configured, or that names a
 // non-erun-hosted provider, is an error rather than a silently empty report.
-func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps CloudDependencies, resolvePublished RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
-	deps = normalizeCloudDependencies(deps)
+func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished registry.RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
+	deps = cloud.NormalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
 	if err != nil {
 		return ControlPlaneVersionDrift{}, err
@@ -182,7 +182,7 @@ func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias 
 		drift.PublishedVersion = strings.TrimSpace(published.LatestStable)
 		ctx.Trace("list: latest published version is " + valueOrNoneLabel(drift.PublishedVersion))
 	}
-	publishedSemver, publishedOK := parseRegistryStableVersion(drift.PublishedVersion)
+	publishedSemver, publishedOK := registry.ParseRegistryStableVersion(drift.PublishedVersion)
 
 	byIdentity := map[string]int{}
 	for _, provider := range planes {
@@ -206,8 +206,8 @@ func appendControlPlaneAlias(drift *ControlPlaneVersionDrift, byIdentity map[str
 
 // controlPlaneProviders filters providers down to the erun-hosted ones --
 // the only kind GET /v1/platform applies to.
-func controlPlaneProviders(providers []CloudProviderStatus) []CloudProviderStatus {
-	planes := make([]CloudProviderStatus, 0, len(providers))
+func controlPlaneProviders(providers []cloud.CloudProviderStatus) []cloud.CloudProviderStatus {
+	planes := make([]cloud.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		if provider.Provider == config.CloudProviderERun {
 			planes = append(planes, provider)
@@ -221,7 +221,7 @@ func controlPlaneProviders(providers []CloudProviderStatus) []CloudProviderStatu
 // ResolveERunPlatformAlias already use elsewhere so an unconfigured or
 // wrong-type --erun-alias reads the same across every command that accepts
 // it.
-func selectControlPlaneProviders(providers []CloudProviderStatus, alias string) ([]CloudProviderStatus, error) {
+func selectControlPlaneProviders(providers []cloud.CloudProviderStatus, alias string) ([]cloud.CloudProviderStatus, error) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return controlPlaneProviders(providers), nil
@@ -233,19 +233,19 @@ func selectControlPlaneProviders(providers []CloudProviderStatus, alias string) 
 		if provider.Provider != config.CloudProviderERun {
 			return nil, fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider)
 		}
-		return []CloudProviderStatus{provider}, nil
+		return []cloud.CloudProviderStatus{provider}, nil
 	}
 	return nil, fmt.Errorf("cloud provider alias %q is not configured", alias)
 }
 
-func controlPlaneAPIURL(provider CloudProviderStatus) string {
+func controlPlaneAPIURL(provider cloud.CloudProviderStatus) string {
 	if provider.ERun == nil {
 		return ""
 	}
 	return strings.TrimSpace(provider.ERun.APIURL)
 }
 
-func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []CloudProviderStatus) {
+func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []cloud.CloudProviderStatus) {
 	ctx.Trace("list: would resolve the published version from erun's own registry")
 	for _, provider := range planes {
 		ctx.Trace("list: would GET " + controlPlaneAPIURL(provider) + "/v1/platform for control plane " + provider.Alias)
@@ -259,7 +259,7 @@ func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []CloudProvide
 // before the console is ever probed, so a duplicate alias costs one wasted
 // GET /v1/platform, not a second GET /version.json for a console already
 // checked under the first alias.
-func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider CloudProviderStatus, fetchPlatformInfo func(core.Context, string) (PlatformInfo, error), fetchVersionJSON func(core.Context, string) (string, error), resolveHostAddrs func(core.Context, string) ([]string, error), publishedSemver semver, publishedOK bool) {
+func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider cloud.CloudProviderStatus, fetchPlatformInfo func(core.Context, string) (platformclient.PlatformInfo, error), fetchVersionJSON func(core.Context, string) (string, error), resolveHostAddrs func(core.Context, string) ([]string, error), publishedSemver registry.Semver, publishedOK bool) {
 	apiURL := controlPlaneAPIURL(provider)
 	if apiURL == "" {
 		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, ControlPlaneVersionStatus{
@@ -430,14 +430,6 @@ func endpointsIntersect(a, b []string) bool {
 	return false
 }
 
-// defaultResolveHostAddrs is the real DNS lookup behind CloudDependencies'
-// ResolveHostAddrs. It ignores ctx.DryRun deliberately:
-// ResolveControlPlaneVersionDrift returns before probing any plane under
-// --dry-run, so there is no dry-run contract for it to honor here.
-func defaultResolveHostAddrs(_ core.Context, host string) ([]string, error) {
-	return net.DefaultResolver.LookupHost(context.Background(), host)
-}
-
 // The two labels a surface is reported and traced under. Console and docs site
 // answer the same question the same way; only the discovery field they were
 // resolved from and the word an operator reads differ.
@@ -446,12 +438,12 @@ const (
 	versionSurfaceDocs    = "docs site"
 )
 
-func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL string, fetchVersionJSON func(core.Context, string) (string, error), publishedSemver semver, publishedOK bool) VersionSurfaceStatus {
+func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL string, fetchVersionJSON func(core.Context, string) (string, error), publishedSemver registry.Semver, publishedOK bool) VersionSurfaceStatus {
 	status := VersionSurfaceStatus{URL: surfaceURL}
 	ctx.Trace("list: GET " + surfaceURL + "/version.json (" + surface + " version check for " + alias + ")")
 	version, err := fetchVersionJSON(ctx, surfaceURL)
 	if err != nil {
-		var contentErr *versionSurfaceUnexpectedContentError
+		var contentErr *cloud.VersionSurfaceUnexpectedContentError
 		if errors.As(err, &contentErr) {
 			// The surface answered -- reporting it unreachable would send an
 			// operator toward DNS/ingress/TLS when the real fault is the
@@ -482,77 +474,21 @@ func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL st
 // versionVerdict compares a deployed version against the published baseline,
 // the shared logic behind both ControlPlaneVersionStatus and
 // VersionSurfaceStatus's Behind/Ahead fields.
-func versionVerdict(version string, publishedSemver semver, publishedOK bool) (behind, ahead bool) {
+func versionVerdict(version string, publishedSemver registry.Semver, publishedOK bool) (behind, ahead bool) {
 	if !publishedOK {
 		return false, false
 	}
-	deployedSemver, deployedOK := parseRegistryStableVersion(version)
+	deployedSemver, deployedOK := registry.ParseRegistryStableVersion(version)
 	if !deployedOK {
 		return false, false
 	}
 	switch {
-	case compareSemver(deployedSemver, publishedSemver) < 0:
+	case registry.CompareSemver(deployedSemver, publishedSemver) < 0:
 		return true, false
-	case compareSemver(deployedSemver, publishedSemver) > 0:
+	case registry.CompareSemver(deployedSemver, publishedSemver) > 0:
 		return false, true
 	}
 	return false, false
-}
-
-// versionSurfaceUnexpectedContentError reports that a surface answered GET
-// /version.json but did not serve the expected JSON document -- most
-// commonly an SPA's index.html, served by a wildcard nginx fallback for a
-// route the deployed config doesn't yet exact-match. It is deliberately a
-// distinct type from a transport error: the surface did answer, so a
-// caller must never treat this as unreachable.
-type versionSurfaceUnexpectedContentError struct {
-	statusCode  int
-	contentType string
-}
-
-func (e *versionSurfaceUnexpectedContentError) Error() string {
-	contentType := strings.TrimSpace(e.contentType)
-	if contentType == "" {
-		contentType = "(no content-type)"
-	}
-	return fmt.Sprintf("/version.json returned %d %s (expected application/json)", e.statusCode, contentType)
-}
-
-// defaultFetchVersionJSON resolves a deployed surface's own build version via
-// its unauthenticated GET /version.json -- the console's and the docs site's
-// counterpart to defaultFetchPlatformInfo's GET /v1/platform. It makes the
-// request directly rather than through fetchJSON so it can tell a transport
-// failure (connection refused, DNS, TLS, timeout -- the request never got an
-// answer) apart from a content failure (an answer arrived, but not the
-// expected JSON document): the two point an operator at completely different
-// first moves, and collapsing them into one "unreachable" verdict misdirects.
-func defaultFetchVersionJSON(ctx core.Context, surfaceURL string) (string, error) {
-	target := strings.TrimRight(strings.TrimSpace(surfaceURL), "/") + "/version.json"
-	ctx.Trace("GET " + target)
-	if ctx.DryRun {
-		return "", nil
-	}
-	req, err := http.NewRequest(http.MethodGet, target, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Accept", "application/json")
-	resp, err := (&http.Client{Timeout: erunHTTPTimeout}).Do(req)
-	if err != nil {
-		// Returned unwrapped: the caller knows which surface it asked about
-		// and is the one that says so, in the same words it traces.
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-
-	var body struct {
-		Version string `json:"version"`
-	}
-	if err := json.Unmarshal(respBody, &body); err != nil {
-		return "", &versionSurfaceUnexpectedContentError{statusCode: resp.StatusCode, contentType: resp.Header.Get("Content-Type")}
-	}
-	return body.Version, nil
 }
 
 func valueOrNoneLabel(value string) string {

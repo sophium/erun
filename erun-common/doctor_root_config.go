@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // RootConfigStatus is the doctor's first gate: a non-OK status means the
@@ -407,14 +408,14 @@ type RepairOrphanedAliasParams struct {
 // RepairOrphanedAlias re-creates a provider for one orphaned alias by
 // delegating to InitAWSCloudProvider; it stays a thin adapter so the init
 // flow's SSO/identity/OIDC handling is not forked here.
-func RepairOrphanedAlias(ctx core.Context, store CloudStore, params RepairOrphanedAliasParams, deps CloudDependencies) (configpkg.CloudProviderConfig, error) {
+func RepairOrphanedAlias(ctx core.Context, store cloud.CloudStore, params RepairOrphanedAliasParams, deps cloud.CloudDependencies) (configpkg.CloudProviderConfig, error) {
 	if !params.Orphan.Parsed {
 		return configpkg.CloudProviderConfig{}, fmt.Errorf("orphaned alias %q cannot be parsed; recreate the provider manually with `erun cloud init aws`", params.Orphan.Alias)
 	}
 	if params.Orphan.Provider != configpkg.CloudProviderAWS {
 		return configpkg.CloudProviderConfig{}, fmt.Errorf("unsupported provider %q for alias %q; only %q is supported", params.Orphan.Provider, params.Orphan.Alias, configpkg.CloudProviderAWS)
 	}
-	initParams := InitAWSCloudProviderParams{
+	initParams := cloud.InitAWSCloudProviderParams{
 		Username:      params.Orphan.Username,
 		AccountID:     params.Orphan.AccountID,
 		SSORegion:     strings.TrimSpace(params.SSORegion),
@@ -424,5 +425,5 @@ func RepairOrphanedAlias(ctx core.Context, store CloudStore, params RepairOrphan
 		OIDCIssuerURL: strings.TrimSpace(params.OIDCIssuerURL),
 		SkipLogin:     params.SkipLogin,
 	}
-	return InitAWSCloudProvider(ctx, store, initParams, deps)
+	return cloud.InitAWSCloudProvider(ctx, store, initParams, deps)
 }

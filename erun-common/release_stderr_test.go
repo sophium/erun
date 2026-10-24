@@ -3,6 +3,8 @@ package eruncommon
 import (
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // These are erun#1768's pattern applied to release.go's git-backed helpers:
@@ -38,7 +40,7 @@ func TestGitResolvedRefIncludesGitOutputForNonExitError(t *testing.T) {
 
 func TestGitCurrentBranchIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
-	_, err := GitCurrentBranch(testTraceContext(false), t.TempDir())
+	_, err := gitx.GitCurrentBranch(testTraceContext(false), t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}
@@ -49,7 +51,7 @@ func TestGitCurrentBranchIncludesGitStderr(t *testing.T) {
 
 func TestGitShortCommitIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: not a git repository (or any of the parent directories): .git", 128)
-	_, err := GitShortCommit(testTraceContext(false), t.TempDir())
+	_, err := gitx.GitShortCommit(testTraceContext(false), t.TempDir())
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

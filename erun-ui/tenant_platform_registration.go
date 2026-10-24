@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // tenant_platform_registration.go is the Registration tab's own surface: the
@@ -58,7 +58,7 @@ const (
 // read of one fails, still sees the other — and the tab itself is hidden
 // only when the caller can neither read nor write anything registration-
 // shaped at all.
-func loadTenantDashboardRegistration(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
+func loadTenantDashboardRegistration(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) {
 	loadTenantDashboardRegistrationCapabilities(capabilities, dashboard)
 	contextsRestricted := loadTenantDashboardContexts(ctx, client, capabilities, dashboard)
 	environmentsRestricted := loadTenantDashboardEnvironments(ctx, client, capabilities, dashboard)
@@ -83,7 +83,7 @@ func loadTenantDashboardRegistrationCapabilities(capabilities model.PlatformCapa
 // loadTenantDashboardContexts resolves the contexts list (or its restriction/
 // error) and returns the restriction, so the caller can fold it into the
 // tab-level hide decision without re-deriving it.
-func loadTenantDashboardContexts(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
+func loadTenantDashboardContexts(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadContexts)
 	if restricted != "" {
 		dashboard.ContextsRestricted = restricted
@@ -100,7 +100,7 @@ func loadTenantDashboardContexts(ctx context.Context, client *eruncommon.Platfor
 
 // loadTenantDashboardEnvironments is loadTenantDashboardContexts's mirror for
 // the environments list.
-func loadTenantDashboardEnvironments(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
+func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) string {
 	restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadEnvironments)
 	if restricted != "" {
 		dashboard.EnvironmentsRestricted = restricted
@@ -115,7 +115,7 @@ func loadTenantDashboardEnvironments(ctx context.Context, client *eruncommon.Pla
 	return ""
 }
 
-func uiPlatformContexts(contexts []eruncommon.PlatformContext) []uiPlatformContext {
+func uiPlatformContexts(contexts []platformclient.PlatformContext) []uiPlatformContext {
 	converted := make([]uiPlatformContext, 0, len(contexts))
 	for _, cloudContext := range contexts {
 		converted = append(converted, uiPlatformContextFrom(cloudContext))
@@ -123,7 +123,7 @@ func uiPlatformContexts(contexts []eruncommon.PlatformContext) []uiPlatformConte
 	return converted
 }
 
-func uiPlatformContextFrom(cloudContext eruncommon.PlatformContext) uiPlatformContext {
+func uiPlatformContextFrom(cloudContext platformclient.PlatformContext) uiPlatformContext {
 	return uiPlatformContext{
 		ContextID:          cloudContext.ContextID,
 		Name:               cloudContext.Name,
@@ -137,7 +137,7 @@ func uiPlatformContextFrom(cloudContext eruncommon.PlatformContext) uiPlatformCo
 	}
 }
 
-func uiPlatformEnvironments(environments []eruncommon.PlatformEnvironment) []uiPlatformEnvironment {
+func uiPlatformEnvironments(environments []platformclient.PlatformEnvironment) []uiPlatformEnvironment {
 	converted := make([]uiPlatformEnvironment, 0, len(environments))
 	for _, environment := range environments {
 		converted = append(converted, uiPlatformEnvironmentFrom(environment))
@@ -145,7 +145,7 @@ func uiPlatformEnvironments(environments []eruncommon.PlatformEnvironment) []uiP
 	return converted
 }
 
-func uiPlatformEnvironmentFrom(environment eruncommon.PlatformEnvironment) uiPlatformEnvironment {
+func uiPlatformEnvironmentFrom(environment platformclient.PlatformEnvironment) uiPlatformEnvironment {
 	return uiPlatformEnvironment{
 		EnvironmentID:     environment.EnvironmentID,
 		Name:              environment.Name,
@@ -169,9 +169,9 @@ func uiPlatformEnvironmentFrom(environment eruncommon.PlatformEnvironment) uiPla
 // response body when one exists rather than the wrapped Go error text.
 func platformOutcomeKind(err error) string {
 	switch {
-	case errors.Is(err, eruncommon.ErrPlatformConflict):
+	case errors.Is(err, platformclient.ErrPlatformConflict):
 		return "conflict"
-	case errors.Is(err, eruncommon.ErrPlatformNotImplemented):
+	case errors.Is(err, platformclient.ErrPlatformNotImplemented):
 		return "unavailable"
 	default:
 		return ""
@@ -179,7 +179,7 @@ func platformOutcomeKind(err error) string {
 }
 
 func platformActionMessage(err error) string {
-	var statusErr *eruncommon.PlatformStatusError
+	var statusErr *platformclient.PlatformStatusError
 	if errors.As(err, &statusErr) {
 		if body := strings.TrimSpace(string(statusErr.Body)); body != "" {
 			return body
@@ -213,7 +213,7 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 	}
 	defer cancel()
 
-	result, err := client.CreateContext(requestCtx, eruncommon.PlatformCreateContextParams{
+	result, err := client.CreateContext(requestCtx, platformclient.PlatformCreateContextParams{
 		Name:               name,
 		CloudProviderAlias: alias,
 		Region:             region,
@@ -240,13 +240,13 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 // PreviewPlatformEnvironment and RegisterPlatformEnvironment so the two can
 // never diverge on what fields they send for the same operator input — the
 // defect class of a preview that cannot model what submit does.
-func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (eruncommon.PlatformCreateEnvironmentParams, error) {
+func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (platformclient.PlatformCreateEnvironmentParams, error) {
 	name := strings.TrimSpace(input.Name)
 	envType := strings.TrimSpace(input.Type)
 	if name == "" || envType == "" {
-		return eruncommon.PlatformCreateEnvironmentParams{}, fmt.Errorf("environment name and type are required")
+		return platformclient.PlatformCreateEnvironmentParams{}, fmt.Errorf("environment name and type are required")
 	}
-	return eruncommon.PlatformCreateEnvironmentParams{
+	return platformclient.PlatformCreateEnvironmentParams{
 		Name:              name,
 		Type:              envType,
 		ContextID:         strings.TrimSpace(input.ContextID),
@@ -329,15 +329,15 @@ func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInp
 // deploy`. Reports a deploy already in flight (Kind "conflict") or no
 // deploy executor configured (Kind "unavailable") as a recoverable state.
 func (a *App) DeployPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *eruncommon.PlatformClient, requestCtx context.Context, environmentID string) (eruncommon.PlatformEnvironment, error) {
-		return client.DeployEnvironment(requestCtx, environmentID, eruncommon.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
+	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
+		return client.DeployEnvironment(requestCtx, environmentID, platformclient.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
 	})
 }
 
 // StopPlatformEnvironment scales a runtime environment's Deployment to zero,
 // mirroring `erun platform env stop`.
 func (a *App) StopPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionStopEnv, func(client *eruncommon.PlatformClient, requestCtx context.Context, environmentID string) (eruncommon.PlatformEnvironment, error) {
+	return a.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
 		return client.StopEnvironment(requestCtx, environmentID)
 	})
 }
@@ -348,7 +348,7 @@ func (a *App) StopPlatformEnvironment(input uiPlatformEnvironmentActionInput) (u
 // delete control — the same boundary every other destructive dashboard
 // action gets.
 func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *eruncommon.PlatformClient, requestCtx context.Context, environmentID string) (eruncommon.PlatformEnvironment, error) {
+	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
 		return client.DeleteEnvironment(requestCtx, environmentID)
 	})
 }
@@ -356,7 +356,7 @@ func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) 
 // platformEnvironmentAction is Deploy/Stop/Delete's shared shape: resolve the
 // tenant's platform client, validate the environment id, run the given call,
 // and classify its error into a recoverable outcome or a real error.
-func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *eruncommon.PlatformClient, requestCtx context.Context, environmentID string) (eruncommon.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
+func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
 	tenant, err := requireTenant(string(action), input.Tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err

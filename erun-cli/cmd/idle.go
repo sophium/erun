@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -60,7 +60,7 @@ func runIdleCommand(ctx context.Context, commandCtx core.Context, store config.O
 
 // writeIdleResult picks the wire form once, so the documented global
 // --output json and the command's own --json alias cannot diverge.
-func writeIdleResult(commandCtx core.Context, status common.EnvironmentIdleStatus, jsonOutput bool) error {
+func writeIdleResult(commandCtx core.Context, status activity.EnvironmentIdleStatus, jsonOutput bool) error {
 	if commandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -72,15 +72,15 @@ func writeIdleResult(commandCtx core.Context, status common.EnvironmentIdleStatu
 // resolveEnvironmentIdleStatus reads the local store only when this process is
 // the environment being asked about; anywhere else the environment's own edge
 // is the only thing that knows.
-func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen OpenResolver, tenant, environment string) (common.EnvironmentIdleStatus, bool, error) {
+func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen OpenResolver, tenant, environment string) (activity.EnvironmentIdleStatus, bool, error) {
 	if environmentTargetsItself() {
-		status, err := common.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
+		status, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 		return status, err == nil, err
 	}
-	return callEnvironmentTool[common.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
+	return callEnvironmentTool[activity.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
 }
 
-func writeIdleStatus(ctx core.Context, status common.EnvironmentIdleStatus) error {
+func writeIdleStatus(ctx core.Context, status activity.EnvironmentIdleStatus) error {
 	if err := writeLabeledValue(ctx, "timeout", fmt.Sprintf("%d seconds", int64(status.Policy.Timeout/time.Second))); err != nil {
 		return err
 	}
@@ -111,7 +111,7 @@ func writeOptionalIdleValue(ctx core.Context, label, value string) error {
 	return writeLabeledValue(ctx, label, value)
 }
 
-func idleMarkerValue(marker common.EnvironmentIdleMarker) string {
+func idleMarkerValue(marker activity.EnvironmentIdleMarker) string {
 	value := "active"
 	if marker.Idle {
 		value = "idle"

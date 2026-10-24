@@ -7,6 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // A stopped environment is one whose runtime Deployment is scaled to zero. That
@@ -44,8 +46,8 @@ func RuntimeScaleTargetForResult(result config.OpenResult) RuntimeScaleTarget {
 	return RuntimeScaleTarget{
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
-		Namespace:         KubernetesNamespaceName(result.Tenant, result.Environment),
-		ReleaseName:       RuntimeReleaseName(result.Tenant),
+		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
+		ReleaseName:       config.RuntimeReleaseName(result.Tenant),
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
 	}
 }
@@ -298,20 +300,20 @@ func traceAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) []str
 // readAttachedAppSessions runs the same in-pod heartbeat probe the desktop uses
 // to count live sessions. Like the run-state read it performs no mutation, so
 // it runs under --dry-run too and the plan can show what a real stop would end.
-func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]RemoteAppSessionHeartbeat, error) {
+func readAttachedAppSessions(ctx core.Context, target RuntimeScaleTarget) ([]activity.RemoteAppSessionHeartbeat, error) {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "exec", "deployment/"+target.ReleaseName, "--", "/bin/sh", "-lc",
-		RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
+		activity.RemoteAppSessionHeartbeatScript(target.Tenant, target.Environment))
 
 	ctx.TraceCommand("", "kubectl", args...)
 	output, err := core.Command("kubectl", args...).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return nil, fmt.Errorf("%w: %s", err, stderr)
 		}
 		return nil, err
 	}
-	return ParseRemoteAppSessionHeartbeats(string(output)), nil
+	return activity.ParseRemoteAppSessionHeartbeats(string(output)), nil
 }
 
 // ClearEnvironmentStopIntent records that the operator wants the environment
@@ -496,8 +498,8 @@ func WaitRuntimeAvailable(ctx core.Context, target RuntimeScaleTarget) error {
 	if ctx.DryRun {
 		return nil
 	}
-	if config.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		return libraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, defaultShellLaunchWaitTimeout)
+	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
+		return kube.LibraryWaitForDeploymentAvailable(target.KubernetesContext, target.Namespace, target.ReleaseName, defaultShellLaunchWaitTimeout)
 	}
 	return core.RawCommandRunner("", "kubectl", args, ctx.Stdin, ctx.Stdout, ctx.Stderr)
 }

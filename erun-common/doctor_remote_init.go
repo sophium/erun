@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // RemoteInitInspectionStatus categorizes one expected artifact's state.
@@ -73,24 +73,6 @@ func (r RemoteInitInspection) MissingItems() []RemoteInitInspectionItem {
 		}
 	}
 	return missing
-}
-
-// IsInRuntimeEnvironment reports whether the current process is running
-// inside an erun runtime pod. The chart sets ERUN_ENV_TYPE on every pod it
-// renders to local-agent, remote-agent, or runtime — never to host, the one
-// EnvironmentType with no pod — so a valid, non-host value is true for any
-// pod regardless of how its worktree is stored. ERUN_REPO_REMOTE records
-// worktree storage, not pod-ness, and stays false for a local-agent pod
-// (hostPath-mounted worktree) even though it runs in a pod; it is kept only
-// as a fallback for a pod deployed by a chart that predates ERUN_ENV_TYPE.
-func IsInRuntimeEnvironment(env func(string) string) bool {
-	if env == nil {
-		env = os.Getenv
-	}
-	if envType := config.EnvironmentType(strings.TrimSpace(env("ERUN_ENV_TYPE"))); envType.IsValid() {
-		return envType != config.EnvironmentTypeHost
-	}
-	return strings.EqualFold(strings.TrimSpace(env("ERUN_REPO_REMOTE")), "true")
 }
 
 // InspectRemoteInit reads the marker (if any) and probes the local
@@ -272,7 +254,7 @@ type RemoteInitFinishParams struct {
 	HomeDir            string
 	RepositoryURL      string
 	CodeCommitSSHKeyID string
-	Sleep              SleepFunc
+	Sleep              core.SleepFunc
 }
 
 // RemoteInitFinishPrompt requests one value from the caller. doctor invokes
@@ -701,7 +683,7 @@ func finishRemoteInitGitCheckout(ctx core.Context, projectRoot, sshKeyPath strin
 // git host, then polls `git ls-remote` until access is active. This mirrors
 // init's key-import wait so the operator sees the same trace and poll cadence
 // whether recovering from inside the pod (doctor) or outside (init).
-func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath string, repository remoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep SleepFunc) error {
+func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath string, repository remoteRepositorySpec, sshKeyJustGenerated, codeCommitKeyJustGenerated bool, sleep core.SleepFunc) error {
 	sshCommand := doctorRemoteInitGitSSHCommandFor(repository, sshKeyPath)
 	if ctx.DryRun {
 		ctx.TraceCommand("", "git", "-c", "core.sshCommand="+sshCommand, "ls-remote", repository.URL, "HEAD")
@@ -737,7 +719,7 @@ func finishRemoteInitGitAccess(ctx core.Context, sshKeyPath, codeCommitKeyPath s
 		}
 		ctx.Info(publicKey)
 	}
-	return WaitForGitAccess(ctx, sleep, func() error {
+	return gitx.WaitForGitAccess(ctx, sleep, func() error {
 		capture := ctx.ToolCapture()
 		cmd := core.Command("git", "-c", "core.sshCommand="+sshCommand, "ls-remote", repository.URL, "HEAD")
 		cmd.Stdout = capture.Stdout()
@@ -772,7 +754,7 @@ func doctorRemoteInitGitSSHCommandFor(repository remoteRepositorySpec, sshKeyPat
 	if repository.CodeCommitHost != "" {
 		return `ssh -F "$HOME/.ssh/config"`
 	}
-	return "ssh -i " + shellQuote(sshKeyPath) + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+	return "ssh -i " + core.ShellQuote(sshKeyPath) + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 }
 
 // WriteRemoteInitInspectionReport renders the inspection to ctx.Stdout in the

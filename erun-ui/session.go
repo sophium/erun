@@ -558,7 +558,7 @@ func deployRuntimeImageOverride(selection uiSelection) string {
 	if idx := strings.IndexAny(repo, ":@"); idx >= 0 {
 		repo = repo[:idx]
 	}
-	if repo == eruncommon.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
+	if repo == config.RuntimeReleaseName(strings.TrimSpace(selection.Tenant)) {
 		return ""
 	}
 	return image

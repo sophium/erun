@@ -20,12 +20,12 @@ const (
 // whole property here lives on the boundary those two meet at. current is the
 // smallest whole byte count that reaches percent, so the crossing itself is
 // what gets tested.
-func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) RuntimeUsage {
+func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) config.RuntimeUsage {
 	bytesFor := func(percent float64) int64 {
 		return int64(math.Ceil(float64(limit) * percent / 100))
 	}
 	values := map[string]string{
-		"cgroup_type":    cgroupV2FSType,
+		"cgroup_type":    config.CgroupV2FSType,
 		"memory_max":     strconv.FormatInt(limit, 10),
 		"memory_peak":    strconv.FormatInt(bytesFor(peakPercent), 10),
 		"memory_current": strconv.FormatInt(bytesFor(currentPercent), 10),
@@ -36,7 +36,7 @@ func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, o
 	} else {
 		values["memory_oom_kill"] = "0"
 	}
-	usage := RuntimeUsage{Tenant: "erun", Environment: "code3", Memory: runtimeMemoryUsageFromValues(values)}
+	usage := config.RuntimeUsage{Tenant: "erun", Environment: "code3", Memory: config.RuntimeMemoryUsageFromValues(values)}
 	usage.Warnings = runtimeUsageWarnings(usage)
 	return usage
 }
@@ -45,11 +45,11 @@ func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, o
 // sustained against its memory ceiling, peak at the limit, no OOM kill recorded
 // yet. It is the case where the warning fired and the recommendation had
 // nothing to say.
-func saturatingReading(current, limit int64) RuntimeUsage {
-	return RuntimeUsage{
+func saturatingReading(current, limit int64) config.RuntimeUsage {
+	return config.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "code3",
-		Memory: RuntimeMemoryUsage{
+		Memory: config.RuntimeMemoryUsage{
 			CurrentBytes:     current,
 			PeakBytes:        limit,
 			PeakObserved:     true,
@@ -57,7 +57,7 @@ func saturatingReading(current, limit int64) RuntimeUsage {
 			PercentOfLimit:   100 * float64(current) / float64(limit),
 			OOMKillsObserved: true,
 		},
-		CPU: RuntimeCPUUsage{QuotaCores: 4, Periods: 20000, ThrottledPeriods: 0},
+		CPU: config.RuntimeCPUUsage{QuotaCores: 4, Periods: 20000, ThrottledPeriods: 0},
 	}
 }
 
@@ -164,7 +164,7 @@ func TestOOMKillWarningCarriesARaise(t *testing.T) {
 func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	limit := int64(6 * testGiB)
 	history := RuntimeUsageHistory{
-		Samples:                 []RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
+		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
 	// The retained history alone says the environment is nowhere near its
@@ -205,7 +205,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	oldLimit := int64(3 * testGiB)
 	history := RuntimeUsageHistory{
-		Samples:                 []RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
+		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
 	live := saturatingReading(1024*1024*1024, testMemoryWarn)
@@ -217,8 +217,8 @@ func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	if recommendation.Evidence.MemoryLimitBytes != testMemoryWarn {
 		t.Errorf("scored against %d, want the live limit %d", recommendation.Evidence.MemoryLimitBytes, testMemoryWarn)
 	}
-	if got := memoryVerdict(t, recommendation).Current; got != formatBytesAsMi(testMemoryWarn) {
-		t.Errorf("current size reported as %q, want %q", got, formatBytesAsMi(testMemoryWarn))
+	if got := memoryVerdict(t, recommendation).Current; got != config.FormatBytesAsMi(testMemoryWarn) {
+		t.Errorf("current size reported as %q, want %q", got, config.FormatBytesAsMi(testMemoryWarn))
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // Deploy runs the components of one step in parallel, and a Secret the
@@ -149,7 +151,7 @@ func applySharedSecretFromTwoComponents(t *testing.T) string {
 	t.Helper()
 	isolateKubectlSecretApplyMode(t)
 	dir := writeStatefulKubectlStub(t, func(dir string) string { return kubectlStubScript(dir, 2) })
-	args := kubectlApplyStdinArgs("team-dev", "orbstack")
+	args := kube.KubectlApplyStdinArgs("team-dev", "orbstack")
 
 	errs := make([]error, 2)
 	var wg sync.WaitGroup
@@ -157,7 +159,7 @@ func applySharedSecretFromTwoComponents(t *testing.T) string {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = applySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, args)
+			errs[i] = kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, args)
 		}(i)
 	}
 	wg.Wait()
@@ -247,15 +249,15 @@ func TestSecretApplySurfacesACreateRefusalThatNeverStops(t *testing.T) {
 	isolateKubectlSecretApplyMode(t)
 	dir := writeStatefulKubectlStub(t, alwaysRefusingKubectlStub(`Error from server (AlreadyExists): error when creating "STDIN": secrets "erun-claude-gateway" already exists`))
 
-	err := applySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kubectlApplyStdinArgs("team-dev", "orbstack"))
+	err := kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kube.KubectlApplyStdinArgs("team-dev", "orbstack"))
 	if err == nil {
 		t.Fatal("a create refusal that every attempt hit was reported as success")
 	}
 	if !strings.Contains(err.Error(), "AlreadyExists") {
 		t.Fatalf("the refusal was not reported: %v", err)
 	}
-	if got := kubectlStubAttempts(t, dir); got != secretApplyCreateRaceAttempts {
-		t.Fatalf("attempts = %d, want %d", got, secretApplyCreateRaceAttempts)
+	if got := kubectlStubAttempts(t, dir); got != kube.SecretApplyCreateRaceAttempts {
+		t.Fatalf("attempts = %d, want %d", got, kube.SecretApplyCreateRaceAttempts)
 	}
 }
 
@@ -278,7 +280,7 @@ func TestSecretApplyDoesNotRetryAnUnrelatedFailure(t *testing.T) {
 	isolateKubectlSecretApplyMode(t)
 	dir := writeStatefulKubectlStub(t, alwaysRefusingKubectlStub(`Error from server (Forbidden): error when creating "STDIN": secrets "erun-claude-gateway" is forbidden: User cannot create resource`))
 
-	err := applySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kubectlApplyStdinArgs("team-dev", "orbstack"))
+	err := kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kube.KubectlApplyStdinArgs("team-dev", "orbstack"))
 	if err == nil {
 		t.Fatal("a forbidden apply was reported as success")
 	}
@@ -301,7 +303,7 @@ func TestSecretApplyUpdatesAnExistingSharedSecret(t *testing.T) {
 		t.Fatalf("seed the existing secret: %v", err)
 	}
 
-	if err := applySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kubectlApplyStdinArgs("team-dev", "orbstack")); err != nil {
+	if err := kube.ApplySecretManifest("orbstack", "team-dev", "gateway credentials secret", sharedSecretManifest, kube.KubectlApplyStdinArgs("team-dev", "orbstack")); err != nil {
 		t.Fatalf("apply onto an existing secret: %v", err)
 	}
 	applied, err := os.ReadFile(filepath.Join(dir, "object"))

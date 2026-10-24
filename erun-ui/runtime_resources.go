@@ -127,8 +127,8 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 		if name == "" {
 			continue
 		}
-		cpuTotal, _ := eruncommon.ParseKubernetesCPUToMilli(node.Status.Allocatable.CPU)
-		memoryTotal, _ := eruncommon.ParseKubernetesMemoryToMi(node.Status.Allocatable.Memory)
+		cpuTotal, _ := config.ParseKubernetesCPUToMilli(node.Status.Allocatable.CPU)
+		memoryTotal, _ := config.ParseKubernetesMemoryToMi(node.Status.Allocatable.Memory)
 		bursting := accounting.usage[name]
 		requests := accounting.requests[name]
 		targetHeld := accounting.targetUsage[name]
@@ -398,7 +398,7 @@ func containerConsumption(pod kubernetesPod, container kubernetesContainer, meas
 	usage, hasUsage := measured[containerUsageKey(pod, container)]
 	complete := true
 
-	if cpu, err := eruncommon.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
+	if cpu, err := config.ParseKubernetesCPUToMilli(container.Resources.Limits.CPU); err == nil {
 		totals.CPUMilli = cpu
 	} else if hasUsage {
 		totals.CPUMilli = usage.CPUMilli
@@ -406,7 +406,7 @@ func containerConsumption(pod kubernetesPod, container kubernetesContainer, meas
 		complete = false
 	}
 
-	if memory, err := eruncommon.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
+	if memory, err := config.ParseKubernetesMemoryToMi(container.Resources.Limits.Memory); err == nil {
 		totals.MemoryMi = memory
 	} else if hasUsage {
 		totals.MemoryMi = usage.MemoryMi
@@ -447,12 +447,12 @@ func runtimeResourceTarget(input uiRuntimeResourceInput) runtimeResourceTargetSp
 		return runtimeResourceTargetSpec{}
 	}
 	return runtimeResourceTargetSpec{
-		namespace: eruncommon.KubernetesNamespaceName(input.Tenant, input.Environment),
+		namespace: config.KubernetesNamespaceName(input.Tenant, input.Environment),
 		// The runtime container is named for the component, identical across
 		// tenants; only the Deployment/release is <tenant>-devops. Match on the
 		// container name, not the release name, or the capacity check misses the
 		// env's own pod for every non-erun tenant.
-		container: eruncommon.DevopsComponentName,
+		container: config.DevopsComponentName,
 	}
 }
 
@@ -505,7 +505,7 @@ func formatRuntimeResourceCPU(milli int64) string {
 	if milli <= 0 {
 		return "0"
 	}
-	return eruncommon.FormatKubernetesCPUFromMilli(milli)
+	return config.FormatKubernetesCPUFromMilli(milli)
 }
 
 func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntimeResourceMetric {
@@ -582,8 +582,8 @@ func parseKubernetesContainerUsage(output string) kubernetesContainerUsage {
 		if len(fields) < 5 {
 			continue
 		}
-		cpu, cpuErr := eruncommon.ParseKubernetesCPUToMilli(fields[3])
-		memory, memoryErr := eruncommon.ParseKubernetesMemoryToMi(fields[4])
+		cpu, cpuErr := config.ParseKubernetesCPUToMilli(fields[3])
+		memory, memoryErr := config.ParseKubernetesMemoryToMi(fields[4])
 		if cpuErr != nil && memoryErr != nil {
 			continue
 		}

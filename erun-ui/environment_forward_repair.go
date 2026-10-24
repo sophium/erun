@@ -1,7 +1,8 @@
 package main
 
 import (
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // environment_forward_repair.go repairs the failure the activity sweep is the
@@ -76,7 +77,7 @@ func (a *App) reconcileForwardHealth(selection uiSelection, port int, portIsBoun
 	if answers {
 		a.noteOrchestratorEdgeAnswering(selection)
 	}
-	health := eruncommon.ClassifyPortForward(established, portIsBound, answers)
+	health := kube.ClassifyPortForward(established, portIsBound, answers)
 	if !health.Interrupted() {
 		a.forgetForwardRepair(selection)
 		return false
@@ -100,7 +101,7 @@ func (a *App) mcpEdgeAnswers(port int) bool {
 // It is called only from the activity sweep, which is a single goroutine, so
 // the read-decide-record sequence below needs no lock spanning the three; each
 // step takes the lock for its own map access.
-func (a *App) repairInterruptedPortForward(selection uiSelection, port int, health eruncommon.PortForwardHealth) bool {
+func (a *App) repairInterruptedPortForward(selection uiSelection, port int, health kube.PortForwardHealth) bool {
 	// Ask the cluster only on this path. A stopped environment reaching here is
 	// the expected shape of a stop, not a fault, so the read is worth its cost
 	// exactly when something looks wrong — never on every sweep of every
@@ -123,7 +124,7 @@ func (a *App) repairInterruptedPortForward(selection uiSelection, port int, heal
 		a.recordForwardRepairReported(selection)
 		a.emitEnvNotification("warning", selection.Tenant, selection.Environment,
 			notificationSourceForwardOutage,
-			eruncommon.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts, health),
+			mcp.DescribeUnrepairedPortForward(selection.Tenant, selection.Environment, port, episode.attempts, health),
 			"")
 	}
 	return true

@@ -10,6 +10,7 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +43,7 @@ func newOutputsListCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsListCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, limit, common.RunRemoteCommand)
+			return runOutputsListCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, limit, kube.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -69,7 +70,7 @@ func newOutputsDownloadCmd(resolveOpen OpenResolver) *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, args[0], dest, force, common.RunRemoteCommand)
+			return runOutputsDownloadCommand(commandContext(cmd), resolveOpen, scopedOpenParams(cmd.CommandPath(), tenant, environment), dirPath, args[0], dest, force, kube.RunRemoteCommand)
 		},
 	}
 	addDryRunFlag(cmd)

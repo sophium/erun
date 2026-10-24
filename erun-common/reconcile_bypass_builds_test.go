@@ -7,6 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // reconcileBypassStub serves the GitHub compare/tags reads and the platform's
@@ -24,13 +27,13 @@ func (s *reconcileBypassStub) server(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/builds", func(w http.ResponseWriter, r *http.Request) {
 		s.queries = append(s.queries, r.URL.RawQuery)
-		page := PlatformBuildPage{Builds: []PlatformBuild{}}
+		page := platformclient.PlatformBuildPage{Builds: []platformclient.PlatformBuild{}}
 		commit := r.URL.Query().Get("commit")
 		switch {
 		case !s.honourFilters:
-			page.Builds = append(page.Builds, PlatformBuild{BuildID: "newest", CommitID: "something-else", Successful: true})
+			page.Builds = append(page.Builds, platformclient.PlatformBuild{BuildID: "newest", CommitID: "something-else", Successful: true})
 		case s.successfulBuilds[commit] != "" && r.URL.Query().Get("successful") == "true":
-			page.Builds = append(page.Builds, PlatformBuild{BuildID: s.successfulBuilds[commit], CommitID: commit, Successful: true})
+			page.Builds = append(page.Builds, platformclient.PlatformBuild{BuildID: s.successfulBuilds[commit], CommitID: commit, Successful: true})
 		}
 		_ = json.NewEncoder(w).Encode(page)
 	})
@@ -50,9 +53,9 @@ func (s *reconcileBypassStub) server(t *testing.T) *httptest.Server {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	restore := githubAPIBaseURL
-	githubAPIBaseURL = srv.URL + "/"
-	t.Cleanup(func() { githubAPIBaseURL = restore })
+	restore := registry.GithubAPIBaseURL
+	registry.GithubAPIBaseURL = srv.URL + "/"
+	t.Cleanup(func() { registry.GithubAPIBaseURL = restore })
 	return srv
 }
 
@@ -67,7 +70,7 @@ func reconcileBypassTestPushes() []BypassedPush {
 func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes []BypassedPush) (int, int, error) {
 	t.Helper()
 	srv := stub.server(t)
-	client := NewPlatformClient(srv.URL, func() (string, error) { return "token", nil })
+	client := platformclient.NewPlatformClient(srv.URL, func() (string, error) { return "token", nil })
 	inputs := reconcileBypassInputs{owner: "sophium", repo: "erun", targetBranch: "main", rulesetID: 1}
 	return accountForBypassedPushes(context.Background(), srv.Client(), "gho_token", inputs, pushes, newSuccessfulBuildIndex(context.Background(), client))
 }
@@ -140,7 +143,7 @@ func TestReconcileBypassFailsWhenTheBuildHistoryIsUnreadable(t *testing.T) {
 		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
-	client := NewPlatformClient(srv.URL, func() (string, error) { return "token", nil })
+	client := platformclient.NewPlatformClient(srv.URL, func() (string, error) { return "token", nil })
 	inputs := reconcileBypassInputs{owner: "sophium", repo: "erun", targetBranch: "main", rulesetID: 1}
 	_, _, err := accountForBypassedPushes(context.Background(), srv.Client(), "gho_token", inputs, reconcileBypassTestPushes(), newSuccessfulBuildIndex(context.Background(), client))
 	if err == nil || !strings.Contains(err.Error(), "list successful builds of merge-tip") {

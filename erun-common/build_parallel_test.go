@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // buildSpecFromDockerfile writes a Dockerfile and returns the spec that builds
@@ -26,7 +27,7 @@ func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) DockerBuildSpe
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write dockerfile: %v", err)
 	}
-	return DockerBuildSpec{Image: DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
+	return DockerBuildSpec{Image: helm.DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
 }
 
 func dependencyContext(stdout, stderr io.Writer) core.Context {

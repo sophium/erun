@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // jobSupervisorContainerRestart asks the Kubernetes API for this pod's own
@@ -25,7 +26,7 @@ func jobSupervisorContainerRestart(podName, containerName string, runner openKub
 	if podName == "" {
 		return false, "", 0, time.Time{}, false
 	}
-	if config.CurrentExecutionMode(kubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
+	if config.CurrentExecutionMode(kube.KubectlPodGetExecutionOperation) == config.ExecutionModeLibrary {
 		return libraryJobSupervisorContainerRestart(podName, containerName)
 	}
 	return defaultJobSupervisorContainerRestart(podName, containerName, runner)
@@ -39,7 +40,7 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 		return false, "", 0, time.Time{}, false
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runner(kubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
+	if err := runner(kube.KubectlGetPodArgs(podName), &stdout, &stderr); err != nil {
 		return false, "", 0, time.Time{}, false
 	}
 	var pod runtimePodDiagnostic
@@ -69,7 +70,7 @@ func defaultJobSupervisorContainerRestart(podName, containerName string, runner 
 // defaultJobSupervisorContainerRestart, resolving the same pod via
 // k8s.io/client-go instead of shelling out to kubectl.
 func libraryJobSupervisorContainerRestart(podName, containerName string) (restarted bool, reason string, exitCode int, finishedAt time.Time, ok bool) {
-	pod, err := libraryGetPod(podName)
+	pod, err := kube.LibraryGetPod(podName)
 	if err != nil {
 		return false, "", 0, time.Time{}, false
 	}

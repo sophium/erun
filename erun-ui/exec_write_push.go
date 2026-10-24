@@ -8,6 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // exec_write_push.go exposes the runtime repo's commit/push primitives to the
@@ -67,18 +69,18 @@ func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (br
 // can be pushed and opened as a review. A real, immediate write: there is no
 // preview path on the desktop, matching every other side-effecting dashboard
 // action.
-func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (eruncommon.CommitWorkingTreeResult, error) {
+func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.CommitWorkingTreeResult, error) {
 	selection = normalizeSelection(selection)
 	branch, message, err := validateExecCommitInput(selection, input)
 	if err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return eruncommon.CommitWorkingTreeResult{}, err
+		return gitx.CommitWorkingTreeResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -86,16 +88,16 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (erunco
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return eruncommon.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
+		return gitx.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
-			errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
+			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	commit, err := a.deps.execCommit(ctx, endpoint, bearer, branch, message)
 	if err != nil && isMCPDialFailure(err) {
-		return eruncommon.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return gitx.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return commit, err
 }
@@ -103,21 +105,21 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (erunco
 // ExecPush pushes the selected environment's current branch to its remote —
 // the precondition a review's sourceBranch requires before CreateReview can
 // reference it.
-func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (eruncommon.PushWorkingTreeBranchResult, error) {
+func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushWorkingTreeBranchResult, error) {
 	selection = normalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)
 	if err := errMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	if branch == "" {
-		return eruncommon.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
+		return gitx.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return eruncommon.PushWorkingTreeBranchResult{}, err
+		return gitx.PushWorkingTreeBranchResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -125,16 +127,16 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (eruncommon
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return eruncommon.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
+		return gitx.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
-			errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
+			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	push, err := a.deps.execPush(ctx, endpoint, bearer, branch, strings.TrimSpace(input.Remote))
 	if err != nil && isMCPDialFailure(err) {
-		return eruncommon.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return gitx.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return push, err
 }

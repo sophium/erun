@@ -14,7 +14,8 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // stubEntitlementChecker stands in for the real permission authorizer.
@@ -36,7 +37,7 @@ func (c *stubEntitlementChecker) Authorize(_ context.Context, method, apiPath st
 
 func testSigner(t *testing.T) *mcptoken.Signer {
 	t.Helper()
-	privatePEM, _, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, _, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}
@@ -79,7 +80,7 @@ func mintMCPTokenWithScope(routes MCPTokenRoutes, userID, scope string) *httptes
 // decodeMCPTokenClaims extracts the claims segment of a minted JWT so a test
 // can assert what capability it actually carries, not just that minting
 // succeeded.
-func decodeMCPTokenClaims(t *testing.T, token string) eruncommon.MCPTokenClaims {
+func decodeMCPTokenClaims(t *testing.T, token string) mcpauth.MCPTokenClaims {
 	t.Helper()
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -89,7 +90,7 @@ func decodeMCPTokenClaims(t *testing.T, token string) eruncommon.MCPTokenClaims 
 	if err != nil {
 		t.Fatalf("decode claims segment: %v", err)
 	}
-	var claims eruncommon.MCPTokenClaims
+	var claims mcpauth.MCPTokenClaims
 	if err := json.Unmarshal(raw, &claims); err != nil {
 		t.Fatalf("unmarshal claims: %v", err)
 	}
@@ -141,8 +142,8 @@ func TestMintMCPTokenDefaultsToReadNotAdmin(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Scope != string(eruncommon.MCPCapabilityRead) {
-		t.Fatalf("scope = %q, want %q", response.Scope, eruncommon.MCPCapabilityRead)
+	if response.Scope != string(mcptools.MCPCapabilityRead) {
+		t.Fatalf("scope = %q, want %q", response.Scope, mcptools.MCPCapabilityRead)
 	}
 	claims := decodeMCPTokenClaims(t, response.Token)
 	capabilities := claims.Capabilities()
@@ -170,7 +171,7 @@ func TestMintMCPTokenAdminScopeIsAdminEndToEnd(t *testing.T) {
 		signer:       testSigner(t),
 		entitlement:  entitlement,
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityAdmin))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -202,7 +203,7 @@ func TestMintMCPTokenRefusesAdminWithoutEntitlement(t *testing.T) {
 		signer:       testSigner(t),
 		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityAdmin))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -230,7 +231,7 @@ func TestMintMCPTokenRefusesAdminWithClearReason(t *testing.T) {
 		signer:       testSigner(t),
 		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityAdmin))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -256,7 +257,7 @@ func TestMintMCPTokenNoEntitlementCheckerRefusesAdmin(t *testing.T) {
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		signer:       testSigner(t),
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAdmin))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityAdmin))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
 	}
@@ -276,7 +277,7 @@ func TestMintMCPTokenDeniedAdminCanStillMintReadEndToEnd(t *testing.T) {
 		signer:       testSigner(t),
 		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityRead))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityRead))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -305,7 +306,7 @@ func TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd(t *testing.T) {
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		signer:       testSigner(t),
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityAttach))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityAttach))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -315,7 +316,7 @@ func TestMintMCPTokenAttachScopeIsAttachScopedEndToEnd(t *testing.T) {
 	}
 	claims := decodeMCPTokenClaims(t, response.Token)
 	capabilities := claims.Capabilities()
-	if !capabilities.Allows(eruncommon.MCPCapabilityAttach) {
+	if !capabilities.Allows(mcptools.MCPCapabilityAttach) {
 		t.Fatal("an attach-scoped mint must actually carry the attach capability")
 	}
 	for _, forbidden := range []string{"exec_raw", "raw", "build", "push", "deploy", "delete", "release", "upgrade", "expose", "terraform", "init", "context_init"} {
@@ -340,7 +341,7 @@ func TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd(t *testing.T) {
 		tenants:      stubConfigTenantRepository{tenant: model.Tenant{Name: "acme"}},
 		signer:       testSigner(t),
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityOperate))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityOperate))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -350,7 +351,7 @@ func TestMintMCPTokenOperateScopeIsOperateScopedEndToEnd(t *testing.T) {
 	}
 	claims := decodeMCPTokenClaims(t, response.Token)
 	capabilities := claims.Capabilities()
-	if !capabilities.Allows(eruncommon.MCPCapabilityOperate) {
+	if !capabilities.Allows(mcptools.MCPCapabilityOperate) {
 		t.Fatal("an operate-scoped mint must actually carry the operate capability")
 	}
 	for _, required := range []string{"deploy", "context_start", "context_stop", "resize"} {
@@ -379,7 +380,7 @@ func TestMintMCPTokenDeniedAdminCanStillMintOperateEndToEnd(t *testing.T) {
 		signer:       testSigner(t),
 		entitlement:  &stubEntitlementChecker{err: repository.ErrForbidden},
 	}
-	rec := mintMCPTokenWithScope(routes, "user-1", string(eruncommon.MCPCapabilityOperate))
+	rec := mintMCPTokenWithScope(routes, "user-1", string(mcptools.MCPCapabilityOperate))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}

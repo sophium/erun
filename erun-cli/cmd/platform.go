@@ -7,6 +7,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +17,7 @@ import (
 // the `erun`-type cloud alias `erun cloud init erun` / `erun cloud login`
 // set up. It gives an operator or agent a native way to exercise a deployed
 // control plane without a browser-obtained token.
-func newPlatformCmd(store common.CloudReadStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newPlatformCmd(store config.CloudReadStore, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := newCommandGroup(
 		"platform",
@@ -33,7 +35,7 @@ func newPlatformCmd(store common.CloudReadStore, promptRunner PromptRunner, deps
 	return cmd
 }
 
-func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformWhoamiCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "whoami",
 		Short:        "Show the caller's resolved identity on the erun platform",
@@ -62,7 +64,7 @@ func newPlatformWhoamiCmd(store common.CloudReadStore, alias *string, deps commo
 	return cmd
 }
 
-func newPlatformVersionCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformVersionCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Report the erun platform's own version and build",
@@ -96,7 +98,7 @@ func newPlatformVersionCmd(store common.CloudReadStore, alias *string, deps comm
 	return cmd
 }
 
-func newPlatformTenantCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformTenantCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"tenant",
 		"Manage tenants on the erun platform",
@@ -106,8 +108,8 @@ func newPlatformTenantCmd(store common.CloudReadStore, alias *string, deps commo
 	)
 }
 
-func newPlatformTenantCreateCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateTenantParams
+func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateTenantParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Register a new tenant on the erun platform",
@@ -146,7 +148,7 @@ func newPlatformTenantCreateCmd(store common.CloudReadStore, alias *string, deps
 	return cmd
 }
 
-func newPlatformTenantListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List tenants visible to the caller",
@@ -174,7 +176,7 @@ func newPlatformTenantListCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func writePlatformTenantList(ctx core.Context, tenants []common.PlatformTenant) error {
+func writePlatformTenantList(ctx core.Context, tenants []platformclient.PlatformTenant) error {
 	if len(tenants) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no tenants")
 		return err
@@ -192,7 +194,7 @@ func writePlatformTenantList(ctx core.Context, tenants []common.PlatformTenant) 
 // this the only way to discover it is a sign-in that lands somewhere else.
 // A nil Resolvable is "not computed", not "reachable", and stays silent rather
 // than accusing every tenant on a read path that never asked.
-func tenantUnreachableSuffix(tenant common.PlatformTenant) string {
+func tenantUnreachableSuffix(tenant platformclient.PlatformTenant) string {
 	if tenant.Resolvable == nil || *tenant.Resolvable {
 		return ""
 	}
@@ -214,8 +216,8 @@ func tenantUnreachableSuffix(tenant common.PlatformTenant) string {
 // no tenant delete endpoint on the platform at all, so this repair (not
 // delete-and-recreate, which is not even possible) is the only way back for
 // a tenant already in that state.
-func newPlatformTenantRepairOrgMappingCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformRepairTenantIssuerOrgMappingParams
+func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformRepairTenantIssuerOrgMappingParams
 	cmd := &cobra.Command{
 		Use:   "repair-org-mapping",
 		Short: "Repair a tenant's dead (issuer, org) mapping so it resolves again",
@@ -255,7 +257,7 @@ func newPlatformTenantRepairOrgMappingCmd(store common.CloudReadStore, alias *st
 	return cmd
 }
 
-func newPlatformIdentityCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformIdentityCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"identity",
 		"Administer the erun platform's own identity provider",
@@ -263,7 +265,7 @@ func newPlatformIdentityCmd(store common.CloudReadStore, alias *string, deps com
 	)
 }
 
-func newPlatformIdentityOrgCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformIdentityOrgCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"org",
 		"Manage organizations on the erun platform's own identity provider",
@@ -271,8 +273,8 @@ func newPlatformIdentityOrgCmd(store common.CloudReadStore, alias *string, deps 
 	)
 }
 
-func newPlatformIdentityOrgCreateCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateOrgParams
+func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateOrgParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an organization on the erun platform's own identity provider",
@@ -308,7 +310,7 @@ func newPlatformIdentityOrgCreateCmd(store common.CloudReadStore, alias *string,
 	return cmd
 }
 
-func newPlatformUserCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformUserCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"user",
 		"Manage users on the erun platform",
@@ -318,8 +320,8 @@ func newPlatformUserCmd(store common.CloudReadStore, alias *string, deps common.
 	)
 }
 
-func newPlatformUserGrantRoleCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformGrantUserRoleParams
+func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformGrantUserRoleParams
 	cmd := &cobra.Command{
 		Use:   "grant-role",
 		Short: "Grant a role to an already-enrolled user on the erun platform",
@@ -358,8 +360,8 @@ func newPlatformUserGrantRoleCmd(store common.CloudReadStore, alias *string, dep
 	return cmd
 }
 
-func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateUserParams
+func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateUserParams
 	cmd := &cobra.Command{
 		Use:   "enroll",
 		Short: "Enroll a user in a tenant on the erun platform",
@@ -406,8 +408,8 @@ func newPlatformUserEnrollCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func newPlatformUserListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformListUsersParams
+func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformListUsersParams
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List a tenant's users on the erun platform",
@@ -437,7 +439,7 @@ func newPlatformUserListCmd(store common.CloudReadStore, alias *string, deps com
 	return cmd
 }
 
-func writePlatformUserList(ctx core.Context, users []common.PlatformUser) error {
+func writePlatformUserList(ctx core.Context, users []platformclient.PlatformUser) error {
 	if len(users) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no users")
 		return err
@@ -450,7 +452,7 @@ func writePlatformUserList(ctx core.Context, users []common.PlatformUser) error 
 	return nil
 }
 
-func newPlatformEnvCmd(store common.CloudReadStore, alias *string, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvCmd(store config.CloudReadStore, alias *string, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"env",
 		"Manage hosted environments on the erun platform",
@@ -465,7 +467,7 @@ func newPlatformEnvCmd(store common.CloudReadStore, alias *string, promptRunner 
 	)
 }
 
-func newPlatformEnvListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List the caller's tenant's hosted environments",
@@ -493,7 +495,7 @@ func newPlatformEnvListCmd(store common.CloudReadStore, alias *string, deps comm
 	return cmd
 }
 
-func writePlatformEnvironmentList(ctx core.Context, environments []common.PlatformEnvironment) error {
+func writePlatformEnvironmentList(ctx core.Context, environments []platformclient.PlatformEnvironment) error {
 	if len(environments) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no environments")
 		return err
@@ -506,7 +508,7 @@ func writePlatformEnvironmentList(ctx core.Context, environments []common.Platfo
 	return nil
 }
 
-func writePlatformEnvironmentLine(ctx core.Context, environment common.PlatformEnvironment) error {
+func writePlatformEnvironmentLine(ctx core.Context, environment platformclient.PlatformEnvironment) error {
 	line := fmt.Sprintf("  - %s (%s) type=%s status=%s", environment.Name, environment.EnvironmentID, environment.Type, environment.Status)
 	if strings.TrimSpace(environment.RuntimeVersion) != "" {
 		line += " runtime-version=" + environment.RuntimeVersion
@@ -521,7 +523,7 @@ func writePlatformEnvironmentLine(ctx core.Context, environment common.PlatformE
 	return err
 }
 
-func newPlatformEnvGetCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "get ENVIRONMENT_ID",
 		Short:        "Fetch one hosted environment by id",
@@ -549,8 +551,8 @@ func newPlatformEnvGetCmd(store common.CloudReadStore, alias *string, deps commo
 	return cmd
 }
 
-func newPlatformEnvRegisterCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateEnvironmentParams
+func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateEnvironmentParams
 	var localDefinition string
 	cmd := &cobra.Command{
 		Use:   "register",
@@ -627,7 +629,7 @@ func parseLocalEnvironmentRef(ref string) (string, string, error) {
 // portable settings to the platform row its hosted marker names. It is the
 // sibling of `register --definition`: that one adopts a row and writes
 // revision 1, this one writes the next revision after local settings changed.
-func newPlatformEnvPushCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push TENANT ENVIRONMENT",
 		Short: "Upload a registered local environment's settings to the platform",
@@ -672,7 +674,7 @@ func newPlatformEnvPushCmd(store common.CloudReadStore, alias *string, deps comm
 
 // newPlatformEnvPullCmd pulls the platform's stored definition into a local
 // environment, creating it first when it does not exist on this machine.
-func newPlatformEnvPullCmd(store common.CloudReadStore, alias *string, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var params common.EnvDefinitionPullParams
 	var yes bool
 	cmd := &cobra.Command{
@@ -726,8 +728,8 @@ func newPlatformEnvPullCmd(store common.CloudReadStore, alias *string, promptRun
 	return cmd
 }
 
-func newPlatformEnvDeployCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformDeployEnvironmentParams
+func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformDeployEnvironmentParams
 	cmd := &cobra.Command{
 		Use:   "deploy ENVIRONMENT_ID",
 		Short: "Start a server-side deploy of an already-registered environment",
@@ -762,7 +764,7 @@ func newPlatformEnvDeployCmd(store common.CloudReadStore, alias *string, deps co
 	return cmd
 }
 
-func newPlatformEnvStopCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop ENVIRONMENT_ID",
 		Short: "Scale a hosted environment's runtime to zero",
@@ -816,7 +818,7 @@ func pullConfirmation(ctx core.Context, promptRunner PromptRunner, tenant, envir
 	}
 }
 
-func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
+func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptRunner PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
 		Use:   "delete ENVIRONMENT_ID",
@@ -865,7 +867,7 @@ func newPlatformEnvDeleteCmd(store common.CloudReadStore, alias *string, promptR
 	return cmd
 }
 
-func newPlatformContextCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformContextCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"context",
 		"Manage the erun platform's own cloud contexts (managed clusters)",
@@ -875,8 +877,8 @@ func newPlatformContextCmd(store common.CloudReadStore, alias *string, deps comm
 	)
 }
 
-func newPlatformContextCreateCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateContextParams
+func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateContextParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Bootstrap or preview a cloud context (managed cluster) on the erun platform",
@@ -917,7 +919,7 @@ func newPlatformContextCreateCmd(store common.CloudReadStore, alias *string, dep
 	return cmd
 }
 
-func writePlatformCreateContextResult(ctx core.Context, result common.PlatformCreateContextResult) error {
+func writePlatformCreateContextResult(ctx core.Context, result platformclient.PlatformCreateContextResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err
@@ -930,7 +932,7 @@ func writePlatformCreateContextResult(ctx core.Context, result common.PlatformCr
 	return err
 }
 
-func newPlatformContextListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List the caller's tenant's cloud contexts on the erun platform",
@@ -958,7 +960,7 @@ func newPlatformContextListCmd(store common.CloudReadStore, alias *string, deps 
 	return cmd
 }
 
-func writePlatformContextList(ctx core.Context, contexts []common.PlatformContext) error {
+func writePlatformContextList(ctx core.Context, contexts []platformclient.PlatformContext) error {
 	if len(contexts) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no contexts")
 		return err
@@ -971,7 +973,7 @@ func writePlatformContextList(ctx core.Context, contexts []common.PlatformContex
 	return nil
 }
 
-func newPlatformContextGetCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newPlatformContextGetCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "get CONTEXT_ID",
 		Short:        "Fetch one cloud context by id",
@@ -999,8 +1001,8 @@ func newPlatformContextGetCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func newPlatformProvisionCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformProvisionParams
+func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformProvisionParams
 	cmd := &cobra.Command{
 		Use:   "provision",
 		Short: "Preview the ordered plan for provisioning a hosted environment",
@@ -1046,7 +1048,7 @@ func newPlatformProvisionCmd(store common.CloudReadStore, alias *string, deps co
 	originalRunE := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(contextName) != "" {
-			params.Context = &common.PlatformProvisionContext{
+			params.Context = &platformclient.PlatformProvisionContext{
 				Name:               contextName,
 				CloudProviderAlias: contextAlias,
 				Region:             contextRegion,
@@ -1061,7 +1063,7 @@ func newPlatformProvisionCmd(store common.CloudReadStore, alias *string, deps co
 	return cmd
 }
 
-func writePlatformProvisionResult(ctx core.Context, result common.PlatformProvisionResult) error {
+func writePlatformProvisionResult(ctx core.Context, result platformclient.PlatformProvisionResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err

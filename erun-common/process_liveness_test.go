@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // ProcessAlive is what a lease and a job record are reconciled against, so it
@@ -52,7 +53,7 @@ func TestProcessAliveRejectsAnExitedProcessThatWasNeverReaped(t *testing.T) {
 	if err := proc.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("signal 0 on the unreaped child (pid %d) = %v, want success: without that, this test no longer covers the state that reads as alive", proc.Pid, err)
 	}
-	if ProcessAlive(proc.Pid) {
+	if activity.ProcessAlive(proc.Pid) {
 		t.Fatalf("ProcessAlive(pid %d) = true for a process that has already exited and is only waiting to be reaped", proc.Pid)
 	}
 }

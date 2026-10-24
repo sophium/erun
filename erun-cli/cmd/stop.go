@@ -64,7 +64,7 @@ func runStopCommand(ctx core.Context, args []string, overrides common.OpenParams
 	defer closeEnvTrace()
 	ctx.Trace(fmt.Sprintf("stop: tenant=%s environment=%s kubernetes-context=%s release=%s namespace=%s",
 		result.Tenant, result.Environment, result.EnvConfig.KubernetesContext,
-		common.RuntimeReleaseName(result.Tenant), common.KubernetesNamespaceName(result.Tenant, result.Environment)))
+		config.RuntimeReleaseName(result.Tenant), config.KubernetesNamespaceName(result.Tenant, result.Environment)))
 	if err := ctx.RequireKubernetesContext(result.EnvConfig.KubernetesContext); err != nil {
 		return err
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 type ReleaseInput struct {
@@ -33,7 +34,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 					return errors.New("release: the resolved plan is not a release")
 				}
 				spec = resolved
-				return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner)
+				return eruncommon.RunReleaseSpec(runCtx, spec, gitx.GitCommandRunner)
 			})
 			output.Spec = &spec
 			return output, err

@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 type DiffInput struct {
@@ -36,7 +37,7 @@ func diffTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			Scope:          input.Scope,
 			SelectedCommit: input.SelectedCommit,
 			Target:         eruncommon.NormalizeDiffTarget(input.Target),
-		}, eruncommon.GitCommandRunner)
+		}, gitx.GitCommandRunner)
 		return nil, result, err
 	}
 }

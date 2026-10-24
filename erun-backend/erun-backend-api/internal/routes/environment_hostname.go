@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // EnvironmentHostnameWriter performs the platform's own wildcard A-record
@@ -123,5 +123,5 @@ func (r EnvironmentHostnameRoutes) resolveWildcard(req *http.Request) (string, e
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("*.%s.%s", eruncommon.KubernetesNamespaceName(tenant.Name, environment.Name), r.servicesZone), nil
+	return fmt.Sprintf("*.%s.%s", config.KubernetesNamespaceName(tenant.Name, environment.Name), r.servicesZone), nil
 }

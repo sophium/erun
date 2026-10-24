@@ -24,7 +24,7 @@ import (
 // already reads it; Sizing is additive and matches what `erun list` reports
 // under `runtime-pod:`.
 type RuntimeUsageReport struct {
-	RuntimeUsage
+	config.RuntimeUsage
 	// Sizing is nil only when there is nothing observed to reason from at all,
 	// or when the history could not be read -- silence, never a guess.
 	Sizing *RuntimeSizingRecommendation `json:"sizing,omitempty"`
@@ -34,7 +34,7 @@ type RuntimeUsageReport struct {
 // that answers it. A history read failure is silence rather than an error, the
 // same posture EnvironmentRuntimeSizing takes: a report is advisory and must
 // not fail over its own bookkeeping.
-func ResolveRuntimeUsageReport(tenant string, env config.EnvConfig, usage RuntimeUsage) RuntimeUsageReport {
+func ResolveRuntimeUsageReport(tenant string, env config.EnvConfig, usage config.RuntimeUsage) RuntimeUsageReport {
 	report := RuntimeUsageReport{RuntimeUsage: usage}
 	history, err := LoadRuntimeUsageHistory(tenant, env.Name)
 	if err != nil {

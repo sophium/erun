@@ -16,6 +16,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // Starting a job detaches it, and the detachment is erun's job rather than the
@@ -368,7 +369,7 @@ func normalizeEnvironmentJobOutputLimit(limit int64) (int64, error) {
 
 func normalizeEnvironmentJobLeaseTTL(ttl time.Duration) (time.Duration, error) {
 	if ttl == 0 {
-		return DefaultEnvironmentActivityLeaseTTL, nil
+		return activity.DefaultEnvironmentActivityLeaseTTL, nil
 	}
 	if ttl < 0 {
 		return 0, fmt.Errorf("lease ttl must be greater than zero")
@@ -405,7 +406,7 @@ func StartEnvironmentJob(ctx core.Context, params StartEnvironmentJobParams) (En
 	ctx.Trace(fmt.Sprintf("job: detaching %q as job %s, output at %s", params.Name, params.ID, logPath))
 	ctx.Trace(fmt.Sprintf("job: holding activity lease %s for the job's lifetime", environmentJobLeaseID(params.ID)))
 	if params.Exclusive {
-		ctx.Trace(fmt.Sprintf("job: holding exclusive claim %s on scope %q, refusing every other job start here while it runs", environmentJobExclusiveLeaseID(params.ID), EnvironmentActivityLeaseScopeEnvironment))
+		ctx.Trace(fmt.Sprintf("job: holding exclusive claim %s on scope %q, refusing every other job start here while it runs", environmentJobExclusiveLeaseID(params.ID), activity.EnvironmentActivityLeaseScopeEnvironment))
 	}
 	ctx.TraceCommand(params.Dir, params.SupervisorPath, args...)
 	if ctx.DryRun {
@@ -527,7 +528,7 @@ func releaseUnsupervisedEnvironmentJobExclusivityClaim(params StartEnvironmentJo
 	if !params.Exclusive {
 		return
 	}
-	if supervisorPID > 0 && ProcessAlive(supervisorPID) {
+	if supervisorPID > 0 && activity.ProcessAlive(supervisorPID) {
 		return
 	}
 	_ = releaseEnvironmentJobExclusivityClaim(params.Tenant, params.Environment, params.ID)
@@ -543,7 +544,7 @@ func reserveEnvironmentJobID(ctx core.Context, dir, id string) error {
 	if err != nil {
 		return nil
 	}
-	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), ProcessAlive, currentJobHostname())
+	resolved := reconcileEnvironmentJob(dir, existing, time.Now(), activity.ProcessAlive, currentJobHostname())
 	if !resolved.Finished() {
 		return fmt.Errorf("job %q is already running (pid %d); pass a different id or cancel it first", id, resolved.PID)
 	}
@@ -578,7 +579,7 @@ func awaitEnvironmentJobRecord(dir, id string, supervisorPID int) (EnvironmentJo
 			}
 			return EnvironmentJob{}, fmt.Errorf("job supervisor %d did not register job %q within %s", supervisorPID, id, jobSupervisorReportTimeout)
 		}
-		if !ProcessAlive(supervisorPID) {
+		if !activity.ProcessAlive(supervisorPID) {
 			// The supervisor is gone and there is no record to read a cause
 			// from. Its own output is the one place that cause can survive, so
 			// the failure to register is reported with it rather than alone.
@@ -1420,7 +1421,7 @@ func startEnvironmentJobHeartbeat(tenant, environment string, recorder *jobRecor
 		// The release must not race a tick that is already renewing, or the lease
 		// would outlive the supervisor and keep the environment reading as busy.
 		stopped.Wait()
-		_, _ = ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
+		_, _ = activity.ReleaseEnvironmentActivityLease(tenant, environment, job.LeaseID)
 		if exclusive {
 			// Releasing the environment promptly is what lets the next gate
 			// start immediately rather than waiting out a TTL. Best-effort like
@@ -1456,7 +1457,7 @@ func (h *jobHeartbeat) refresh(force bool) {
 	if !force && name == h.leaseName && time.Since(h.renewedAt) < h.leaseInterval() {
 		return
 	}
-	_, _ = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	_, _ = activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      h.tenant,
 		Environment: h.environment,
 		Name:        name,
@@ -1485,7 +1486,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 	if !h.exclusive {
 		return
 	}
-	_, _ = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	_, _ = activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      h.tenant,
 		Environment: h.environment,
 		Name:        name,
@@ -1493,7 +1494,7 @@ func (h *jobHeartbeat) renewExclusiveClaim(job EnvironmentJob, name string) {
 		PID:         job.PID,
 		TTL:         h.ttl,
 		Exclusive:   true,
-		Scope:       EnvironmentActivityLeaseScopeEnvironment,
+		Scope:       activity.EnvironmentActivityLeaseScopeEnvironment,
 		Holder:      environmentJobHolder(h.tenant),
 	})
 }
@@ -1608,7 +1609,7 @@ func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (
 	if err := writeEnvironmentJob(dir, job); err != nil {
 		return EnvironmentJob{}, err
 	}
-	if _, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
 		Environment: params.Environment,
 		Name:        job.Name,

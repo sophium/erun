@@ -39,7 +39,7 @@ func ensureSSHDPortForward(ctx core.Context, result config.OpenResult) (common.S
 		Tenant:            result.Tenant,
 		Environment:       result.Environment,
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		Namespace:         common.KubernetesNamespaceName(result.Tenant, result.Environment),
+		Namespace:         config.KubernetesNamespaceName(result.Tenant, result.Environment),
 		LocalPort:         info.Port,
 	}
 
@@ -204,13 +204,13 @@ func kubectlPortForwardArgs(result config.OpenResult, localPort int) []string {
 	if strings.TrimSpace(result.EnvConfig.KubernetesContext) != "" {
 		args = append(args, "--context", result.EnvConfig.KubernetesContext)
 	}
-	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
+	namespace := config.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+common.RuntimeReleaseName(result.Tenant),
+		"deployment/"+config.RuntimeReleaseName(result.Tenant),
 		fmt.Sprintf("%d:%d", localPort, config.SSHLocalPortForResult(result)),
 		"--address", "127.0.0.1",
 	)

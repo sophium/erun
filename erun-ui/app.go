@@ -12,6 +12,12 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -56,9 +62,9 @@ type erunUIDeps struct {
 	findProjectRoot        eruncommon.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
-	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps              eruncommon.CloudDependencies
-	cloudContextDeps       eruncommon.CloudContextDependencies
+	resolveImageRegistry   func(context.Context, string, string) (registry.RuntimeRegistryVersions, error)
+	cloudDeps              cloud.CloudDependencies
+	cloudContextDeps       cloud.CloudContextDependencies
 	deleteNamespace        eruncommon.NamespaceDeleterFunc
 	listKubeContexts       func() ([]string, error)
 	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
@@ -92,9 +98,9 @@ type erunUIDeps struct {
 	listAgentOutputs         func(config.OpenResult, eruncommon.RuntimeOutputsParams) (eruncommon.RuntimeOutputsListResult, error)
 	downloadAgentOutput      func(config.OpenResult, eruncommon.RuntimeOutputDownloadParams) (eruncommon.RuntimeOutputResult, error)
 	loadDiff                 func(context.Context, string, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (eruncommon.CommitWorkingTreeResult, error)
-	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error)
-	loadIdleStatus           func(context.Context, string, string) (eruncommon.EnvironmentIdleStatus, error)
+	execCommit               func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
+	execPush                 func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
+	loadIdleStatus           func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
 	loadEnvironmentJobs      func(context.Context, string, string) ([]eruncommon.EnvironmentJob, error)
 	readEnvironmentJobOutput func(context.Context, string, string, eruncommon.ReadEnvironmentJobOutputParams) (eruncommon.EnvironmentJobOutput, error)
 	cancelEnvironmentJob     func(context.Context, string, string, eruncommon.CancelEnvironmentJobParams) (eruncommon.CancelEnvironmentJobResult, error)
@@ -103,13 +109,13 @@ type erunUIDeps struct {
 	workspaceSyncReady       func(context.Context, string) error
 	syncWorkspace            func(context.Context, eruncommon.WorkspaceSyncParams) (eruncommon.WorkspaceSyncResult, error)
 	workspaceSyncInterval    time.Duration
-	recordActivity           func(eruncommon.EnvironmentActivityParams) error
+	recordActivity           func(activity.EnvironmentActivityParams) error
 	runWorkingIssueCommand   workingIssueCommandRunner
 	loadPodBranch            func(context.Context, string, string) (string, error)
 	runPodRaw                func(context.Context, string, string, []string) (string, error)
 	execRuntimePod           func(context.Context, uiSelection, string) (string, error)
 	loadRuntimeUsage         func(context.Context, uiSelection) (uiRuntimeUsage, error)
-	stopCloudContext         func(context.Context, string) (eruncommon.CloudContextStatus, error)
+	stopCloudContext         func(context.Context, string) (config.CloudContextStatus, error)
 	windowStatePath          string
 	windowMaximised          func(context.Context) bool
 	// skipLoginShellEnv leaves the process environment as the caller gave it.
@@ -376,10 +382,10 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 		}
 	}
 	if deps.resolveImageRegistry == nil {
-		deps.resolveImageRegistry = eruncommon.ResolveRuntimeImageRegistryVersions
+		deps.resolveImageRegistry = registry.ResolveRuntimeImageRegistryVersions
 	}
 	if deps.deleteNamespace == nil {
-		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
+		deps.deleteNamespace = kube.DeleteKubernetesNamespace
 	}
 	return deps
 }
@@ -389,7 +395,7 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 // directory), so Cloudflare token operations fail unless it is wired here.
 func withDefaultCloudDeps(deps erunUIDeps) erunUIDeps {
 	if deps.cloudDeps.CloudSecretStore == nil {
-		deps.cloudDeps.CloudSecretStore = eruncommon.DefaultCloudDependencies().CloudSecretStore
+		deps.cloudDeps.CloudSecretStore = cloud.DefaultCloudDependencies().CloudSecretStore
 	}
 	return deps
 }
@@ -471,7 +477,7 @@ func withDefaultReachabilityDeps(deps erunUIDeps) erunUIDeps {
 			if override, ok := localPortReachabilityOverride(); ok {
 				return override
 			}
-			return eruncommon.CanReachLocalMCPEndpoint(port)
+			return mcp.CanReachLocalMCPEndpoint(port)
 		}
 	}
 	return deps
@@ -648,11 +654,11 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.environmentUsageHistoryPath = defaultEnvironmentUsageHistoryPath()
 	}
 	if deps.recordActivity == nil {
-		deps.recordActivity = eruncommon.RecordEnvironmentActivity
+		deps.recordActivity = activity.RecordEnvironmentActivity
 	}
 	if deps.stopCloudContext == nil {
-		deps.stopCloudContext = func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.StopCloudContext(core.Context{}, deps.store, eruncommon.CloudContextParams{Name: name}, deps.cloudContextDeps)
+		deps.stopCloudContext = func(_ context.Context, name string) (config.CloudContextStatus, error) {
+			return cloud.StopCloudContext(core.Context{}, deps.store, cloud.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
 	return deps

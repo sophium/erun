@@ -4,12 +4,13 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 func newTestSigner(t *testing.T) *Signer {
 	t.Helper()
-	privatePEM, _, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, _, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestVerifyDNS01RejectsForeignKey(t *testing.T) {
 func TestVerifyDNS01RejectsMCPToken(t *testing.T) {
 	signer := newTestSigner(t)
 	now := time.Unix(1_700_000_000, 0)
-	mcpToken, _, err := signer.Sign("acme", "prod", "user-1", string(eruncommon.MCPCapabilityAdmin), now)
+	mcpToken, _, err := signer.Sign("acme", "prod", "user-1", string(mcptools.MCPCapabilityAdmin), now)
 	if err != nil {
 		t.Fatalf("sign mcp: %v", err)
 	}

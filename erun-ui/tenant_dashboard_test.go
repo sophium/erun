@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // tenantDashboardAPI serves the dashboard's reads, refusing every path in
@@ -80,7 +80,7 @@ func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
 // carry.
 func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]config.TenantConfig) *App {
 	t.Helper()
-	secrets := eruncommon.NewFileCloudSecretStore(t.TempDir())
+	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
@@ -94,13 +94,13 @@ func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants ma
 	}}}
 	return NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig, tenants: tenants},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			CloudSecretStore: secrets,
-			FetchOIDCDiscovery: func(core.Context, string) (eruncommon.OIDCDiscovery, error) {
-				return eruncommon.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
+			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
+				return cloud.OIDCDiscovery{TokenEndpoint: "https://auth.erun.example/token"}, nil
 			},
-			RefreshERunTokens: func(core.Context, eruncommon.OIDCDiscovery, string, string) (eruncommon.ERunTokens, error) {
-				return eruncommon.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
+			RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
+				return cloud.ERunTokens{AccessToken: jwt, ExpiresIn: time.Hour}, nil
 			},
 		},
 	})
@@ -124,10 +124,10 @@ func testAWSAliasApp(t *testing.T) *App {
 	}}}
 	return NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
-		cloudDeps: eruncommon.CloudDependencies{
+		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) eruncommon.CloudProviderStatus {
-				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
+				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})

@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // aiSessionProbeOutput builds the pod exec's combined output the way
 // aiSessionStatusScript does: the CLI's JSON array between the begin and end
 // markers.
-func aiSessionProbeOutput(statuses ...eruncommon.AISessionStatus) string {
+func aiSessionProbeOutput(statuses ...model.AISessionStatus) string {
 	if statuses == nil {
 		// The CLI prints an empty list for an environment with nothing
 		// recorded, never null.
-		statuses = []eruncommon.AISessionStatus{}
+		statuses = []model.AISessionStatus{}
 	}
 	data, err := json.Marshal(statuses)
 	if err != nil {
@@ -30,8 +30,8 @@ func aiSessionProbeOutput(statuses ...eruncommon.AISessionStatus) string {
 
 // reportedAISessionStatus is one resolved status the tool reported at a given
 // time, as erun-common's own resolver would produce it.
-func reportedAISessionStatus(sessionID string, state eruncommon.AISessionState, at time.Time) eruncommon.AISessionStatus {
-	return eruncommon.AISessionStatus{
+func reportedAISessionStatus(sessionID string, state model.AISessionState, at time.Time) model.AISessionStatus {
+	return model.AISessionStatus{
 		SessionID:    sessionID,
 		Tool:         "claude",
 		State:        state,
@@ -91,17 +91,17 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	tests := []struct {
 		name        string
-		state       eruncommon.AISessionState
+		state       model.AISessionState
 		wantCleared bool
 	}{
 		{
 			name:        "turn-end reads as awaiting input, so the badge clears",
-			state:       eruncommon.AISessionStateAwaitingInput,
+			state:       model.AISessionStateAwaitingInput,
 			wantCleared: true,
 		},
 		{
 			name:        "a report of work in flight keeps the badge, though the stream is silent",
-			state:       eruncommon.AISessionStateBusy,
+			state:       model.AISessionStateBusy,
 			wantCleared: false,
 		},
 	}
@@ -113,7 +113,7 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 			// The pod reports the session still running, which is what held the
 			// latch open through every silence the tab produced.
 			app.sessionHeartbeats[selectionKey(selection)] = heartbeatFor(true)
-			app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
+			app.recordAISessionReading(selection, []model.AISessionStatus{
 				reportedAISessionStatus("conv-1", tc.state, time.Now()),
 			})
 
@@ -138,7 +138,7 @@ func TestAwaitingInputReleasesTheBadgeOnALiveSession(t *testing.T) {
 func TestModelReportedWorkLightsTheBadgeWithoutOutput(t *testing.T) {
 	selection := uiSelection{Tenant: "petios", Environment: "local"}
 	app, emits, scripts := newAISessionStatusTestApp(
-		aiSessionProbeOutput(reportedAISessionStatus("conv-1", eruncommon.AISessionStateBusy, time.Now())), nil)
+		aiSessionProbeOutput(reportedAISessionStatus("conv-1", model.AISessionStateBusy, time.Now())), nil)
 	managed := aiStatusTestTab(selection)
 	managed.aiBusyEmitted = false
 	managed.aiLastOutput = time.Time{}
@@ -213,8 +213,8 @@ func TestReportedStateOutranksVolumeWhenTheToolRepaints(t *testing.T) {
 			managed.aiLastOutput = time.Now()
 			app.sessions[managed.key] = managed
 			if tc.reporting {
-				app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
-					reportedAISessionStatus("conv-1", eruncommon.AISessionStateAwaitingInput, time.Now()),
+				app.recordAISessionReading(selection, []model.AISessionStatus{
+					reportedAISessionStatus("conv-1", model.AISessionStateAwaitingInput, time.Now()),
 				})
 			}
 
@@ -245,7 +245,7 @@ func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T)
 		name    string
 		output  string
 		execErr error
-		reading []eruncommon.AISessionStatus
+		reading []model.AISessionStatus
 	}{
 		{
 			name:   "nothing recorded for the environment",
@@ -253,8 +253,8 @@ func TestAISessionStatusLeavesTheVolumeLatchAloneWhenItSaysNothing(t *testing.T)
 		},
 		{
 			name: "a record from before this tab existed belongs to another session",
-			reading: []eruncommon.AISessionStatus{
-				reportedAISessionStatus("older", eruncommon.AISessionStateAwaitingInput, time.Now().Add(-time.Hour)),
+			reading: []model.AISessionStatus{
+				reportedAISessionStatus("older", model.AISessionStateAwaitingInput, time.Now().Add(-time.Hour)),
 			},
 		},
 		{
@@ -302,8 +302,8 @@ func TestModelLatchIsReleasedWhenItsReportStopsArriving(t *testing.T) {
 	app.sessions[managed.key] = managed
 	app.sessionHeartbeats[selectionKey(selection)] = heartbeatFor(true)
 
-	app.recordAISessionReading(selection, []eruncommon.AISessionStatus{
-		reportedAISessionStatus("conv-1", eruncommon.AISessionStateBusy, time.Now()),
+	app.recordAISessionReading(selection, []model.AISessionStatus{
+		reportedAISessionStatus("conv-1", model.AISessionStateBusy, time.Now()),
 	})
 	app.latchAIActivity(managed)
 	if len(emits.events(aiActivityEvent)) != 1 {
@@ -337,13 +337,13 @@ func TestParseAISessionStatuses(t *testing.T) {
 		name       string
 		output     string
 		wantOK     bool
-		wantStates []eruncommon.AISessionState
+		wantStates []model.AISessionState
 	}{
 		{
 			name:       "a marked array",
-			output:     aiSessionProbeOutput(reportedAISessionStatus("conv-1", eruncommon.AISessionStateAwaitingInput, time.Unix(100, 0).UTC())),
+			output:     aiSessionProbeOutput(reportedAISessionStatus("conv-1", model.AISessionStateAwaitingInput, time.Unix(100, 0).UTC())),
 			wantOK:     true,
-			wantStates: []eruncommon.AISessionState{eruncommon.AISessionStateAwaitingInput},
+			wantStates: []model.AISessionState{model.AISessionStateAwaitingInput},
 		},
 		{
 			name:   "an empty environment is a reading, not a failure",
@@ -352,9 +352,9 @@ func TestParseAISessionStatuses(t *testing.T) {
 		},
 		{
 			name:       "trace output around the array is dropped",
-			output:     "==> Resolving\n" + aiSessionProbeOutput(reportedAISessionStatus("conv-1", eruncommon.AISessionStateBusy, time.Unix(100, 0).UTC())) + "done\n",
+			output:     "==> Resolving\n" + aiSessionProbeOutput(reportedAISessionStatus("conv-1", model.AISessionStateBusy, time.Unix(100, 0).UTC())) + "done\n",
 			wantOK:     true,
-			wantStates: []eruncommon.AISessionState{eruncommon.AISessionStateBusy},
+			wantStates: []model.AISessionState{model.AISessionStateBusy},
 		},
 		{
 			name:   "no markers at all",

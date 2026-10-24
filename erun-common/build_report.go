@@ -5,7 +5,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // build_report.go lets an ordinary `erun build` self-report its own outcome
@@ -68,15 +71,15 @@ type ReportBuildOutcomeParams struct {
 // Traces the intended call before checking ctx.DryRun, the same contract
 // tracePlatformCall's other callers already use, so --dry-run shows the
 // attempt without making it.
-func ReportBuildOutcome(ctx core.Context, store CloudReadStore, deps CloudDependencies, params ReportBuildOutcomeParams) {
-	if !hasAnyErunPlatformAlias(store) {
+func ReportBuildOutcome(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params ReportBuildOutcomeParams) {
+	if !cloud.HasAnyErunPlatformAlias(store) {
 		return
 	}
 	if strings.TrimSpace(params.Environment) == "" {
 		ctx.Trace("build report to erun platform skipped: no environment resolved to report against")
 		return
 	}
-	client, provider, err := newPlatformClientForAlias(ctx, store, "", deps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, "", deps)
 	if err != nil {
 		ctx.Trace("build report to erun platform skipped: " + err.Error())
 		return
@@ -86,7 +89,7 @@ func ReportBuildOutcome(ctx core.Context, store CloudReadStore, deps CloudDepend
 		ctx.Trace("build report to erun platform skipped: " + err.Error())
 		return
 	}
-	tracePlatformCall(ctx, provider, "POST", "/v1/builds", buildReportTraceDetails(params, commitID)...)
+	cloud.TracePlatformCall(ctx, provider, "POST", "/v1/builds", buildReportTraceDetails(params, commitID)...)
 	if ctx.DryRun {
 		return
 	}
@@ -129,15 +132,15 @@ func buildReportTraceDetails(params ReportBuildOutcomeParams, commitID string) [
 // createUnattachedBuildReport resolves the platform's environment id and
 // reports the build against it, both network calls bounded by
 // buildReportTimeout.
-func createUnattachedBuildReport(client *PlatformClient, params ReportBuildOutcomeParams, commitID string) (PlatformBuild, error) {
+func createUnattachedBuildReport(client *platformclient.PlatformClient, params ReportBuildOutcomeParams, commitID string) (platformclient.PlatformBuild, error) {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), buildReportTimeout)
 	defer cancel()
 
-	environmentID, err := resolvePlatformEnvironmentID(timeoutCtx, client, params.Environment)
+	environmentID, err := cloud.ResolvePlatformEnvironmentID(timeoutCtx, client, params.Environment)
 	if err != nil {
-		return PlatformBuild{}, err
+		return platformclient.PlatformBuild{}, err
 	}
-	return client.CreateUnattachedBuild(timeoutCtx, PlatformCreateUnattachedBuildParams{
+	return client.CreateUnattachedBuild(timeoutCtx, platformclient.PlatformCreateUnattachedBuildParams{
 		EnvironmentID: environmentID,
 		CommitID:      commitID,
 		Version:       params.Version,

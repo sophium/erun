@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -61,7 +62,7 @@ type versionProjectResult struct {
 }
 
 // newVersionCmd returns a Cobra command that prints the build information.
-func newVersionCmd(resolveBuildInfo func() (versionCommandInfo, error), resolveRegistryVersions common.RuntimeRegistryVersionResolverFunc) *cobra.Command {
+func newVersionCmd(resolveBuildInfo func() (versionCommandInfo, error), resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) *cobra.Command {
 	var noRegistry bool
 	cmd := &cobra.Command{
 		Use:   "version",
@@ -78,7 +79,7 @@ func newVersionCmd(resolveBuildInfo func() (versionCommandInfo, error), resolveR
 				ctx.Logger.Debug("resolved project version from " + info.VersionFilePath)
 			}
 
-			versions := common.RuntimeRegistryVersions{}
+			versions := registry.RuntimeRegistryVersions{}
 			if !noRegistry {
 				versions = resolveRegistryVersionsForVersionCommand(cmd.Context(), ctx, resolveRegistryVersions)
 			}
@@ -95,7 +96,7 @@ func newVersionCmd(resolveBuildInfo func() (versionCommandInfo, error), resolveR
 	return cmd
 }
 
-func versionCommandResultFor(info versionCommandInfo, versions common.RuntimeRegistryVersions) versionCommandResult {
+func versionCommandResultFor(info versionCommandInfo, versions registry.RuntimeRegistryVersions) versionCommandResult {
 	build := model.NormalizeBuildInfo(info.Build)
 	result := versionCommandResult{
 		Erun: versionBuildResult{
@@ -116,7 +117,7 @@ func versionCommandResultFor(info versionCommandInfo, versions common.RuntimeReg
 	return result
 }
 
-func writeVersionLines(ctx core.Context, info versionCommandInfo, versions common.RuntimeRegistryVersions) error {
+func writeVersionLines(ctx core.Context, info versionCommandInfo, versions registry.RuntimeRegistryVersions) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, model.FormatVersionLine(info.Build)); err != nil {
 		return err
 	}
@@ -151,14 +152,14 @@ func formatProjectVersionLine(info versionCommandInfo) string {
 
 // A registry lookup failure is not fatal: the local build version is still worth
 // printing, so the error is traced and the lines are simply omitted.
-func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions common.RuntimeRegistryVersionResolverFunc) common.RuntimeRegistryVersions {
+func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) registry.RuntimeRegistryVersions {
 	if resolveRegistryVersions == nil {
-		return common.RuntimeRegistryVersions{}
+		return registry.RuntimeRegistryVersions{}
 	}
 	versions, err := resolveRegistryVersions(ctx)
 	if err != nil {
 		commandCtx.Logger.Debug("resolve runtime registry versions: " + err.Error())
-		return common.RuntimeRegistryVersions{}
+		return registry.RuntimeRegistryVersions{}
 	}
 	return versions
 }

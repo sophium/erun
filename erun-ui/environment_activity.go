@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // environment_activity.go answers the question the sidebar could not answer: is
@@ -170,7 +171,7 @@ func (a *App) observeEnvironmentActivity(selection uiSelection) environmentActiv
 	// what makes a CLI-opened environment visible here at all. Its absence only
 	// means this desktop has no local forward; it does not mean nobody is using
 	// the environment, so the fallback below still asks.
-	forward, established, err := eruncommon.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
+	forward, established, err := kube.LoadPortForwardState("mcp", selection.Tenant, selection.Environment)
 	if err != nil || !established {
 		a.forgetForwardRepair(selection)
 		return a.observeEnvironmentActivityViaPod(selection, observation)
@@ -273,7 +274,7 @@ func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observatio
 		observation.state.checkFailed = true
 		return observation
 	}
-	var status eruncommon.EnvironmentIdleStatus
+	var status activity.EnvironmentIdleStatus
 	if err := json.Unmarshal([]byte(output), &status); err != nil {
 		observation.state.checkFailed = true
 		return observation
@@ -291,7 +292,7 @@ func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observatio
 // lease with no named orchestrator holder — a plain SSH session, an operator's
 // own agent invocation — contributes nothing: it cannot be attributed to any
 // orchestrator, so it must never suppress one's pacing nudge.
-func environmentLeaseHolderOrchestrators(leases []eruncommon.EnvironmentActivityLease) string {
+func environmentLeaseHolderOrchestrators(leases []activity.EnvironmentActivityLease) string {
 	seen := make(map[string]struct{})
 	for _, lease := range leases {
 		if id := strings.TrimSpace(lease.Holder.Orchestrator); id != "" {
@@ -313,7 +314,7 @@ func environmentLeaseHolderOrchestrators(leases []eruncommon.EnvironmentActivity
 // line the sidebar shows. A held lease wins because it is the only signal that
 // names the work; everything else is described by what the marker means rather
 // than by its wire name.
-func environmentBusyFromIdleStatus(status eruncommon.EnvironmentIdleStatus) (bool, string) {
+func environmentBusyFromIdleStatus(status activity.EnvironmentIdleStatus) (bool, string) {
 	if len(status.Leases) > 0 {
 		names := make([]string, 0, len(status.Leases))
 		for _, lease := range status.Leases {
@@ -329,7 +330,7 @@ func environmentBusyFromIdleStatus(status eruncommon.EnvironmentIdleStatus) (boo
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
 		}
-		if detail := eruncommon.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
+		if detail := activity.EnvironmentActivityMarkerDetail(marker.Name); detail != "" {
 			return true, detail
 		}
 	}

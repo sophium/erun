@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 const (
@@ -83,7 +84,7 @@ type RemoveFunc func(path string) error
 // ResolveContributeCloneStatus inspects the filesystem for the contribute
 // clone target and reports whether it already exists. Pure inspection;
 // no side effects.
-func ResolveContributeCloneStatus(homeDir string, runGit GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
+func ResolveContributeCloneStatus(homeDir string, runGit gitx.GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
 	target, err := ContributeClonePath(homeDir)
 	if err != nil {
 		return ContributeCloneStatus{}, err
@@ -99,7 +100,7 @@ func ResolveContributeCloneStatus(homeDir string, runGit GitCommandRunnerFunc, s
 		return status, fmt.Errorf("stat %s: %w", filepath.Join(target, ".git"), err)
 	}
 	if runGit == nil {
-		runGit = GitCommandRunner
+		runGit = gitx.GitCommandRunner
 	}
 	stdout := new(strings.Builder)
 	stderr := new(strings.Builder)
@@ -150,13 +151,13 @@ type WriteFileFunc func(path string, data []byte, perm os.FileMode) error
 //
 // The audit and command trace lines it emits are locked by integration
 // goldens.
-func RunContributeClone(ctx core.Context, homeDir string, runGit GitCommandRunnerFunc) error {
+func RunContributeClone(ctx core.Context, homeDir string, runGit gitx.GitCommandRunnerFunc) error {
 	return RunContributeCloneWithIO(ctx, homeDir, runGit, ContributeCloneIO{})
 }
 
 // RunContributeCloneWithIO is the test-friendly variant of
 // RunContributeClone with injectable filesystem helpers.
-func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit GitCommandRunnerFunc, io ContributeCloneIO) error {
+func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit gitx.GitCommandRunnerFunc, io ContributeCloneIO) error {
 	io = defaultContributeCloneIO(io)
 	ctx.Info("==> Cloning ERun for contribute mode")
 	status, err := ResolveContributeCloneStatus(homeDir, runGit, io.Stat)
@@ -178,7 +179,7 @@ func RunContributeCloneWithIO(ctx core.Context, homeDir string, runGit GitComman
 		ctx.TraceCommand("", "git", "clone", ContributeRepoHTTPS, status.Target)
 		if !ctx.DryRun {
 			if runGit == nil {
-				runGit = GitCommandRunner
+				runGit = gitx.GitCommandRunner
 			}
 			stdout := new(strings.Builder)
 			stderr := new(strings.Builder)

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // consumedTestStageDockerfileContent is the repository's component shape:
@@ -110,7 +112,7 @@ func testStagePromotionBuild(t *testing.T) DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, consumedTestStageDockerfileContent),
-		Image:          DockerImageReference{ImageName: "erun-devops", Tag: "ghcr.io/sophium/erun-devops:1.0.248"},
+		Image:          helm.DockerImageReference{ImageName: "erun-devops", Tag: "ghcr.io/sophium/erun-devops:1.0.248"},
 		Platforms:      []string{"linux/amd64"},
 	}
 }
@@ -148,7 +150,7 @@ func TestApplyIncrementalPromotionStillPromotesOrdinaryDockerfiles(t *testing.T)
 	build := DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, "FROM scratch\nCOPY . /app\n"),
-		Image:          DockerImageReference{ImageName: "erun-console", Tag: "ghcr.io/sophium/erun-console:1.0.248"},
+		Image:          helm.DockerImageReference{ImageName: "erun-console", Tag: "ghcr.io/sophium/erun-console:1.0.248"},
 		Platforms:      []string{"linux/amd64"},
 	}
 	out, err := applyIncrementalPromotion([]DockerBuildSpec{build}, func(string) (bool, error) { return true, nil })
@@ -180,7 +182,7 @@ func TestBuildSucceedsForAnAllPromotedPlanWithATestStageDockerfile(t *testing.T)
 	build.Fingerprint = "abc123"
 	build.Promote = true
 
-	if err := RunBuildExecution(core.Context{DryRun: true}, BuildExecutionSpec{dockerBuilds: []DockerBuildSpec{build}}, nil, nil, nil, nil, CloudDependencies{}); err != nil {
+	if err := RunBuildExecution(core.Context{DryRun: true}, BuildExecutionSpec{dockerBuilds: []DockerBuildSpec{build}}, nil, nil, nil, nil, cloud.CloudDependencies{}); err != nil {
 		t.Fatalf("expected an all-promoted plan to be accepted, got %v", err)
 	}
 

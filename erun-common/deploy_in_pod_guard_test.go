@@ -15,7 +15,7 @@ func inPodProjection(values map[string]string) func(string) string {
 func inPodProjectionRuntimeSpecs(tenant string) []DeploySpec {
 	return []DeploySpec{{
 		Target: configpkg.OpenResult{Tenant: tenant},
-		Deploy: HelmDeploySpec{ReleaseName: RuntimeReleaseName(tenant), Version: "1.2.3"},
+		Deploy: HelmDeploySpec{ReleaseName: configpkg.RuntimeReleaseName(tenant), Version: "1.2.3"},
 	}}
 }
 
@@ -24,8 +24,8 @@ func inPodProjectionRuntimeSpecs(tenant string) []DeploySpec {
 func inPodProjectionRuntimeChart(t *testing.T) string {
 	t.Helper()
 	chartPath := t.TempDir()
-	manifest := "apiVersion: v2\nname: " + DevopsComponentName +
-		"\ndependencies:\n  - name: " + DevopsComponentName + "\n    alias: runtime\n"
+	manifest := "apiVersion: v2\nname: " + configpkg.DevopsComponentName +
+		"\ndependencies:\n  - name: " + configpkg.DevopsComponentName + "\n    alias: runtime\n"
 	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte(manifest), 0o600); err != nil {
 		t.Fatalf("write Chart.yaml: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestInPodProjectionResolvesDeployValuesTheGuardRefuses(t *testing.T) {
 		wantMemory string
 	}{
 		{name: "the host store resolves the environment's own values", config: hostStore, wantSSHD: true, wantMemory: "8192Mi"},
-		{name: "the in-pod projection resolves substituted values", config: projection, wantSSHD: false, wantMemory: DefaultRuntimePodMemory},
+		{name: "the in-pod projection resolves substituted values", config: projection, wantSSHD: false, wantMemory: configpkg.DefaultRuntimePodMemory},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec, err := newHelmDeploySpecWithValues(target(tc.config), deployContext, "", "")

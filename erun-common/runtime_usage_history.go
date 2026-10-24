@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 const (
@@ -67,13 +70,13 @@ type RuntimeUsageHistory struct {
 	// ReadLocalRuntimeUsage produced, kept for recency rather than for the
 	// aggregates above (which are derived once, at append time, and never
 	// recomputed from this window).
-	Samples []RuntimeUsage `json:"samples,omitempty"`
+	Samples []config.RuntimeUsage `json:"samples,omitempty"`
 }
 
 // Latest returns the newest retained sample.
-func (h RuntimeUsageHistory) Latest() (RuntimeUsage, bool) {
+func (h RuntimeUsageHistory) Latest() (config.RuntimeUsage, bool) {
 	if len(h.Samples) == 0 {
-		return RuntimeUsage{}, false
+		return config.RuntimeUsage{}, false
 	}
 	return h.Samples[len(h.Samples)-1], true
 }
@@ -95,7 +98,7 @@ func (h RuntimeUsageHistory) ObservedWindow() time.Duration {
 // result. now is the time the reading was taken, threaded in explicitly rather
 // than read from the sample, since RuntimeUsage (a reading also returned
 // verbatim by `erun usage`) carries no timestamp of its own.
-func AppendRuntimeUsageSample(history RuntimeUsageHistory, sample RuntimeUsage, now time.Time) RuntimeUsageHistory {
+func AppendRuntimeUsageSample(history RuntimeUsageHistory, sample config.RuntimeUsage, now time.Time) RuntimeUsageHistory {
 	previous, hasPrevious := history.Latest()
 	// A cumulative counter that went backwards can only mean the container was
 	// replaced. Inferring the restart from the data needs no second source of
@@ -145,7 +148,7 @@ func runtimeUsageCounterDelta(previous, current int64, continuous bool) int64 {
 	return current - previous
 }
 
-func runtimeUsageCountersReset(previous, current RuntimeUsage) bool {
+func runtimeUsageCountersReset(previous, current config.RuntimeUsage) bool {
 	return current.Memory.PeakBytes < previous.Memory.PeakBytes ||
 		current.CPU.UsageUsec < previous.CPU.UsageUsec ||
 		current.CPU.Periods < previous.CPU.Periods
@@ -153,7 +156,7 @@ func runtimeUsageCountersReset(previous, current RuntimeUsage) bool {
 
 // runtimeUsageIntervalCPUMilli converts the CPU time burned between two
 // readings into millicores over the wall time that elapsed between them.
-func runtimeUsageIntervalCPUMilli(previous, current RuntimeUsage, elapsed time.Duration) (int64, bool) {
+func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed time.Duration) (int64, bool) {
 	usec := current.CPU.UsageUsec - previous.CPU.UsageUsec
 	if usec <= 0 {
 		return 0, false
@@ -164,12 +167,12 @@ func runtimeUsageIntervalCPUMilli(previous, current RuntimeUsage, elapsed time.D
 // appendBoundedUsageSamples keeps the newest samples up to the cap. It copies
 // rather than resliceing so the trimmed prefix is not retained by the backing
 // array for the life of a long-running monitor.
-func appendBoundedUsageSamples(samples []RuntimeUsage, sample RuntimeUsage) []RuntimeUsage {
+func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.RuntimeUsage) []config.RuntimeUsage {
 	next := append(samples, sample)
 	if len(next) <= runtimeUsageHistorySampleCap {
 		return next
 	}
-	trimmed := make([]RuntimeUsage, runtimeUsageHistorySampleCap)
+	trimmed := make([]config.RuntimeUsage, runtimeUsageHistorySampleCap)
 	copy(trimmed, next[len(next)-runtimeUsageHistorySampleCap:])
 	return trimmed
 }
@@ -213,7 +216,7 @@ func SaveRuntimeUsageHistory(tenant, environment string, history RuntimeUsageHis
 // to outlive the container that produced it, which is the whole reason it is a
 // store and not a live read.
 func runtimeUsageHistoryPath(tenant, environment string) (string, error) {
-	dir, err := EnvironmentActivityDir(tenant, environment)
+	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
 		return "", err
 	}

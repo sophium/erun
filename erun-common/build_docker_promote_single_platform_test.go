@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // A `-amd64` tag has to denote a single-platform manifest: `docker manifest
@@ -155,7 +157,7 @@ func indexOfExactCall(calls []string, want string) int {
 // The build half of the invariant.
 func TestBuildPathPublishesEveryPlatformWithoutProvenanceAttestation(t *testing.T) {
 	for _, platform := range []string{"linux/amd64", "linux/arm64"} {
-		args := dockerBuildArgs(DockerBuildSpec{Image: DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3"}}, platform)
+		args := dockerBuildArgs(DockerBuildSpec{Image: helm.DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3"}}, platform)
 		if !slicesContains(args, "--provenance=false") {
 			t.Fatalf("platform %s must not attach the provenance attestation that makes a per-arch tag a manifest list, got %v", platform, args)
 		}

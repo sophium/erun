@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // TestWriteReleaseRepoClaimBlobIncludesGitStderr and
@@ -17,7 +19,7 @@ func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: could not write blob object", 128)
 	now := time.Now()
 	_, err := writeReleaseRepoClaimBlob(testTraceContext(false), t.TempDir(), "prod",
-		EnvironmentActivityLeaseHolder{Tenant: "acme"}, now, now)
+		activity.EnvironmentActivityLeaseHolder{Tenant: "acme"}, now, now)
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

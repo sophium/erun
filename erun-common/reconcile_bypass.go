@@ -12,6 +12,10 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // reconcile_bypass.go implements the read half of the recorded decision on
@@ -204,7 +208,7 @@ func resolveGitHubRepoFromRemoteOrOrigin(ctx core.Context, remoteURL, traceLabel
 func originRemoteURL() (string, error) {
 	stdout := new(strings.Builder)
 	stderr := new(strings.Builder)
-	if err := GitCommandRunner("", asWriter(stdout), asWriter(stderr), "remote", "get-url", "origin"); err != nil {
+	if err := gitx.GitCommandRunner("", asWriter(stdout), asWriter(stderr), "remote", "get-url", "origin"); err != nil {
 		return "", fmt.Errorf("remote-url is required: no --remote-url given and reading origin failed: %w%s",
 			err, formatGitCommandStderr(stderr.String()))
 	}
@@ -229,7 +233,7 @@ func trimmedNonEmpty(values []string) []string {
 // params.RulesetID/params.TargetBranch against the platform's build history,
 // and reports every bypassed push next to whether a successful build of a
 // commit it landed covers it.
-func ReconcileBypass(ctx core.Context, store CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
+func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps cloud.CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
 	inputs, err := resolveReconcileBypassInputs(ctx, params)
 	if err != nil {
 		return ReconcileBypassResult{}, err
@@ -240,7 +244,7 @@ func ReconcileBypass(ctx core.Context, store CloudReadStore, alias string, param
 	listURL := githubRuleSuitesURL(inputs.owner, inputs.repo, inputs.targetBranch, inputs.since)
 	ctx.Trace("github: GET " + listURL)
 
-	client, provider, err := newPlatformClientForAlias(ctx, store, alias, cloudDeps)
+	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, cloudDeps)
 	if err != nil {
 		return ReconcileBypassResult{}, err
 	}
@@ -265,18 +269,18 @@ func ReconcileBypass(ctx core.Context, store CloudReadStore, alias string, param
 // than only the one it always makes.
 func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
-		githubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
-	tracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
+		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
+	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/compare/{beforeSha}...{afterSha} per push whose tip has no successful build, to account for every commit the push added",
-		githubAPIBaseURL, inputs.owner, inputs.repo))
+		registry.GithubAPIBaseURL, inputs.owner, inputs.repo))
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/tags?per_page=100 (once, up to %d pages) to tell a release's own push from an ungated one",
-		githubAPIBaseURL, inputs.owner, inputs.repo, maxReleaseTagPages))
+		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, maxReleaseTagPages))
 }
 
 // finishReconcileBypass runs the networked half of ReconcileBypass, isolated
 // so the validation and dry-run branching above it don't inflate that
 // function's complexity -- the same split ClosePullRequest uses.
-func finishReconcileBypass(ctx core.Context, client *PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
+func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
 	suites, truncated, err := listBypassedRuleSuites(context.Background(), httpClient, token, listURL)
 	if err != nil {
 		return ReconcileBypassResult{}, err
@@ -334,7 +338,7 @@ func githubRuleSuitesURL(owner, repo, targetBranch, since string) string {
 	if since != "" {
 		values.Set("time_period", since)
 	}
-	return fmt.Sprintf("%srepos/%s/%s/rulesets/rule-suites?%s", githubAPIBaseURL, owner, repo, values.Encode())
+	return fmt.Sprintf("%srepos/%s/%s/rulesets/rule-suites?%s", registry.GithubAPIBaseURL, owner, repo, values.Encode())
 }
 
 // listBypassedRuleSuites walks GitHub's rule-suites pagination (via the
@@ -417,7 +421,7 @@ func listGitHubCompareCommits(ctx context.Context, client *http.Client, token, o
 	if strings.TrimSpace(base) == "" || strings.TrimSpace(head) == "" {
 		return nil, fmt.Errorf("the rule-suites ledger recorded no before/after pair for this push")
 	}
-	requestURL := fmt.Sprintf("%srepos/%s/%s/compare/%s...%s", githubAPIBaseURL, owner, repo, base, head)
+	requestURL := fmt.Sprintf("%srepos/%s/%s/compare/%s...%s", registry.GithubAPIBaseURL, owner, repo, base, head)
 	var payload struct {
 		Commits []struct {
 			SHA string `json:"sha"`
@@ -437,7 +441,7 @@ func listGitHubCompareCommits(ctx context.Context, client *http.Client, token, o
 // pagination up to maxReleaseTagPages.
 func listGitHubTagCommits(ctx context.Context, client *http.Client, token, owner, repo string) (map[string]string, error) {
 	tagByCommit := make(map[string]string)
-	next := fmt.Sprintf("%srepos/%s/%s/tags?per_page=100", githubAPIBaseURL, owner, repo)
+	next := fmt.Sprintf("%srepos/%s/%s/tags?per_page=100", registry.GithubAPIBaseURL, owner, repo)
 	for page := 0; next != "" && page < maxReleaseTagPages; page++ {
 		var batch []struct {
 			Name   string `json:"name"`
@@ -492,7 +496,7 @@ func getGitHubJSONPage(ctx context.Context, client *http.Client, token, requestU
 }
 
 func getGitHubRuleSuiteDetail(ctx context.Context, client *http.Client, token, owner, repo string, id int64) (githubRuleSuiteDetail, error) {
-	requestURL := fmt.Sprintf("%srepos/%s/%s/rulesets/rule-suites/%d", githubAPIBaseURL, owner, repo, id)
+	requestURL := fmt.Sprintf("%srepos/%s/%s/rulesets/rule-suites/%d", registry.GithubAPIBaseURL, owner, repo, id)
 	var detail githubRuleSuiteDetail
 	if err := getGitHubJSON(ctx, client, token, requestURL, &detail); err != nil {
 		return githubRuleSuiteDetail{}, err
@@ -594,11 +598,11 @@ func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token
 // is often the before-commit of the next.
 type successfulBuildIndex struct {
 	ctx      context.Context
-	client   *PlatformClient
+	client   *platformclient.PlatformClient
 	byCommit map[string]string
 }
 
-func newSuccessfulBuildIndex(ctx context.Context, client *PlatformClient) *successfulBuildIndex {
+func newSuccessfulBuildIndex(ctx context.Context, client *platformclient.PlatformClient) *successfulBuildIndex {
 	return &successfulBuildIndex{ctx: ctx, client: client, byCommit: map[string]string{}}
 }
 
@@ -611,7 +615,7 @@ func (index *successfulBuildIndex) buildOf(commit string) (string, error) {
 		return buildID, nil
 	}
 	successful := true
-	page, err := index.client.ListAllBuilds(index.ctx, PlatformBuildListFilter{CommitID: commit, Successful: &successful, Limit: 1})
+	page, err := index.client.ListAllBuilds(index.ctx, platformclient.PlatformBuildListFilter{CommitID: commit, Successful: &successful, Limit: 1})
 	if err != nil {
 		return "", fmt.Errorf("list successful builds of %s: %w", commit, err)
 	}

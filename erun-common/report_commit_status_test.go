@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // The wire shape of the GitHub request (method, path, auth header, body) and
@@ -38,9 +39,9 @@ func TestReportCommitStatusPostsToGitHubWithTheRightShape(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer server.Close()
-	restoreBaseURL := githubAPIBaseURL
-	githubAPIBaseURL = server.URL + "/"
-	defer func() { githubAPIBaseURL = restoreBaseURL }()
+	restoreBaseURL := registry.GithubAPIBaseURL
+	registry.GithubAPIBaseURL = server.URL + "/"
+	defer func() { registry.GithubAPIBaseURL = restoreBaseURL }()
 
 	var resolvedOwner string
 	deps := ReportCommitStatusDependencies{
@@ -90,9 +91,9 @@ func TestReportCommitStatusSurfacesAGitHubFailureResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
 	}))
 	defer server.Close()
-	restoreBaseURL := githubAPIBaseURL
-	githubAPIBaseURL = server.URL + "/"
-	defer func() { githubAPIBaseURL = restoreBaseURL }()
+	restoreBaseURL := registry.GithubAPIBaseURL
+	registry.GithubAPIBaseURL = server.URL + "/"
+	defer func() { registry.GithubAPIBaseURL = restoreBaseURL }()
 
 	deps := ReportCommitStatusDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },

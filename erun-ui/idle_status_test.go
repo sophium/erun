@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // TestIdleStatusToUICarriesFromPodProvenance is the regression for
@@ -14,7 +14,7 @@ import (
 // moment the sidebar might be showing the environment as unreachable.
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
-	status := eruncommon.EnvironmentIdleStatus{StopEligible: true}
+	status := activity.EnvironmentIdleStatus{StopEligible: true}
 	result := config.OpenResult{}
 
 	if ui := app.idleStatusToUI(result, status, true); !ui.FromPod {

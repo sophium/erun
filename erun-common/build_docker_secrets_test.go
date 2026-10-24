@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // dockerBuildSpecForSecretTest is a build spec with the fields dockerBuildArgs
@@ -16,7 +17,7 @@ func dockerBuildSpecForSecretTest() DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:     ".",
 		DockerfilePath: "Dockerfile",
-		Image:          DockerImageReference{Tag: "ghcr.io/acme/app:1.0.0"},
+		Image:          helm.DockerImageReference{Tag: "ghcr.io/acme/app:1.0.0"},
 		Platforms:      []string{"linux/amd64"},
 	}
 }

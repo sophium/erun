@@ -11,6 +11,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -225,7 +226,7 @@ func whipOneEnvironment(ctx context.Context, commandCtx core.Context, resolveOpe
 
 	result, err := callMCPToolWithReattach(ctx, commandCtx, target, "whip", arguments, false)
 	if err != nil {
-		if errors.Is(err, common.ErrMCPEndpointUnreachable) {
+		if errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 			return channelDown(mcpEdgeError(target, err).Error())
 		}
 		return failed(err.Error())

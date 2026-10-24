@@ -11,6 +11,10 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +25,7 @@ import (
 // --output json, whether or not it also carries its own --json alias.
 func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	leases := []common.EnvironmentActivityLease{{
+	leases := []activity.EnvironmentActivityLease{{
 		ID:        "build",
 		Name:      "build",
 		StartedAt: now,
@@ -33,7 +37,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 		render func(core.Context) error
 	}{
 		{"idle", func(ctx core.Context) error {
-			return writeIdleResult(ctx, common.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
+			return writeIdleResult(ctx, activity.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
 		}},
 		{"whip", func(ctx core.Context) error {
 			return writeWhipReport(ctx, common.WhipReport{
@@ -45,16 +49,16 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 			return writeActivityLeases(ctx, leases, now, false)
 		}},
 		{"activity sample", func(ctx core.Context) error {
-			return writeActivitySampleResult(ctx, common.ResidentActivityResult{Busy: true}, false)
+			return writeActivitySampleResult(ctx, activity.ResidentActivityResult{Busy: true}, false)
 		}},
 		{"activity ai-session status", func(ctx core.Context) error {
-			return writeAISessionStatuses(commandCarryingOutput(ctx), []common.AISessionStatus{{SessionID: "s1"}}, false)
+			return writeAISessionStatuses(commandCarryingOutput(ctx), []model.AISessionStatus{{SessionID: "s1"}}, false)
 		}},
 		{"list", func(ctx core.Context) error {
 			return writeListResult(ctx, common.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
 		{"context list", func(ctx core.Context) error {
-			return writeCloudContextList(ctx, common.CloudContextListResult{CloudContexts: []common.CloudContextStatus{{Status: "running"}}})
+			return writeCloudContextList(ctx, cloud.CloudContextListResult{CloudContexts: []config.CloudContextStatus{{Status: "running"}}})
 		}},
 	}
 
@@ -82,7 +86,7 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 func TestTextOutputStaysProse(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := core.Context{Output: core.OutputText, Stdout: &buf, Stderr: &buf}
-	if err := writeIdleResult(ctx, common.EnvironmentIdleStatus{SecondsUntilStop: 300}, false); err != nil {
+	if err := writeIdleResult(ctx, activity.EnvironmentIdleStatus{SecondsUntilStop: 300}, false); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if json.Valid(bytes.TrimSpace(buf.Bytes())) {
@@ -154,14 +158,14 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 		command string
 		value   any
 	}{
-		{"jobs list", []common.PlatformJob(nil)},
-		{"review list", []common.PlatformReview(nil)},
-		{"review queue list", []common.PlatformReview(nil)},
-		{"review reviewers", []common.PlatformReviewer(nil)},
-		{"platform tenant list", []common.PlatformTenant(nil)},
-		{"platform user list", []common.PlatformUser(nil)},
-		{"platform environment list", []common.PlatformEnvironment(nil)},
-		{"platform context list", []common.PlatformContext(nil)},
+		{"jobs list", []platformclient.PlatformJob(nil)},
+		{"review list", []platformclient.PlatformReview(nil)},
+		{"review queue list", []platformclient.PlatformReview(nil)},
+		{"review reviewers", []platformclient.PlatformReviewer(nil)},
+		{"platform tenant list", []platformclient.PlatformTenant(nil)},
+		{"platform user list", []platformclient.PlatformUser(nil)},
+		{"platform environment list", []platformclient.PlatformEnvironment(nil)},
+		{"platform context list", []platformclient.PlatformContext(nil)},
 		{"build profile", []common.TimingRecordSummary(nil)},
 	}
 
@@ -195,7 +199,7 @@ func TestEmptyListingCommandsEmitAnArrayNotNull(t *testing.T) {
 // a caller that developed against it and iterated the result worked until the
 // list came back empty. Both are arrays now.
 func TestReviewListKeepsOneTypeAcrossCardinalities(t *testing.T) {
-	render := func(t *testing.T, reviews []common.PlatformReview) []json.RawMessage {
+	render := func(t *testing.T, reviews []platformclient.PlatformReview) []json.RawMessage {
 		t.Helper()
 		var buf bytes.Buffer
 		ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
@@ -215,7 +219,7 @@ func TestReviewListKeepsOneTypeAcrossCardinalities(t *testing.T) {
 	if got := len(render(t, nil)); got != 0 {
 		t.Fatalf("expected an empty array, got %d rows", got)
 	}
-	if got := len(render(t, []common.PlatformReview{{ReviewID: "r1"}})); got != 1 {
+	if got := len(render(t, []platformclient.PlatformReview{{ReviewID: "r1"}})); got != 1 {
 		t.Fatalf("expected one row, got %d", got)
 	}
 }
@@ -238,7 +242,7 @@ func (emptyCloudConfig) SaveERunConfig(config.ERunConfig) error { return nil }
 func TestContextListJSONAlwaysCarriesTheCollection(t *testing.T) {
 	var buf bytes.Buffer
 	ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
-	if err := runContextListCommand(ctx, emptyCloudConfig{}, common.CloudContextDependencies{}); err != nil {
+	if err := runContextListCommand(ctx, emptyCloudConfig{}, cloud.CloudContextDependencies{}); err != nil {
 		t.Fatalf("run context list: %v", err)
 	}
 

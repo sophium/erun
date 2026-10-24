@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // writeDockerLoginCaptureStub points ERUN_DOCKER_BIN at a script that records
@@ -35,7 +36,7 @@ func TestHostedRegistryDockerLoginFailsClearlyWithoutConfiguredAlias(t *testing.
 	t.Setenv("ERUN_DOCKER_BIN", failingBinaryPath(t))
 	store := erunTestCloudStore{}
 
-	err := hostedRegistryDockerLogin(&store, CloudDependencies{}, os.Stdout, os.Stderr)
+	err := hostedRegistryDockerLogin(&store, cloud.CloudDependencies{}, os.Stdout, os.Stderr)
 	if err == nil {
 		t.Fatal("expected an error when no erun cloud provider alias is configured")
 	}
@@ -57,11 +58,11 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 
 	provider := erunTestProvider()
 	store := erunTestCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
-	secretStore := NewFileCloudSecretStore(t.TempDir())
-	if err := saveCachedERunAccessToken(secretStore, provider.Alias, ERunTokens{AccessToken: "test-bearer-token", ExpiresIn: time.Hour}); err != nil {
+	secretStore := cloud.NewFileCloudSecretStore(t.TempDir())
+	if err := cloud.SaveCachedERunAccessToken(secretStore, provider.Alias, cloud.ERunTokens{AccessToken: "test-bearer-token", ExpiresIn: time.Hour}); err != nil {
 		t.Fatalf("seed cached access token: %v", err)
 	}
-	deps := CloudDependencies{CloudSecretStore: secretStore}
+	deps := cloud.CloudDependencies{CloudSecretStore: secretStore}
 
 	if err := hostedRegistryDockerLogin(&store, deps, os.Stdout, os.Stderr); err != nil {
 		t.Fatalf("hostedRegistryDockerLogin: %v", err)
@@ -100,7 +101,7 @@ func TestDockerRegistryLoginWithHostedRegistryFallsThroughForOtherRegistries(t *
 	// An empty store would fail ResolveERunPlatformAlias immediately, so a
 	// nil error here proves the hosted branch was never taken.
 	store := erunTestCloudStore{}
-	login := DockerRegistryLoginWithHostedRegistry(&store, CloudDependencies{})
+	login := DockerRegistryLoginWithHostedRegistry(&store, cloud.CloudDependencies{})
 	if err := login("some-other-registry.example.com", strings.NewReader("whatever-password"), os.Stdout, os.Stderr); err != nil {
 		t.Fatalf("login: %v", err)
 	}

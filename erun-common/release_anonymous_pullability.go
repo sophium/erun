@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // moduleReferencedImagePattern matches an erun image reference a Terraform
@@ -164,8 +166,8 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 	if client == nil {
 		client = &http.Client{Timeout: anonymousPullProbeTimeout}
 	}
-	baseURL = normalizeGHCRBaseURL(baseURL)
-	tokenURL = normalizeGHCRBaseURL(tokenURL)
+	baseURL = registry.NormalizeGHCRBaseURL(baseURL)
+	tokenURL = registry.NormalizeGHCRBaseURL(tokenURL)
 	repoPath = strings.ToLower(repoPath)
 
 	// A 401/403 here is ghcr answering the anonymous token request with "no" --
@@ -174,9 +176,9 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 	// Any other failure (DNS, connection refused, timeout, a non-2xx status
 	// registryStatusError doesn't recognize as an auth refusal) is genuinely
 	// inconclusive and must keep failing the release loudly.
-	token, err := fetchGHCRPullToken(ctx, client, repoPath, tokenURL, registryBasicAuth{}, false)
+	token, err := registry.FetchGHCRPullToken(ctx, client, repoPath, tokenURL, registry.RegistryBasicAuth{}, false)
 	if err != nil {
-		if errors.Is(err, ErrRegistryAuthRequired) {
+		if errors.Is(err, registry.ErrRegistryAuthRequired) {
 			return false, nil
 		}
 		return false, err
@@ -201,7 +203,7 @@ func probeAnonymousManifestPullAt(ctx context.Context, client *http.Client, repo
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return false, nil
 	}
-	return false, registryStatusError("anonymous manifest pull", resp.Status, resp.StatusCode)
+	return false, registry.RegistryStatusError("anonymous manifest pull", resp.Status, resp.StatusCode)
 }
 
 // verifyModuleReferencedImagesAnonymouslyPullable asserts that every erun
@@ -221,7 +223,7 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 		return nil
 	}
 
-	byName := make(map[string]DockerImageReference, len(execution.dockerPushes))
+	byName := make(map[string]helm.DockerImageReference, len(execution.dockerPushes))
 	for _, pushInput := range execution.dockerPushes {
 		byName[pushInput.Image.ImageName] = pushInput.Image
 	}
@@ -244,16 +246,16 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 // A baselined name that probes as pullable fails the release rather than
 // passing silently -- see anonymousPullabilityBaseline's doc comment for why
 // this enforcement has to live here and not in a unit test.
-func verifyImageAnonymouslyPullable(ctx core.Context, name string, image DockerImageReference, probe anonymousPullProbeFunc) error {
+func verifyImageAnonymouslyPullable(ctx core.Context, name string, image helm.DockerImageReference, probe anonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
-	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+	if !registry.IsGHCRRegistry(registry.DockerRegistryFromImageTag(tag)) {
 		return nil
 	}
 	ctx.Trace("release: anonymous-pullability probing " + tag + " with a fresh, credential-free token")
 	if ctx.DryRun {
 		return nil
 	}
-	repoPath := DockerNamespaceFromTag(tag) + "/" + name
+	repoPath := registry.DockerNamespaceFromTag(tag) + "/" + name
 	pullable, probeErr := probe(context.Background(), nil, repoPath, image.Version)
 	if probeErr != nil {
 		// A genuine failure to reach the registry (not a refusal -- those come

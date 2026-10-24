@@ -96,8 +96,8 @@ var loadRuntimeDeploymentJSON = func(ctx context.Context, kubernetesContext, nam
 // with its saved configuration. found is false when no runtime is deployed.
 func ReadGatewayRouting(ctx context.Context, env config.EnvConfig, tenant string, catalog *config.OpenRouterConfig) (routing GatewayRouting, found bool, err error) {
 	routing.Wanted = WantedGatewayEndpoint(env.Claude, catalog)
-	namespace := KubernetesNamespaceName(tenant, env.Name)
-	raw, found, err := loadRuntimeDeploymentJSON(ctx, env.KubernetesContext, namespace, RuntimeReleaseName(tenant))
+	namespace := config.KubernetesNamespaceName(tenant, env.Name)
+	raw, found, err := loadRuntimeDeploymentJSON(ctx, env.KubernetesContext, namespace, config.RuntimeReleaseName(tenant))
 	if err != nil || !found {
 		return routing, found, err
 	}

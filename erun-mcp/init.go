@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type InitInput struct {
@@ -75,7 +76,7 @@ func initToolExecute(runtime RuntimeConfig, input InitInput) (func(bool, io.Writ
 		traceOutput := new(bytes.Buffer)
 		traceSink := mirrorToJobLog(traceOutput, log)
 		ctx := runtimeCallContext(preview, input.Verbosity, nil, traceSink, traceSink)
-		ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
+		ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
 
 		params := eruncommon.BootstrapInitParams{
 			Tenant:                   tenant,

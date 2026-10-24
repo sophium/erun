@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // TestReleaseToolDoesNotClaimItPublishesArtifacts reproduces the contradiction
@@ -21,7 +21,7 @@ import (
 // A description is not decorative: it is the whole contract an MCP caller has,
 // and this one named a capability the command does not have.
 func TestReleaseToolDoesNotClaimItPublishesArtifacts(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
 	if len(tools) == 0 {
 		t.Fatal("no tools listed; the rest of this test would pass vacuously")

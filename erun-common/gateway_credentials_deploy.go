@@ -8,6 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // renderGatewayCredentialsSecret is the Secret erun creates in an
@@ -52,7 +54,7 @@ func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec)
 	if !gateway.Configured() {
 		return nil
 	}
-	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	args := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.Trace("apply gateway credentials secret " + config.GatewaySecretName + " (token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -63,7 +65,7 @@ func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec)
 		return err
 	}
 	manifest := renderGatewayCredentialsSecret(config.GatewaySecretName, deployInput.Namespace, authToken)
-	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "gateway credentials secret", manifest, args)
+	return kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "gateway credentials secret", manifest, args)
 }
 
 // pruneGatewayCredentialsSecret removes the gateway credential from the env's
@@ -76,7 +78,7 @@ func applyGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec)
 // until the new one is up, and a component release in the same namespace does
 // not carry the env's Claude configuration to decide by.
 func pruneGatewayCredentialsSecret(ctx core.Context, deployInput HelmDeploySpec) error {
-	if deployInput.ReleaseName != RuntimeReleaseName(deployInput.Tenant) {
+	if deployInput.ReleaseName != config.RuntimeReleaseName(deployInput.Tenant) {
 		return nil
 	}
 	if config.EffectiveGateway(deployInput.Claude, deployInput.OpenRouter).Configured() {
@@ -114,7 +116,7 @@ var deleteGatewayCredentialsSecret = func(args []string) error {
 // who wants a key other than their own saves one; deleting it restores the
 // fallback rather than leaving the gateway unauthenticated.
 func gatewayCredentialForDeploy(gateway *config.OpenRouterConfig) (string, error) {
-	store, err := DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		return "", fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -136,7 +138,7 @@ func ResolveGatewayCredential(gateway *config.OpenRouterConfig) (string, error) 
 // baseURL is the gateway the credential is destined for. It is what scopes the
 // host fallback: a credential is issued for one service, so the host's own key
 // is reused only when the host is already pointed at this same endpoint.
-func resolveGatewayCredential(store CloudSecretStore, ref, baseURL string) (string, error) {
+func resolveGatewayCredential(store cloud.CloudSecretStore, ref, baseURL string) (string, error) {
 	saved, loadErr := store.LoadCloudSecret(ref)
 	switch {
 	case loadErr == nil && strings.TrimSpace(saved) != "":

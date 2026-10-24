@@ -2,6 +2,8 @@ package eruncommon
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // TestAISessionHookBindingsResolveToTheStateTheyClaim pins the mapping to the
@@ -10,21 +12,21 @@ import (
 // must resolve to AwaitingInput -- the state this whole model exists to
 // surface.
 func TestAISessionHookBindingsResolveToTheStateTheyClaim(t *testing.T) {
-	wantState := map[AISessionEventKind]AISessionState{
-		AISessionEventTurnStart: AISessionStateBusy,
-		AISessionEventToolUse:   AISessionStateBusy,
-		AISessionEventTurnEnd:   AISessionStateAwaitingInput,
-		AISessionEventNotify:    AISessionStateAwaitingInput,
-		AISessionEventExit:      AISessionStateExited,
+	wantState := map[model.AISessionEventKind]model.AISessionState{
+		model.AISessionEventTurnStart: model.AISessionStateBusy,
+		model.AISessionEventToolUse:   model.AISessionStateBusy,
+		model.AISessionEventTurnEnd:   model.AISessionStateAwaitingInput,
+		model.AISessionEventNotify:    model.AISessionStateAwaitingInput,
+		model.AISessionEventExit:      model.AISessionStateExited,
 	}
-	reported := map[AISessionEventKind]bool{}
+	reported := map[model.AISessionEventKind]bool{}
 	for _, binding := range AISessionHookBindings() {
 		state, ok := wantState[binding.ModelEvent]
 		if !ok {
 			t.Fatalf("binding %s reports %q, which no hook can produce a state for", binding.ToolEvent, binding.ModelEvent)
 		}
 		reported[binding.ModelEvent] = true
-		got := ResolveAISessionStatus(AISessionRecord{SessionID: "s", Event: binding.ModelEvent})
+		got := model.ResolveAISessionStatus(model.AISessionRecord{SessionID: "s", Event: binding.ModelEvent})
 		if got.State != state {
 			t.Fatalf("binding %s reports %q, which resolves to %s, want %s", binding.ToolEvent, binding.ModelEvent, got.State, state)
 		}

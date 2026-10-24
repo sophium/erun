@@ -4,14 +4,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // TestRemoteShellLaunchPersistentSession pins the reconnect contract: a desktop
 // tab persists in a dtach session so another window can reattach, while the bare
 // `erun open` CLI path stays unchanged.
 func TestRemoteShellLaunchPersistentSession(t *testing.T) {
-	base := ShellLaunchParams{
+	base := config.ShellLaunchParams{
 		Tenant:      "erun",
 		Environment: "local",
 		Title:       "erun/local",
@@ -20,7 +22,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 	}
 	const bashrc = `/bin/bash --rcfile "$HOME/.erun/erun/local/bashrc" -i`
 
-	preview := func(t *testing.T, req ShellLaunchParams) string {
+	preview := func(t *testing.T, req config.ShellLaunchParams) string {
 		t.Helper()
 		p, err := PreviewShellLaunch(req)
 		if err != nil {
@@ -108,7 +110,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 // live terminals along with their agent sessions.
 func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	paths := []string{
-		RemoteAppSessionSocketDir,
+		activity.RemoteAppSessionSocketDir,
 		RemoteAppSessionSocketPath("erun", "local", "open-0"),
 		RemoteAppSessionSocketPath("erun", "local", "ai"),
 	}
@@ -119,7 +121,7 @@ func TestSessionSocketPathCannotCollideWithTheDesktopBinary(t *testing.T) {
 	}
 	// The dtach command line is what pkill actually matches, so the same
 	// property is asserted on the rendered script rather than only on the path.
-	script, err := PreviewShellLaunch(ShellLaunchParams{
+	script, err := PreviewShellLaunch(config.ShellLaunchParams{
 		Tenant:      "erun",
 		Environment: "local",
 		Namespace:   "erun-local",
@@ -200,7 +202,7 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 // the separate seed exec's stdin.
 func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 	lines := remoteShellGitSeedScriptLines(
-		`"$HOME/git/erun"`, "github.com", shellQuote("sophium"), shellQuote("erun"),
+		`"$HOME/git/erun"`, "github.com", core.ShellQuote("sophium"), core.ShellQuote("erun"),
 		"github.com ssh-ed25519 AAAAEXAMPLE",
 	)
 	script := strings.Join(lines, "\n")
@@ -230,7 +232,7 @@ func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
 // key on stdin, not in the argv, so the key bytes never appear in a process
 // listing.
 func TestRemoteSSHKeySeedArgsStreamOnStdin(t *testing.T) {
-	args := remoteSSHKeySeedArgs(ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
+	args := remoteSSHKeySeedArgs(config.ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
 
 	sawI, sawIT := false, false
 	for _, a := range args {

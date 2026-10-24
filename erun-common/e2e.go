@@ -374,7 +374,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 		return versionOverride, nil, nil
 	}
 	deployed, err := CheckKubernetesDeployment(ctx, KubernetesDeploymentCheckParams{
-		Name:              RuntimeReleaseName(target.Tenant),
+		Name:              config.RuntimeReleaseName(target.Tenant),
 		Namespace:         target.Namespace,
 		KubernetesContext: target.KubernetesContext,
 	})
@@ -383,7 +383,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 	}
 	if !deployed {
 		return "", nil, fmt.Errorf("erun e2e: %s/%s "+KubernetesDeploymentAbsentMessageMarker+" %q not found in namespace %q); run `erun deploy %s %s` first",
-			target.Tenant, target.Environment, RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
+			target.Tenant, target.Environment, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.Tenant, target.Environment)
 	}
 
 	var exposed []ExposedService
@@ -396,7 +396,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 	if versionOverride != "" {
 		return versionOverride, exposed, nil
 	}
-	version, err := ResolveDeployedHelmReleaseVersion(ctx, RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
+	version, err := ResolveDeployedHelmReleaseVersion(ctx, config.RuntimeReleaseName(target.Tenant), target.Namespace, target.KubernetesContext)
 	if err != nil {
 		return "", nil, fmt.Errorf("erun e2e: could not resolve the deployed version for %s/%s: %w", target.Tenant, target.Environment, err)
 	}
@@ -410,7 +410,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 // checkE2EExposures lists the environment's exposed services and refuses a
 // suite whose service is not exposed or not yet serving a valid certificate.
 func checkE2EExposures(target E2ETarget, suites []E2ESuite) ([]ExposedService, error) {
-	exposed, err := ListExposedServices(ShellLaunchParams{
+	exposed, err := ListExposedServices(config.ShellLaunchParams{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
 		Namespace:         target.Namespace,

@@ -11,7 +11,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // UploadRuntimeInputParams selects the file `inputs upload` places inside the
@@ -35,7 +37,7 @@ type UploadRuntimeInputResult struct {
 
 // RuntimeInputUploadRunner runs a /bin/sh script in the env's runtime pod,
 // streaming stdin to it, and returns its captured output.
-type RuntimeInputUploadRunner func(req ShellLaunchParams, script string, stdin io.Reader) (RemoteCommandResult, error)
+type RuntimeInputUploadRunner func(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error)
 
 // UploadRuntimeInput streams one local file into the env's runtime pod over
 // the same kubectl-exec transport ExecShell uses to seed an SSH key onto
@@ -47,7 +49,7 @@ type RuntimeInputUploadRunner func(req ShellLaunchParams, script string, stdin i
 // serves (mirroring workspace_sync) for an MCP-connected orchestrator. It has
 // no in-pod MCP counterpart — the edge in erun-mcp runs inside the pod and
 // has no path back to the operator's filesystem.
-func UploadRuntimeInput(ctx core.Context, req ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
+func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
@@ -69,7 +71,7 @@ func UploadRuntimeInput(ctx core.Context, req ShellLaunchParams, params UploadRu
 	hasher := sha256.New()
 	out, err := run(req, script, io.TeeReader(f, hasher))
 	if err != nil {
-		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q%s: %w", target, formatRemoteCommandStderr(out.Stderr), err)
+		return UploadRuntimeInputResult{}, fmt.Errorf("upload runtime input %q%s: %w", target, kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	localSHA := hex.EncodeToString(hasher.Sum(nil))
 	if err := verifyRuntimeInputUpload(target, localSHA, info.Size(), out.Stdout); err != nil {
@@ -141,7 +143,7 @@ func splitRuntimeInputDestination(remotePath string) (dir, name string, err erro
 
 // traceRuntimeInputUploadScript returns true when the context is in dry-run,
 // in which case the caller must not run the command.
-func traceRuntimeInputUploadScript(ctx core.Context, req ShellLaunchParams, label, script string) bool {
+func traceRuntimeInputUploadScript(ctx core.Context, req config.ShellLaunchParams, label, script string) bool {
 	traceArgs := append([]string{}, kubectlRemoteExecStdinArgs(req, script)...)
 	if len(traceArgs) > 0 {
 		traceArgs[len(traceArgs)-1] = "<remote-script>"
@@ -156,8 +158,8 @@ func traceRuntimeInputUploadScript(ctx core.Context, req ShellLaunchParams, labe
 // partial file visible at the final path) and reports the written size and
 // sha256 so the caller can verify the transfer landed byte-identical.
 func runtimeInputUploadScript(dir, name string) string {
-	quotedDir := shellQuote(dir)
-	quotedName := shellQuote(name)
+	quotedDir := core.ShellQuote(dir)
+	quotedName := core.ShellQuote(name)
 	return strings.Join([]string{
 		"set -e",
 		"dir=" + quotedDir,
@@ -204,15 +206,15 @@ func parseRuntimeInputUploadResponse(stdout string) (size int64, sha string, err
 // kubectlRemoteExecStdinArgs mirrors kubectlRemoteExecArgs but adds -i so
 // stdin is attached: the local file's bytes stream through it, never through
 // argv, matching the pattern seedRemoteSSHKey already uses to seed a key.
-func kubectlRemoteExecStdinArgs(req ShellLaunchParams, script string) []string {
-	args := kubectlTargetArgs(req)
-	args = append(args, "exec", "-i", "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
+func kubectlRemoteExecStdinArgs(req config.ShellLaunchParams, script string) []string {
+	args := config.KubectlTargetArgs(req)
+	args = append(args, "exec", "-i", "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", script)
 	return args
 }
 
 // RunRemoteCommandWithStdin is the stdin-streaming counterpart of
 // RunRemoteCommand.
-func RunRemoteCommandWithStdin(req ShellLaunchParams, script string, stdin io.Reader) (RemoteCommandResult, error) {
+func RunRemoteCommandWithStdin(req config.ShellLaunchParams, script string, stdin io.Reader) (kube.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", kubectlRemoteExecStdinArgs(req, script)...)
 	cmd.Stdin = stdin
 	var stdout bytes.Buffer
@@ -220,7 +222,7 @@ func RunRemoteCommandWithStdin(req ShellLaunchParams, script string, stdin io.Re
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return RemoteCommandResult{
+	return kube.RemoteCommandResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}, err

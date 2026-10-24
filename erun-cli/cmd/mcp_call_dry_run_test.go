@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // TestCallMCPToolWithReattachDryRunNeverReattaches locks the preview contract on
@@ -39,11 +39,11 @@ func TestCallMCPToolWithReattachDryRunNeverReattaches(t *testing.T) {
 		tenant:      "team",
 		environment: "dev",
 		port:        port,
-		endpoint:    common.MCPLocalEndpoint(port),
+		endpoint:    mcp.MCPLocalEndpoint(port),
 	}
 
 	_, err := callMCPToolWithReattach(context.Background(), testCommandContext(t, true), target, "whip", map[string]any{"preview": true}, false)
-	if !errors.Is(err, common.ErrMCPEndpointUnreachable) {
+	if !errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 		t.Fatalf("dry run against a closed port returned %v, want an unreachable endpoint", err)
 	}
 	if len(spawned) != 0 {

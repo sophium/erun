@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // The sidebar's busy line comes from the environment's own idle markers, so the
@@ -16,20 +17,20 @@ import (
 // read in the operator's language rather than by its wire name.
 
 func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
-	activeMarker := func(name string) eruncommon.EnvironmentIdleMarker {
-		return eruncommon.EnvironmentIdleMarker{Name: name, Idle: false, Reason: "recent activity"}
+	activeMarker := func(name string) activitypkg.EnvironmentIdleMarker {
+		return activitypkg.EnvironmentIdleMarker{Name: name, Idle: false, Reason: "recent activity"}
 	}
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
 	cases := []struct {
 		name       string
-		status     eruncommon.EnvironmentIdleStatus
+		status     activitypkg.EnvironmentIdleStatus
 		wantBusy   bool
 		wantDetail string
 	}{
 		{
 			name: "a quiet environment is not busy",
-			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
+			status: activitypkg.EnvironmentIdleStatus{Markers: []activitypkg.EnvironmentIdleMarker{
 				{Name: "working-hours", Idle: false},
 				{Name: config.ActivityKindMCP, Idle: true},
 			}},
@@ -39,17 +40,17 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 			// "inside working hours"), so counting it would make every
 			// environment busy all day.
 			name: "inside working hours alone is not activity",
-			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
+			status: activitypkg.EnvironmentIdleStatus{Markers: []activitypkg.EnvironmentIdleMarker{
 				activeMarker("working-hours"),
 			}},
 		},
 		{
 			name: "a held lease names the work",
-			status: eruncommon.EnvironmentIdleStatus{
-				Leases: []eruncommon.EnvironmentActivityLease{
+			status: activitypkg.EnvironmentIdleStatus{
+				Leases: []activitypkg.EnvironmentActivityLease{
 					{ID: "gradle-build", Name: "gradle-build", StartedAt: now, ExpiresAt: now.Add(time.Hour)},
 				},
-				Markers: []eruncommon.EnvironmentIdleMarker{activeMarker("lease")},
+				Markers: []activitypkg.EnvironmentIdleMarker{activeMarker("lease")},
 			},
 			wantBusy:   true,
 			wantDetail: "holding: gradle-build",
@@ -58,26 +59,26 @@ func TestEnvironmentBusyFromIdleStatus(t *testing.T) {
 			// The lease is preferred over a bare marker precisely because it is
 			// the one signal that can say what the work is.
 			name: "a lease wins over a generic marker",
-			status: eruncommon.EnvironmentIdleStatus{
-				Leases: []eruncommon.EnvironmentActivityLease{
+			status: activitypkg.EnvironmentIdleStatus{
+				Leases: []activitypkg.EnvironmentActivityLease{
 					{ID: "agent-run", Name: "agent-run", StartedAt: now, ExpiresAt: now.Add(time.Hour)},
 				},
-				Markers: []eruncommon.EnvironmentIdleMarker{activeMarker(config.ActivityKindMCP)},
+				Markers: []activitypkg.EnvironmentIdleMarker{activeMarker(config.ActivityKindMCP)},
 			},
 			wantBusy:   true,
 			wantDetail: "holding: agent-run",
 		},
 		{
 			name: "sampled processes describe themselves",
-			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
-				activeMarker(eruncommon.ActivityKindProcess),
+			status: activitypkg.EnvironmentIdleStatus{Markers: []activitypkg.EnvironmentIdleMarker{
+				activeMarker(activitypkg.ActivityKindProcess),
 			}},
 			wantBusy:   true,
 			wantDetail: "running build or agent processes",
 		},
 		{
 			name: "an agent over MCP is named",
-			status: eruncommon.EnvironmentIdleStatus{Markers: []eruncommon.EnvironmentIdleMarker{
+			status: activitypkg.EnvironmentIdleStatus{Markers: []activitypkg.EnvironmentIdleMarker{
 				activeMarker(config.ActivityKindMCP),
 			}},
 			wantBusy:   true,
@@ -204,8 +205,8 @@ func TestLoadStateSeedsEnvironmentActivityFromThePoller(t *testing.T) {
 		store:            store,
 		findProjectRoot:  func() (string, string, error) { return "acme", projectRoot, nil },
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.0"} },
-		resolveImageRegistry: func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
-			return eruncommon.RuntimeRegistryVersions{}, nil
+		resolveImageRegistry: func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
+			return registry.RuntimeRegistryVersions{}, nil
 		},
 	})
 	app.envActivity = map[string]environmentActivityState{

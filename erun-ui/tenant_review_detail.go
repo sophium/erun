@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // tenant_review_detail.go extends the tenant dashboard's Reviews tab with a
@@ -81,7 +82,7 @@ func (a *App) LoadReviewDetail(input uiReviewDetailInput) (uiReviewDetail, error
 // loadReviewDetailReviewers loads a review's assigned reviewers, degrading
 // independently like loadReviewDetailComments/loadReviewDetailBuilds: a
 // caller who cannot read reviewers still sees the rest of the detail.
-func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
+func loadReviewDetailReviewers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadReviewers); restricted != "" {
 		detail.ReviewersRestricted = restricted
 		return
@@ -102,11 +103,11 @@ func loadReviewDetailReviewers(ctx context.Context, client *eruncommon.PlatformC
 // the Add reviewers picker, best effort: a caller who cannot read /v1/users,
 // or a read that fails, gets back nil rather than failing the whole detail —
 // the Add reviewers action itself simply has nothing to offer.
-func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities) []uiReviewer {
+func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities) []uiReviewer {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return nil
 	}
-	users, err := client.ListUsers(ctx, eruncommon.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
 	if err != nil {
 		return nil
 	}
@@ -117,7 +118,7 @@ func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *eruncom
 	return choices
 }
 
-func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
+func loadReviewDetailComments(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID string, usernames map[string]string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments); restricted != "" {
 		detail.CommentsRestricted = restricted
 		return
@@ -131,7 +132,7 @@ func loadReviewDetailComments(ctx context.Context, client *eruncommon.PlatformCl
 	detail.UnresolvedThreads = eruncommon.CountUnresolvedThreads(comments)
 }
 
-func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {
+func loadReviewDetailBuilds(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, reviewID, reviewName string, detail *uiReviewDetail) {
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadBuilds); restricted != "" {
 		detail.BuildsRestricted = restricted
 		return
@@ -148,11 +149,11 @@ func loadReviewDetailBuilds(ctx context.Context, client *eruncommon.PlatformClie
 // may not read the queue and when the read itself fails — the position is
 // supplemental detail in the dialog header, not something worth its own
 // error line the way comments and builds get.
-func loadReviewDetailQueuePosition(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, reviewID string) int {
+func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, reviewID string) int {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
 		return 0
 	}
-	queue, err := client.ListMergeQueue(ctx, eruncommon.PlatformMergeQueueParams{
+	queue, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{
 		Repository: review.Repository, TargetBranch: review.TargetBranch,
 	})
 	if err != nil {
@@ -194,7 +195,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 	}
 	defer cancel()
 
-	comment, err := client.CreateComment(requestCtx, reviewID, eruncommon.PlatformCreateCommentParams{
+	comment, err := client.CreateComment(requestCtx, reviewID, platformclient.PlatformCreateCommentParams{
 		CommitID:        input.CommitID,
 		FilePath:        input.FilePath,
 		Line:            input.Line,
@@ -207,7 +208,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 	return tenantDashboardComment(comment), nil
 }
 
-func tenantDashboardBuildsForReview(builds []eruncommon.PlatformBuild, reviewName string) []uiTenantDashboardBuild {
+func tenantDashboardBuildsForReview(builds []platformclient.PlatformBuild, reviewName string) []uiTenantDashboardBuild {
 	converted := make([]uiTenantDashboardBuild, 0, len(builds))
 	for _, build := range builds {
 		converted = append(converted, uiTenantDashboardBuild{
@@ -226,7 +227,7 @@ func tenantDashboardBuildsForReview(builds []eruncommon.PlatformBuild, reviewNam
 	return converted
 }
 
-func tenantDashboardComments(comments []eruncommon.PlatformComment, usernames map[string]string) []uiReviewComment {
+func tenantDashboardComments(comments []platformclient.PlatformComment, usernames map[string]string) []uiReviewComment {
 	converted := make([]uiReviewComment, 0, len(comments))
 	for _, comment := range comments {
 		converted = append(converted, tenantDashboardCommentWithUsername(comment, usernames))
@@ -234,13 +235,13 @@ func tenantDashboardComments(comments []eruncommon.PlatformComment, usernames ma
 	return converted
 }
 
-func tenantDashboardCommentWithUsername(comment eruncommon.PlatformComment, usernames map[string]string) uiReviewComment {
+func tenantDashboardCommentWithUsername(comment platformclient.PlatformComment, usernames map[string]string) uiReviewComment {
 	converted := tenantDashboardComment(comment)
 	converted.CreatorUsername = usernames[comment.CreatorUserID]
 	return converted
 }
 
-func tenantDashboardComment(comment eruncommon.PlatformComment) uiReviewComment {
+func tenantDashboardComment(comment platformclient.PlatformComment) uiReviewComment {
 	return uiReviewComment{
 		CommentID:       comment.CommentID,
 		CreatorUserID:   comment.CreatorUserID,
@@ -257,7 +258,7 @@ func tenantDashboardComment(comment eruncommon.PlatformComment) uiReviewComment 
 // reviewQueuePosition reports reviewID's 1-based position in queue, or 0 when
 // it is not present — the review is not currently queued for its target
 // branch.
-func reviewQueuePosition(queue []eruncommon.PlatformReview, reviewID string) int {
+func reviewQueuePosition(queue []platformclient.PlatformReview, reviewID string) int {
 	for i, review := range queue {
 		if review.ReviewID == reviewID {
 			return i + 1

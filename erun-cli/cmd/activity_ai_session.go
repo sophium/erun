@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -79,12 +81,12 @@ func runActivityAISessionHook(cmd *cobra.Command, tenant, environment, tool, eve
 			return fmt.Errorf("%s hook: %w", toolLabelForHook(tool), err)
 		}
 	}
-	return common.RecordAISessionEvent(common.AISessionEventParams{
+	return activity.RecordAISessionEvent(model.AISessionEventParams{
 		Tenant:      resolvedTenant,
 		Environment: resolvedEnvironment,
 		SessionID:   sessionID,
 		Tool:        tool,
-		Event:       common.AISessionEventKind(event),
+		Event:       model.AISessionEventKind(event),
 	})
 }
 
@@ -163,18 +165,18 @@ func newActivityAISessionReportCmd() *cobra.Command {
 			"    --session 5f2c1a2b-e2e --tool claude --event turn-end",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			params := common.AISessionEventParams{
+			params := model.AISessionEventParams{
 				Tenant:      tenant,
 				Environment: environment,
 				SessionID:   sessionID,
 				Tool:        tool,
-				Event:       common.AISessionEventKind(strings.TrimSpace(event)),
+				Event:       model.AISessionEventKind(strings.TrimSpace(event)),
 				ExitReason:  exitReason,
 			}
 			if cmd.Flags().Changed("exit-code") {
 				params.ExitCode = &exitCode
 			}
-			return common.RecordAISessionEvent(params)
+			return activity.RecordAISessionEvent(params)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
@@ -217,20 +219,20 @@ func runActivityAISessionStatus(cmd *cobra.Command, tenant, environment, session
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID != "" {
-		status, err := common.LoadAISessionStatus(tenant, environment, sessionID)
+		status, err := activity.LoadAISessionStatus(tenant, environment, sessionID)
 		if err != nil {
 			return err
 		}
-		return writeAISessionStatuses(cmd, []common.AISessionStatus{status}, jsonOutput)
+		return writeAISessionStatuses(cmd, []model.AISessionStatus{status}, jsonOutput)
 	}
-	statuses, err := common.LoadAISessionStatuses(tenant, environment)
+	statuses, err := activity.LoadAISessionStatuses(tenant, environment)
 	if err != nil {
 		return err
 	}
 	return writeAISessionStatuses(cmd, statuses, jsonOutput)
 }
 
-func writeAISessionStatuses(cmd *cobra.Command, statuses []common.AISessionStatus, jsonOutput bool) error {
+func writeAISessionStatuses(cmd *cobra.Command, statuses []model.AISessionStatus, jsonOutput bool) error {
 	ctx := commandContext(cmd)
 	if commandWantsJSON(ctx, jsonOutput) {
 		encoder := json.NewEncoder(ctx.Stdout)

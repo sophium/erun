@@ -12,8 +12,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-integration/internal/harnessexec"
 )
 
@@ -82,7 +81,7 @@ func killFixturePipeHolder(t *testing.T, path string) {
 		return
 	}
 	deadline := time.Now().Add(10 * time.Second)
-	for eruncommon.ProcessAlive(pid) {
+	for activity.ProcessAlive(pid) {
 		_ = proc.Kill()
 		if !time.Now().Before(deadline) {
 			t.Errorf("the pipe holder (pid %d) is still alive %s after being killed, so it outlives the run that started it", pid, 10*time.Second)

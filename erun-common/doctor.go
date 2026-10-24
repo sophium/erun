@@ -8,12 +8,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 const runtimeDindContainerName = "erun-dind"
 
 type (
-	RuntimeContainerCommandRunnerFunc func(ShellLaunchParams, string, string) (RemoteCommandResult, error)
+	RuntimeContainerCommandRunnerFunc func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error)
 	DoctorAction                      string
 )
 
@@ -75,7 +76,7 @@ func DoctorActionDescription(action DoctorAction) string {
 // came from; an environment with no daemon holding build images refuses with
 // DoctorDockerDaemonUnavailableError rather than reading whatever daemon
 // happens to be reachable.
-func RunDoctorInspection(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams) (DoctorInspectionResult, error) {
+func RunDoctorInspection(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -92,7 +93,7 @@ func RunDoctorInspection(ctx core.Context, runner RuntimeContainerCommandRunnerF
 // the daemon beside the output so the caller can name it, and the store
 // readings taken around the prune so a prune that freed nothing can be reported
 // as that instead of as a success.
-func RunDoctorAction(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+func RunDoctorAction(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
 		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
@@ -112,21 +113,21 @@ func RunDoctorAction(ctx core.Context, runner RuntimeContainerCommandRunnerFunc,
 // (the host kind) needs no wait and no cluster: waiting on a deployment a host
 // environment does not have would fail the read for a reason that is not about
 // the daemon at all.
-func waitForDoctorDaemon(ctx core.Context, req ShellLaunchParams, daemon DoctorDockerDaemon) error {
+func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon DoctorDockerDaemon) error {
 	if daemon.Kind == DoctorDockerDaemonHost {
 		return nil
 	}
 	return traceAndWaitForRuntime(ctx, req)
 }
 
-func traceAndWaitForRuntime(ctx core.Context, req ShellLaunchParams) error {
+func traceAndWaitForRuntime(ctx core.Context, req config.ShellLaunchParams) error {
 	args := kubectlDeploymentWaitArgs(req)
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
 		return nil
 	}
-	if config.CurrentExecutionMode(kubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
-		if err := libraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
+	if config.CurrentExecutionMode(kube.KubectlDeploymentWaitExecutionOperation) == config.ExecutionModeLibrary {
+		if err := kube.LibraryWaitForDeploymentAvailable(req.KubernetesContext, req.Namespace, config.RuntimeReleaseName(req.Tenant), defaultShellLaunchWaitTimeout); err != nil {
 			// normalizeDoctorKubectlError's diagnostics (doctorKubectlDiagnostic)
 			// pattern-match literal kubectl CLI stderr text, which a client-go
 			// error never produces, so library-mode failures return unadorned
@@ -142,14 +143,14 @@ func traceAndWaitForRuntime(ctx core.Context, req ShellLaunchParams) error {
 	return normalizeDoctorKubectlError(req, stderr, err)
 }
 
-func PreviewRuntimeContainerCommand(req ShellLaunchParams, container, script string) RemoteCommandPreview {
-	return RemoteCommandPreview{
+func PreviewRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) kube.RemoteCommandPreview {
+	return kube.RemoteCommandPreview{
 		Args:   kubectlContainerExecArgs(req, container, script),
 		Script: script,
 	}
 }
 
-func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req ShellLaunchParams, container, label, script string) (RemoteCommandResult, error) {
+func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, container, label, script string) (kube.RemoteCommandResult, error) {
 	preview := PreviewRuntimeContainerCommand(req, container, script)
 	traceArgs := append([]string{}, preview.Args...)
 	if len(traceArgs) > 0 {
@@ -158,7 +159,7 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerC
 	ctx.TraceCommand("", "kubectl", traceArgs...)
 	ctx.TraceBlock(label, script)
 	if ctx.DryRun {
-		return RemoteCommandResult{}, nil
+		return kube.RemoteCommandResult{}, nil
 	}
 	if runner == nil {
 		runner = RunRuntimeContainerCommand
@@ -170,14 +171,14 @@ func RunTracedRuntimeContainerCommand(ctx core.Context, runner RuntimeContainerC
 	return result, nil
 }
 
-func RunRuntimeContainerCommand(req ShellLaunchParams, container, script string) (RemoteCommandResult, error) {
+func RunRuntimeContainerCommand(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
 	cmd := core.Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	return RemoteCommandResult{
+	return kube.RemoteCommandResult{
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}, err
@@ -194,7 +195,7 @@ func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
 	return stderr.String(), err
 }
 
-func normalizeDoctorKubectlError(req ShellLaunchParams, stderr string, err error) error {
+func normalizeDoctorKubectlError(req config.ShellLaunchParams, stderr string, err error) error {
 	diagnostic := doctorKubectlDiagnostic(req, stderr)
 	stderr = strings.TrimSpace(stderr)
 	if diagnostic == "" {
@@ -212,7 +213,7 @@ func normalizeDoctorKubectlError(req ShellLaunchParams, stderr string, err error
 	return fmt.Errorf("%s: %s", diagnostic, stderr)
 }
 
-func doctorKubectlDiagnostic(req ShellLaunchParams, stderr string) string {
+func doctorKubectlDiagnostic(req config.ShellLaunchParams, stderr string) string {
 	trimmed := strings.TrimSpace(stderr)
 	lower := strings.ToLower(trimmed)
 	switch {
@@ -225,12 +226,12 @@ func doctorKubectlDiagnostic(req ShellLaunchParams, stderr string) string {
 	}
 }
 
-func doctorNamespaceLookupFailed(req ShellLaunchParams, stderr string) bool {
+func doctorNamespaceLookupFailed(req config.ShellLaunchParams, stderr string) bool {
 	namespace := strings.TrimSpace(req.Namespace)
 	return namespace != "" && strings.Contains(stderr, fmt.Sprintf("namespaces %q not found", namespace))
 }
 
-func doctorNamespaceIsListed(req ShellLaunchParams) bool {
+func doctorNamespaceIsListed(req config.ShellLaunchParams) bool {
 	args := make([]string, 0, 6)
 	if strings.TrimSpace(req.KubernetesContext) != "" {
 		args = append(args, "--context", strings.TrimSpace(req.KubernetesContext))
@@ -250,9 +251,9 @@ func doctorNamespaceIsListed(req ShellLaunchParams) bool {
 	return false
 }
 
-func kubectlContainerExecArgs(req ShellLaunchParams, container, script string) []string {
-	args := kubectlTargetArgs(req)
+func kubectlContainerExecArgs(req config.ShellLaunchParams, container, script string) []string {
+	args := config.KubectlTargetArgs(req)
 	args = append(args, "exec", "-c", strings.TrimSpace(container))
-	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	args = append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

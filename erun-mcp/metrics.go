@@ -14,8 +14,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // The runtime pod's Prometheus exposition listener, documented at
@@ -214,7 +215,7 @@ func (w *byteCountingResponseWriter) Flush() {
 // synthetic polling, not traffic that should ever read as the env being busy.
 func trafficMeteringMiddleware(recorder *metricsRecorder, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if recorder == nil || req.Header.Get(eruncommon.MCPIdleProbeHeader) == "true" {
+		if recorder == nil || req.Header.Get(mcp.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
 			return
 		}
@@ -298,7 +299,7 @@ func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
 		return
 	}
 	now := time.Now()
-	status, err := eruncommon.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, now)
+	status, err := activitypkg.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, now)
 	if err != nil {
 		// Best-effort: leave the gauges at their last known value rather than
 		// erroring the whole metrics loop over a transient resolution failure
@@ -318,7 +319,7 @@ func sampleIdleMetrics(runtime RuntimeConfig, recorder *metricsRecorder) {
 // tool reads rather than a metrics-only redefinition.
 var terminalInputActivityKinds = []string{config.ActivityKindSSH, config.ActivityKindCLI, config.ActivityKindMCP}
 
-func secondsSinceLastTerminalInput(status eruncommon.EnvironmentIdleStatus, now time.Time) float64 {
+func secondsSinceLastTerminalInput(status activitypkg.EnvironmentIdleStatus, now time.Time) float64 {
 	var last time.Time
 	for _, kind := range terminalInputActivityKinds {
 		snapshot, ok := status.Activity[kind]
@@ -368,7 +369,7 @@ func sampleTrafficWindow(runtime RuntimeConfig, recorder *metricsRecorder, lastS
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	sshBytes := lastSSHBytes
 	if tenant != "" && environment != "" {
-		if activity, err := eruncommon.LoadEnvironmentActivity(tenant, environment); err == nil {
+		if activity, err := activitypkg.LoadEnvironmentActivity(tenant, environment); err == nil {
 			sshBytes = activity[config.ActivityKindSSH].Bytes
 		}
 	}

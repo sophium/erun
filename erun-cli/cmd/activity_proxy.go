@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
 
@@ -211,7 +211,7 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	if bytes <= r.idleTrafficBytes {
 		return
 	}
-	_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+	_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
 		Tenant:        r.tenant,
 		Environment:   r.environment,
 		Kind:          config.ActivityKindSSH,
@@ -221,16 +221,16 @@ func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	})
 }
 
-func clientUpdatesFromMap(byClient map[string]int64) []common.EnvironmentActivityClientUpdate {
+func clientUpdatesFromMap(byClient map[string]int64) []activity.EnvironmentActivityClientUpdate {
 	if len(byClient) == 0 {
 		return nil
 	}
-	updates := make([]common.EnvironmentActivityClientUpdate, 0, len(byClient))
+	updates := make([]activity.EnvironmentActivityClientUpdate, 0, len(byClient))
 	for address, bytes := range byClient {
 		if bytes <= 0 {
 			continue
 		}
-		updates = append(updates, common.EnvironmentActivityClientUpdate{Address: address, Bytes: bytes})
+		updates = append(updates, activity.EnvironmentActivityClientUpdate{Address: address, Bytes: bytes})
 	}
 	return updates
 }

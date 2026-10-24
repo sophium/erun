@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // TestIdleStopRecordToolWritesHostManualEntry covers the desktop Stop
@@ -31,8 +31,8 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	assertRecentStopTarget(t, result, "tenant-a", "dev")
 
 	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
-	if entry.Source != eruncommon.StopHistorySourceHostManual {
-		t.Fatalf("expected source=%q, got %q", eruncommon.StopHistorySourceHostManual, entry.Source)
+	if entry.Source != activity.StopHistorySourceHostManual {
+		t.Fatalf("expected source=%q, got %q", activity.StopHistorySourceHostManual, entry.Source)
 	}
 	if entry.Reason != "Manual stop via desktop" {
 		t.Fatalf("expected reason carried through, got %q", entry.Reason)
@@ -56,12 +56,12 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	pending := eruncommon.EnvironmentStopPending{
+	pending := activity.EnvironmentStopPending{
 		Since:            time.Now().Add(-5 * time.Minute).UTC(),
 		GraceSeconds:     600,
 		CloudContextName: "mock-cluster",
 		ReasonSummary:    "idle: terminal-stdin, ai",
-		Markers: []eruncommon.EnvironmentIdleMarker{
+		Markers: []activity.EnvironmentIdleMarker{
 			{Name: "terminal-stdin", Idle: true, Reason: "no input", LastActivity: time.Now().Add(-15 * time.Minute).UTC()},
 			{Name: "ai", Idle: true, Reason: "no Claude session", LastActivity: time.Now().Add(-12 * time.Minute).UTC()},
 		},
@@ -71,7 +71,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 			Timezone:     "Europe/Riga",
 		},
 	}
-	if err := eruncommon.SaveEnvironmentStopPending("tenant-a", "dev", pending); err != nil {
+	if err := activity.SaveEnvironmentStopPending("tenant-a", "dev", pending); err != nil {
 		t.Fatalf("SaveEnvironmentStopPending: %v", err)
 	}
 
@@ -85,7 +85,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	}
 
 	entry := loadSingleStopHistoryEntry(t, "tenant-a", "dev")
-	if entry.Source != eruncommon.StopHistorySourceHostManual {
+	if entry.Source != activity.StopHistorySourceHostManual {
 		t.Fatalf("expected source=host-manual even with armed grace, got %q", entry.Source)
 	}
 	if entry.GraceSeconds != 600 {
@@ -128,9 +128,9 @@ func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, e
 	}
 }
 
-func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) eruncommon.EnvironmentStopHistoryEntry {
+func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) activity.EnvironmentStopHistoryEntry {
 	t.Helper()
-	entries, err := eruncommon.LoadEnvironmentStopHistory(tenant, env)
+	entries, err := activity.LoadEnvironmentStopHistory(tenant, env)
 	if err != nil {
 		t.Fatalf("LoadEnvironmentStopHistory: %v", err)
 	}
@@ -142,7 +142,7 @@ func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) eruncommon.Env
 
 func assertStopPendingCleared(t *testing.T, tenant, env, home string) {
 	t.Helper()
-	pendingPath, err := eruncommon.EnvironmentStopPendingPath(tenant, env)
+	pendingPath, err := activity.EnvironmentStopPendingPath(tenant, env)
 	if err != nil {
 		t.Fatalf("EnvironmentStopPendingPath: %v", err)
 	}

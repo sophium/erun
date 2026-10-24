@@ -78,3 +78,5 @@ func resolveDeployKubernetesContext(environment, configured string, currentConte
 	}
 	return current
 }
+
+const DevopsComponentName = "erun-devops"

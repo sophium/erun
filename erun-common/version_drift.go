@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // EnvironmentVersionStatus is one environment's erun version, compared
@@ -98,7 +100,7 @@ func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gate
 	drift := TenantVersionDrift{Tenant: tenant}
 	maxVersion, hasMax := maxResolvedVersion(tenantResult.Environments, resolutions)
 	if hasMax {
-		drift.MaxVersion = formatSemver(maxVersion)
+		drift.MaxVersion = registry.FormatSemver(maxVersion)
 	}
 	for _, env := range tenantResult.Environments {
 		drift.Environments = append(drift.Environments, environmentVersionStatus(env.Name, resolutions[env.Name], maxVersion, hasMax))
@@ -114,7 +116,7 @@ func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gate
 // report shape: BehindMax only applies to a resolution that actually named a
 // version, never to a confirmed absence or an unresolved unknown -- neither
 // of those can be "behind" anything.
-func environmentVersionStatus(name string, resolution environmentVersionResolution, maxVersion semver, hasMax bool) EnvironmentVersionStatus {
+func environmentVersionStatus(name string, resolution environmentVersionResolution, maxVersion registry.Semver, hasMax bool) EnvironmentVersionStatus {
 	status := EnvironmentVersionStatus{Environment: name, Version: resolution.Version}
 	if resolution.Version == "" {
 		status.VersionUnresolved = !resolution.ConfirmedAbsent
@@ -122,8 +124,8 @@ func environmentVersionStatus(name string, resolution environmentVersionResoluti
 		return status
 	}
 	if hasMax {
-		if parsed, parsedOK := parseRegistryStableVersion(resolution.Version); parsedOK {
-			status.BehindMax = compareSemver(parsed, maxVersion) < 0
+		if parsed, parsedOK := registry.ParseRegistryStableVersion(resolution.Version); parsedOK {
+			status.BehindMax = registry.CompareSemver(parsed, maxVersion) < 0
 		}
 	}
 	return status
@@ -146,7 +148,7 @@ func addGateVerdict(drift TenantVersionDrift, tenantResult ListTenantResult, ten
 		drift.GateVersionUnresolvedReason = gateVersionUnresolvedReason(gateResolution)
 		return drift, nil
 	}
-	gateParsed, gateParsedOK := parseRegistryStableVersion(drift.GateVersion)
+	gateParsed, gateParsedOK := registry.ParseRegistryStableVersion(drift.GateVersion)
 	if !gateParsedOK {
 		drift.GateVersionUnresolved = true
 		return drift, nil
@@ -155,11 +157,11 @@ func addGateVerdict(drift TenantVersionDrift, tenantResult ListTenantResult, ten
 		if env.Name == gateEnvironment {
 			continue
 		}
-		parsed, parsedOK := parseRegistryStableVersion(resolutions[env.Name].Version)
+		parsed, parsedOK := registry.ParseRegistryStableVersion(resolutions[env.Name].Version)
 		if !parsedOK {
 			continue
 		}
-		if compareSemver(parsed, gateParsed) > 0 {
+		if registry.CompareSemver(parsed, gateParsed) > 0 {
 			drift.GateBehind = true
 			drift.GateOutdatedBy = append(drift.GateOutdatedBy, env.Name)
 		}
@@ -186,13 +188,13 @@ func erunVersionString(env ListEnvironmentResult) string {
 // maxResolvedVersion returns the newest parseable erun version among envs'
 // resolutions. ok is false when none parses -- an empty/snapshot-only tenant
 // has no max to compare against, not a max of zero.
-func maxResolvedVersion(envs []ListEnvironmentResult, resolutions map[string]environmentVersionResolution) (version semver, ok bool) {
+func maxResolvedVersion(envs []ListEnvironmentResult, resolutions map[string]environmentVersionResolution) (version registry.Semver, ok bool) {
 	for _, env := range envs {
-		parsed, parsedOK := parseRegistryStableVersion(resolutions[env.Name].Version)
+		parsed, parsedOK := registry.ParseRegistryStableVersion(resolutions[env.Name].Version)
 		if !parsedOK {
 			continue
 		}
-		if !ok || compareSemver(parsed, version) > 0 {
+		if !ok || registry.CompareSemver(parsed, version) > 0 {
 			version = parsed
 			ok = true
 		}
@@ -235,13 +237,13 @@ func resolveEnvironmentVersionForDrift(ctx core.Context, tenant string, env List
 // no-live-network-call dry-run contract every other list-mode live check in
 // this file already follows.
 func resolveLiveEnvironmentVersion(ctx core.Context, tenant string, env ListEnvironmentResult) environmentVersionResolution {
-	req := ShellLaunchParams{
+	req := config.ShellLaunchParams{
 		Tenant:            tenant,
 		Environment:       env.Name,
-		Namespace:         KubernetesNamespaceName(tenant, env.Name),
+		Namespace:         config.KubernetesNamespaceName(tenant, env.Name),
 		KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 	}
-	releaseName := RuntimeReleaseName(tenant)
+	releaseName := config.RuntimeReleaseName(tenant)
 	statusArgs := observeHelmStatusArgs(req)
 	listArgs := observeHelmListArgs(req, releaseName)
 	ctx.Trace("list: " + tenant + "/" + env.Name + "'s runtime version is not recorded locally -- checking its deployed release live")

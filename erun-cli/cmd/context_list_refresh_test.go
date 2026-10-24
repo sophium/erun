@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	common "github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // listRefreshTestStore is the smallest CloudContextStore the list path needs:
@@ -40,9 +40,9 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 			CloudProviderAlias: listRefreshTestAlias,
 			Region:             listRefreshTestRegion,
 			InstanceID:         instanceID,
-			InstanceType:       common.DefaultCloudContextInstanceType,
-			DiskType:           common.DefaultCloudContextDiskType,
-			DiskSizeGB:         common.DefaultCloudContextDiskSizeGB,
+			InstanceType:       configpkg.DefaultCloudContextInstanceType,
+			DiskType:           configpkg.DefaultCloudContextDiskType,
+			DiskSizeGB:         configpkg.DefaultCloudContextDiskSizeGB,
 			KubernetesContext:  fmt.Sprintf("erun-%03d", i+1),
 		})
 	}
@@ -66,7 +66,7 @@ func listRefreshTestFailingRunAWS() func(core.Context, configpkg.CloudProviderCo
 	}
 }
 
-func runListRefreshTest(t *testing.T, store common.CloudContextStore, deps common.CloudContextDependencies) string {
+func runListRefreshTest(t *testing.T, store cloud.CloudContextStore, deps cloud.CloudContextDependencies) string {
 	t.Helper()
 	var buf bytes.Buffer
 	ctx := core.Context{
@@ -101,7 +101,7 @@ func contextListRowLines(out string) []string {
 func TestContextListReportsBatchedRefreshFailureOnce(t *testing.T) {
 	instanceIDs := []string{"i-0aaaa11111aaaa1111", "i-0bbbb22222bbbb2222", "i-0cccc33333cccc3333", "i-0dddd44444dddd4444"}
 	store := listRefreshTestStoreWithIDs(instanceIDs...)
-	deps := common.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
+	deps := cloud.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
 
 	out := runListRefreshTest(t, store, deps)
 
@@ -140,7 +140,7 @@ func TestContextListReportsBatchedRefreshFailureOnce(t *testing.T) {
 // reads as a successful refresh.
 func TestContextListNamesTheBatchedRefreshFailureAtBatchLevel(t *testing.T) {
 	store := listRefreshTestStoreWithIDs("i-0aaaa11111aaaa1111", "i-0bbbb22222bbbb2222")
-	deps := common.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
+	deps := cloud.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
 
 	out := runListRefreshTest(t, store, deps)
 
@@ -179,7 +179,7 @@ func TestContextListNamesTheBatchedRefreshFailureAtBatchLevel(t *testing.T) {
 func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 	instanceIDs := []string{"i-0aaaa11111aaaa1111", "i-0bbbb22222bbbb2222"}
 	store := listRefreshTestStoreWithIDs(instanceIDs...)
-	deps := common.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
+	deps := cloud.CloudContextDependencies{RunAWS: listRefreshTestFailingRunAWS()}
 
 	var buf bytes.Buffer
 	ctx := core.Context{
@@ -192,7 +192,7 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 		t.Fatalf("context list: %v", err)
 	}
 
-	var result common.CloudContextListResult
+	var result cloud.CloudContextListResult
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode %q: %v", buf.String(), err)
 	}
@@ -216,13 +216,13 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 
 // requireUnknownWithoutSharedCause pins what a row owes once its batch failed:
 // the refuted state, and no copy of a cause that belongs to the batch.
-func requireUnknownWithoutSharedCause(t *testing.T, context common.CloudContextStatus) {
+func requireUnknownWithoutSharedCause(t *testing.T, context configpkg.CloudContextStatus) {
 	t.Helper()
 	if context.Message != "" {
 		t.Fatalf("context %s repeats the shared cause: %q", context.Name, context.Message)
 	}
-	if context.Status != common.CloudContextStatusUnknown {
-		t.Fatalf("context %s status = %q, want %q", context.Name, context.Status, common.CloudContextStatusUnknown)
+	if context.Status != cloud.CloudContextStatusUnknown {
+		t.Fatalf("context %s status = %q, want %q", context.Name, context.Status, cloud.CloudContextStatusUnknown)
 	}
 }
 
@@ -230,7 +230,7 @@ func requireUnknownWithoutSharedCause(t *testing.T, context common.CloudContextS
 // every message would lose the detail that actually differs per row.
 func TestContextListKeepsPerContextMessages(t *testing.T) {
 	store := listRefreshTestStoreWithIDs("i-0aaaa11111aaaa1111")
-	deps := common.CloudContextDependencies{RunAWS: func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
+	deps := cloud.CloudContextDependencies{RunAWS: func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
 		return "", nil
 	}}
 

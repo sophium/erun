@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // IdleStopCancelInput selects the env whose armed idle-stop should be cancelled.
@@ -29,7 +29,7 @@ func idleStopCancelTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 		if err != nil {
 			return nil, IdleStopCancelResult{}, err
 		}
-		if err := eruncommon.ClearEnvironmentStopPending(tenant, environment); err != nil {
+		if err := activity.ClearEnvironmentStopPending(tenant, environment); err != nil {
 			return nil, IdleStopCancelResult{}, err
 		}
 		return nil, IdleStopCancelResult{
@@ -49,9 +49,9 @@ type IdleStopHistoryInput struct {
 // IdleStopHistoryResult wraps the entries so the MCP schema stays a stable
 // object. Entries are newest-first, capped at common.StopHistoryCap.
 type IdleStopHistoryResult struct {
-	Tenant      string                                   `json:"tenant"`
-	Environment string                                   `json:"environment"`
-	Entries     []eruncommon.EnvironmentStopHistoryEntry `json:"entries"`
+	Tenant      string                                 `json:"tenant"`
+	Environment string                                 `json:"environment"`
+	Entries     []activity.EnvironmentStopHistoryEntry `json:"entries"`
 }
 
 func idleStopHistoryTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
@@ -60,7 +60,7 @@ func idleStopHistoryTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 		if err != nil {
 			return nil, IdleStopHistoryResult{}, err
 		}
-		entries, err := eruncommon.LoadEnvironmentStopHistory(tenant, environment)
+		entries, err := activity.LoadEnvironmentStopHistory(tenant, environment)
 		if err != nil {
 			return nil, IdleStopHistoryResult{}, err
 		}
@@ -102,16 +102,16 @@ func idleStopRecordTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 			reason = "Manual stop"
 		}
 		now := time.Now().UTC()
-		entry := eruncommon.EnvironmentStopHistoryEntry{
+		entry := activity.EnvironmentStopHistoryEntry{
 			StoppedAt:        now,
-			Source:           eruncommon.StopHistorySourceHostManual,
+			Source:           activity.StopHistorySourceHostManual,
 			Reason:           reason,
 			CloudContextName: strings.TrimSpace(input.CloudContextName),
 		}
 		// Fold an armed idle breakdown into the manual stop so the row shows
 		// both the manual action and what would have auto-fired. No pending
 		// file just means a plain manual stop.
-		if pending, ok, err := eruncommon.LoadEnvironmentStopPending(tenant, environment); err != nil {
+		if pending, ok, err := activity.LoadEnvironmentStopPending(tenant, environment); err != nil {
 			return nil, IdleStopRecordResult{}, err
 		} else if ok {
 			entry.GraceSeconds = pending.GraceSeconds
@@ -124,10 +124,10 @@ func idleStopRecordTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 				entry.Markers = append(entry.Markers, stopHistoryMarkerFromPending(marker, pending.Since))
 			}
 		}
-		if err := eruncommon.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
+		if err := activity.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
 			return nil, IdleStopRecordResult{}, err
 		}
-		if err := eruncommon.ClearEnvironmentStopPending(tenant, environment); err != nil {
+		if err := activity.ClearEnvironmentStopPending(tenant, environment); err != nil {
 			return nil, IdleStopRecordResult{}, err
 		}
 		return nil, IdleStopRecordResult{
@@ -138,8 +138,8 @@ func idleStopRecordTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTo
 	}
 }
 
-func stopHistoryMarkerFromPending(marker eruncommon.EnvironmentIdleMarker, since time.Time) eruncommon.EnvironmentStopHistoryMarker {
-	out := eruncommon.EnvironmentStopHistoryMarker{
+func stopHistoryMarkerFromPending(marker activity.EnvironmentIdleMarker, since time.Time) activity.EnvironmentStopHistoryMarker {
+	out := activity.EnvironmentStopHistoryMarker{
 		Name:   marker.Name,
 		Idle:   marker.Idle,
 		Reason: marker.Reason,

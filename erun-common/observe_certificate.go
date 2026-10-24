@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -191,7 +192,7 @@ func observedOrdersForCertificate(certificateName string, requests, orders, chal
 	return result
 }
 
-func certificateChainArgs(req ShellLaunchParams) (certificateRequests, orders, challenges []string) {
+func certificateChainArgs(req config.ShellLaunchParams) (certificateRequests, orders, challenges []string) {
 	return observeGetArgs(req, "certificaterequests.cert-manager.io"),
 		observeGetArgs(req, "orders.acme.cert-manager.io"),
 		observeGetArgs(req, "challenges.acme.cert-manager.io")
@@ -221,7 +222,7 @@ func fetchOwnedResourceList(args []string, kind string) ([]ownedResourceItem, er
 // reason. ctx/req are needed here (unlike the other observe fetchers) because
 // that walk is itself conditional on what the first read finds, so its
 // kubectl calls are traced only when they actually run.
-func fetchObservedCertificates(ctx core.Context, req ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
+func fetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
 	raw, stderr, err := runObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {

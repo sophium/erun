@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 func execWritePushTestStore(t *testing.T) erunUIStore {
@@ -33,9 +33,9 @@ func TestExecCommitCallsMCPWithTheClaimedBranchAndMessage(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(_ context.Context, endpoint, _, branch, message string) (eruncommon.CommitWorkingTreeResult, error) {
+		execCommit: func(_ context.Context, endpoint, _, branch, message string) (gitx.CommitWorkingTreeResult, error) {
 			gotEndpoint, gotBranch, gotMessage = endpoint, branch, message
-			return eruncommon.CommitWorkingTreeResult{Branch: branch, Commit: "abc123", Files: []string{"a.txt"}}, nil
+			return gitx.CommitWorkingTreeResult{Branch: branch, Commit: "abc123", Files: []string{"a.txt"}}, nil
 		},
 	})
 
@@ -61,9 +61,9 @@ func TestExecCommitRequiresAMessage(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execCommit: func(context.Context, string, string, string, string) (eruncommon.CommitWorkingTreeResult, error) {
+		execCommit: func(context.Context, string, string, string, string) (gitx.CommitWorkingTreeResult, error) {
 			t.Fatal("execCommit must not be called without a message")
-			return eruncommon.CommitWorkingTreeResult{}, nil
+			return gitx.CommitWorkingTreeResult{}, nil
 		},
 	})
 
@@ -79,9 +79,9 @@ func TestExecCommitReturnsUnreachableWhenPortClosed(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return false },
 		canReachMCPEndpoint: func(int) bool { return false },
-		execCommit: func(context.Context, string, string, string, string) (eruncommon.CommitWorkingTreeResult, error) {
+		execCommit: func(context.Context, string, string, string, string) (gitx.CommitWorkingTreeResult, error) {
 			calls++
-			return eruncommon.CommitWorkingTreeResult{}, nil
+			return gitx.CommitWorkingTreeResult{}, nil
 		},
 	})
 
@@ -100,9 +100,9 @@ func TestExecPushCallsMCPWithTheClaimedBranch(t *testing.T) {
 		store:               execWritePushTestStore(t),
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		execPush: func(_ context.Context, _, _, branch, remote string) (eruncommon.PushWorkingTreeBranchResult, error) {
+		execPush: func(_ context.Context, _, _, branch, remote string) (gitx.PushWorkingTreeBranchResult, error) {
 			gotBranch, gotRemote = branch, remote
-			return eruncommon.PushWorkingTreeBranchResult{Branch: branch, Remote: "origin", Commit: "abc123"}, nil
+			return gitx.PushWorkingTreeBranchResult{Branch: branch, Remote: "origin", Commit: "abc123"}, nil
 		},
 	})
 

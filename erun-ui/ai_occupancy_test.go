@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // newAIOccupancyTestApp isolates the activity-lease cache per test and returns
@@ -46,7 +46,7 @@ func newAIOccupancyTestApp(t *testing.T) (*App, *int) {
 
 func takeTestLease(t *testing.T, name string) {
 	t.Helper()
-	if _, err := eruncommon.TakeEnvironmentActivityLease(eruncommon.TakeEnvironmentActivityLeaseParams{
+	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      "erun",
 		Environment: "remote",
 		Name:        name,
@@ -163,7 +163,7 @@ func TestStartAISessionReuseSkipsOccupancyCheck(t *testing.T) {
 func TestStartAISessionReportsAHeldLeaseWhenAnActivitySnapshotIsUnreadable(t *testing.T) {
 	app, started := newAIOccupancyTestApp(t)
 	takeTestLease(t, "job-fix-1201")
-	dir, err := eruncommon.EnvironmentActivityDir("erun", "remote")
+	dir, err := activity.EnvironmentActivityDir("erun", "remote")
 	if err != nil {
 		t.Fatalf("activity dir: %v", err)
 	}

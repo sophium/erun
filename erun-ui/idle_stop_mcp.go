@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // idleStopMCPTimeout bounds every idle-stop MCP round-trip so a stale
@@ -50,7 +50,7 @@ func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, envi
 // loadStopHistoryViaMCP reads the stop-history audit trail from the pod,
 // the source of truth the in-pod monitor appends to, so a desktop
 // returning after a break sees the complete history.
-func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]eruncommon.EnvironmentStopHistoryEntry, error) {
+func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]activity.EnvironmentStopHistoryEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
@@ -80,13 +80,13 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, enviro
 		return nil, err
 	}
 	var payload struct {
-		Entries []eruncommon.EnvironmentStopHistoryEntry `json:"entries"`
+		Entries []activity.EnvironmentStopHistoryEntry `json:"entries"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
 	if payload.Entries == nil {
-		return []eruncommon.EnvironmentStopHistoryEntry{}, nil
+		return []activity.EnvironmentStopHistoryEntry{}, nil
 	}
 	return payload.Entries, nil
 }

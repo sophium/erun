@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // TestStartSessionStopsReconnectingAfterRepeatedFailures guards against
@@ -256,15 +257,15 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 		// The instance goes to `stopping` but the cache stays running, so the
 		// on-disk status branch alone would allow the respawn — only the intent
 		// marker can block it, which is what this test isolates.
-		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.CloudContextStatus{
+		stopCloudContext: func(_ context.Context, name string) (config.CloudContextStatus, error) {
+			return config.CloudContextStatus{
 				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
@@ -321,15 +322,15 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 
 	app := NewApp(erunUIDeps{
 		store: store,
-		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.CloudContextStatus{
+		stopCloudContext: func(_ context.Context, name string) (config.CloudContextStatus, error) {
+			return config.CloudContextStatus{
 				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 
@@ -375,12 +376,12 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	wantErr := errors.New("aws stop failed")
 	app := NewApp(erunUIDeps{
 		store: store,
-		stopCloudContext: func(_ context.Context, _ string) (eruncommon.CloudContextStatus, error) {
-			return eruncommon.CloudContextStatus{}, wantErr
+		stopCloudContext: func(_ context.Context, _ string) (config.CloudContextStatus, error) {
+			return config.CloudContextStatus{}, wantErr
 		},
 	})
 	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	if _, err := app.StopCloudContext("managed-cloud"); err == nil {

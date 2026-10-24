@@ -20,12 +20,11 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 	"gopkg.in/yaml.v3"
 )
 
 type (
-	GitValueResolverFunc func(core.Context, string) (string, error)
-	GitCommandRunnerFunc func(string, io.Writer, io.Writer, ...string) error
 	GitBranchCheckerFunc func(core.Context, string, string) (bool, error)
 )
 
@@ -145,10 +144,10 @@ type releaseArtifacts struct {
 }
 
 func ResolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
-	return resolveReleaseSpec(ctx, findProjectRoot, configpkg.LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitBranchExists, GitCommandRunner, params)
+	return resolveReleaseSpec(ctx, findProjectRoot, configpkg.LoadProjectConfig, gitx.GitCurrentBranch, gitx.GitShortCommit, GitBranchExists, gitx.GitCommandRunner, params)
 }
 
-func resolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc, params ReleaseParams) (ReleaseSpec, error) {
+func resolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (ReleaseSpec, error) {
 	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit)
 
 	inputs, err := resolveReleaseInputs(ctx, findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit, params)
@@ -222,9 +221,9 @@ func traceReleaseUmbrella(ctx core.Context, version string) (core.Context, func(
 	}
 }
 
-func runReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func runReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	if runGit == nil {
-		runGit = GitCommandRunner
+		runGit = gitx.GitCommandRunner
 	}
 	if syncPackagingChecksums == nil {
 		syncPackagingChecksums = syncReleasePackagingChecksums
@@ -252,7 +251,7 @@ func runReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerF
 // corruption: a tag whose artifacts never landed names a dead version, and
 // because `erun deploy` never builds, a dead version is not deployable by
 // accident. If the release's source is wrong, fix it and release again.
-func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
 	return runReleaseSpec(ctx, spec, runGit, nil, nil)
 }
 
@@ -265,7 +264,7 @@ func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerF
 // would not publish, the pre-spend base-branch and disk-headroom checks, and
 // the build+publish itself. That is why a release's tag is a record of the
 // source it points at and never a claim that artifacts exist for it.
-func runClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func runClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
 		return err
@@ -347,7 +346,7 @@ func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) er
 // release, which marks source control only -- it says what did not happen, so a
 // release that exits 0 having published nothing cannot read as one that
 // published something.
-func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, publisher *ReleasePublisher) error {
+func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		if spec.Version != "" {
 			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
@@ -366,7 +365,7 @@ func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit GitCommand
 	return runReleasePublication(ctx, *publisher)
 }
 
-func runReleaseStages(ctx core.Context, spec ReleaseSpec, stages []ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStages(ctx core.Context, spec ReleaseSpec, stages []ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	for _, stage := range stages {
 		stepCtx, finish := ctx.StartTimingStep(stage.Name)
 		err := runReleaseStage(stepCtx, spec, stage, runGit, syncPackagingChecksums)
@@ -402,7 +401,7 @@ func ensureReleaseWorktreeClean(ctx core.Context, projectRoot string) error {
 	return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
 }
 
-func runReleaseStage(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStage(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	ctx.Trace("stage: " + stage.Name)
 	stageFileUpdates, err := releaseStageFileUpdates(ctx, stage, syncPackagingChecksums)
 	if err != nil {
@@ -451,7 +450,7 @@ func releaseStageCommands(ctx core.Context, stage ReleaseStage, updates []Releas
 	return stage.GitCommands
 }
 
-func runReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+func runReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
 		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
@@ -484,7 +483,7 @@ func runReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, c
 // runReleaseStageCommand runs one of a stage's git commands. A push captures
 // its own stderr, because that is the only stream GitHub's bypass notice ever
 // appears on; every other stage command streams straight through.
-func runReleaseStageCommand(ctx core.Context, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+func runReleaseStageCommand(ctx core.Context, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	if !isGitPushArgs(command.Args) {
 		return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 	}
@@ -500,7 +499,7 @@ func shouldSkipExistingReleaseTag(args []string) bool {
 	return len(args) >= 3 && args[0] == "tag" && args[1] == "-a" && strings.TrimSpace(args[2]) != ""
 }
 
-func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, command ReleaseCommandSpec) (bool, error) {
+func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, command ReleaseCommandSpec) (bool, error) {
 	tag := strings.TrimSpace(command.Args[2])
 	if tag == "" {
 		return false, nil
@@ -514,7 +513,7 @@ func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit GitCommandRunn
 	return canSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func canSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, tag string, runGit GitCommandRunnerFunc) (bool, error) {
+func canSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
@@ -550,7 +549,7 @@ func canSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, 
 // automatically is judged too aggressive for a git tag inside a release flow,
 // so the refusal instead names the diagnosis and the exact remedy, rather than
 // leaving the operator to work out both by hand.
-func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit GitCommandRunnerFunc) error {
+func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit gitx.GitCommandRunnerFunc) error {
 	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
 	pushed, err := gitRemoteTagExists(ctx, projectRoot, "origin", tag)
 	if err != nil || pushed {
@@ -570,7 +569,7 @@ func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, ta
 // (no remote, no network, unresolved ref) — an unknown answer is never
 // treated as "reachable" or "unreachable", since either would risk offering
 // the reclaim message, or withholding it, on a guess.
-func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit GitCommandRunnerFunc) (reachable bool, known bool) {
+func releaseBaseBranchIncorporates(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (reachable bool, known bool) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" || commit == "" {
 		return false, false
@@ -613,7 +612,7 @@ const releaseStampWalkLimit = 20
 // while each one is unpushed and origin's branch history has never
 // incorporated it — the same leftover-vs-real-collision boundary
 // releaseTagMismatchError already draws for the release tag.
-func resolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit GitValueResolverFunc, runGit GitCommandRunnerFunc) (string, error) {
+func resolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, error) {
 	base, found, err := findLeftoverReleaseStampBase(ctx, projectRoot, branch, runGit)
 	if err != nil {
 		return "", err
@@ -631,7 +630,7 @@ func resolveReleaseVersionCommit(ctx core.Context, projectRoot, branch string, r
 // previously published stamp, not an interrupted attempt's leftover. found
 // is false when HEAD carries no such leftover, meaning version resolution
 // should keep using HEAD as before.
-func findLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit GitCommandRunnerFunc) (string, bool, error) {
+func findLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) (string, bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return "", false, nil
@@ -672,7 +671,7 @@ func findLeftoverReleaseStampBase(ctx core.Context, projectRoot, branch string, 
 // incorporated by origin/branch — the two conditions that together make it a
 // safe-to-skip-past leftover from an interrupted attempt rather than real,
 // published history.
-func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit GitCommandRunnerFunc) (bool, error) {
+func isLeftoverReleaseStampCommit(projectRoot, branch, commit string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
 	subject, err := gitCommitSubject(projectRoot, commit)
 	if err != nil {
 		return false, err
@@ -688,7 +687,7 @@ func gitShortCommitOf(ctx core.Context, projectRoot, commit string) (string, err
 	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", commit)
 	output, err := core.Command("git", "-C", projectRoot, "rev-parse", "--short", commit).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)
 		}
 		return "", err
@@ -696,7 +695,7 @@ func gitShortCommitOf(ctx core.Context, projectRoot, commit string) (string, err
 	return strings.TrimSpace(string(output)), nil
 }
 
-func deleteExistingReleaseTag(ctx core.Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {
+func deleteExistingReleaseTag(ctx core.Context, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) error {
 	localExists, err := gitTagExists(ctx, projectRoot, tag)
 	if err != nil {
 		return err
@@ -767,30 +766,6 @@ func gitResolvedRef(ctx core.Context, projectRoot, ref string) (string, bool, er
 	return "", false, err
 }
 
-func GitCurrentBranch(ctx core.Context, projectRoot string) (string, error) {
-	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
-	output, err := core.Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
-	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
-			return "", fmt.Errorf("%w: %s", err, stderr)
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-func GitShortCommit(ctx core.Context, projectRoot string) (string, error) {
-	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", "HEAD")
-	output, err := core.Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output()
-	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
-			return "", fmt.Errorf("%w: %s", err, stderr)
-		}
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
 // GitBranchExists reports whether branch exists locally or as an
 // origin-tracking ref. release's sync-develop/push stages run `git checkout
 // <branch>`, which git resolves to a new local branch tracking
@@ -825,15 +800,6 @@ func gitRefExists(ctx core.Context, projectRoot, ref string) (bool, error) {
 	return false, err
 }
 
-func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) error {
-	cmd := core.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.Env = gitCommandEnv(dir)
-	return cmd.Run()
-}
-
 func gitWorktreeClean(ctx core.Context, projectRoot string) (bool, error) {
 	// Only tracked-file changes gate the release: release publishes HEAD,
 	// not the working tree, so untracked files (e.g. IDE state under
@@ -850,87 +816,7 @@ func gitWorktreeClean(ctx core.Context, projectRoot string) (bool, error) {
 	return strings.TrimSpace(string(output)) == "", nil
 }
 
-func gitCommandEnv(dir string) []string {
-	env := os.Environ()
-
-	authorName := firstNonEmptyEnv(env, "GIT_AUTHOR_NAME")
-	authorEmail := firstNonEmptyEnv(env, "GIT_AUTHOR_EMAIL")
-	committerName := firstNonEmptyEnv(env, "GIT_COMMITTER_NAME")
-	committerEmail := firstNonEmptyEnv(env, "GIT_COMMITTER_EMAIL")
-
-	name := authorName
-	if name == "" {
-		name = committerName
-	}
-	if name == "" {
-		name = gitConfigValue(dir, "user.name")
-	}
-	if name == "" {
-		name = firstNonEmptyEnv(env, "ERUN_GIT_USER_NAME")
-	}
-	if name == "" {
-		name = configpkg.DefaultReleaseGitUserName
-	}
-
-	email := authorEmail
-	if email == "" {
-		email = committerEmail
-	}
-	if email == "" {
-		email = gitConfigValue(dir, "user.email")
-	}
-	if email == "" {
-		email = firstNonEmptyEnv(env, "ERUN_GIT_USER_EMAIL")
-	}
-	if email == "" {
-		email = configpkg.DefaultReleaseGitUserEmail
-	}
-
-	env = appendOrReplaceEnv(env, "GIT_AUTHOR_NAME", name)
-	env = appendOrReplaceEnv(env, "GIT_AUTHOR_EMAIL", email)
-	env = appendOrReplaceEnv(env, "GIT_COMMITTER_NAME", name)
-	env = appendOrReplaceEnv(env, "GIT_COMMITTER_EMAIL", email)
-
-	return env
-}
-
-func gitConfigValue(dir, key string) string {
-	cmd := core.Command("git", "config", "--get", key)
-	cmd.Dir = dir
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(output))
-}
-
-func firstNonEmptyEnv(env []string, key string) string {
-	prefix := key + "="
-	for _, entry := range env {
-		if !strings.HasPrefix(entry, prefix) {
-			continue
-		}
-		value := strings.TrimSpace(strings.TrimPrefix(entry, prefix))
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func appendOrReplaceEnv(env []string, key, value string) []string {
-	prefix := key + "="
-	for i, entry := range env {
-		if !strings.HasPrefix(entry, prefix) {
-			continue
-		}
-		env[i] = prefix + value
-		return env
-	}
-	return append(env, prefix+value)
-}
-
-func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc, GitBranchCheckerFunc, GitCommandRunnerFunc) {
+func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, gitx.GitValueResolverFunc, gitx.GitValueResolverFunc, GitBranchCheckerFunc, gitx.GitCommandRunnerFunc) {
 	if findProjectRoot == nil {
 		findProjectRoot = configpkg.FindProjectRoot
 	}
@@ -938,21 +824,21 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 		loadProjectConfig = configpkg.LoadProjectConfig
 	}
 	if resolveBranch == nil {
-		resolveBranch = GitCurrentBranch
+		resolveBranch = gitx.GitCurrentBranch
 	}
 	if resolveCommit == nil {
-		resolveCommit = GitShortCommit
+		resolveCommit = gitx.GitShortCommit
 	}
 	if branchExists == nil {
 		branchExists = GitBranchExists
 	}
 	if runGit == nil {
-		runGit = GitCommandRunner
+		runGit = gitx.GitCommandRunner
 	}
 	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit
 }
 
-func resolveReleaseInputs(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit GitCommandRunnerFunc, params ReleaseParams) (releaseInputs, error) {
+func resolveReleaseInputs(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (releaseInputs, error) {
 	ctx.Trace("release: resolving project root")
 	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
 	if err != nil {
@@ -1024,7 +910,7 @@ func loadReleaseConfig(projectRoot string, loadProjectConfig ProjectConfigLoader
 	return projectConfig.NormalizedReleaseConfig(), nil
 }
 
-func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc, runGit GitCommandRunnerFunc) (string, string, error) {
+func resolveReleaseGitState(ctx core.Context, projectRoot string, resolveBranch, resolveCommit gitx.GitValueResolverFunc, runGit gitx.GitCommandRunnerFunc) (string, string, error) {
 	branch, err := resolveBranch(ctx, projectRoot)
 	if err != nil {
 		return "", "", err

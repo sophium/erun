@@ -8,6 +8,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // HostAWSCredentialsProfile is the profile the runtime chart wires into the
@@ -50,13 +52,13 @@ type HostCredentialsStatus struct {
 // own AWS profile and writes them into the env's runtime pod under the erun-host
 // profile. The secret is read here and streamed to the pod on stdin, so it never
 // appears in an argument, a trace line, or a golden.
-func RefreshHostAWSCredentials(ctx core.Context, store CloudReadStore, result config.OpenResult, deps CloudDependencies) (HostCredentialsRefresh, error) {
+func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, result config.OpenResult, deps cloud.CloudDependencies) (HostCredentialsRefresh, error) {
 	alias := strings.TrimSpace(result.EnvConfig.CloudProviderAlias)
 	if alias == "" {
 		return HostCredentialsRefresh{}, fmt.Errorf("environment %s/%s has no AWS cloud provider alias; attach one with `erun cloud set %s %s --alias <alias>`",
 			result.Tenant, result.Environment, result.Tenant, result.Environment)
 	}
-	provider, err := ResolveCloudProvider(store, alias)
+	provider, err := cloud.ResolveCloudProvider(store, alias)
 	if err != nil {
 		return HostCredentialsRefresh{}, err
 	}
@@ -84,7 +86,7 @@ func RefreshHostAWSCredentials(ctx core.Context, store CloudReadStore, result co
 		return refresh, nil
 	}
 
-	credentials, err := ExportCloudProviderCredentials(ctx, store, alias, deps)
+	credentials, err := cloud.ExportCloudProviderCredentials(ctx, store, alias, deps)
 	if err != nil {
 		return HostCredentialsRefresh{}, fmt.Errorf("export host credentials for %s: %w (run `erun cloud login --alias %s` if the SSO session lapsed)", provider.Alias, err, provider.Alias)
 	}
@@ -98,16 +100,16 @@ func RefreshHostAWSCredentials(ctx core.Context, store CloudReadStore, result co
 // InspectHostAWSCredentials reads back the pod's erun-host profile so staleness
 // is diagnosable at the erun layer. It reports presence and expiry only — the
 // script it runs never prints credential material.
-func InspectHostAWSCredentials(ctx core.Context, runner RemoteCommandRunnerFunc, store CloudReadStore, result config.OpenResult) (HostCredentialsStatus, error) {
+func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (HostCredentialsStatus, error) {
 	status := HostCredentialsStatus{
 		Alias:   strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Profile: HostAWSCredentialsProfile,
 		Region:  resolveEnvironmentAWSRegion(store, result.EnvConfig),
 	}
 	req := ShellLaunchParamsFromResult(result)
-	out, err := RunTracedRemoteCommand(ctx, runner, req, "host-credentials-read-script", hostAWSCredentialsReadScript())
+	out, err := kube.RunTracedRemoteCommand(ctx, runner, req, "host-credentials-read-script", hostAWSCredentialsReadScript())
 	if err != nil {
-		return HostCredentialsStatus{}, fmt.Errorf("read host credentials%s: %w", formatRemoteCommandStderr(out.Stderr), err)
+		return HostCredentialsStatus{}, fmt.Errorf("read host credentials%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	if ctx.DryRun {
 		return status, nil
@@ -138,13 +140,13 @@ func traceRuntimeExecCommand(ctx core.Context, args []string, label, script stri
 // hostAWSCredentialsWriteArgs streams the profile to the pod on stdin: -i (not
 // -it) keeps stdin a pipe for the credential bytes, and no credential value is
 // ever one of these args.
-func hostAWSCredentialsWriteArgs(req ShellLaunchParams, script string) []string {
-	args := kubectlTargetArgs(req)
+func hostAWSCredentialsWriteArgs(req config.ShellLaunchParams, script string) []string {
+	args := config.KubectlTargetArgs(req)
 	args = append(args, "exec", "-i")
-	return append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+	return append(args, "deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 }
 
-func writeHostAWSCredentials(req ShellLaunchParams, script, payload string) error {
+func writeHostAWSCredentials(req config.ShellLaunchParams, script, payload string) error {
 	cmd := core.Command("kubectl", hostAWSCredentialsWriteArgs(req, script)...)
 	cmd.Stdin = strings.NewReader(payload)
 	var output bytes.Buffer
@@ -152,9 +154,9 @@ func writeHostAWSCredentials(req ShellLaunchParams, script, payload string) erro
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
 		if message := strings.TrimSpace(output.String()); message != "" {
-			return fmt.Errorf("write host credentials into %s: %w: %s", RuntimeReleaseName(req.Tenant), err, message)
+			return fmt.Errorf("write host credentials into %s: %w: %s", config.RuntimeReleaseName(req.Tenant), err, message)
 		}
-		return fmt.Errorf("write host credentials into %s: %w", RuntimeReleaseName(req.Tenant), err)
+		return fmt.Errorf("write host credentials into %s: %w", config.RuntimeReleaseName(req.Tenant), err)
 	}
 	return nil
 }
@@ -162,7 +164,7 @@ func writeHostAWSCredentials(req ShellLaunchParams, script, payload string) erro
 // renderHostAWSCredentialsProfile builds the profile block the pod receives. The
 // region rides along so the pod still resolves one from its own profile when the
 // chart legitimately threads no AWS_REGION.
-func renderHostAWSCredentialsProfile(credentials CloudProviderCredentials, region string) string {
+func renderHostAWSCredentialsProfile(credentials cloud.CloudProviderCredentials, region string) string {
 	lines := []string{
 		"[" + HostAWSCredentialsProfile + "]",
 		"aws_access_key_id = " + strings.TrimSpace(credentials.AccessKeyID),
@@ -259,13 +261,13 @@ func parseHostAWSCredentialsReport(stdout string) (bool, time.Time) {
 // host. Empty means nothing resolved — callers must then omit the region rather
 // than pass an empty one, because an empty AWS_REGION overrides (instead of
 // falling back to) whatever the pod's own profile carries.
-func resolveEnvironmentAWSRegion(store CloudReadStore, env config.EnvConfig) string {
+func resolveEnvironmentAWSRegion(store config.CloudReadStore, env config.EnvConfig) string {
 	if region := cloudContextRegionFromName(env.KubernetesContext); region != "" {
 		return region
 	}
 	alias := strings.TrimSpace(env.CloudProviderAlias)
 	if alias != "" {
-		if provider, err := ResolveCloudProvider(store, alias); err == nil {
+		if provider, err := cloud.ResolveCloudProvider(store, alias); err == nil {
 			if region := strings.TrimSpace(provider.SSORegion); region != "" {
 				return region
 			}

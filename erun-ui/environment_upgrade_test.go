@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing verifies
@@ -30,7 +31,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 			if namespace != config.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
@@ -38,9 +39,9 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			case "petios-devops":
 				// A successful-but-empty lookup (not a failed one) is what triggers
 				// the fallback to the default image.
-				return eruncommon.RuntimeRegistryVersions{}, nil
+				return registry.RuntimeRegistryVersions{}, nil
 			case config.DefaultRuntimeImageName:
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.85", fallbackSnapshot},
 					LatestStable:   "1.0.85",
@@ -49,7 +50,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
+			return registry.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -116,26 +117,26 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	assertCandidateVersions(t, item.Candidates, tenantSnapshot, defaultSnapshot)
 }
 
-func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
+func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
 	t.Helper()
 
-	return func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+	return func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
 		switch repository {
 		case "petios-devops":
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{tenantSnapshot},
 				LatestSnapshot: tenantSnapshot,
 			}, nil
 		case config.DefaultRuntimeImageName:
-			return eruncommon.RuntimeRegistryVersions{
+			return registry.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				LatestSnapshot: defaultSnapshot,
 			}, nil
 		default:
 			t.Fatalf("unexpected registry repository: %s", repository)
 		}
-		return eruncommon.RuntimeRegistryVersions{}, nil
+		return registry.RuntimeRegistryVersions{}, nil
 	}
 }
 
@@ -173,14 +174,14 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return eruncommon.RuntimeRegistryVersions{
+				return registry.RuntimeRegistryVersions{
 					LatestStable:   "1.0.85",
 					LatestSnapshot: canonicalSnapshot,
 				}, nil
 			}
-			return eruncommon.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 
@@ -216,11 +217,11 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return eruncommon.RuntimeRegistryVersions{}, errors.New("registry unreachable")
+				return registry.RuntimeRegistryVersions{}, errors.New("registry unreachable")
 			}
-			return eruncommon.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 

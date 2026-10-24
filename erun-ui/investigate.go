@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // InvestigateFailure captures a failure report to a host file and spawns a
@@ -143,7 +144,7 @@ func (a *App) finishExpiredInvestigation(record investigationRecord) {
 	a.stopOrchestratorSession(record.ID)
 	a.investigations.appendInvestigationLog(record, fmt.Sprintf("terminated: still running after the %s lifetime bound without concluding; stopped by the desktop", investigationAge(investigationLifetime)))
 	if record.Tenant != "" && record.Environment != "" && record.LeaseID != "" {
-		if _, err := eruncommon.ReleaseEnvironmentActivityLease(record.Tenant, record.Environment, record.LeaseID); err != nil {
+		if _, err := activity.ReleaseEnvironmentActivityLease(record.Tenant, record.Environment, record.LeaseID); err != nil {
 			log.Printf("erun-app: release investigation lease %s: %v", record.LeaseID, err)
 		}
 	}

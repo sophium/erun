@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // TestBuildFingerprintExcludesChartForVersionPinnedBase locks in the contract
@@ -36,7 +38,7 @@ func TestBuildFingerprintExcludesChartForVersionPinnedBase(t *testing.T) {
 		return DockerBuildSpec{
 			ContextDir:     dockerDir,
 			DockerfilePath: dockerfile,
-			Image:          DockerImageReference{ImageName: "comp", VersionFromBuildDir: pinned},
+			Image:          helm.DockerImageReference{ImageName: "comp", VersionFromBuildDir: pinned},
 		}
 	}
 	fingerprint := func(pinned bool) string {

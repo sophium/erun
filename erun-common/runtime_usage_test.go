@@ -12,6 +12,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // TestParseRuntimeUsageReadings covers the fixture shapes #1233 measured
@@ -24,7 +25,7 @@ import (
 // top-level assert helpers, so the number of fixtures does not grow this
 // function's own cyclomatic complexity.
 func TestParseRuntimeUsageReadings(t *testing.T) {
-	req := ShellLaunchParams{Tenant: "frs", Environment: "local"}
+	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second
 
 	for _, tc := range runtimeUsageReadingCases() {
@@ -49,9 +50,9 @@ func TestParseRuntimeUsageReadings(t *testing.T) {
 type runtimeUsageReadingCase struct {
 	name       string
 	output     string
-	wantCPU    RuntimeCPUUsage
-	wantMemory RuntimeMemoryUsage
-	wantDisk   RuntimeDiskUsage
+	wantCPU    config.RuntimeCPUUsage
+	wantMemory config.RuntimeMemoryUsage
+	wantDisk   config.RuntimeDiskUsage
 }
 
 func runtimeUsageReadingCases() []runtimeUsageReadingCase {
@@ -80,13 +81,13 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"disk_own_used_kb=54000000",
 			}, "\n"),
 			// 100000 usec of CPU burned over 1 elapsed second, against a 1-core quota.
-			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{
+			wantDisk: config.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
 				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
@@ -107,11 +108,11 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_after_ns=2000000000",
 				"disk_workspace=",
 			}, "\n"),
-			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
+			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
 			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
@@ -129,10 +130,10 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"disk_workspace=/dev/sda1 100 50 40 55% /home/erun",
 				"disk_own_used_kb=50",
 			}, "\n"),
-			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
-			wantMemory: RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
+			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
 			// Disk uses statfs via df, not cgroup, so it stays readable regardless.
-			wantDisk: RuntimeDiskUsage{
+			wantDisk: config.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50,
 				OwnUsedBytes: 50 * 1024, OwnUsageObserved: true,
@@ -145,9 +146,9 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"memory_current=",
 				"memory_max=2147483648",
 			}, "\n"),
-			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
-			wantDisk:   RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
+			wantDisk:   config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// A long filesystem identifier pushes df's data row onto its own
@@ -157,9 +158,9 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			// `tail -n1` already selects this line.
 			name:       "wrapped filesystem name still parses by column, not fixed index",
 			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
-			wantCPU:    RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
-			wantDisk: RuntimeDiskUsage{
+			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
+			wantDisk: config.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50,
 				OwnUsedBytes: 300 * 1024, OwnUsageObserved: true,
@@ -195,12 +196,12 @@ func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
 				"disk_workspace=",
 				"disk_own_used_kb=12345",
 			}, "\n"),
-			wantCPU: RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 1048576, PeakBytes: 1048576, PeakObserved: true,
 				LimitBytes: 2097152, PercentOfLimit: 50, OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{
+			wantDisk: config.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				Unavailable:      "an empty df line should report unavailable even though own usage was read",
 				OwnUsedBytes:     12345 * 1024,
@@ -226,12 +227,12 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				"memory_peak=",
 				"memory_oom_kill=0",
 			}, "\n"),
-			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, LimitBytes: 2147483648,
 				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// memory.events' oom_kill counter can be as unreadable as
@@ -245,12 +246,12 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				"memory_peak=1027301376",
 				"memory_oom_kill=",
 			}, "\n"),
-			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// memory.events' "max" counter (cgroup ceiling hits) is exactly
@@ -265,13 +266,13 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				"memory_oom_kill=0",
 				"memory_ceiling_hits=",
 			}, "\n"),
-			wantCPU: RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: RuntimeMemoryUsage{
+			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: config.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true,
 			},
-			wantDisk: RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 	}
 }
@@ -280,7 +281,7 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 // presence, not its exact text -- the fixture table above uses the field to
 // document *why* a case is unavailable) and, only when available, the
 // numeric fields.
-func assertRuntimeCPU(t *testing.T, got, want RuntimeCPUUsage) {
+func assertRuntimeCPU(t *testing.T, got, want config.RuntimeCPUUsage) {
 	t.Helper()
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("CPU.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
@@ -297,7 +298,7 @@ func assertRuntimeCPU(t *testing.T, got, want RuntimeCPUUsage) {
 	}
 }
 
-func assertRuntimeMemory(t *testing.T, got, want RuntimeMemoryUsage) {
+func assertRuntimeMemory(t *testing.T, got, want config.RuntimeMemoryUsage) {
 	t.Helper()
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("Memory.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
@@ -321,7 +322,7 @@ func assertRuntimeMemory(t *testing.T, got, want RuntimeMemoryUsage) {
 // assertRuntimeMemoryPeakAndOOM checks CurrentBytes/PeakBytes/OOMKills
 // alongside their own Observed bit: a value alone is never enough to say
 // whether it means anything.
-func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want RuntimeMemoryUsage) {
+func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want config.RuntimeMemoryUsage) {
 	t.Helper()
 	if got.CurrentBytes != want.CurrentBytes {
 		t.Errorf("Memory.CurrentBytes = %d, want %d", got.CurrentBytes, want.CurrentBytes)
@@ -343,7 +344,7 @@ func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want RuntimeMemoryUsage) {
 	}
 }
 
-func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
+func assertRuntimeDisk(t *testing.T, got, want config.RuntimeDiskUsage) {
 	t.Helper()
 	if got.Mount != want.Mount {
 		t.Errorf("Disk.Mount = %q, want %q", got.Mount, want.Mount)
@@ -373,7 +374,7 @@ func assertRuntimeDisk(t *testing.T, got, want RuntimeDiskUsage) {
 	}
 }
 
-func assertRuntimeDiskOwnUsage(t *testing.T, got, want RuntimeDiskUsage) {
+func assertRuntimeDiskOwnUsage(t *testing.T, got, want config.RuntimeDiskUsage) {
 	t.Helper()
 	if got.OwnUsageObserved != want.OwnUsageObserved {
 		t.Errorf("Disk.OwnUsageObserved = %t, want %t", got.OwnUsageObserved, want.OwnUsageObserved)
@@ -387,7 +388,7 @@ func assertRuntimeDiskOwnUsage(t *testing.T, got, want RuntimeDiskUsage) {
 // reading nobody acts on is decoration, so each threshold must fire exactly
 // at its boundary and stay silent below it.
 func TestParseRuntimeUsageWarnings(t *testing.T) {
-	req := ShellLaunchParams{Tenant: "frs", Environment: "local"}
+	req := config.ShellLaunchParams{Tenant: "frs", Environment: "local"}
 	interval := time.Second
 
 	t.Run("memory warning fires at the threshold and not below it", func(t *testing.T) {
@@ -507,7 +508,7 @@ func hasWarningContaining(warnings []string, substr string) bool {
 // an unread value marshal identically unless their own Observed bit is
 // carried alongside them.
 func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
-	unread, err := json.Marshal(RuntimeMemoryUsage{CurrentBytes: 100})
+	unread, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100})
 	if err != nil {
 		t.Fatalf("marshal unread: %v", err)
 	}
@@ -515,7 +516,7 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 		t.Errorf("an unread peak must omit both peakBytes and peakObserved, got %s", unread)
 	}
 
-	genuineZero, err := json.Marshal(RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
+	genuineZero, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
 	if err != nil {
 		t.Fatalf("marshal genuine zero: %v", err)
 	}
@@ -526,7 +527,7 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 		t.Errorf("a genuine zero peak still omits the zero-valued peakBytes key, got %s", genuineZero)
 	}
 
-	var roundTripped RuntimeMemoryUsage
+	var roundTripped config.RuntimeMemoryUsage
 	if err := json.Unmarshal(genuineZero, &roundTripped); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -572,12 +573,12 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
 	}, "\n")
 
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
+	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
-			return RemoteCommandResult{Stdout: busyDindReading}, nil
+			return kube.RemoteCommandResult{Stdout: busyDindReading}, nil
 		}
-		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
 	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
@@ -608,12 +609,12 @@ func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
 // been unable to see anyway.
 func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 	idleRuntimeReading := "cgroup_type=cgroup2fs\nmemory_current=100\nmemory_max=200\nmemory_peak=100\nmemory_oom_kill=0\ncpu_max=100000 100000\ncpu_usage_before=0\ncpu_usage_after=0\ncpu_time_before_ns=1000000000\ncpu_time_after_ns=2000000000\ndisk_workspace=overlay 100 50 50 50% /home/erun"
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
+	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
-			return RemoteCommandResult{}, errors.New("container not found")
+			return kube.RemoteCommandResult{}, errors.New("container not found")
 		}
-		return RemoteCommandResult{Stdout: idleRuntimeReading}, nil
+		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
 	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
@@ -678,12 +679,12 @@ func runtimeUsageDindReading(cpuMax string, periods, throttled int64) string {
 // some unrelated warning cannot pass as silent about throttling.
 func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 	t.Helper()
-	req := ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ ShellLaunchParams, container, _ string) (RemoteCommandResult, error) {
+	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
+	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
 		if container == runtimeDindContainerName {
-			return RemoteCommandResult{Stdout: dindReading}, nil
+			return kube.RemoteCommandResult{Stdout: dindReading}, nil
 		}
-		return RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
+		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
 	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
@@ -870,12 +871,12 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 
 	// The reading taken after the restart: both counters reset, so neither the
 	// live peak nor the live kill count supports a warning by itself.
-	restarted := RuntimeMemoryUsage{
+	restarted := config.RuntimeMemoryUsage{
 		CurrentBytes: 1503238554, PeakBytes: 2254857830, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(1503238554) / float64(limit),
 		OOMKills: 0, OOMKillsObserved: true,
 	}
-	unrestarted := RuntimeMemoryUsage{
+	unrestarted := config.RuntimeMemoryUsage{
 		CurrentBytes: 6442450943, PeakBytes: 6443237376, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(6442450943) / float64(limit),
 		OOMKills: 1, OOMKillsObserved: true,
@@ -894,7 +895,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("a genuinely idle environment is still healthy", func(t *testing.T) {
-		idle := RuntimeMemoryUsage{
+		idle := config.RuntimeMemoryUsage{
 			CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true,
 			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
 			OOMKillsObserved: true,
@@ -946,7 +947,7 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 	t.Cleanup(xdg.Reload)
 
 	// The post-restart reading: both counters reset, so it warns about nothing.
-	reading := parseRuntimeUsage(ShellLaunchParams{Tenant: "erun", Environment: "code3"}, strings.Join([]string{
+	reading := parseRuntimeUsage(config.ShellLaunchParams{Tenant: "erun", Environment: "code3"}, strings.Join([]string{
 		"cgroup_type=cgroup2fs",
 		"memory_current=1503238554",
 		"memory_max=6442450944",
@@ -960,8 +961,8 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
 	}
 
-	history := AppendRuntimeUsageSample(RuntimeUsageHistory{}, RuntimeUsage{
-		Memory: RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
+	history := AppendRuntimeUsageSample(RuntimeUsageHistory{}, config.RuntimeUsage{
+		Memory: config.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
 	}, time.Now())
 	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {
 		t.Fatalf("save history: %v", err)

@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // ResizeInput mirrors the CLI's `erun resize` flags. tenant/environment must
@@ -74,7 +75,7 @@ func resizeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 					ApplyRecommendation: input.ApplyRecommendation,
 				},
 				OverrideLease: input.OverrideLease,
-				Holder: eruncommon.EnvironmentActivityLeaseHolder{
+				Holder: activity.EnvironmentActivityLeaseHolder{
 					Orchestrator: input.Orchestrator,
 					Tenant:       identity.Tenant,
 					User:         identity.User,

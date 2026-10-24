@@ -10,6 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"gopkg.in/yaml.v3"
 )
 
@@ -21,9 +22,9 @@ func testPlatformAliasProvider() configpkg.CloudProviderConfig {
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
 		ERun: &configpkg.ERunProviderConfig{
-			APIURL:          HostedPlatformAPIURL,
+			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: erunRefreshTokenRef("erun+api.erunpaas.com@erun"),
+			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
 		},
 	}
 }
@@ -85,7 +86,7 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 	if platform.Provider != configpkg.CloudProviderERun || platform.Alias != "erun+api.erunpaas.com@erun" {
 		t.Fatalf("platform alias did not round-trip: %+v", platform)
 	}
-	if platform.ERun == nil || platform.ERun.APIURL != HostedPlatformAPIURL {
+	if platform.ERun == nil || platform.ERun.APIURL != cloud.HostedPlatformAPIURL {
 		t.Fatalf("platform api configuration did not round-trip: %+v", platform.ERun)
 	}
 }
@@ -98,12 +99,12 @@ func TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider(t *testing
 func TestRenderPlatformAliasEntryResolvesToTheSecretStorePath(t *testing.T) {
 	provider := testPlatformAliasProvider()
 	ref := provider.ERun.RefreshTokenRef
-	store := NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))
+	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
 	if err := store.SaveCloudSecret(ref, "refresh-token-value"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	written := filepath.Base(store.(fileCloudSecretStore).path(ref))
-	if got := cloudSecretFileName(ref); got != written {
+	written := filepath.Base(store.(cloud.FileCloudSecretStore).Path(ref))
+	if got := cloud.CloudSecretFileName(ref); got != written {
 		t.Fatalf("cloudSecretFileName = %q, but the store wrote %q", got, written)
 	}
 }
@@ -152,7 +153,7 @@ func TestProvisionedAliasResolvesInThePod(t *testing.T) {
 	if resolved.Alias != provider.Alias {
 		t.Fatalf("got alias %q, want %q", resolved.Alias, provider.Alias)
 	}
-	store := NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
+	store := cloud.NewFileCloudSecretStore(filepath.Join(boot.configHome(), configpkg.ConfigRoot, "cloud-secrets"))
 	token, err := store.LoadCloudSecret(resolved.ERun.RefreshTokenRef)
 	if err != nil {
 		t.Fatalf("the pod's secret store cannot read the token at the ref the resolved alias names: %v", err)
@@ -173,7 +174,7 @@ func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 		t.Fatalf("the unprovisioned config does not parse: %v", err)
 	}
 	_, err := ResolveERunPlatformAlias(staticCloudStore{config: before}, "")
-	if !errors.Is(err, ErrPlatformAliasUnusable) {
+	if !errors.Is(err, cloud.ErrPlatformAliasUnusable) {
 		t.Fatalf("expected the reported unusable-alias failure before provisioning, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "no erun platform cloud provider alias is configured") {
@@ -183,7 +184,7 @@ func assertUnprovisionedAliasIsUnusable(t *testing.T, document string) {
 
 func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 	secretsDir := t.TempDir()
-	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(secretsDir, cloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(secretsDir, cloud.CloudSecretStoreDirName))}
 
 	t.Run("nil store", func(t *testing.T) {
 		assertNoAliasToGive(t, nil, deps, "a nil config store")
@@ -198,7 +199,7 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 	})
 
 	t.Run("nil secret store", func(t *testing.T) {
-		assertNoAliasToGive(t, signedInHostStore(), CloudDependencies{}, "a host with no readable secret store")
+		assertNoAliasToGive(t, signedInHostStore(), cloud.CloudDependencies{}, "a host with no readable secret store")
 	})
 
 	t.Run("signed in", func(t *testing.T) {
@@ -228,7 +229,7 @@ func TestResolveHostPlatformAliasNeedsASession(t *testing.T) {
 // ambiguity is the only unnamed decline that is not one -- so a decline that
 // quietly acquired a reason here is how the silence those callers rely on would
 // turn into a line a routine deploy carries.
-func assertNoAliasToGive(t *testing.T, store CloudReadStore, deps CloudDependencies, what string) {
+func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps cloud.CloudDependencies, what string) {
 	t.Helper()
 	_, _, ok, cause := resolveHostPlatformAlias(store, deps, "")
 	if ok {
@@ -243,7 +244,7 @@ func assertNoAliasToGive(t *testing.T, store CloudReadStore, deps CloudDependenc
 // not satisfied by "some alias exists": an AWS alias is not a platform
 // credential, and provisioning one would leave the pod exactly as blocked.
 func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
-	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
 		{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 	}}}
@@ -254,7 +255,7 @@ func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 
 func TestProvisionPlatformAliasSecretNoSignedInHostAlias(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 
 	name, err := provisionPlatformAliasSecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "", deps)
 	if err != nil {
@@ -277,7 +278,7 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log)}
-	name, err := provisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", DefaultCloudDependencies())
+	name, err := provisionPlatformAliasSecret(ctx, store, "team", "team-dev", "", cloud.DefaultCloudDependencies())
 	if err != nil {
 		t.Fatalf("an ambiguous host is a decline for init, not a failure: %v", err)
 	}
@@ -291,7 +292,7 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 
 func TestProvisionPlatformAliasSecretDryRunSkipsApply(t *testing.T) {
 	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 	provider := testPlatformAliasProvider()
 	if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 		t.Fatalf("save: %v", err)
@@ -312,7 +313,7 @@ func TestProvisionPlatformAliasSecretDryRunSkipsApply(t *testing.T) {
 // and the token itself.
 func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) {
 	captured := installCapturingKubectl(t)
-	deps := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
+	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 	provider := testPlatformAliasProvider()
 	if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 		t.Fatalf("save: %v", err)
@@ -335,9 +336,9 @@ func TestProvisionPlatformAliasSecretCarriesEntryFileNameAndToken(t *testing.T) 
 		platformAliasSecretFileKey,
 		platformAliasSecretTokenKey,
 		"alias: erun+api.erunpaas.com@erun",
-		"apiurl: " + HostedPlatformAPIURL,
+		"apiurl: " + cloud.HostedPlatformAPIURL,
 		"refresh-token-value",
-		cloudSecretFileName(provider.ERun.RefreshTokenRef),
+		cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef),
 	} {
 		if !strings.Contains(manifest, want) {
 			t.Errorf("manifest missing %q:\n%s", want, manifest)
@@ -391,7 +392,7 @@ func TestHelmPlatformAliasSecretSetArgs(t *testing.T) {
 // the deploying host's own config is what gets read.
 func signedInDefaultHostStore(t *testing.T, provider configpkg.CloudProviderConfig) {
 	t.Helper()
-	store, err := DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
@@ -427,7 +428,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	deployInput := HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: RuntimeReleaseName("team"),
+		ReleaseName: configpkg.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	// The reported state, asserted rather than assumed: with no name recorded
@@ -450,7 +451,7 @@ func TestReconcilePlatformAliasSecretRetrofitsAnEnvironmentInitialisedWithoutOne
 	for _, want := range []string{
 		"name: team-devops-platform-alias",
 		"alias: " + provider.Alias,
-		cloudSecretFileName(provider.ERun.RefreshTokenRef),
+		cloud.CloudSecretFileName(provider.ERun.RefreshTokenRef),
 		"refresh-token-value",
 	} {
 		if !strings.Contains(manifest, want) {
@@ -489,7 +490,7 @@ func TestReconcilePlatformAliasSecretLeavesAnEnvironmentThatAlreadyNamesOneAlone
 	deployInput := HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             RuntimeReleaseName("team"),
+		ReleaseName:             configpkg.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -524,7 +525,7 @@ func TestReconcilePlatformAliasSecretSilentlySkipsWhenTheHostHasNothingToGive(t 
 	deployInput := HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: RuntimeReleaseName("team"),
+		ReleaseName: configpkg.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -558,9 +559,9 @@ func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
 		ERun: &configpkg.ERunProviderConfig{
-			APIURL:          HostedPlatformAPIURL,
+			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
-			RefreshTokenRef: erunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
+			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
 		},
 	}
 }
@@ -572,7 +573,7 @@ func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
 func ambiguousHostStore(t *testing.T) staticCloudStore {
 	t.Helper()
 	redirectConfigHomeForTest(t)
-	secretStore, err := DefaultCloudSecretStore()
+	secretStore, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
@@ -597,7 +598,7 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 // one decline the operator named nothing for that they can still lift.
 func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 	store := ambiguousHostStore(t)
-	deps := DefaultCloudDependencies()
+	deps := cloud.DefaultCloudDependencies()
 	chosen := secondPlatformAliasProvider()
 
 	got, token, ok, err := resolveHostPlatformAlias(store, deps, chosen.Alias)
@@ -659,7 +660,7 @@ func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
 // success.
 func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *testing.T) {
 	store := ambiguousHostStore(t)
-	deps := DefaultCloudDependencies()
+	deps := cloud.DefaultCloudDependencies()
 	const alias = "erun+api.nowhere.example@erun"
 
 	t.Run("names nothing configured", func(t *testing.T) {
@@ -677,12 +678,12 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 		// A secret store holding nothing, so the only thing missing is the
 		// session -- the state a fresh machine is in for an alias it has been
 		// told about but never signed in to.
-		empty := CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloudSecretStoreDirName))}
+		empty := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
 		assertSelectionRejected(t, store, empty, testPlatformAliasProvider().Alias, "erun cloud login")
 	})
 
 	t.Run("names an alias with no readable secret store", func(t *testing.T) {
-		assertSelectionRejected(t, store, CloudDependencies{}, testPlatformAliasProvider().Alias, "--erun-alias")
+		assertSelectionRejected(t, store, cloud.CloudDependencies{}, testPlatformAliasProvider().Alias, "--erun-alias")
 	})
 }
 
@@ -691,7 +692,7 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 // and the alias, never a usable alias alongside it. wantCause, when set, is the
 // phrase the failure owes the operator -- the reason, or the command that fixes
 // it.
-func assertSelectionRejected(t *testing.T, store staticCloudStore, deps CloudDependencies, alias, wantCause string) {
+func assertSelectionRejected(t *testing.T, store staticCloudStore, deps cloud.CloudDependencies, alias, wantCause string) {
 	t.Helper()
 	_, _, ok, err := resolveHostPlatformAlias(store, deps, alias)
 	if err == nil {
@@ -727,7 +728,7 @@ func TestReconcilePlatformAliasSecretHonoursTheOperatorsExplicitAlias(t *testing
 	deployInput := HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: RuntimeReleaseName("team"),
+		ReleaseName: configpkg.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -782,7 +783,7 @@ func TestReconcilePlatformAliasSecretReportsAnAmbiguousHostWithoutTheFlag(t *tes
 	deployInput := HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: RuntimeReleaseName("team"),
+		ReleaseName: configpkg.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -829,7 +830,7 @@ func TestReconcilePlatformAliasSecretLeavesARecordedEnvironmentAloneOnAnAmbiguou
 	deployInput := HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             RuntimeReleaseName("team"),
+		ReleaseName:             configpkg.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -870,7 +871,7 @@ func TestReconcilePlatformAliasSecretSaysWhenAnExplicitAliasWasNotUsed(t *testin
 	deployInput := HelmDeploySpec{
 		Tenant:                  "team",
 		Environment:             "dev",
-		ReleaseName:             RuntimeReleaseName("team"),
+		ReleaseName:             configpkg.RuntimeReleaseName("team"),
 		Namespace:               "team-dev",
 		PlatformAliasSecretName: "team-devops-platform-alias",
 	}
@@ -905,7 +906,7 @@ func TestReconcilePlatformAliasSecretReportsAnExplicitAliasOnADeploy(t *testing.
 	deployInput := HelmDeploySpec{
 		Tenant:      "team",
 		Environment: "dev",
-		ReleaseName: RuntimeReleaseName("team"),
+		ReleaseName: configpkg.RuntimeReleaseName("team"),
 		Namespace:   "team-dev",
 	}
 	var log bytes.Buffer
@@ -980,7 +981,7 @@ func TestRetrofittedAliasRecordSurvivesTheDeploysOwnVersionPersistence(t *testin
 		Deploy: HelmDeploySpec{
 			Tenant:               "team",
 			Environment:          "dev",
-			ReleaseName:          RuntimeReleaseName("team"),
+			ReleaseName:          configpkg.RuntimeReleaseName("team"),
 			Namespace:            "team-dev",
 			Version:              "1.0.0",
 			ResolvedRuntimeImage: "registry.example/test/team-devops:1.0.0",

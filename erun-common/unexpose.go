@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // UnexposeParams are the inputs to removing an environment's per-env wildcard
@@ -55,7 +56,7 @@ type UnexposeResult struct {
 // The DNS delete uses the same two-path decision RunExposeService's upsert
 // does — see resolveUnexposeDNSDeleter. deleteDNSRecord, when
 // non-nil, overrides the decision outright (tests).
-func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -90,8 +91,8 @@ func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeSto
 		ctx.Trace(fmt.Sprintf("unexpose: platform powerdns namespace %s", result.PlatformNamespace))
 		ctx.TraceCommand("", "kubectl", powerDNSDeleteArgs(deleteParams)...)
 	} else {
-		tracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
-		tracePlatformCall(ctx, dnsProvider, "DELETE", "/v1/environments/{environment_id}/hostname")
+		cloud.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+		cloud.TracePlatformCall(ctx, dnsProvider, "DELETE", "/v1/environments/{environment_id}/hostname")
 	}
 	if ctx.DryRun {
 		return result, nil
@@ -111,7 +112,7 @@ func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (Unexp
 	if err := model.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
 		return UnexposeResult{}, err
 	}
-	if err := ValidateTenantName(tenant); err != nil {
+	if err := config.ValidateTenantName(tenant); err != nil {
 		return UnexposeResult{}, err
 	}
 
@@ -124,7 +125,7 @@ func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (Unexp
 		return UnexposeResult{}, err
 	}
 
-	envLabel := KubernetesNamespaceName(tenant, environment)
+	envLabel := config.KubernetesNamespaceName(tenant, environment)
 	return UnexposeResult{
 		Tenant:                     tenant,
 		Environment:                environment,

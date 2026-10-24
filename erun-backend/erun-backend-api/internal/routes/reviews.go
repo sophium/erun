@@ -9,7 +9,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	apirepository "github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
-	"github.com/sophium/erun/erun-common"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -179,7 +178,7 @@ func canonicalRepositoryParam(repository string) (string, error) {
 func (r ReviewRoutes) listReviews(w http.ResponseWriter, req *http.Request) {
 	query := req.URL.Query()
 	status := model.ReviewStatus(strings.ToUpper(strings.TrimSpace(query.Get("status"))))
-	if _, err := eruncommon.NormalizeReviewStatus(string(status)); err != nil {
+	if _, err := modelpkg.NormalizeReviewStatus(string(status)); err != nil {
 		writeErrorCode(w, http.StatusBadRequest, "INVALID_QUERY", err.Error())
 		return
 	}

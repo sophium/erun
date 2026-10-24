@@ -57,7 +57,7 @@ func ResolveRuntimeVersionLine(tenant string, env config.EnvConfig) RuntimeVersi
 	return RuntimeVersionLine{
 		Line:      config.ImageReleaseLine(name),
 		Image:     reference,
-		Disagrees: stock && RuntimeReleaseName(tenant) != DevopsComponentName,
+		Disagrees: stock && config.RuntimeReleaseName(tenant) != config.DevopsComponentName,
 	}
 }
 

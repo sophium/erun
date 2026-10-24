@@ -7,9 +7,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
-
-const localSnapshotTimestampFormat = "20060102150405"
 
 var (
 	ErrVersionFileNotFound        = errors.New("version file not found for current module")
@@ -17,12 +16,6 @@ var (
 	ErrLinuxPackageBuildNotFound  = errors.New("linux package Dockerfile not found in current directory")
 	multiPlatformDockerBuilds     = []string{"linux/amd64", "linux/arm64"}
 )
-
-type commandSpec struct {
-	Dir  string   `json:"dir,omitempty"`
-	Name string   `json:"name"`
-	Args []string `json:"args"`
-}
 
 type (
 	BuildContextResolverFunc func() (DockerBuildContext, error)
@@ -46,31 +39,10 @@ type DockerBuildContext struct {
 	DockerfilePath string
 }
 
-type DockerImageReference struct {
-	ProjectRoot string
-	Environment string
-	Registry    string
-	ImageName   string
-	Version     string
-	// BaseVersion is the stable semver without the snapshot suffix, set only for
-	// local snapshot builds where it differs from Version. It exists so downstream
-	// images (FROM …:${ERUN_VERSION}) resolve from the local Docker cache instead
-	// of the registry.
-	BaseVersion         string
-	Tag                 string
-	VersionFilePath     string
-	VersionFromBuildDir bool
-	// Insecure marks Registry as plain HTTP (a cluster registry with
-	// `insecure: true`). `docker manifest` never consults the daemon's
-	// insecure-registry list, so anything that shells out to it for this
-	// image must pass its own `--insecure` explicitly.
-	Insecure bool
-}
-
 type DockerBuildSpec struct {
 	ContextDir     string
 	DockerfilePath string
-	Image          DockerImageReference
+	Image          helm.DockerImageReference
 	Platforms      []string
 	Push           bool
 	Verbosity      int
@@ -144,7 +116,7 @@ type DockerBuildSpec struct {
 
 type DockerPushSpec struct {
 	Dir       string
-	Image     DockerImageReference
+	Image     helm.DockerImageReference
 	Verbosity int
 }
 
@@ -165,7 +137,7 @@ type BuildExecutionSpec struct {
 	// componentCharts are the Helm charts under <tenant>-devops/k8s/*, resolved as
 	// first-class build source independent of images. A plain build packages them
 	// (validate); a build that pushes publishes them.
-	componentCharts []HelmChartPublishSpec
+	componentCharts []helm.HelmChartPublishSpec
 }
 
 type DockerPushExecutionSpec struct {
@@ -173,7 +145,7 @@ type DockerPushExecutionSpec struct {
 	pushes []DockerPushSpec
 	// componentCharts are the <tenant>-devops/k8s/* charts this push publishes,
 	// discovered by directory scan rather than keyed to same-named images.
-	componentCharts []HelmChartPublishSpec
+	componentCharts []helm.HelmChartPublishSpec
 }
 
 type DockerCommandTarget struct {

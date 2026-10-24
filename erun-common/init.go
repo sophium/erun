@@ -13,6 +13,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,9 +44,7 @@ type (
 	NamespaceEnsurerFunc    func(string, string) error
 	ProjectConfigLoaderFunc func(string) (configpkg.ProjectConfig, string, error)
 	ProjectConfigSaverFunc  func(string, configpkg.ProjectConfig) error
-	RemoteRuntimeWaitFunc   func(ShellLaunchParams) error
-	RemoteCommandRunnerFunc func(ShellLaunchParams, string) (RemoteCommandResult, error)
-	SleepFunc               func(time.Duration)
+	RemoteRuntimeWaitFunc   func(configpkg.ShellLaunchParams) error
 )
 
 type (
@@ -52,10 +52,6 @@ type (
 	TenantSelectionResult struct {
 		Tenant     string
 		Initialize bool
-	}
-	RemoteCommandResult struct {
-		Stdout string
-		Stderr string
 	}
 )
 
@@ -254,9 +250,9 @@ type BootstrapInitDependencies struct {
 	LoadProjectConfig          ProjectConfigLoaderFunc
 	SaveProjectConfig          ProjectConfigSaverFunc
 	WaitForRemoteRuntime       RemoteRuntimeWaitFunc
-	RunRemoteCommand           RemoteCommandRunnerFunc
+	RunRemoteCommand           kube.RemoteCommandRunnerFunc
 	DeployHelmChart            HelmChartDeployerFunc
-	Sleep                      SleepFunc
+	Sleep                      core.SleepFunc
 	// ProbeHostedRegistry answers whether erun's hosted registry can be pushed
 	// to. Unset defaults to a real probe, so a caller that wires nothing still
 	// refuses an unreachable registry instead of writing config whose pushes
@@ -333,7 +329,7 @@ func TraceNamespaceEnsurer(ctx core.Context, ensure NamespaceEnsurerFunc) Namesp
 		return nil
 	}
 	return func(contextName, namespace string) error {
-		TraceEnsureKubernetesNamespace(ctx, contextName, namespace)
+		kube.TraceEnsureKubernetesNamespace(ctx, contextName, namespace)
 		if ctx.DryRun {
 			return nil
 		}
@@ -435,10 +431,10 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 }
 
 func (s *bootstrapRunState) run() error {
-	if err := ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
+	if err := configpkg.ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
 		return err
 	}
-	if err := ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
+	if err := configpkg.ValidateRuntimeDindPodResources(s.params.RuntimeDindPod); err != nil {
 		return err
 	}
 	if err := s.validateRemoteParams(); err != nil {
@@ -762,7 +758,7 @@ func (s *bootstrapRunState) loadTenantConfig() error {
 }
 
 func (s *bootstrapRunState) createTenantConfig() error {
-	if err := ValidateTenantName(s.tenant); err != nil {
+	if err := configpkg.ValidateTenantName(s.tenant); err != nil {
 		return err
 	}
 	projectRoot, err := s.tenantProjectRoot()
@@ -882,9 +878,9 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		MCPAuthPublicKeyPath: strings.TrimSpace(s.params.MCPAuthPublicKeyPath),
 		// The pod cannot start on a private runtime image without these, so a new
 		// env records them from the start rather than on a second init.
-		ImagePullSecrets:   normalizeImagePullSecrets(s.params.ImagePullSecrets),
-		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
-		RuntimeDindPod:     NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
+		ImagePullSecrets:   configpkg.NormalizeImagePullSecrets(s.params.ImagePullSecrets),
+		RuntimePod:         configpkg.NormalizeRuntimePodResources(s.params.RuntimePod),
+		RuntimeDindPod:     configpkg.NormalizeRuntimeDindPodResources(s.params.RuntimeDindPod),
 		DisableBuildScript: s.params.DisableBuildScript,
 		PlatformAccount:    s.params.PlatformAccount,
 		Deploy:             initDeployConfig(s.params),
@@ -1010,7 +1006,7 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 	if err != nil {
 		return "", "", false, err
 	}
-	managedCloud, err := managedCloudEnvironment(s.runner.Store, configpkg.EnvConfig{
+	managedCloud, err := activity.ManagedCloudEnvironment(s.runner.Store, configpkg.EnvConfig{
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
 		Type:               s.params.ResolvedType(),
@@ -1111,7 +1107,7 @@ func (s *bootstrapRunState) applyEnvRuntimeVersion() {
 }
 
 func (s *bootstrapRunState) applyEnvImagePullSecrets() {
-	pullSecrets := normalizeImagePullSecrets(s.params.ImagePullSecrets)
+	pullSecrets := configpkg.NormalizeImagePullSecrets(s.params.ImagePullSecrets)
 	if len(pullSecrets) == 0 {
 		s.traceEnvSettingKept("image pull secrets", strings.Join(s.envConfig.ImagePullSecrets, ","))
 		return
@@ -1142,7 +1138,7 @@ func (s *bootstrapRunState) applyEnvRuntimePod() {
 		s.traceEnvSettingKept("runtime pod resources", formatRuntimePodResources(s.envConfig.RuntimePod))
 		return
 	}
-	s.envConfig.RuntimePod = NormalizeRuntimePodResources(desired)
+	s.envConfig.RuntimePod = configpkg.NormalizeRuntimePodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: runtime pod resources set to " + formatRuntimePodResources(s.envConfig.RuntimePod))
 }
@@ -1163,7 +1159,7 @@ func (s *bootstrapRunState) applyEnvRuntimeDindPod() {
 		s.traceEnvSettingKept("erun-dind sidecar resources", formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 		return
 	}
-	s.envConfig.RuntimeDindPod = NormalizeRuntimeDindPodResources(desired)
+	s.envConfig.RuntimeDindPod = configpkg.NormalizeRuntimeDindPodResources(desired)
 	s.envConfigChanged = true
 	s.runner.Context.Trace("init: erun-dind sidecar resources set to " + formatRuntimeDindPodResources(s.envConfig.RuntimeDindPod))
 }
@@ -1248,12 +1244,12 @@ func describeEnvType(envType configpkg.EnvironmentType) string {
 }
 
 func formatRuntimePodResources(resources configpkg.RuntimePodResources) string {
-	resources = NormalizeRuntimePodResources(resources)
+	resources = configpkg.NormalizeRuntimePodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
 func formatRuntimeDindPodResources(resources configpkg.RuntimePodResources) string {
-	resources = NormalizeRuntimeDindPodResources(resources)
+	resources = configpkg.NormalizeRuntimeDindPodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
@@ -1282,7 +1278,7 @@ func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) err
 		s.envConfig.CloudProviderAlias = cloudProviderAlias
 		s.envConfigChanged = true
 	}
-	managedCloud, err := managedCloudEnvironment(s.runner.Store, s.envConfig)
+	managedCloud, err := activity.ManagedCloudEnvironment(s.runner.Store, s.envConfig)
 	if err != nil {
 		return err
 	}
@@ -1342,7 +1338,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
 	}
-	s.runner.Context.Trace("init: runtime deploys use the published " + DevopsComponentName + " chart; no devops scaffold is written")
+	s.runner.Context.Trace("init: runtime deploys use the published " + configpkg.DevopsComponentName + " chart; no devops scaffold is written")
 	return nil
 }
 
@@ -1362,7 +1358,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 		s.envConfigChanged = true
 	}
 	if s.params.Bootstrap {
-		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + DevopsComponentName + " chart")
+		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + configpkg.DevopsComponentName + " chart")
 	}
 	return s.runner.writeRemoteInitMarker(req, RemoteInitMarker{
 		Tenant:             s.tenant,
@@ -1440,41 +1436,6 @@ func remoteHostConfigLabel(tenant, envName string) string {
 	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
 }
 
-// maxTenantNameLength caps a tenant name at the RFC 1123 DNS label limit. The
-// combined `<tenant>-<env>` namespace is normalized and truncated separately by
-// normalizeNamespaceName; this bound just keeps a tenant name a single label.
-const maxTenantNameLength = 63
-
-// ValidateTenantName enforces that a tenant name is a single DNS-safe label of
-// lowercase letters and digits with no hyphens. Tenant names feed the
-// `<tenant>-<env>` namespace mapping (KubernetesNamespaceName); forbidding
-// hyphens keeps that mapping unambiguous (split on the first hyphen) and
-// injective, so `a-b`+`c` and `a`+`b-c` can no longer collide on one namespace.
-//
-// The rule is checked before normalization so a caller cannot rely on
-// normalizeNamespaceName to silently repair an invalid name. It is enforced at
-// tenant creation only; tenants created before this rule keep working unchanged
-// (no re-validation on load), preserving back-compat.
-func ValidateTenantName(name string) error {
-	if name == "" {
-		return fmt.Errorf("tenant name is required")
-	}
-	if len(name) > maxTenantNameLength {
-		return fmt.Errorf("invalid tenant name %q: must be at most %d characters", name, maxTenantNameLength)
-	}
-	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			continue
-		}
-		return fmt.Errorf("invalid tenant name %q: tenant names must use only lowercase letters and digits with no hyphens, so the <tenant>-<env> namespace is unambiguous", name)
-	}
-	return nil
-}
-
-func KubernetesNamespaceName(tenant, envName string) string {
-	return configpkg.NormalizeNamespaceName(tenant + "-" + envName)
-}
-
 func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.Tenant = strings.TrimSpace(params.Tenant)
 	params.SelectedTenant = strings.TrimSpace(params.SelectedTenant)
@@ -1526,7 +1487,7 @@ func (s bootstrapRunner) withRuntimeDefaults() bootstrapRunner {
 		s.WaitForRemoteRuntime = WaitForShellDeployment
 	}
 	if s.RunRemoteCommand == nil {
-		s.RunRemoteCommand = RunRemoteCommand
+		s.RunRemoteCommand = kube.RunRemoteCommand
 	}
 	if s.DeployHelmChart == nil {
 		s.DeployHelmChart = DeployHelmChart
@@ -1711,7 +1672,7 @@ func (s bootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current st
 		return current, nil
 	}
 
-	status, ok, err := findCloudContextForKubernetesContext(s.Store, kubernetesContext)
+	status, ok, err := configpkg.FindCloudContextForKubernetesContext(s.Store, kubernetesContext)
 	if err != nil || !ok {
 		return current, err
 	}
@@ -1789,7 +1750,7 @@ func (s bootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 		return err
 	}
 
-	namespace := KubernetesNamespaceName(tenant, envName)
+	namespace := configpkg.KubernetesNamespaceName(tenant, envName)
 	if namespace == "" {
 		return fmt.Errorf("kubernetes namespace name is empty for tenant %q and environment %q", tenant, envName)
 	}
@@ -1918,20 +1879,6 @@ type projectContext struct {
 	tenant string
 	root   string
 	loaded bool
-}
-
-// normalizeImagePullSecrets trims and de-duplicates the requested secret names,
-// keeping the order the operator gave so the chart renders them predictably.
-func normalizeImagePullSecrets(names []string) []string {
-	normalized := make([]string, 0, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" || slices.Contains(normalized, name) {
-			continue
-		}
-		normalized = append(normalized, name)
-	}
-	return normalized
 }
 
 // probeHostedRegistry runs the availability probe the hosted-registry choice is

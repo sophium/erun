@@ -56,7 +56,7 @@ func savePastedFileToRuntime(params pastedFileSaveParams) (string, error) {
 
 func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath string) (string, []string, string) {
 	shellParams := eruncommon.ShellLaunchParamsFromResult(result)
-	release := eruncommon.RuntimeReleaseName(result.Tenant)
+	release := config.RuntimeReleaseName(result.Tenant)
 	script := fmt.Sprintf("mkdir -p %s && base64 -d > %s", shellQuote(remoteDir), shellQuote(remotePath))
 
 	args := make([]string, 0, 12)
@@ -70,7 +70,7 @@ func buildPastedFileCopyCommand(result config.OpenResult, remoteDir, remotePath 
 		"exec",
 		"-i",
 		"-c",
-		eruncommon.DevopsComponentName,
+		config.DevopsComponentName,
 		"deployment/"+release,
 		"--",
 		"/bin/sh",

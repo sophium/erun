@@ -13,15 +13,17 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 const (
 	DefaultHost = "127.0.0.1"
 	DefaultPort = config.MCPServicePort
-	DefaultPath = eruncommon.MCPServerPath
+	DefaultPath = mcppkg.MCPServerPath
 )
 
 type HTTPConfig struct {
@@ -177,7 +179,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Header.Get(eruncommon.MCPIdleProbeHeader) == "true" {
+		if req.Header.Get(mcppkg.MCPIdleProbeHeader) == "true" {
 			next.ServeHTTP(w, req)
 			return
 		}
@@ -190,7 +192,7 @@ func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handl
 }
 
 func recordRuntimeActivity(runtime RuntimeConfig, kind string, seen bool) {
-	_ = eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+	_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
 		Tenant:      runtime.Context.Tenant,
 		Environment: runtime.Context.Environment,
 		Kind:        kind,
@@ -293,7 +295,7 @@ func newServer(info model.BuildInfo, runtime RuntimeConfig, identity authIdentit
 // shaped for the retired tool's own schema reaches this handler rather than
 // failing schema validation first.
 func registerRemovedTools(reg toolRegistrar) {
-	for name, guidance := range eruncommon.MCPRemovedTools() {
+	for name, guidance := range mcptools.MCPRemovedTools() {
 		addTool(reg, &mcp.Tool{
 			Name:        name,
 			Description: fmt.Sprintf("Removed; use %s instead.", guidance),

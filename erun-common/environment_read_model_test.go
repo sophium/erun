@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative is the
@@ -24,11 +26,11 @@ func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T
 		},
 		{
 			name: "managed cloud with a pending (mid-transition) power state",
-			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: CloudContextStatusPending},
+			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusPending},
 		},
 		{
 			name: "managed cloud with an explicitly unknown power state",
-			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: CloudContextStatusUnknown},
+			in:   EnvironmentLifecycleInputs{ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusUnknown},
 		},
 		{
 			name: "non-managed with nothing observed at all",
@@ -49,14 +51,14 @@ func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T
 
 func TestResolveEnvironmentLifecycleStateManagedCloudPowerState(t *testing.T) {
 	stopped := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
-		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: CloudContextStatusStopped,
+		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusStopped,
 	})
 	if stopped != EnvironmentLifecycleStopped {
 		t.Fatalf("want stopped, got %s", stopped)
 	}
 
 	running := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
-		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: CloudContextStatusRunning,
+		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusRunning,
 	})
 	if running != EnvironmentLifecycleRunning {
 		t.Fatalf("want running, got %s", running)
@@ -113,8 +115,8 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 	// is the realistic shape ResolveEnvironmentReadModel's default,
 	// no-live-refresh call produces for a managed-cloud environment.
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRuntime}
-	cloudContext := &CloudContextStatus{CloudContextConfig: config.CloudContextConfig{Name: "acme-dev"}}
-	idle := &EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}
+	cloudContext := &config.CloudContextStatus{CloudContextConfig: config.CloudContextConfig{Name: "acme-dev"}}
+	idle := &activity.EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}
 
 	model := AssembleEnvironmentReadModel("acme", entry, cloudContext, idle, nil)
 
@@ -128,7 +130,7 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 
 func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
-	idle := &EnvironmentIdleStatus{StopEligible: false}
+	idle := &activity.EnvironmentIdleStatus{StopEligible: false}
 	resolvedHealth := ResolveEnvironmentHealth(RootConfigInspection{}, DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
 	health := &resolvedHealth
 

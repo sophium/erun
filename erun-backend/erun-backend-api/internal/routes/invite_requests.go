@@ -10,12 +10,11 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/ratelimit"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	configpkg "github.com/sophium/erun/erun-common/base/config"
 )
 
 // InviteRequestStore is the read/decision-lookup dependency for the
@@ -362,7 +361,7 @@ func parseSubmitInviteRequestParams(req *http.Request, claims security.Claims) (
 			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, "tenantName is required"
 		}
 	case model.InviteRequestKindCreateTenant:
-		if err := eruncommon.ValidateTenantName(tenantName); err != nil {
+		if err := configpkg.ValidateTenantName(tenantName); err != nil {
 			return repository.SubmitInviteRequestParams{}, http.StatusBadRequest, err.Error()
 		}
 	default:

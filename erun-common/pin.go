@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // One erun version is written down in several places in a tenant repo — the
@@ -304,12 +305,12 @@ func ownLineChartStatement(chart string) *runtimeImageStatement {
 	}
 	reference, _ := splitChartReferenceVersion(chart)
 	name := chartNameFromReference(reference)
-	if name == "" || name == DevopsComponentName {
+	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
 	return &runtimeImageStatement{
 		Reference: chart,
-		Origin:    "from runtimechart, the " + name + " chart publishes its own runtime image, not erun's stock " + DevopsComponentName,
+		Origin:    "from runtimechart, the " + name + " chart publishes its own runtime image, not erun's stock " + config.DevopsComponentName,
 	}
 }
 
@@ -324,7 +325,7 @@ func defaultDeployImageStatement(tenant string, env config.EnvConfig) *runtimeIm
 	}
 	chartReference, _ := splitChartReferenceVersion(strings.TrimSpace(env.RuntimeChart))
 	name := defaultDeployRuntimeImageBareName(tenant, chartNameFromReference(chartReference))
-	if name == "" || name == DevopsComponentName {
+	if name == "" || name == config.DevopsComponentName {
 		return nil
 	}
 	return &runtimeImageStatement{
@@ -414,8 +415,8 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 	}
 	reference, chartVersion := splitChartReferenceVersion(chart)
 	chartName := chartNameFromReference(reference)
-	if chartName != DevopsComponentName {
-		reason := "names " + chartName + ", not the stock " + DevopsComponentName + " chart, so it rides its own release line"
+	if chartName != config.DevopsComponentName {
+		reason := "names " + chartName + ", not the stock " + config.DevopsComponentName + " chart, so it rides its own release line"
 		if chartName == "" {
 			reason = "could not be read to find its chart name"
 		}
@@ -442,7 +443,7 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 // plan this only annotates.
 func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 	note := "project root resolved from the caller's working directory, not a known checkout of this environment or its tenant"
-	if head, err := GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
+	if head, err := gitx.GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
 		note += "; HEAD is " + strings.TrimSpace(head)
 	}
 	deployed := strings.TrimSpace(plan.Previous)

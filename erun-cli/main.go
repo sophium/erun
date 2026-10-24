@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/cmd"
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
 
@@ -73,7 +74,7 @@ func runERun() int {
 // refusal is tagged with its own code by the command that produced it, so it can
 // never be read as either of the other two.
 func exitCodeFor(err error) int {
-	if errors.Is(err, eruncommon.ErrPlatformAliasUnusable) {
+	if errors.Is(err, cloud.ErrPlatformAliasUnusable) {
 		return platformAliasUnusableExitCode
 	}
 	return internal.ExitCodeFor(err)

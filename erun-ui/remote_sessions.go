@@ -5,7 +5,8 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // ListRemoteAppSessions reports the persistent desktop sessions running in the
@@ -24,12 +25,12 @@ func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	ctx, cancel := context.WithTimeout(a.backgroundContext(), 5*time.Second)
 	defer cancel()
 	output, err := a.execInRuntimePod(ctx, selection,
-		eruncommon.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
+		activity.RemoteAppSessionHeartbeatScript(selection.Tenant, selection.Environment))
 	if err != nil {
 		return nil
 	}
 	var ids []string
-	for _, heartbeat := range eruncommon.ParseRemoteAppSessionHeartbeats(output) {
+	for _, heartbeat := range activity.ParseRemoteAppSessionHeartbeats(output) {
 		if heartbeat.Running() {
 			ids = append(ids, heartbeat.ID)
 		}

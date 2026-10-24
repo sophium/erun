@@ -6,8 +6,11 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +21,7 @@ import (
 // surface has always been missing (#1199): before this, the only way to
 // start a review, comment on one, or advance the merge queue from a terminal
 // or an agent was a hand-written HTTP request.
-func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := newCommandGroup(
 		"review",
@@ -40,7 +43,7 @@ func newReviewCmd(store common.CloudReadStore, deps common.CloudDependencies) *c
 	return cmd
 }
 
-func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var params common.ReviewListParams
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -89,7 +92,7 @@ func newReviewListCmd(store common.CloudReadStore, alias *string, deps common.Cl
 	return cmd
 }
 
-func writeReviewList(ctx core.Context, reviews []common.PlatformReview) error {
+func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) error {
 	if len(reviews) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no reviews")
 		return err
@@ -109,7 +112,7 @@ func writeReviewList(ctx core.Context, reviews []common.PlatformReview) error {
 // A review created before the platform recorded a repository says so rather
 // than printing nothing, which would read as an empty value rather than an
 // absent identity.
-func writeReviewLine(ctx core.Context, review common.PlatformReview) error {
+func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) error {
 	repository := review.Repository
 	if strings.TrimSpace(repository) == "" {
 		repository = "(no repository recorded)"
@@ -127,7 +130,7 @@ func writeReviewLine(ctx core.Context, review common.PlatformReview) error {
 // a guess that the branch was named honestly, and printing it the way a
 // declared one prints would tell an operator the author had recorded an issue
 // they never mentioned. Both are shown, told apart.
-func reviewIssueSuffix(review common.PlatformReview) string {
+func reviewIssueSuffix(review platformclient.PlatformReview) string {
 	if strings.TrimSpace(review.IssueRef) == "" {
 		return ""
 	}
@@ -138,7 +141,7 @@ func reviewIssueSuffix(review common.PlatformReview) string {
 	return fmt.Sprintf(" issue=%s (%s)", review.IssueRef, source)
 }
 
-func newReviewShowCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "show REVIEW_ID",
 		Short:        "Show a review, its comment threads, and its recorded builds",
@@ -184,7 +187,7 @@ func writeReviewDetail(ctx core.Context, detail common.ReviewDetail) error {
 // writeReviewCommentLine renders one comment. A thread's status lives on its
 // root comment only (a reply's own status is never separately settable), so
 // only root lines carry status=.
-func writeReviewCommentLine(ctx core.Context, comment common.PlatformComment) error {
+func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformComment) error {
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)
 		return err
@@ -193,8 +196,8 @@ func writeReviewCommentLine(ctx core.Context, comment common.PlatformComment) er
 	return err
 }
 
-func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformCreateReviewParams
+func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformCreateReviewParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Open a review on the erun platform",
@@ -245,7 +248,7 @@ func newReviewCreateCmd(store common.CloudReadStore, alias *string, deps common.
 	return cmd
 }
 
-func newReviewCommentCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		commitID string
 		filePath string
@@ -299,7 +302,7 @@ func newReviewCommentCmd(store common.CloudReadStore, alias *string, deps common
 	return cmd
 }
 
-func newReviewResolveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "resolve REVIEW_ID COMMENT_ID",
 		Short: "Resolve a comment thread by closing its root comment",
@@ -332,7 +335,7 @@ func newReviewResolveCmd(store common.CloudReadStore, alias *string, deps common
 	return cmd
 }
 
-func newReviewUnresolveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "unresolve REVIEW_ID COMMENT_ID",
 		Short: "Reopen a comment thread by marking its root comment OPEN",
@@ -365,7 +368,7 @@ func newReviewUnresolveCmd(store common.CloudReadStore, alias *string, deps comm
 	return cmd
 }
 
-func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "close REVIEW_ID",
 		Short:        "Close a review without merging it",
@@ -393,7 +396,7 @@ func newReviewCloseCmd(store common.CloudReadStore, alias *string, deps common.C
 	return cmd
 }
 
-func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		commitID      string
 		version       string
@@ -462,7 +465,7 @@ func newReviewRecordBuildCmd(store common.CloudReadStore, alias *string, deps co
 	return cmd
 }
 
-func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		buildID   string
 		remoteURL string
@@ -520,7 +523,7 @@ func newReviewReportMergedCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "requeue REVIEW_ID",
 		Short: "Move a review stuck at MERGE back to READY",
@@ -556,13 +559,13 @@ func newReviewRequeueCmd(store common.CloudReadStore, alias *string, deps common
 	return cmd
 }
 
-func writeReviewBuildLine(ctx core.Context, build common.PlatformBuild) error {
+func writeReviewBuildLine(ctx core.Context, build platformclient.PlatformBuild) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] successful=%t commit=%s version=%s\n",
 		build.BuildID, build.Successful, build.CommitID, build.Version)
 	return err
 }
 
-func newReviewReviewersCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewReviewersCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"reviewers",
 		"Assign and remove reviewers on a review",
@@ -572,12 +575,12 @@ func newReviewReviewersCmd(store common.CloudReadStore, alias *string, deps comm
 	)
 }
 
-func writeReviewerLine(ctx core.Context, reviewer common.PlatformReviewer) error {
+func writeReviewerLine(ctx core.Context, reviewer platformclient.PlatformReviewer) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  - %s\n", reviewer.UserID)
 	return err
 }
 
-func newReviewReviewersListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "list REVIEW_ID",
 		Short:        "List a review's assigned reviewers",
@@ -613,7 +616,7 @@ func newReviewReviewersListCmd(store common.CloudReadStore, alias *string, deps 
 	return cmd
 }
 
-func newReviewReviewersAddCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var userID string
 	cmd := &cobra.Command{
 		Use:   "add REVIEW_ID",
@@ -649,7 +652,7 @@ func newReviewReviewersAddCmd(store common.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func newReviewReviewersRemoveCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	var userID string
 	cmd := &cobra.Command{
 		Use:          "remove REVIEW_ID",
@@ -680,7 +683,7 @@ func newReviewReviewersRemoveCmd(store common.CloudReadStore, alias *string, dep
 	return cmd
 }
 
-func newReviewMergeQueueCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
+func newReviewMergeQueueCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"queue",
 		"Inspect and advance a target branch's merge queue",
@@ -690,8 +693,8 @@ func newReviewMergeQueueCmd(store common.CloudReadStore, alias *string, deps com
 	)
 }
 
-func newReviewMergeQueueListCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformMergeQueueParams
+func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformMergeQueueParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List a repository's merge queue for a target branch, in queue order",
@@ -729,8 +732,8 @@ func newReviewMergeQueueListCmd(store common.CloudReadStore, alias *string, deps
 	return cmd
 }
 
-func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformMergeQueueParams
+func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformMergeQueueParams
 	cmd := &cobra.Command{
 		Use:   "advance",
 		Short: "Advance a repository's merge queue head to MERGE",
@@ -771,8 +774,8 @@ func newReviewMergeQueueAdvanceCmd(store common.CloudReadStore, alias *string, d
 	return cmd
 }
 
-func newReviewMergeQueueOverrideAdvanceCmd(store common.CloudReadStore, alias *string, deps common.CloudDependencies) *cobra.Command {
-	var params common.PlatformMergeQueueParams
+func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
+	var params platformclient.PlatformMergeQueueParams
 	var reason string
 	cmd := &cobra.Command{
 		Use:   "override-advance",

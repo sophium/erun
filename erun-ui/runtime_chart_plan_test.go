@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // The Runtime tab has to answer "which chart would this version install?" before
@@ -104,11 +104,11 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 					tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},
 					envs:    envs,
 				},
-				resolveImageRegistry: func(_ context.Context, _, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+				resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
 					if testCase.listErr != nil {
-						return eruncommon.RuntimeRegistryVersions{}, testCase.listErr
+						return registry.RuntimeRegistryVersions{}, testCase.listErr
 					}
-					return eruncommon.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
+					return registry.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
 				},
 			})
 			got := app.resolveRuntimeChartPlan("acme", testCase.environment, snapshot, testCase.localChart)

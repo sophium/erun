@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A plain activity lease is presence: many holders coexist, and taking one says
@@ -86,7 +87,7 @@ type EnvironmentExclusivityConflictError struct {
 	// release remedy below names the store the claim is really in, rather than
 	// the environment scope an exclusive take only uses when asked for it.
 	Scope  string
-	Holder EnvironmentActivityLease
+	Holder activity.EnvironmentActivityLease
 	// HolderJobID is the job behind the claim, empty when the holder is not a
 	// job (an operator holding the environment directly).
 	HolderJobID string
@@ -134,10 +135,10 @@ func formatEnvironmentExclusivityRemaining(remaining time.Duration) string {
 // environment, if any. Reading through LoadEnvironmentActivityLeases is
 // deliberate: that read is also what reclaims an expired or orphaned claim, so
 // the answer here can never be a claim nobody holds any more.
-func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (EnvironmentActivityLease, bool) {
+func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (activity.EnvironmentActivityLease, bool) {
 	claims := heldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityHoldsWholeEnvironment)
 	if len(claims) == 0 {
-		return EnvironmentActivityLease{}, false
+		return activity.EnvironmentActivityLease{}, false
 	}
 	return claims[0], true
 }
@@ -145,7 +146,7 @@ func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) 
 // environmentExclusivityHoldsWholeEnvironment is the one scope that means "no
 // other work here at all", rather than "not this resource".
 func environmentExclusivityHoldsWholeEnvironment(scope string) bool {
-	return strings.TrimSpace(scope) == EnvironmentActivityLeaseScopeEnvironment
+	return strings.TrimSpace(scope) == activity.EnvironmentActivityLeaseScopeEnvironment
 }
 
 // environmentExclusivityCoversWorktree reports whether a claim in scope covers
@@ -157,7 +158,7 @@ func environmentExclusivityHoldsWholeEnvironment(scope string) bool {
 // in a different one.
 func environmentExclusivityCoversWorktree(scope string) bool {
 	switch strings.TrimSpace(scope) {
-	case defaultEnvironmentActivityLeaseScope, EnvironmentActivityLeaseScopeEnvironment:
+	case activity.DefaultEnvironmentActivityLeaseScope, activity.EnvironmentActivityLeaseScopeEnvironment:
 		return true
 	default:
 		return false
@@ -169,12 +170,12 @@ func environmentExclusivityCoversWorktree(scope string) bool {
 // rather than the one claim, because two scopes can be held at once, one claim
 // per scope, and a caller entitled to work under one of them is not thereby
 // entitled to work under the other.
-func heldEnvironmentExclusivityClaims(tenant, environment string, now time.Time, covers func(string) bool) []EnvironmentActivityLease {
-	held, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+func heldEnvironmentExclusivityClaims(tenant, environment string, now time.Time, covers func(string) bool) []activity.EnvironmentActivityLease {
+	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
 		return nil
 	}
-	var claims []EnvironmentActivityLease
+	var claims []activity.EnvironmentActivityLease
 	for _, lease := range held {
 		if lease.Exclusive && covers(lease.Scope) {
 			claims = append(claims, lease)
@@ -186,7 +187,7 @@ func heldEnvironmentExclusivityClaims(tenant, environment string, now time.Time,
 // environmentExclusivityExemption names why this caller may run under a held
 // claim, or returns "" when it may not: either it took the claim itself and
 // named it, or the claim belongs to a job it is running inside.
-func environmentExclusivityExemption(tenant, environment string, holder EnvironmentActivityLease, underLeaseID string) string {
+func environmentExclusivityExemption(tenant, environment string, holder activity.EnvironmentActivityLease, underLeaseID string) string {
 	if environmentExclusivityClaimedByCaller(holder, underLeaseID) {
 		return fmt.Sprintf("running under the caller's own exclusive claim %s", holder.ID)
 	}
@@ -198,11 +199,11 @@ func environmentExclusivityExemption(tenant, environment string, holder Environm
 
 // environmentExclusivityConflict builds the refusal for a claim this caller is
 // not entitled to work under.
-func environmentExclusivityConflict(operation, tenant, environment string, holder EnvironmentActivityLease, requested bool, now time.Time) error {
+func environmentExclusivityConflict(operation, tenant, environment string, holder activity.EnvironmentActivityLease, requested bool, now time.Time) error {
 	holderJobID, _ := environmentJobIDFromExclusiveLeaseID(holder.ID)
 	return &EnvironmentExclusivityConflictError{
 		Operation:   operation,
-		Scope:       NormalizeExclusiveEnvironmentActivityLeaseScope(holder.Scope),
+		Scope:       activity.NormalizeExclusiveEnvironmentActivityLeaseScope(holder.Scope),
 		Holder:      holder,
 		HolderJobID: holderJobID,
 		Requested:   requested,
@@ -268,11 +269,11 @@ func EnsureEnvironmentNotExclusivelyHeld(ctx core.Context, what, underLeaseID st
 // Comparing raw against sanitized is how erun#1652 happened: an id needing
 // sanitisation never matched its stored form, so every renewal misread as a
 // fresh claim — here the same mistake would refuse a caller its own claim.
-func environmentExclusivityClaimedByCaller(holder EnvironmentActivityLease, underLeaseID string) bool {
+func environmentExclusivityClaimedByCaller(holder activity.EnvironmentActivityLease, underLeaseID string) bool {
 	if strings.TrimSpace(underLeaseID) == "" {
 		return false
 	}
-	resolved, err := ResolveEnvironmentActivityLeaseID(underLeaseID, underLeaseID)
+	resolved, err := activity.ResolveEnvironmentActivityLeaseID(underLeaseID, underLeaseID)
 	if err != nil {
 		return false
 	}
@@ -282,7 +283,7 @@ func environmentExclusivityClaimedByCaller(holder EnvironmentActivityLease, unde
 // environmentExclusivityHeldByOwnLineage reports whether the claim belongs to a
 // job this process is running inside — its own job, or one that started it,
 // transitively.
-func environmentExclusivityHeldByOwnLineage(tenant, environment string, holder EnvironmentActivityLease) bool {
+func environmentExclusivityHeldByOwnLineage(tenant, environment string, holder activity.EnvironmentActivityLease) bool {
 	holderJobID, ok := environmentJobIDFromExclusiveLeaseID(holder.ID)
 	if !ok {
 		return false
@@ -392,15 +393,15 @@ func resolveEnvironmentJobExclusivity(ctx core.Context, dir string, params Start
 // which point liveness reclaim applies to it exactly as it does to any other
 // lease. Until then only the TTL bounds it, which is the same bound a remote
 // holder has always had.
-func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now time.Time) (EnvironmentActivityLease, error) {
-	return TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now time.Time) (activity.EnvironmentActivityLease, error) {
+	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
 		Environment: params.Environment,
 		Name:        params.Name,
 		ID:          environmentJobExclusiveLeaseID(params.ID),
 		TTL:         params.LeaseTTL,
 		Exclusive:   true,
-		Scope:       EnvironmentActivityLeaseScopeEnvironment,
+		Scope:       activity.EnvironmentActivityLeaseScopeEnvironment,
 		Holder:      environmentJobHolder(params.Tenant),
 		Now:         now,
 	})
@@ -414,8 +415,8 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 // by every lease a job takes on its own behalf — the exclusive claim and the
 // plain presence lease alike — so a refusal against either names the same
 // initiator.
-func environmentJobHolder(tenant string) EnvironmentActivityLeaseHolder {
-	return EnvironmentActivityLeaseHolder{
+func environmentJobHolder(tenant string) activity.EnvironmentActivityLeaseHolder {
+	return activity.EnvironmentActivityLeaseHolder{
 		Orchestrator: strings.TrimSpace(os.Getenv(OrchestratorIDEnvVar)),
 		Tenant:       tenant,
 	}
@@ -425,7 +426,7 @@ func environmentJobHolder(tenant string) EnvironmentActivityLeaseHolder {
 // scoped to this job's own id, so it can never drop a claim that has since been
 // legitimately taken by someone else.
 func releaseEnvironmentJobExclusivityClaim(tenant, environment, id string) error {
-	_, err := ReleaseExclusiveEnvironmentActivityLease(tenant, environment, EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
+	_, err := activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, activity.EnvironmentActivityLeaseScopeEnvironment, environmentJobExclusiveLeaseID(id))
 	return err
 }
 
@@ -434,7 +435,7 @@ func releaseEnvironmentJobExclusivityClaim(tenant, environment, id string) error
 // concurrently; only one create wins, and the loser must be told who won rather
 // than shown the store's raw conflict text.
 func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err error, now time.Time) error {
-	var conflict *EnvironmentActivityLeaseConflictError
+	var conflict *activity.EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
 		return err
 	}
@@ -450,7 +451,7 @@ func environmentJobExclusivityTakeError(params StartEnvironmentJobParams, err er
 // raw schema rejection reads like a malformed call rather than the version
 // mismatch it is.
 func DescribeExclusiveJobStartVersionSkew(tenant, environment string, exclusive bool, err error) error {
-	return describeExclusiveClaimVersionSkew(tenant, environment, "job start",
+	return activity.DescribeExclusiveClaimVersionSkew(tenant, environment, "job start",
 		"upgrade the environment (erun pin / erun deploy) to run this job exclusively there, or drop --exclusive to accept concurrent jobs",
 		exclusive, err)
 }

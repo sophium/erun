@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
@@ -35,8 +35,8 @@ func CommandTreeForAudit() *cobra.Command {
 // tree where the optional variant did not attach.
 func ContextSensitiveTopLevelCommands() map[string]*cobra.Command {
 	return map[string]*cobra.Command{
-		"build": newBuildCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, common.CloudDependencies{}),
-		"push":  newRootPushCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, common.CloudDependencies{}),
+		"build": newBuildCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, cloud.CloudDependencies{}),
+		"push":  newRootPushCmd(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, cloud.CloudDependencies{}),
 	}
 }
 

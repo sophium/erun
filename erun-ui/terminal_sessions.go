@@ -15,6 +15,9 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY, queued through the
@@ -326,7 +329,7 @@ func (a *App) aiSessionOccupants(selection uiSelection) []uiEnvironmentLease {
 		return status.Leases
 	}
 	now := time.Now()
-	leases, err := eruncommon.LoadEnvironmentActivityLeases(selection.Tenant, selection.Environment, now)
+	leases, err := activity.LoadEnvironmentActivityLeases(selection.Tenant, selection.Environment, now)
 	if err != nil {
 		return nil
 	}
@@ -808,7 +811,7 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	if selection.Tenant == "" || selection.Environment == "" || a.deps.recordActivity == nil {
 		return
 	}
-	_ = a.deps.recordActivity(eruncommon.EnvironmentActivityParams{
+	_ = a.deps.recordActivity(activity.EnvironmentActivityParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Kind:        configpkg.ActivityKindCLI,
@@ -873,7 +876,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		return eruncommon.DiffResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
-			errors.New(eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
+			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
 	}
 	endpoint := mcpEndpointForOpenResult(result)
@@ -889,11 +892,11 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 // unreachability the review panel is looking at, through the same injectable
 // port-bound check the rest of erun-ui uses (so it stays testable without a
 // real dial).
-func (a *App) classifyMCPUnreachable(port int) eruncommon.LocalMCPUnreachableKind {
+func (a *App) classifyMCPUnreachable(port int) mcp.LocalMCPUnreachableKind {
 	if a.deps.canConnectLocalPort != nil && a.deps.canConnectLocalPort(port) {
-		return eruncommon.LocalMCPStaleForward
+		return mcp.LocalMCPStaleForward
 	}
-	return eruncommon.LocalMCPNotOpen
+	return mcp.LocalMCPNotOpen
 }
 
 func (a *App) ensureMCPAvailable(ctx context.Context, result configpkg.OpenResult) error {
@@ -903,7 +906,7 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result configpkg.OpenResul
 	// permanently unreachable behind a listener that looked fine.
 	if a.deps.ensureMCP != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
 		a.emitEnvNotification("warning", result.Tenant, result.EnvConfig.Name, notificationSourceMCPUnreachable,
-			eruncommon.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), "")
+			mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort), "")
 		if err := a.deps.ensureMCP(ctx, result); err != nil {
 			if !a.deps.canReachMCPEndpoint(mcpPort) {
 				return err
@@ -1760,7 +1763,7 @@ func (a *App) shouldRespawnForCloudContext(managed *managedTerminal) bool {
 		return true
 	}
 	switch strings.TrimSpace(cloudContext.Status) {
-	case eruncommon.CloudContextStatusRunning, eruncommon.CloudContextStatusPending:
+	case cloud.CloudContextStatusRunning, cloud.CloudContextStatusPending:
 		return true
 	case "":
 		return true

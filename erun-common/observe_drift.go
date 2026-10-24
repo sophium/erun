@@ -19,7 +19,7 @@ import (
 // as `[]` and can only mean "compared, nothing disagreed", while a dry run
 // returns nil, which serializes as `null` and means "not determined". See
 // ObserveResult.Drift for why a consumer cannot be left to guess between them.
-func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, pods []ObservedPod) []string {
+func computeObserveDrift(req config.ShellLaunchParams, release *ObservedHelmRelease, pods []ObservedPod) []string {
 	if release == nil {
 		return nil
 	}
@@ -50,7 +50,7 @@ func computeObserveDrift(req ShellLaunchParams, release *ObservedHelmRelease, po
 	return findings
 }
 
-func unreadableReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+func unreadableReleaseDrift(req config.ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -59,7 +59,7 @@ func unreadableReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease,
 		recordedVersion, release.Name, req.Namespace, release.Error)}
 }
 
-func missingReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+func missingReleaseDrift(req config.ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -68,7 +68,7 @@ func missingReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, re
 		recordedVersion, release.Name, req.Namespace)}
 }
 
-func foundReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
+func foundReleaseDrift(req config.ShellLaunchParams, release *ObservedHelmRelease, recordedVersion string) []string {
 	var findings []string
 	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
 		findings = append(findings, fmt.Sprintf(
@@ -77,10 +77,10 @@ func foundReleaseDrift(req ShellLaunchParams, release *ObservedHelmRelease, reco
 	}
 
 	if runtimeImage := strings.TrimSpace(req.RuntimeImage); runtimeImage != "" {
-		if recorded, ok := release.ImageOverrides[DevopsComponentName]; ok && recorded != runtimeImage {
+		if recorded, ok := release.ImageOverrides[config.DevopsComponentName]; ok && recorded != runtimeImage {
 			findings = append(findings, fmt.Sprintf(
 				"env config runtimeimage (%s) does not match the release's imageOverrides.%s (%s)",
-				runtimeImage, DevopsComponentName, recorded))
+				runtimeImage, config.DevopsComponentName, recorded))
 		}
 	}
 	return findings
@@ -135,7 +135,7 @@ func runningImageDrift(release *ObservedHelmRelease, pods []ObservedPod) []strin
 // reasoning the recordedVersion/runtimeImage checks above already apply — so
 // each field compares only when the config actually recorded one, instead of
 // diffing the release against a manufactured default nobody configured.
-func runtimePodDrift(req ShellLaunchParams, release *ObservedHelmRelease) []string {
+func runtimePodDrift(req config.ShellLaunchParams, release *ObservedHelmRelease) []string {
 	if release.RuntimePod == (config.RuntimePodResources{}) {
 		return nil
 	}

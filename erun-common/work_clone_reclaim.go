@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // Every agent task that clones the repo into a work directory leaves that
@@ -105,7 +106,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 		decision.Reason = "not a git working tree"
 		return decision
 	}
-	changed, err := gitChangedWorkingTreeFiles(ctx, dir)
+	changed, err := gitx.GitChangedWorkingTreeFiles(ctx, dir)
 	if err != nil {
 		decision.Reason = fmt.Sprintf("could not read working tree status: %v", err)
 		return decision
@@ -121,7 +122,7 @@ func DecideWorkCloneReclaim(ctx core.Context, dir string) WorkCloneReclaimDecisi
 	// fetch failure (no network, offline test fixture) is not fatal.
 	gitFetchOrigin(ctx, dir)
 
-	branch, err := GitCurrentBranch(ctx, dir)
+	branch, err := gitx.GitCurrentBranch(ctx, dir)
 	if err != nil {
 		decision.Reason = fmt.Sprintf("could not read the current branch: %v", err)
 		return decision
@@ -305,7 +306,7 @@ func gitCommitsAhead(ctx core.Context, dir, base, tip string) (int, error) {
 	ctx.TraceCommand("", "git", "-C", dir, "rev-list", "--count", rangeSpec)
 	output, err := core.Command("git", "-C", dir, "rev-list", "--count", rangeSpec).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return 0, fmt.Errorf("%w: %s", err, stderr)
 		}
 		return 0, err

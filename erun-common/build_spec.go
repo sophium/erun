@@ -6,24 +6,25 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
-func ResolveDockerImageReference(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (DockerImageReference, error) {
+func ResolveDockerImageReference(ctx core.Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (helm.DockerImageReference, error) {
 	store, findProjectRoot, _, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
-		return DockerImageReference{}, err
+		return helm.DockerImageReference{}, err
 	}
 
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
-		return DockerImageReference{}, err
+		return helm.DockerImageReference{}, err
 	}
 
 	environment, err := resolveDockerBuildEnvironment(store, findProjectRoot, projectRoot, target.Environment)
 	if err != nil {
-		return DockerImageReference{}, err
+		return helm.DockerImageReference{}, err
 	}
 
 	return resolveDockerImageReferenceForProject(ctx, now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride), target.Component)
@@ -115,23 +116,23 @@ func resolveDockerBuildSpec(ctx core.Context, store DockerStore, findProjectRoot
 	return newDockerBuildSpec(ctx, store, now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride), target.Platforms, target.Component)
 }
 
-func resolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (DockerImageReference, error) {
+func resolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (helm.DockerImageReference, error) {
 	registry, insecure, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
-		return DockerImageReference{}, err
+		return helm.DockerImageReference{}, err
 	}
 
 	imageName := strings.TrimSpace(filepath.Base(buildDir))
 	if imageName == "" || imageName == "." || imageName == string(filepath.Separator) {
-		return DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
+		return helm.DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
 	}
 
 	version, baseVersion, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, buildDir, versionOverride, selectedComponent)
 	if err != nil {
-		return DockerImageReference{}, err
+		return helm.DockerImageReference{}, err
 	}
 
-	ref := DockerImageReference{
+	ref := helm.DockerImageReference{
 		ProjectRoot:         projectRoot,
 		Environment:         strings.TrimSpace(environment),
 		Registry:            registry,
@@ -230,21 +231,21 @@ func checkImageDockerfile(dockerfilePath string) error {
 	return checkDockerfileTestStageConsumed(dockerfilePath)
 }
 
-func (b DockerBuildSpec) traceCommands() []commandSpec {
+func (b DockerBuildSpec) traceCommands() []helm.CommandSpec {
 	if b.Promote {
 		return promoteTraceCommands(b)
 	}
 	return multiPlatformTraceCommands(b)
 }
 
-func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
-	commands := make([]commandSpec, 0, len(b.Platforms)*4+2)
+func multiPlatformTraceCommands(b DockerBuildSpec) []helm.CommandSpec {
+	commands := make([]helm.CommandSpec, 0, len(b.Platforms)*4+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
 	baseTag := stableBaseVersionTag(b.Image)
 	for _, platform := range b.Platforms {
 		platformTag := platformSuffixedTag(b.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
-		commands = append(commands, commandSpec{
+		commands = append(commands, helm.CommandSpec{
 			Dir:  b.ContextDir,
 			Name: "docker",
 			Args: dockerBuildArgs(b, platform),
@@ -254,7 +255,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 		}
 		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
 		if b.Push {
-			commands = append(commands, commandSpec{
+			commands = append(commands, helm.CommandSpec{
 				Dir:  b.ContextDir,
 				Name: "docker",
 				Args: dockerPushArgs(platformTag, b.Verbosity),
@@ -270,11 +271,11 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 
 // stableBaseVersionTraceCommands must mirror tagStableBaseVersionAfterBuild's
 // ordering so the dry-run trace stays an honest preview of the real build.
-func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) []commandSpec {
+func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) []helm.CommandSpec {
 	if baseTag == "" {
 		return nil
 	}
-	commands := make([]commandSpec, 0, 2)
+	commands := make([]helm.CommandSpec, 0, 2)
 	if archTag := platformSuffixedTag(baseTag, platform); archTag != platformTag {
 		commands = append(commands, dockerTagTraceCommand(dir, platformTag, archTag))
 	}
@@ -284,8 +285,8 @@ func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) 
 	return commands
 }
 
-func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
-	commands := make([]commandSpec, 0, len(b.Platforms)*3+2)
+func promoteTraceCommands(b DockerBuildSpec) []helm.CommandSpec {
+	commands := make([]helm.CommandSpec, 0, len(b.Platforms)*3+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
 	baseTag := stableBaseVersionTag(b.Image)
 	for _, platform := range b.Platforms {
@@ -294,7 +295,7 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 		commands = append(commands, dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, platform), platformTag))
 		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
 		if b.Push {
-			commands = append(commands, commandSpec{
+			commands = append(commands, helm.CommandSpec{
 				Dir:  b.ContextDir,
 				Name: "docker",
 				Args: dockerPushArgs(platformTag, b.Verbosity),
@@ -313,33 +314,33 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 // manifest list that keeps a re-published version from resolving to the previous
 // one, and the --insecure flag a plain-HTTP registry needs on every subcommand
 // but rm (which never leaves the local manifest-list store).
-func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string, insecure bool) []commandSpec {
+func multiPlatformManifestTraceCommands(dir, tag string, perPlatformTags []string, insecure bool) []helm.CommandSpec {
 	createArgs := append(dockerManifestArgs("create", insecure), tag)
 	createArgs = append(createArgs, perPlatformTags...)
 	pushArgs := append(dockerManifestArgs("push", insecure), tag)
-	return []commandSpec{
+	return []helm.CommandSpec{
 		{Dir: dir, Name: "docker", Args: []string{"manifest", "rm", tag}},
 		{Dir: dir, Name: "docker", Args: createArgs},
 		{Dir: dir, Name: "docker", Args: pushArgs},
 	}
 }
 
-func dockerTagTraceCommand(dir, source, target string) commandSpec {
-	return commandSpec{
+func dockerTagTraceCommand(dir, source, target string) helm.CommandSpec {
+	return helm.CommandSpec{
 		Dir:  dir,
 		Name: "docker",
 		Args: []string{"tag", source, target},
 	}
 }
 
-func (p DockerPushSpec) command() commandSpec {
-	return commandSpec{
+func (p DockerPushSpec) command() helm.CommandSpec {
+	return helm.CommandSpec{
 		Dir:  p.Dir,
 		Name: "docker",
 		Args: dockerPushArgs(p.Image.Tag, p.Verbosity),
 	}
 }
 
-func NewDockerPushSpec(dir string, image DockerImageReference) DockerPushSpec {
+func NewDockerPushSpec(dir string, image helm.DockerImageReference) DockerPushSpec {
 	return DockerPushSpec{Dir: dir, Image: image}
 }

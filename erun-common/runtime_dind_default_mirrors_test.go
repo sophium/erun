@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // DefaultRuntimeDindCPU is written down in two places that cannot read each
@@ -44,9 +46,9 @@ func TestDindCPUDefaultMatchesEveryMirror(t *testing.T) {
 				t.Fatalf("%s no longer matches %s, so nothing establishes %s — a mirror nothing reads is "+
 					"how the constant and the file it mirrors drift apart", mirror.path, mirror.pattern, mirror.what)
 			}
-			if match[1] != DefaultRuntimeDindCPU {
+			if match[1] != config.DefaultRuntimeDindCPU {
 				t.Errorf("%s sets %s to %q, but DefaultRuntimeDindCPU is %q: raise or lower both together, since "+
-					"they are one sizing decision written down twice", mirror.path, mirror.what, match[1], DefaultRuntimeDindCPU)
+					"they are one sizing decision written down twice", mirror.path, mirror.what, match[1], config.DefaultRuntimeDindCPU)
 			}
 		})
 	}

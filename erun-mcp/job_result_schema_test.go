@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // A task job's Result is "whatever the task returned, captured verbatim as
@@ -25,7 +25,7 @@ import (
 // hand-written expectation of what it should be.
 func execJobStatusOutputSchema(t *testing.T) *jsonschema.Resolved {
 	t.Helper()
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -170,7 +170,7 @@ func assertResultRoundTrips(t *testing.T, out JobStatusResult, want json.RawMess
 
 func TestExecJobStatusRoundTripsAJobResult(t *testing.T) {
 	isolateLeaseCache(t)
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityRead))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityRead))
 
 	cases := []struct {
 		name   string
@@ -317,7 +317,7 @@ func assertSchemaPropertiesAreJSONObjects(t *testing.T, toolName, side string, p
 // report described is the one that has to pass, not just some property that
 // happened to be checked.
 func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
 	if len(tools) == 0 {
 		t.Fatal("no tools listed; the rest of this test would pass vacuously")
@@ -368,7 +368,7 @@ func TestPublishedOutputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
 // have to show the legal booleans were seen and left alone, not that the sweep
 // simply never met one.
 func TestPublishedInputSchemaPropertiesAreObjectsNotBooleans(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
 	if len(tools) == 0 {
 		t.Fatal("no tools listed; the rest of this test would pass vacuously")

@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // CheckEnvironmentHealth runs the out-of-pod diagnostics the Manage dialog's
@@ -123,7 +123,7 @@ func (a *App) runtimeDeployedHealthCheck(tenant, environment string, config conf
 // genuine NotFound is a negative answer; anything else is propagated as an
 // error.
 func checkRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment string) (bool, error) {
-	namespace := eruncommon.KubernetesNamespaceName(tenant, environment)
+	namespace := configpkg.KubernetesNamespaceName(tenant, environment)
 	output, err := kubectlJSON(ctx, kubeContext,
 		"get", "pods", "-n", namespace,
 		"-o", `jsonpath={range .items[*]}{range .spec.containers[*]}{.name}{"\n"}{end}{end}`)
@@ -132,13 +132,13 @@ func checkRuntimeDeployed(ctx context.Context, kubeContext, tenant, environment 
 		// "kubectl": executable file not found in $PATH`), which would
 		// otherwise be misclassified as an absent namespace rather than the
 		// "could not check" it actually is.
-		if !errors.Is(err, exec.ErrNotFound) && eruncommon.KubernetesResourceNotFound(err.Error()) {
+		if !errors.Is(err, exec.ErrNotFound) && kube.KubernetesResourceNotFound(err.Error()) {
 			return false, nil
 		}
 		return false, err
 	}
 	for _, name := range strings.Split(string(output), "\n") {
-		if strings.TrimSpace(name) == eruncommon.DevopsComponentName {
+		if strings.TrimSpace(name) == configpkg.DevopsComponentName {
 			return true, nil
 		}
 	}

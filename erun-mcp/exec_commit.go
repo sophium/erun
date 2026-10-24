@@ -5,8 +5,8 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // CommitInput takes the commit message as data — never a shell — and the
@@ -23,13 +23,13 @@ type CommitInput struct {
 func commitTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CommitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CommitInput) (*mcp.CallToolResult, JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (CommandOutput, error) {
-			var committed *eruncommon.CommitWorkingTreeResult
+			var committed *gitx.CommitWorkingTreeResult
 			output, err := runRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
-				result, err := eruncommon.CommitWorkingTree(runCtx, workDir, eruncommon.CommitWorkingTreeParams{
+				result, err := gitx.CommitWorkingTree(runCtx, workDir, gitx.CommitWorkingTreeParams{
 					Branch:  input.Branch,
 					Message: input.Message,
 					Paths:   input.Paths,
-				}, eruncommon.CommitWorkingTreeDependencies{})
+				}, gitx.CommitWorkingTreeDependencies{})
 				if err != nil {
 					return err
 				}

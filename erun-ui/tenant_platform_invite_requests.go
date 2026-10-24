@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // tenant_platform_invite_requests.go is the desktop half of the
@@ -61,7 +61,7 @@ type uiInviteRequest struct {
 	UpdatedAt         string `json:"updatedAt,omitempty"`
 }
 
-func inviteRequestToUI(request eruncommon.PlatformInviteRequest) uiInviteRequest {
+func inviteRequestToUI(request platformclient.PlatformInviteRequest) uiInviteRequest {
 	return uiInviteRequest{
 		InviteRequestID:   request.InviteRequestID,
 		Issuer:            request.Issuer,
@@ -113,8 +113,8 @@ func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSub
 		return uiSubmitInviteRequestOutcome{}, err
 	}
 	kind := strings.TrimSpace(input.Kind)
-	if kind != eruncommon.PlatformInviteRequestKindJoinTenant && kind != eruncommon.PlatformInviteRequestKindCreateTenant {
-		return uiSubmitInviteRequestOutcome{}, fmt.Errorf("requesting an invitation requires a kind of %q or %q, got %q", eruncommon.PlatformInviteRequestKindJoinTenant, eruncommon.PlatformInviteRequestKindCreateTenant, kind)
+	if kind != platformclient.PlatformInviteRequestKindJoinTenant && kind != platformclient.PlatformInviteRequestKindCreateTenant {
+		return uiSubmitInviteRequestOutcome{}, fmt.Errorf("requesting an invitation requires a kind of %q or %q, got %q", platformclient.PlatformInviteRequestKindJoinTenant, platformclient.PlatformInviteRequestKindCreateTenant, kind)
 	}
 	tenantName := strings.TrimSpace(input.TenantName)
 	if tenantName == "" {
@@ -127,15 +127,15 @@ func (a *App) SubmitTenantInviteRequest(input uiSubmitInviteRequestInput) (uiSub
 	}
 	defer cancel()
 
-	request, err := client.SubmitInviteRequest(ctx, eruncommon.PlatformSubmitInviteRequestParams{
+	request, err := client.SubmitInviteRequest(ctx, platformclient.PlatformSubmitInviteRequestParams{
 		Kind:            kind,
 		TenantName:      tenantName,
 		EnvironmentName: strings.TrimSpace(input.EnvironmentName),
 		Note:            strings.TrimSpace(input.Note),
 	})
 	if err != nil {
-		var statusErr *eruncommon.PlatformStatusError
-		if errors.Is(err, eruncommon.ErrPlatformRateLimited) && errors.As(err, &statusErr) {
+		var statusErr *platformclient.PlatformStatusError
+		if errors.Is(err, platformclient.ErrPlatformRateLimited) && errors.As(err, &statusErr) {
 			seconds := inviteRequestRetryAfterSeconds(ctx, client, statusErr)
 			return uiSubmitInviteRequestOutcome{RateLimited: &uiInviteRequestRateLimited{RetryAfterSeconds: seconds}}, nil
 		}
@@ -158,7 +158,7 @@ const defaultInviteRequestRetryAfterSeconds = 60
 // A parsed value of exactly zero (the backend rounds a sub-second remainder
 // down to "0") is trusted as-is -- that case is a real ok=true, not a
 // missing header, and an almost-immediate retry is the correct answer.
-func inviteRequestRetryAfterSeconds(ctx context.Context, client *eruncommon.PlatformClient, statusErr *eruncommon.PlatformStatusError) int {
+func inviteRequestRetryAfterSeconds(ctx context.Context, client *platformclient.PlatformClient, statusErr *platformclient.PlatformStatusError) int {
 	if retryAfter, ok := statusErr.RetryAfter(); ok {
 		return int(retryAfter.Seconds())
 	}
@@ -190,7 +190,7 @@ func (a *App) GetMyTenantInviteRequest(input uiTenantInput) (*uiInviteRequest, e
 
 	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrPlatformNotFound) {
+		if errors.Is(err, platformclient.ErrPlatformNotFound) {
 			return nil, nil
 		}
 		return nil, err
@@ -267,7 +267,7 @@ func (a *App) DeclineTenantInviteRequest(input uiDeclineInviteRequestInput) (uiI
 		return uiInviteRequest{}, err
 	}
 	defer cancel()
-	request, err := client.DeclineInviteRequest(ctx, inviteRequestID, eruncommon.PlatformDeclineInviteRequestParams{Reason: reason})
+	request, err := client.DeclineInviteRequest(ctx, inviteRequestID, platformclient.PlatformDeclineInviteRequestParams{Reason: reason})
 	if err != nil {
 		return uiInviteRequest{}, err
 	}
@@ -390,12 +390,12 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 	// pins. This branch is therefore a "no answer to compare", not a skipped
 	// comparison; a platform that learns to name the tenant on 403 gets the
 	// mismatch check for free by answering here instead of failing.
-	if errors.Is(whoamiErr, eruncommon.ErrPlatformForbidden) {
+	if errors.Is(whoamiErr, platformclient.ErrPlatformForbidden) {
 		status.State = tenantEnrollmentEnrolled
 		return status
 	}
-	if errors.Is(whoamiErr, eruncommon.ErrPlatformUnauthorized) {
-		switch eruncommon.PlatformAuthErrorCode(whoamiErr) {
+	if errors.Is(whoamiErr, platformclient.ErrPlatformUnauthorized) {
+		switch platformclient.PlatformAuthErrorCode(whoamiErr) {
 		case "TENANT_UNRESOLVED", "RESOLUTION_FAILED":
 			// Neither is an enrollment answer (same line tenantDashboardIdentityFailure
 			// and enrollERunPlatformUserError draw): the state genuinely could
@@ -418,10 +418,10 @@ func (a *App) tenantPlatformEnrollmentStatus(tenant string) uiTenantPlatformEnro
 // the identity is verified but not yet enrolled — split out of
 // tenantPlatformEnrollmentStatus purely to keep that function's own branch
 // count under the module's complexity budget.
-func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *eruncommon.PlatformClient, status uiTenantPlatformEnrollmentStatus) uiTenantPlatformEnrollmentStatus {
+func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client *platformclient.PlatformClient, status uiTenantPlatformEnrollmentStatus) uiTenantPlatformEnrollmentStatus {
 	request, err := client.MyInviteRequest(ctx)
 	if err != nil {
-		if errors.Is(err, eruncommon.ErrPlatformNotFound) {
+		if errors.Is(err, platformclient.ErrPlatformNotFound) {
 			// Signed in, never requested: genuinely local-only.
 			return status
 		}
@@ -429,12 +429,12 @@ func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client
 		return status
 	}
 	switch request.Status {
-	case eruncommon.PlatformInviteRequestStatusPending:
+	case platformclient.PlatformInviteRequestStatusPending:
 		status.State = tenantEnrollmentPending
-	case eruncommon.PlatformInviteRequestStatusDeclined:
+	case platformclient.PlatformInviteRequestStatusDeclined:
 		status.State = tenantEnrollmentDeclined
 		status.DeclineReason = request.DeclineReason
-	case eruncommon.PlatformInviteRequestStatusApproved:
+	case platformclient.PlatformInviteRequestStatusApproved:
 		// The service enrolls the requester's identity the moment it approves
 		// (ApproveJoin/ApproveCreateTenant insert the users row directly), so
 		// the Whoami call above will already have succeeded on the very next
@@ -452,13 +452,13 @@ func tenantPlatformEnrollmentStatusFromInviteRequest(ctx context.Context, client
 // PlatformState as. A genuine round-trip failure is reported via
 // MyInviteRequestError rather than left indistinguishable from "never
 // submitted one" (both would otherwise collapse to a nil MyInviteRequest).
-func loadTenantDashboardMyInviteRequest(ctx context.Context, client *eruncommon.PlatformClient, dashboard *uiTenantDashboard) {
+func loadTenantDashboardMyInviteRequest(ctx context.Context, client *platformclient.PlatformClient, dashboard *uiTenantDashboard) {
 	request, err := client.MyInviteRequest(ctx)
 	switch {
 	case err == nil:
 		ui := inviteRequestToUI(request)
 		dashboard.MyInviteRequest = &ui
-	case errors.Is(err, eruncommon.ErrPlatformNotFound):
+	case errors.Is(err, platformclient.ErrPlatformNotFound):
 		// Genuinely never submitted one.
 	default:
 		dashboard.MyInviteRequestError = err.Error()
@@ -474,7 +474,7 @@ func loadTenantDashboardMyInviteRequest(ctx context.Context, client *eruncommon.
 // no-permission identity is not an error here: those are exactly the states
 // this call exists to serve. Only a resolution that never got a bearer at
 // all (not connected, choose-alias, not signed in) is refused.
-func (a *App) tenantPlatformClientForIdentityCall(tenant string) (*eruncommon.PlatformClient, context.Context, context.CancelFunc, error) {
+func (a *App) tenantPlatformClientForIdentityCall(tenant string) (*platformclient.PlatformClient, context.Context, context.CancelFunc, error) {
 	resolution, err := a.resolveTenantPlatform(tenant, "")
 	if err != nil {
 		return nil, nil, nil, err

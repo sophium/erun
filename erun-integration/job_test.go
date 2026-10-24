@@ -14,8 +14,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
+	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -285,7 +284,7 @@ func awaitJobSupervisorGone(t *testing.T, id string, timeout time.Duration, obse
 	deadline := time.Now().Add(timeout)
 	for {
 		pid, recorded := observe()
-		if !recorded || !eruncommon.ProcessAlive(pid) {
+		if !recorded || !activity.ProcessAlive(pid) {
 			return
 		}
 		if !time.Now().Before(deadline) {

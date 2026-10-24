@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // The exclusive activity lease release_claim.go added scopes its claim to one
@@ -52,10 +54,10 @@ const (
 // named a process in a pod that may already be gone by the time anyone reads
 // it back.
 type releaseRepoClaimRecord struct {
-	Holder      EnvironmentActivityLeaseHolder `json:"holder"`
-	Environment string                         `json:"environment,omitempty"`
-	StartedAt   time.Time                      `json:"startedAt"`
-	ExpiresAt   time.Time                      `json:"expiresAt"`
+	Holder      activity.EnvironmentActivityLeaseHolder `json:"holder"`
+	Environment string                                  `json:"environment,omitempty"`
+	StartedAt   time.Time                               `json:"startedAt"`
+	ExpiresAt   time.Time                               `json:"expiresAt"`
 }
 
 // ReleaseRepoClaimConflictError names the still-live holder of the
@@ -67,7 +69,7 @@ type releaseRepoClaimRecord struct {
 // against a fixed clock.
 type ReleaseRepoClaimConflictError struct {
 	Version     string
-	Holder      EnvironmentActivityLeaseHolder
+	Holder      activity.EnvironmentActivityLeaseHolder
 	Environment string
 	StartedAt   time.Time
 	ExpiresAt   time.Time
@@ -110,7 +112,7 @@ func releaseClaimRunningFor(startedAt, now time.Time) string {
 // claim record predating this field, or a holder with no other identifying
 // fields set — so each is only appended when present, never leaving a
 // dangling separator or an empty fragment.
-func releaseClaimHolderDescription(holder EnvironmentActivityLeaseHolder, environment string) string {
+func releaseClaimHolderDescription(holder activity.EnvironmentActivityLeaseHolder, environment string) string {
 	desc := holder.String()
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
@@ -123,11 +125,11 @@ func releaseClaimHolderDescription(holder EnvironmentActivityLeaseHolder, enviro
 }
 
 func releaseRepoClaimRef(version string) string {
-	return releaseRepoClaimRefPrefix + sanitizeForFilename(strings.TrimSpace(version))
+	return releaseRepoClaimRefPrefix + core.SanitizeForFilename(strings.TrimSpace(version))
 }
 
 func releaseRepoClaimProbeRef(version string) string {
-	return releaseRepoClaimProbeRefPrefix + sanitizeForFilename(strings.TrimSpace(version))
+	return releaseRepoClaimProbeRefPrefix + core.SanitizeForFilename(strings.TrimSpace(version))
 }
 
 // releaseRepoClaimLocalHolder answers whether the caller's own environment
@@ -150,7 +152,7 @@ type releaseRepoClaimLocalHolder func() bool
 // recorded, and must be read before the caller takes its own local claim: what
 // it reports is whether somebody else in this environment is still holding the
 // version.
-func takeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
+func takeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
 	ref := releaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
@@ -209,7 +211,7 @@ func takeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 // local git object lookup, not a network call, and it happens before the
 // push below, so it neither reads nor writes the ref and cannot weaken the
 // force-with-lease compare-and-swap that follows.
-func renewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
+func renewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
 	existing, err := readReleaseRepoClaimBlob(ctx, projectRoot, currentSHA)
 	if err != nil {
 		return "", err
@@ -268,7 +270,7 @@ func releaseRepoClaimHeld(record releaseRepoClaimRecord, now time.Time, environm
 	return localHolderAlive()
 }
 
-func writeReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string, holder EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
+func writeReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string, holder activity.EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
 	record := releaseRepoClaimRecord{
 		Holder:      holder,
 		Environment: environment,
@@ -284,7 +286,7 @@ func writeReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string
 	cmd.Stdin = strings.NewReader(string(data))
 	output, err := cmd.Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return "", fmt.Errorf("%w: %s", err, stderr)
 		}
 		return "", err
@@ -349,7 +351,7 @@ func loadReleaseRepoClaimRecord(ctx core.Context, projectRoot, remote, ref, vers
 	}
 	output, err := core.Command("git", "-C", projectRoot, "cat-file", "-p", probe).Output()
 	if err != nil {
-		if stderr := stderrFromExitError(err); stderr != "" {
+		if stderr := core.StderrFromExitError(err); stderr != "" {
 			return releaseRepoClaimRecord{}, fmt.Errorf("%w: %s", err, stderr)
 		}
 		return releaseRepoClaimRecord{}, err
@@ -383,6 +385,6 @@ func runReleaseClaimPush(ctx core.Context, projectRoot string, args ...string) e
 	cmd := core.Command("git", append([]string{"-C", projectRoot}, args...)...)
 	cmd.Stderr = releasePushStderrWriter(ctx, &pushOutput)
 	err := cmd.Run()
-	reportRulesetBypassFromPushArgs(ctx, args, pushOutput.String())
+	gitx.ReportRulesetBypassFromPushArgs(ctx, args, pushOutput.String())
 	return err
 }

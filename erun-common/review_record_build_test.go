@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // Every build recorded against a review is RECORDED and carries its version:
@@ -44,7 +45,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 }
 
 func TestRunReviewRecordBuildRequiresAVersionBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, CloudDependencies{})
+	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, cloud.CloudDependencies{})
 	if err == nil || !strings.Contains(err.Error(), "version is required") {
 		t.Fatalf("err = %v, want the missing-version refusal", err)
 	}

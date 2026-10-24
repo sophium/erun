@@ -11,7 +11,8 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // These lock the spawn decision by what it produces, not by what it logs: a
@@ -410,7 +411,7 @@ func stagedReports(t *testing.T, dir string) []string {
 
 func activityLeaseIDs(t *testing.T, tenant, environment string) []string {
 	t.Helper()
-	leases, err := eruncommon.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
+	leases, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivityLeases failed: %v", err)
 	}

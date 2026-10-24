@@ -36,7 +36,7 @@ const doctorResourceInterval = time.Second
 // healthy environment: an environment whose pod was just replaced has no
 // retained history to reason from, and one whose counters cannot be read at all
 // is exactly the case where saying nothing would read as saying it is fine.
-func reportDoctorResources(ctx core.Context, req common.ShellLaunchParams, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
+func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis common.DeployDiagnosisResult) error {
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
@@ -69,7 +69,7 @@ func reportDoctorResources(ctx core.Context, req common.ShellLaunchParams, resul
 // its own unavailable fields: "nothing was observed" is not "nothing is wrong",
 // and a doctor section that stays silent here reads as a clean bill of health
 // for the one environment least able to say otherwise.
-func writeDoctorResourcesNotObserved(ctx core.Context, usage common.RuntimeUsage) error {
+func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage) error {
 	reason := strings.TrimSpace(usage.Memory.Unavailable)
 	if reason == "" {
 		reason = strings.TrimSpace(usage.CPU.Unavailable)

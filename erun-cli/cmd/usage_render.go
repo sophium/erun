@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -39,7 +40,7 @@ func writeUsageResult(ctx core.Context, report common.RuntimeUsageReport) error 
 // runtime image, a sidecar mid-restart), matching the desktop hover card's
 // "-- excludes builds" caveat (Sidebar.EnvHoverCard.tsx) so both transports
 // agree on what this reading covers either way.
-func writeUsageDindReading(ctx core.Context, usage common.RuntimeUsage) error {
+func writeUsageDindReading(ctx core.Context, usage config.RuntimeUsage) error {
 	if !usage.ExcludesBuilds {
 		return nil
 	}
@@ -57,7 +58,7 @@ func writeUsageDindReading(ctx core.Context, usage common.RuntimeUsage) error {
 	return writeUsageMemory(ctx, "  ", usage.Dind.Memory)
 }
 
-func writeUsageCPU(ctx core.Context, prefix string, cpu common.RuntimeCPUUsage) error {
+func writeUsageCPU(ctx core.Context, prefix string, cpu config.RuntimeCPUUsage) error {
 	if cpu.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sCPU: unavailable (%s)\n", prefix, cpu.Unavailable)
 		return err
@@ -72,7 +73,7 @@ func writeUsageCPU(ctx core.Context, prefix string, cpu common.RuntimeCPUUsage) 
 // environment holds 2.0GiB": a cgroup ceiling is what the container may grow to
 // under pressure, and it reserves nothing at all. The reservation is the line
 // writeUsageRequests prints beneath it.
-func writeUsageMemory(ctx core.Context, prefix string, memory common.RuntimeMemoryUsage) error {
+func writeUsageMemory(ctx core.Context, prefix string, memory config.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
 		return err
@@ -101,7 +102,7 @@ func writeUsageMemory(ctx core.Context, prefix string, memory common.RuntimeMemo
 // It names each container's own request as well as the pod's effective total,
 // because the container is what each limit above belongs to -- the runtime
 // container's 1GiB request is the figure to read against its own 27GiB limit.
-func writeUsageRequests(ctx core.Context, requests *common.RuntimeUsageRequests) error {
+func writeUsageRequests(ctx core.Context, requests *config.RuntimeUsageRequests) error {
 	if requests == nil {
 		// A dry run read nothing, and the reading is omitted rather than
 		// printed as a reservation of nothing.
@@ -122,7 +123,7 @@ func writeUsageRequests(ctx core.Context, requests *common.RuntimeUsageRequests)
 	return nil
 }
 
-func sortedUsageRequestContainers(containers map[string]common.KubernetesRequests) []string {
+func sortedUsageRequestContainers(containers map[string]config.KubernetesRequests) []string {
 	names := make([]string, 0, len(containers))
 	for name := range containers {
 		names = append(names, name)
@@ -135,10 +136,10 @@ func sortedUsageRequestContainers(containers map[string]common.KubernetesRequest
 // emitting two bare numbers ("0.5 CPU / 2.0GiB"), and stating a resource the
 // container declares nothing for as "none" -- an undeclared request reserves
 // nothing, and a bare 0 would read as a measured reservation of zero.
-func formatUsageRequests(requests common.KubernetesRequests) string {
+func formatUsageRequests(requests config.KubernetesRequests) string {
 	cpu := "none"
 	if requests.CPUMilli > 0 {
-		cpu = common.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+		cpu = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
 	}
 	memory := "none"
 	if requests.MemoryBytes > 0 {
@@ -152,14 +153,14 @@ func formatUsageRequests(requests common.KubernetesRequests) string {
 // not be read -- the same distinction the reader itself carries via
 // PeakObserved/OOMKillsObserved, so the two never collapse into a confident
 // zero here either.
-func formatUsagePeak(memory common.RuntimeMemoryUsage) string {
+func formatUsagePeak(memory config.RuntimeMemoryUsage) string {
 	if !memory.PeakObserved {
 		return "unavailable"
 	}
 	return formatUsageBytes(memory.PeakBytes)
 }
 
-func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
+func formatUsageOOMKills(memory config.RuntimeMemoryUsage) string {
 	if !memory.OOMKillsObserved {
 		return "unavailable"
 	}
@@ -172,7 +173,7 @@ func formatUsageOOMKills(memory common.RuntimeMemoryUsage) string {
 // actually wrote the bytes (see RuntimeDiskUsage.NodeShared). The own-usage
 // line beneath it is the number scoped to this environment alone -- the one
 // an operator can actually reduce by cleaning up this environment.
-func writeUsageDisk(ctx core.Context, disks []common.RuntimeDiskUsage) error {
+func writeUsageDisk(ctx core.Context, disks []config.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
 			if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared) %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
@@ -189,7 +190,7 @@ func writeUsageDisk(ctx core.Context, disks []common.RuntimeDiskUsage) error {
 	return nil
 }
 
-func formatUsageDiskOwn(disk common.RuntimeDiskUsage) string {
+func formatUsageDiskOwn(disk config.RuntimeDiskUsage) string {
 	if !disk.OwnUsageObserved {
 		return "unavailable"
 	}

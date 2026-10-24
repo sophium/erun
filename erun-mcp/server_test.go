@@ -21,6 +21,9 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 )
 
 type initInteractionStore struct{}
@@ -421,14 +424,14 @@ func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest failed: %v", err)
 	}
-	req.Header.Set(eruncommon.MCPIdleProbeHeader, "true")
+	req.Header.Set(mcppkg.MCPIdleProbeHeader, "true")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	_ = resp.Body.Close()
 
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	dir, err := activity.EnvironmentActivityDir("tenant-a", "dev")
 	if err != nil {
 		t.Fatalf("EnvironmentActivityDir failed: %v", err)
 	}
@@ -457,7 +460,7 @@ func TestActivityHTTPMiddlewareRecordsWithoutIdleProbe(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	dir, err := activity.EnvironmentActivityDir("tenant-a", "dev")
 	if err != nil {
 		t.Fatalf("EnvironmentActivityDir failed: %v", err)
 	}
@@ -492,7 +495,7 @@ func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 
-	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	dir, err := activity.EnvironmentActivityDir("tenant-a", "dev")
 	if err != nil {
 		t.Fatalf("EnvironmentActivityDir failed: %v", err)
 	}
@@ -1227,12 +1230,12 @@ func stubGHCRDockerCredential(t *testing.T) {
 // every remote-exec call shares this one seam) with "credential configured"
 // so these tests keep exercising repository interaction rather than tripping
 // the new check.
-func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
-	return func(_ eruncommon.ShellLaunchParams, script string) (eruncommon.RemoteCommandResult, error) {
+func fakeRemoteRepositoryStateRunner(repositoryStateStdout string) func(configpkg.ShellLaunchParams, string) (kube.RemoteCommandResult, error) {
+	return func(_ configpkg.ShellLaunchParams, script string) (kube.RemoteCommandResult, error) {
 		if strings.Contains(script, ".docker/config.json") {
-			return eruncommon.RemoteCommandResult{Stdout: "1\n"}, nil
+			return kube.RemoteCommandResult{Stdout: "1\n"}, nil
 		}
-		return eruncommon.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
+		return kube.RemoteCommandResult{Stdout: repositoryStateStdout}, nil
 	}
 }
 
@@ -1254,7 +1257,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 		DeployHelmChart: func(eruncommon.HelmDeployParams) error {
 			return nil
 		},
-		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
+		WaitForRemoteRuntime: func(configpkg.ShellLaunchParams) error {
 			return nil
 		},
 		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),
@@ -1300,7 +1303,7 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 			deployedVersion = params.Version
 			return nil
 		},
-		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
+		WaitForRemoteRuntime: func(configpkg.ShellLaunchParams) error {
 			return nil
 		},
 		RunRemoteCommand: fakeRemoteRepositoryStateRunner("repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"),

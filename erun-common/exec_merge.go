@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
 // MergeWorkingTreeBranchParams names the branch to bring into the working
@@ -52,10 +53,10 @@ func (e *MergeConflictError) Error() string {
 // MergeWorkingTreeBranchDependencies lets tests replace the git plumbing
 // without a real remote, mirroring PushWorkingTreeBranchDependencies.
 type MergeWorkingTreeBranchDependencies struct {
-	CurrentBranch   GitValueResolverFunc
-	CurrentCommit   GitValueResolverFunc
-	RunGit          GitCommandRunnerFunc
-	ConflictedFiles func(root string, runGit GitCommandRunnerFunc) ([]string, error)
+	CurrentBranch   gitx.GitValueResolverFunc
+	CurrentCommit   gitx.GitValueResolverFunc
+	RunGit          gitx.GitCommandRunnerFunc
+	ConflictedFiles func(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error)
 	// RunAtlasHash regenerates a conflicted atlas.sum instead of leaving it
 	// for a human to resolve. See resolveAtlasSumConflicts.
 	RunAtlasHash AtlasMigrateHashRunnerFunc
@@ -63,13 +64,13 @@ type MergeWorkingTreeBranchDependencies struct {
 
 func normalizeMergeWorkingTreeBranchDependencies(deps MergeWorkingTreeBranchDependencies) MergeWorkingTreeBranchDependencies {
 	if deps.CurrentBranch == nil {
-		deps.CurrentBranch = GitCurrentBranch
+		deps.CurrentBranch = gitx.GitCurrentBranch
 	}
 	if deps.CurrentCommit == nil {
-		deps.CurrentCommit = GitShortCommit
+		deps.CurrentCommit = gitx.GitShortCommit
 	}
 	if deps.RunGit == nil {
-		deps.RunGit = GitCommandRunner
+		deps.RunGit = gitx.GitCommandRunner
 	}
 	if deps.ConflictedFiles == nil {
 		deps.ConflictedFiles = gitMergeConflictedFiles
@@ -161,7 +162,7 @@ func fetchAndMergeWorkingTree(ctx core.Context, root, target, remote, remoteRef 
 // MergeWorkingTreeBranch can tell a real conflict apart from any other merge
 // failure (a bad ref, a network error) by what git actually left behind
 // rather than by guessing from exit codes or stderr text.
-func gitMergeConflictedFiles(root string, runGit GitCommandRunnerFunc) ([]string, error) {
+func gitMergeConflictedFiles(root string, runGit gitx.GitCommandRunnerFunc) ([]string, error) {
 	var stdout, stderr bytes.Buffer
 	if err := runGit(root, &stdout, &stderr, "diff", "--name-only", "--diff-filter=U"); err != nil {
 		return nil, fmt.Errorf("git diff --diff-filter=U: %w: %s", err, strings.TrimSpace(stderr.String()))

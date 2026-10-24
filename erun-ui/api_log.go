@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -24,7 +25,7 @@ func loadAPILog(ctx context.Context, input uiTenantDashboardInput) (string, erro
 }
 
 func loadAPILogFromKubernetes(ctx context.Context, kubernetesContext, tenant, environment string) (string, error) {
-	namespace := eruncommon.KubernetesNamespaceName(tenant, environment)
+	namespace := config.KubernetesNamespaceName(tenant, environment)
 	// A selector (rather than deployment/<name>) names which replica the log
 	// came from instead of quietly picking one; the API Deployment's
 	// Recreate strategy means a rollout transiently has two pods matching.

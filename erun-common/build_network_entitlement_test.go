@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 // The grant is decided from the Dockerfile's own content, so every case here
@@ -24,7 +26,7 @@ func entitlementArgv(t *testing.T, content string) []string {
 	return dockerBuildArgs(
 		DockerBuildSpec{
 			DockerfilePath: entitlementDockerfilePath(t, content),
-			Image:          DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3"},
+			Image:          helm.DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3"},
 		},
 		"linux/amd64",
 	)

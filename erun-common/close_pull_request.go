@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // close_pull_request.go closes the GitHub pull request a merge queue
@@ -209,7 +210,7 @@ func githubListPullRequestsURL(owner, repo, branch, target string) string {
 		"base":  {target},
 		"state": {"open"},
 	}
-	return fmt.Sprintf("%srepos/%s/%s/pulls?%s", githubAPIBaseURL, owner, repo, query.Encode())
+	return fmt.Sprintf("%srepos/%s/%s/pulls?%s", registry.GithubAPIBaseURL, owner, repo, query.Encode())
 }
 
 func listOpenGitHubPullRequests(ctx context.Context, client *http.Client, token, listURL, owner, repo string) ([]githubPullRequest, error) {
@@ -244,7 +245,7 @@ func postGitHubIssueComment(ctx context.Context, client *http.Client, token, own
 	if err != nil {
 		return fmt.Errorf("encode pull request comment body: %w", err)
 	}
-	url := fmt.Sprintf("%srepos/%s/%s/issues/%d/comments", githubAPIBaseURL, owner, repo, number)
+	url := fmt.Sprintf("%srepos/%s/%s/issues/%d/comments", registry.GithubAPIBaseURL, owner, repo, number)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(encoded))
 	if err != nil {
 		return fmt.Errorf("build github issue comment request: %w", err)
@@ -273,7 +274,7 @@ func closeGitHubPullRequest(ctx context.Context, client *http.Client, token, own
 	if err != nil {
 		return fmt.Errorf("encode pull request close body: %w", err)
 	}
-	url := fmt.Sprintf("%srepos/%s/%s/pulls/%d", githubAPIBaseURL, owner, repo, number)
+	url := fmt.Sprintf("%srepos/%s/%s/pulls/%d", registry.GithubAPIBaseURL, owner, repo, number)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, bytes.NewReader(encoded))
 	if err != nil {
 		return fmt.Errorf("build github close pull request request: %w", err)

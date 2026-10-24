@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // displayShapedStateNames are the strings a tenant and an environment take on
@@ -88,8 +89,8 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	}{
 		{"EnvConfigPath tenant", func() (string, error) { return config.EnvConfigPath(name, "local") }},
 		{"EnvConfigPath environment", func() (string, error) { return config.EnvConfigPath("frs", name) }},
-		{"PortForwardStatePath tenant", func() (string, error) { return PortForwardStatePath("mcp", name, "local") }},
-		{"PortForwardStatePath environment", func() (string, error) { return PortForwardStatePath("mcp", "frs", name) }},
+		{"PortForwardStatePath tenant", func() (string, error) { return kube.PortForwardStatePath("mcp", name, "local") }},
+		{"PortForwardStatePath environment", func() (string, error) { return kube.PortForwardStatePath("mcp", "frs", name) }},
 	} {
 		if path, err := slot.build(); err == nil {
 			t.Errorf("%s built %s for %q, which is not a path segment", slot.what, path, name)

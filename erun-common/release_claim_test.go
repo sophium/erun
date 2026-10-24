@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A test covering only "the first release claims it and nothing else races"
@@ -22,12 +23,12 @@ func TestReleaseVersionClaimRefusesASecondReleaseAndNamesTheHolder(t *testing.T)
 	// releasing the same version concurrently, as erun#1619 actually happened.
 	firstPID, secondPID := os.Getpid(), os.Getpid()+1
 
-	firstHolder := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
+	firstHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
 	if _, err := takeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, firstPID, now); err != nil {
 		t.Fatalf("first release's claim: %v", err)
 	}
 
-	secondHolder := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
+	secondHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
 	_, err := takeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, secondPID, now.Add(time.Second))
 	if err == nil {
 		t.Fatal("expected a second concurrent release of the same version to be refused")
@@ -67,7 +68,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 
 	const tenant, environment, version = "erun", "build", "1.0.290"
 	ctx := newTestClaimContext()
-	cancelled := EnvironmentActivityLeaseHolder{Tenant: tenant}
+	cancelled := activity.EnvironmentActivityLeaseHolder{Tenant: tenant}
 	start := time.Now()
 
 	cancelledSHA, err := takeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
@@ -133,7 +134,7 @@ func TestReleaseVersionClaimReclaimsAnAbandonedRelease(t *testing.T) {
 	isolateActivityCache(t)
 	start := time.Date(2026, 8, 29, 17, 0, 53, 0, time.UTC)
 
-	firstHolder := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
+	firstHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-a"}
 	if _, err := takeReleaseVersionClaim("erun", "build", "1.0.211", firstHolder, os.Getpid(), start); err != nil {
 		t.Fatalf("first release's claim: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestReleaseVersionClaimReclaimsAnAbandonedRelease(t *testing.T) {
 	// environment, so the only way a second release ever proceeds is if the
 	// lease reclaims itself once it lapses.
 	afterLapse := start.Add(releaseVersionClaimTTL + time.Minute)
-	secondHolder := EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
+	secondHolder := activity.EnvironmentActivityLeaseHolder{Orchestrator: "orchestrator-b"}
 	claim, err := takeReleaseVersionClaim("erun", "build", "1.0.211", secondHolder, os.Getpid()+1, afterLapse)
 	if err != nil {
 		t.Fatalf("expected the abandoned claim to be reclaimed automatically, got refused: %v", err)

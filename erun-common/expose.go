@@ -6,6 +6,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // ExposeStore is the read surface RunExposeService needs to resolve the target
@@ -258,7 +260,7 @@ const defaultExposeWildcardTTL = 60
 // the caller instead has an erun platform alias configured (a developer's
 // local cluster, most concretely) — see resolveExposeDNSUpserter.
 // upsertDNSRecord, when non-nil, overrides the decision outright (tests).
-func RunExposeService(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
+func RunExposeService(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc, applyIngress IngressApplierFunc) (ExposeServiceResult, error) {
 	store, applyIngress = normalizeExposeDependencies(store, applyIngress)
 
 	if params.SkipIfUnconfigured && !exposePlatformConfigured(params) {
@@ -304,7 +306,7 @@ func RunExposeService(ctx core.Context, params ExposeServiceParams, store Expose
 // write path to use -- split out of RunExposeService purely to keep that
 // function's own branch count down; see resolveExposeDNSUpserter for the
 // actual decision.
-func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore CloudReadStore, deps CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
+func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
 	result, err := resolveExposeServicePlan(params, store)
 	if err != nil {
 		return ExposeServiceResult{}, nil, config.CloudProviderConfig{}, err
@@ -327,7 +329,7 @@ func traceExposePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNS
 		ctx.Trace(fmt.Sprintf("expose: http-only (%s)", result.TLSDisabledReason))
 	}
 	traceExposeDNSWritePlan(ctx, result, dnsParams, dnsProvider)
-	ctx.TraceCommand("", "kubectl", kubectlApplyStdinArgs(ingressParams.Namespace, ingressParams.KubernetesContext)...)
+	ctx.TraceCommand("", "kubectl", kube.KubectlApplyStdinArgs(ingressParams.Namespace, ingressParams.KubernetesContext)...)
 	// The Ingress manifest is piped to `kubectl apply -f -` on stdin, so trace
 	// its body too — the argv alone hides the exact resource the real run applies.
 	ctx.TraceBlock("expose: ingress manifest", renderHostRoutingIngress(ingressParams))
@@ -343,8 +345,8 @@ func traceExposeDNSWritePlan(ctx core.Context, result ExposeServiceResult, dnsPa
 		ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)
 		return
 	}
-	tracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
-	tracePlatformCall(ctx, dnsProvider, "PUT", "/v1/environments/{environment_id}/hostname", "targetIp="+result.TargetIP)
+	cloud.TracePlatformCall(ctx, dnsProvider, "GET", "/v1/environments", "resolve environment id for "+result.Environment)
+	cloud.TracePlatformCall(ctx, dnsProvider, "PUT", "/v1/environments/{environment_id}/hostname", "targetIp="+result.TargetIP)
 }
 
 // applyExposeWrites performs the DNS and Ingress side effects. The Ingress
@@ -437,7 +439,7 @@ func validateExposeTarget(params ExposeServiceParams) (tenant, environment, serv
 	if tenant == "" || environment == "" || service == "" {
 		return "", "", "", fmt.Errorf("tenant, environment, and service are required")
 	}
-	if err := ValidateTenantName(tenant); err != nil {
+	if err := config.ValidateTenantName(tenant); err != nil {
 		return "", "", "", err
 	}
 	// The service name becomes a DNS label in the public hostname, so validate it
@@ -497,7 +499,7 @@ func resolveExposeServicePlan(params ExposeServiceParams, store ExposeStore) (Ex
 	if servicePort <= 0 {
 		servicePort = defaultExposeServicePort
 	}
-	envLabel := KubernetesNamespaceName(tenant, environment)
+	envLabel := config.KubernetesNamespaceName(tenant, environment)
 	tlsEnabled, ingressClass, tlsSecret, scheme, tlsDisabledReason := resolveExposeTLSPlan(params, envLabel)
 	result := ExposeServiceResult{
 		Tenant:                     tenant,

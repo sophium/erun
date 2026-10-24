@@ -9,12 +9,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
-
-// portForwardStateKinds are every kind of forward `erun open` can record for
-// one environment. Deleting the environment must clear all three, or whichever
-// one is skipped outlives the environment it describes.
-var portForwardStateKinds = []string{"mcp", "api", "sshd"}
 
 type (
 	NamespaceDeleterFunc func(string, string) error
@@ -116,8 +112,8 @@ func RunDeleteEnvironment(ctx core.Context, params DeleteEnvironmentParams, stor
 // file that nothing else in erun will ever open, restart, or rotate again, for
 // an environment that no longer exists to reopen it.
 func removePortForwardStateFiles(ctx core.Context, tenant, environment string) error {
-	for _, kind := range portForwardStateKinds {
-		if err := RemovePortForwardRecord(ctx, kind, tenant, environment); err != nil {
+	for _, kind := range kube.PortForwardStateKinds {
+		if err := kube.RemovePortForwardRecord(ctx, kind, tenant, environment); err != nil {
 			return err
 		}
 	}
@@ -195,7 +191,7 @@ func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace N
 		store = config.ConfigStore{}
 	}
 	if deleteNamespace == nil {
-		deleteNamespace = DeleteKubernetesNamespace
+		deleteNamespace = kube.DeleteKubernetesNamespace
 	}
 	return store, deleteNamespace
 }
@@ -211,11 +207,11 @@ func deleteEnvironmentResult(tenant, environment string, envConfig config.EnvCon
 }
 
 func deleteRemoteEnvironmentNamespace(ctx core.Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
-	result.Namespace = KubernetesNamespaceName(result.Tenant, result.Environment)
+	result.Namespace = config.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
 		return fmt.Errorf("delete environment %s/%s: %w", result.Tenant, result.Environment, err)
 	}
-	TraceDeleteKubernetesNamespace(ctx, result.KubernetesContext, result.Namespace)
+	kube.TraceDeleteKubernetesNamespace(ctx, result.KubernetesContext, result.Namespace)
 	if ctx.DryRun {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // guardRuntimeImageLineSwitch refuses a runtime deploy that would move the pod
@@ -167,7 +168,7 @@ func guardRuntimeChartLineSwitch(ctx core.Context, target config.OpenResult, res
 // its erun base cannot be read off its tag and it is not checked here: the
 // erun-build-env contract re-pins its base with the chart.
 func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) error {
-	if strings.TrimSpace(chartName) != DevopsComponentName || !runtimeImageIsStockDevops(image) {
+	if strings.TrimSpace(chartName) != config.DevopsComponentName || !runtimeImageIsStockDevops(image) {
 		return nil
 	}
 	_, _, tag, ok := parseDockerImageReference(strings.TrimSpace(image))
@@ -176,19 +177,19 @@ func guardRuntimeImageNotOlderThanChart(image, chartName, chartVersion string) e
 	}
 	imageRelease, imageOK := runtimeReleaseBase(tag)
 	chartRelease, chartOK := runtimeReleaseBase(chartVersion)
-	if !imageOK || !chartOK || compareSemver(imageRelease, chartRelease) >= 0 {
+	if !imageOK || !chartOK || registry.CompareSemver(imageRelease, chartRelease) >= 0 {
 		return nil
 	}
 	return fmt.Errorf("deploy: runtime image %s is from erun %s, older than the %s %s chart this deploy installs; the chart runs its init containers and dind sidecar on the image's own erun, so the rollout would fail after the running pod is torn down -- deploy an image at %s or newer with --runtime-image, or the chart matching the image with --runtime-chart %s:%s",
-		image, formatSemver(imageRelease), DevopsComponentName, strings.TrimSpace(chartVersion), formatSemver(chartRelease), DevopsComponentName, tag)
+		image, registry.FormatSemver(imageRelease), config.DevopsComponentName, strings.TrimSpace(chartVersion), registry.FormatSemver(chartRelease), config.DevopsComponentName, tag)
 }
 
 // runtimeReleaseBase reads the release a version or image tag belongs to:
 // 1.0.307, 1.0.307-snapshot, 1.0.307-rc.1 and 1.0.307-snapshot-<ts>-arm64 are
 // all 1.0.307. Anything else (a fingerprint tag, a digest) does not classify.
-func runtimeReleaseBase(version string) (semver, bool) {
+func runtimeReleaseBase(version string) (registry.Semver, bool) {
 	base, _, _ := strings.Cut(strings.TrimSpace(version), "-")
-	return parseRegistryStableVersion(base)
+	return registry.ParseRegistryStableVersion(base)
 }
 
 // guardRuntimeCoordinate runs the runtime coordinate's pre-mutation guards: the

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // powerDNSConfigDir holds the PowerDNS backend config and DB password, so the
@@ -70,7 +71,7 @@ func deletePowerDNSRecord(params DNSRecordDeleteParams) error {
 // applyHostRoutingIngress is live-only: RunExposeService short-circuits before
 // calling it, so it never runs under a dry-run.
 func applyHostRoutingIngress(params IngressApplyParams) error {
-	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kube.KubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderHostRoutingIngress(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply ingress: %w: %s", err, strings.TrimSpace(string(out)))
@@ -83,7 +84,7 @@ func applyHostRoutingIngress(params IngressApplyParams) error {
 // and stays redacted, matching applyMCPAuthSecret), and the Issuer/Certificate
 // commands plus their non-secret manifests in full.
 func traceTLSCertPlan(ctx core.Context, params TLSCertApplyParams) {
-	args := kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
+	args := kube.KubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
 	ctx.Trace(fmt.Sprintf("expose: tls: dns01 token secret %s (namespace %s, token read from %s, content redacted)", params.TokenSecretName, params.Namespace, params.Cert.DNS01TokenPath))
 	ctx.TraceCommand("", "kubectl", args...)
 	ctx.Trace(fmt.Sprintf("expose: tls: namespaced issuer %s -> broker %s (subzone %s.%s)", params.IssuerName, params.Cert.DNS01BrokerURL, params.EnvLabel, params.ServicesZone))
@@ -114,8 +115,8 @@ func applyDNS01TokenSecret(params TLSCertApplyParams) error {
 	if err != nil {
 		return err
 	}
-	args := kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
-	return applySecretManifest(params.KubernetesContext, params.Namespace, "dns01 token secret", manifest, args)
+	args := kube.KubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)
+	return kube.ApplySecretManifest(params.KubernetesContext, params.Namespace, "dns01 token secret", manifest, args)
 }
 
 // applyPerEnvIssuer and applyPerEnvCertificate stay on the subprocess path
@@ -124,7 +125,7 @@ func applyDNS01TokenSecret(params TLSCertApplyParams) error {
 // algorithm reached through discovery and a dynamic client (see
 // kubectlSecretApplyExecutionOperation).
 func applyPerEnvIssuer(params TLSCertApplyParams) error {
-	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kube.KubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvIssuer(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env issuer: %w: %s", err, strings.TrimSpace(string(out)))
@@ -133,7 +134,7 @@ func applyPerEnvIssuer(params TLSCertApplyParams) error {
 }
 
 func applyPerEnvCertificate(params TLSCertApplyParams) error {
-	cmd := core.Command("kubectl", kubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
+	cmd := core.Command("kubectl", kube.KubectlApplyStdinArgs(params.Namespace, params.KubernetesContext)...)
 	cmd.Stdin = strings.NewReader(renderPerEnvCertificate(params))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("kubectl apply per-env certificate: %w: %s", err, strings.TrimSpace(string(out)))

@@ -7,6 +7,8 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -107,7 +109,7 @@ func runListVersionDrift(ctx core.Context, result common.ListResult, versionDrif
 }
 
 func runListControlPlanes(ctx core.Context, result common.ListResult, erunAlias string, failOnDrift bool) error {
-	drift, err := common.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, common.DefaultCloudDependencies(), common.ResolveDefaultRuntimeRegistryVersions)
+	drift, err := common.ResolveControlPlaneVersionDrift(ctx, result, erunAlias, cloud.DefaultCloudDependencies(), registry.ResolveDefaultRuntimeRegistryVersions)
 	if err != nil {
 		return err
 	}
@@ -970,7 +972,7 @@ func runtimeVersionLabel(tenantName string, env common.ListEnvironmentResult) st
 	}
 	detail := line.Line + " line, " + line.Image
 	if line.Disagrees {
-		detail += " — release name " + common.RuntimeReleaseName(tenantName) + " disagrees with the image"
+		detail += " — release name " + config.RuntimeReleaseName(tenantName) + " disagrees with the image"
 	}
 	return version + " (" + detail + ")"
 }
@@ -1036,7 +1038,7 @@ func statusMarkers(isDefault, isEffective bool) []string {
 	return markers
 }
 
-func writeCloudProviders(ctx core.Context, providers []common.CloudProviderStatus) error {
+func writeCloudProviders(ctx core.Context, providers []cloud.CloudProviderStatus) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Providers:"); err != nil {
 		return err
 	}

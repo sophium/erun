@@ -7,6 +7,8 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // EnvironmentLifecycleState is the environment read model's single resolved
@@ -80,9 +82,9 @@ func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state Env
 		return EnvironmentLifecycleUnknown, true
 	}
 	switch in.CloudContextStatus {
-	case CloudContextStatusStopped:
+	case cloud.CloudContextStatusStopped:
 		return EnvironmentLifecycleStopped, true
-	case CloudContextStatusRunning:
+	case cloud.CloudContextStatusRunning:
 		return "", false
 	default:
 		// Pending, unknown, or any unrecognized value: the power state is
@@ -139,12 +141,12 @@ func ResolveEnvironmentHealth(rootConfig RootConfigInspection, deploy DeployDiag
 // EnvironmentIdleStatus, CloudContextStatus, doctor's diagnosis); this type
 // only composes them.
 type EnvironmentReadModel struct {
-	Tenant       string                    `json:"tenant"`
-	Environment  ListEnvironmentResult     `json:"environment"`
-	State        EnvironmentLifecycleState `json:"state"`
-	CloudContext *CloudContextStatus       `json:"cloudContext,omitempty"`
-	Idle         *EnvironmentIdleStatus    `json:"idle,omitempty"`
-	Health       *EnvironmentHealth        `json:"health,omitempty"`
+	Tenant       string                          `json:"tenant"`
+	Environment  ListEnvironmentResult           `json:"environment"`
+	State        EnvironmentLifecycleState       `json:"state"`
+	CloudContext *config.CloudContextStatus      `json:"cloudContext,omitempty"`
+	Idle         *activity.EnvironmentIdleStatus `json:"idle,omitempty"`
+	Health       *EnvironmentHealth              `json:"health,omitempty"`
 }
 
 // AssembleEnvironmentReadModel is pure: it composes already-resolved pieces
@@ -152,7 +154,7 @@ type EnvironmentReadModel struct {
 // passed in. A nil cloudContext/idle/health is not an error -- it means that
 // signal was not observed, and ResolveEnvironmentLifecycleState treats it
 // that way rather than defaulting it to a real reading.
-func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResult, cloudContext *CloudContextStatus, idle *EnvironmentIdleStatus, health *EnvironmentHealth) EnvironmentReadModel {
+func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResult, cloudContext *config.CloudContextStatus, idle *activity.EnvironmentIdleStatus, health *EnvironmentHealth) EnvironmentReadModel {
 	inputs := EnvironmentLifecycleInputs{}
 	if idle != nil {
 		inputs.ManagedCloud = idle.ManagedCloud
@@ -225,13 +227,13 @@ func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, envi
 		return EnvironmentReadModel{}, err
 	}
 
-	idleStatus, err := ResolveStoredEnvironmentIdleStatus(store, tenant, environment, now)
+	idleStatus, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, now)
 	if err != nil {
 		return EnvironmentReadModel{}, err
 	}
 
-	var cloudContext *CloudContextStatus
-	if status, ok, err := findCloudContextForKubernetesContext(store, entry.KubernetesContext); err != nil {
+	var cloudContext *config.CloudContextStatus
+	if status, ok, err := config.FindCloudContextForKubernetesContext(store, entry.KubernetesContext); err != nil {
 		return EnvironmentReadModel{}, err
 	} else if ok {
 		cloudContext = &status

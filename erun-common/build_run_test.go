@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // The scenario from #1201: a brand-new environment configured to build+push to
@@ -20,7 +22,7 @@ func TestPreflightRegistryPushAccessRefusesBeforeBuildWhenNoCredentialConfigured
 	execution := DockerPushExecutionSpec{
 		builds: []DockerBuildSpec{{
 			Push:  true,
-			Image: DockerImageReference{Tag: "ghcr.io/sophium/frs-app:1.0.0"},
+			Image: helm.DockerImageReference{Tag: "ghcr.io/sophium/frs-app:1.0.0"},
 		}},
 	}
 
@@ -28,7 +30,7 @@ func TestPreflightRegistryPushAccessRefusesBeforeBuildWhenNoCredentialConfigured
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a push with no ghcr.io credential configured")
 	}
-	if _, ok := err.(*MissingGHCRCredentialError); !ok {
+	if _, ok := err.(*registry.MissingGHCRCredentialError); !ok {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 }
@@ -42,7 +44,7 @@ func TestPreflightRegistryPushAccessRefusesChartPushWithNoCredentialConfigured(t
 	t.Setenv("GITHUB_TOKEN", "")
 
 	execution := DockerPushExecutionSpec{
-		componentCharts: []HelmChartPublishSpec{{
+		componentCharts: []helm.HelmChartPublishSpec{{
 			OCIRepo:   "oci://ghcr.io/sophium/charts",
 			ChartName: "erun-backend-postgres",
 		}},
@@ -52,7 +54,7 @@ func TestPreflightRegistryPushAccessRefusesChartPushWithNoCredentialConfigured(t
 	if err == nil {
 		t.Fatal("expected the preflight to refuse a chart push with no ghcr.io credential configured")
 	}
-	if _, ok := err.(*MissingGHCRCredentialError); !ok {
+	if _, ok := err.(*registry.MissingGHCRCredentialError); !ok {
 		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
 	}
 }
@@ -69,7 +71,7 @@ func TestPreflightRegistryPushAccessSkipsInDryRun(t *testing.T) {
 	execution := DockerPushExecutionSpec{
 		builds: []DockerBuildSpec{{
 			Push:  true,
-			Image: DockerImageReference{Tag: "ghcr.io/sophium/frs-app:1.0.0"},
+			Image: helm.DockerImageReference{Tag: "ghcr.io/sophium/frs-app:1.0.0"},
 		}},
 	}
 

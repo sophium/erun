@@ -14,8 +14,9 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
+	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // scrapeMetrics serves recorder's registry the same way runMetricsHTTP does
@@ -174,7 +175,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 
 	// An SSH session started five seconds ago: eligibility must flip to
 	// ineligible and terminal-input must report a real elapsed time.
-	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH,
 		Now: time.Now().Add(-5 * time.Second),
 	}); err != nil {
@@ -199,19 +200,19 @@ func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
 	now := time.Now()
-	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(ssh) failed: %v", err)
 	}
-	if err := eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI, Now: now.Add(-2 * time.Second),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(cli) failed: %v", err)
 	}
 
-	status := eruncommon.EnvironmentIdleStatus{}
-	activity, err := eruncommon.LoadEnvironmentActivity("acme", "dev")
+	status := activitypkg.EnvironmentIdleStatus{}
+	activity, err := activitypkg.LoadEnvironmentActivity("acme", "dev")
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivity failed: %v", err)
 	}
@@ -269,8 +270,8 @@ type guardToolTestOutput struct {
 // dry-run call, an error, and a capability refusal.
 func TestGuardToolRecordsMCPCallsAndAuditEvents(t *testing.T) {
 	recorder := newMetricsRecorder("acme", "dev")
-	admin := authIdentity{Tenant: "acme", Capabilities: eruncommon.AdminMCPCapabilitySet()}
-	readOnly := authIdentity{Tenant: "acme", Capabilities: eruncommon.NewMCPCapabilitySet([]string{string(eruncommon.MCPCapabilityRead)})}
+	admin := authIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
+	readOnly := authIdentity{Tenant: "acme", Capabilities: mcptools.NewMCPCapabilitySet([]string{string(mcptools.MCPCapabilityRead)})}
 
 	successHandler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, guardToolTestOutput, error) {
 		return nil, guardToolTestOutput{Executed: true}, nil
@@ -330,7 +331,7 @@ func TestNilMetricsRecorderIsSafe(t *testing.T) {
 	recorder.setTrafficWindowBytes(1)
 	recorder.addMCPBytes(1)
 
-	admin := authIdentity{Tenant: "acme", Capabilities: eruncommon.AdminMCPCapabilitySet()}
+	admin := authIdentity{Tenant: "acme", Capabilities: mcptools.AdminMCPCapabilitySet()}
 	handler := func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, guardToolTestOutput, error) {
 		return nil, guardToolTestOutput{Executed: true}, nil
 	}

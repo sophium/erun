@@ -34,14 +34,14 @@ this file for the conventions below.
 
 https://github.com/sophium/erun/issues/2741 splits this module into layers so
 an edit recompiles only its dependents and the compiler enforces primitive
-independence. The base layer is in place (`base/model`, `base/core`,
-`base/config`); everything else is still the root package `eruncommon` until
-its step lands, and new code is written so it would already sit in one layer:
+independence. The base and infra layers are in place (`base/*`, `infra/*`);
+everything else is still the root package `eruncommon` until its step lands,
+and new code is written so it would already sit in one layer:
 
 ```
 erun-common/
   base/          model/ core/ config/
-  infra/         docker/ kube/ helm/ gitx/ platformclient/ cloud/ activity/ mcpauth/ mcptools/
+  infra/         kube/ helm/ gitx/ registry/ platformclient/ cloud/ activity/ mcp/ mcpauth/ mcptools/
   primitive/     build/ push/ deploy/ open/ release/
   orchestration/ build --release, --deploy, --push: compositions of primitives
   command/       mergequeue/ review/ jobs/ lifecycle/ setup/ doctor/ observe/ terraform/ e2e/ orchestrator/ podruntime/
@@ -51,14 +51,18 @@ erun-common/
 |---|---|
 | `base/model` | stdlib only |
 | `base/core`, `base/config` | lower `base/*` (config → core → model) |
-| `infra/*` | `base/*`; other `infra/*` only downward |
+| `infra/*` | `base/*`; another `infra/*` only where its depguard rule names it |
 | `primitive/*` | `base/*`, `infra/*`; never another primitive |
 | `orchestration` | `base/*`, `infra/*`, `primitive/*` |
 | `command/*` | anything below; never another `command/*` |
-| erun-backend-api | `base/*`, `infra/mcpauth`, `infra/cloud` only |
+| erun-backend-api | `base/*`, `infra/{cloud,mcpauth,mcptools,platformclient}` only |
 
 - depguard in `.golangci.yml` enforces the table for every layer that exists:
-  each package denies the module and allows only what lies beneath it.
+  each package denies the module and allows only what lies beneath it. An
+  infra package lists the exact infra packages it imports (today: gitx,
+  registry and mcp → kube; mcpauth → mcptools; cloud → activity,
+  platformclient), so a new edge between external systems is a reviewed
+  config change. erun-backend-api's own `.golangci.yml` holds its row.
 - Move declarations between packages with `go run ./cmd/pkgmove`, never by
   hand. `plan -map` simulates a map (the import graph it makes, every cycle
   with the references that hold it, the fields it would export); `apply`

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 // The per-env erun-mcp server is exposed publicly and its `raw` tool can
@@ -28,7 +28,7 @@ type mcpAuthConfig struct {
 	trustedIssuers map[string]string
 	audience       string
 	tenant         string
-	oidc           *eruncommon.OIDCVerifier
+	oidc           *mcpauth.OIDCVerifier
 }
 
 // mcpAuthConfigFromEnv builds the auth config from the environment. An empty
@@ -40,7 +40,7 @@ func mcpAuthConfigFromEnv() mcpAuthConfig {
 		trustedIssuers: map[string]string{},
 		audience:       strings.TrimSpace(os.Getenv(envMCPAudience)),
 		tenant:         strings.TrimSpace(os.Getenv(envTenant)),
-		oidc:           eruncommon.NewOIDCVerifier(),
+		oidc:           mcpauth.NewOIDCVerifier(),
 	}
 	if raw := strings.TrimSpace(os.Getenv(envMCPTrustedIssuers)); raw != "" {
 		parsed := map[string]string{}
@@ -100,7 +100,7 @@ func authHTTPMiddlewareWithTokenResolver(cfg mcpAuthConfig, resolveToken func(*h
 			writeUnauthorized(w, "a bearer token is required")
 			return
 		}
-		issuer, err := eruncommon.UnverifiedMCPTokenIssuer(token)
+		issuer, err := mcpauth.UnverifiedMCPTokenIssuer(token)
 		if err != nil {
 			writeUnauthorized(w, err.Error())
 			return
@@ -116,7 +116,7 @@ func authHTTPMiddlewareWithTokenResolver(cfg mcpAuthConfig, resolveToken func(*h
 			writeUnauthorized(w, "token tenant does not match this environment")
 			return
 		}
-		claims, err := eruncommon.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now())
+		claims, err := mcpauth.VerifyMCPToken(req.Context(), cfg.oidc, token, issuer, cfg.audience, time.Now())
 		if err != nil {
 			writeUnauthorized(w, err.Error())
 			return

@@ -6,6 +6,8 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -56,7 +58,7 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 			if err != nil {
 				return err
 			}
-			holder := common.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
+			holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
 			deployer = common.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
 			return runUpgrade(withCloudContextPreflight(commandContext(cmd), store), store, target, deployer)
@@ -106,7 +108,7 @@ func runUpgrade(ctx core.Context, store common.DeployStore, target common.Upgrad
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v fleet=%v gate-environment=%s",
 		target.Tenant, target.Environment, target.VersionOverride, target.Force, target.Fleet, target.GateEnvironment))
 
-	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.UpgradeVersionsResolverForStore(store, common.ResolveRuntimeImageRegistryVersions))
+	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.UpgradeVersionsResolverForStore(store, registry.ResolveRuntimeImageRegistryVersions))
 	if err != nil {
 		ctx.Trace("upgrade: plan resolution failed: " + err.Error())
 		return err

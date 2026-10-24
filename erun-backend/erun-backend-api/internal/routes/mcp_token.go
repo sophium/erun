@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // EntitlementChecker answers whether the calling security context already
@@ -81,7 +81,7 @@ type mintMCPTokenRequest struct {
 // defaultMintedMCPScope is what this route mints when the caller does not ask
 // for a scope: read-only observation, the least capability a token can carry
 // and still be useful, never admin.
-const defaultMintedMCPScope = string(eruncommon.MCPCapabilityRead)
+const defaultMintedMCPScope = string(mcptools.MCPCapabilityRead)
 
 type mcpTokenResponse struct {
 	Token    string `json:"token"`
@@ -155,7 +155,7 @@ func (r MCPTokenRoutes) mintMCPToken(w http.ResponseWriter, req *http.Request) {
 func (r MCPTokenRoutes) authorizeScope(ctx context.Context, scope string) error {
 	requestsAdmin := false
 	for _, requested := range strings.Fields(scope) {
-		if requested == string(eruncommon.MCPCapabilityAdmin) {
+		if requested == string(mcptools.MCPCapabilityAdmin) {
 			requestsAdmin = true
 			break
 		}
@@ -185,7 +185,7 @@ func requestedMCPScope(req *http.Request) (string, error) {
 		return defaultMintedMCPScope, nil
 	}
 	for _, requested := range strings.Fields(scope) {
-		if !eruncommon.IsKnownMCPCapability(requested) {
+		if !mcptools.IsKnownMCPCapability(requested) {
 			return "", errors.New("unknown mcp token scope: " + requested)
 		}
 	}

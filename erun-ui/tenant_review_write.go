@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // tenant_review_write.go gives the desktop the review write surface the CLI's
@@ -52,7 +52,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	}
 	defer cancel()
 
-	review, err := client.CreateReview(requestCtx, eruncommon.PlatformCreateReviewParams{
+	review, err := client.CreateReview(requestCtx, platformclient.PlatformCreateReviewParams{
 		Repository: strings.TrimSpace(input.Repository),
 		Name:       name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
 	})
@@ -85,7 +85,7 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 	}
 	defer cancel()
 
-	review, err := client.UpdateReviewStatus(requestCtx, reviewID, eruncommon.PlatformUpdateReviewStatusParams{Status: "CLOSED"})
+	review, err := client.UpdateReviewStatus(requestCtx, reviewID, platformclient.PlatformUpdateReviewStatusParams{Status: "CLOSED"})
 	if err != nil {
 		return uiTenantDashboardReview{}, operatorPlatformError(actionCloseReview, err)
 	}
@@ -101,13 +101,13 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 // (MERGE_QUEUE_AMBIGUOUS) and promotes normally when the branch's queue is one
 // repository's, which is what a review created before repositories were
 // recorded leaves behind.
-func mergeQueueAddress(repository, targetBranch string) (eruncommon.PlatformMergeQueueParams, error) {
-	queue := eruncommon.PlatformMergeQueueParams{
+func mergeQueueAddress(repository, targetBranch string) (platformclient.PlatformMergeQueueParams, error) {
+	queue := platformclient.PlatformMergeQueueParams{
 		Repository:   strings.TrimSpace(repository),
 		TargetBranch: strings.TrimSpace(targetBranch),
 	}
 	if queue.TargetBranch == "" {
-		return eruncommon.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
+		return platformclient.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
 	}
 	return queue, nil
 }
@@ -146,12 +146,12 @@ func (a *App) AdvanceMergeQueue(input uiAdvanceMergeQueueInput) (uiTenantDashboa
 
 	review, err := client.AdvanceMergeQueue(requestCtx, queue)
 	if err != nil {
-		var blocked *eruncommon.PlatformMergeQueueBlockedError
+		var blocked *platformclient.PlatformMergeQueueBlockedError
 		if errors.As(err, &blocked) {
 			unresolved := blocked.UnresolvedThreads
 			return uiTenantDashboardReview{ReviewID: blocked.ReviewID, Blocked: true, UnresolvedThreads: &unresolved}, nil
 		}
-		var occupied *eruncommon.PlatformMergeQueueOccupiedError
+		var occupied *platformclient.PlatformMergeQueueOccupiedError
 		if errors.As(err, &occupied) {
 			return uiTenantDashboardReview{}, errors.New(occupied.Error())
 		}
@@ -222,7 +222,7 @@ func (a *App) AddReviewer(input uiAddReviewerInput) (uiReviewer, error) {
 	}
 	defer cancel()
 
-	reviewer, err := client.AddReviewer(requestCtx, reviewID, eruncommon.PlatformAddReviewerParams{UserID: userID})
+	reviewer, err := client.AddReviewer(requestCtx, reviewID, platformclient.PlatformAddReviewerParams{UserID: userID})
 	if err != nil {
 		return uiReviewer{}, operatorPlatformError(actionAddReviewer, err)
 	}
@@ -304,7 +304,7 @@ func (a *App) CreateReviewComment(input uiCreateReviewCommentInput) (uiReviewCom
 	}
 	defer cancel()
 
-	comment, err := client.CreateComment(requestCtx, reviewID, eruncommon.PlatformCreateCommentParams{
+	comment, err := client.CreateComment(requestCtx, reviewID, platformclient.PlatformCreateCommentParams{
 		CommitID: commitID,
 		FilePath: filePath,
 		Line:     input.Line,
@@ -361,7 +361,7 @@ func (a *App) updateReviewCommentStatus(input uiUpdateReviewCommentStatusInput, 
 	if status == "OPEN" {
 		action = actionUnresolveComment
 	}
-	comment, err := client.UpdateCommentStatus(requestCtx, reviewID, commentID, eruncommon.PlatformUpdateCommentStatusParams{Status: status})
+	comment, err := client.UpdateCommentStatus(requestCtx, reviewID, commentID, platformclient.PlatformUpdateCommentStatusParams{Status: status})
 	if err != nil {
 		return uiReviewComment{}, operatorPlatformError(action, err)
 	}

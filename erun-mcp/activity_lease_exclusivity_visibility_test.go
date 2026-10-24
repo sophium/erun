@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // An exclusivity defect *between* the transports has to be asserted across
@@ -85,9 +86,9 @@ func TestExclusiveClaimTakenByTheInPodCLIIsReadBackOverMCPAsExclusive(t *testing
 	isolateLeaseCache(t)
 	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "erun", Environment: "code1"}}
 
-	if _, err := eruncommon.TakeEnvironmentActivityLease(eruncommon.TakeEnvironmentActivityLeaseParams{
+	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "code1", Name: "in-pod drive", ID: "in-pod-drive",
-		Exclusive: true, Holder: eruncommon.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
+		Exclusive: true, Holder: activity.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
 	}); err != nil {
 		t.Fatalf("take in-pod: %v", err)
 	}

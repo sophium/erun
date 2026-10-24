@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A release used to have nothing standing in for "I am releasing this
@@ -54,15 +55,15 @@ func releaseVersionClaimScope(version string) string {
 // stable across one release's own renewal ticks because those reuse the pid
 // that made the original claim.
 func releaseVersionClaimID(version string, pid int) string {
-	return fmt.Sprintf("release-%s-%d", sanitizeForFilename(strings.TrimSpace(version)), pid)
+	return fmt.Sprintf("release-%s-%d", core.SanitizeForFilename(strings.TrimSpace(version)), pid)
 }
 
 // takeReleaseVersionClaim is the thin wrapper over the exclusive activity
 // lease that names the claim's shape, kept separate from claimReleaseVersion
 // so the refuse/reclaim behavior can be exercised directly against a
 // controlled clock rather than through a real release run.
-func takeReleaseVersionClaim(tenant, environment, version string, holder EnvironmentActivityLeaseHolder, pid int, now time.Time) (EnvironmentActivityLease, error) {
-	return TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
+func takeReleaseVersionClaim(tenant, environment, version string, holder activity.EnvironmentActivityLeaseHolder, pid int, now time.Time) (activity.EnvironmentActivityLease, error) {
+	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      tenant,
 		Environment: environment,
 		Name:        "release " + strings.TrimSpace(version),
@@ -80,7 +81,7 @@ func takeReleaseVersionClaim(tenant, environment, version string, holder Environ
 // operator-facing refusal: it names the version and the holder, and says
 // what to do — wait, or nothing, since a dead holder reclaims itself.
 func releaseVersionClaimRefusalError(version string, err error) error {
-	var conflict *EnvironmentActivityLeaseConflictError
+	var conflict *activity.EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
 		return err
 	}
@@ -113,7 +114,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 		return func() {}, nil
 	}
 
-	holder := EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
+	holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
 	pid := os.Getpid()
 
 	// The liveness a repository-global claim cannot carry: this environment's
@@ -163,7 +164,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 	return func() {
 		close(stop)
 		stopped.Wait()
-		_, _ = ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
+		_, _ = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id)
 		releaseRepoClaimIfHeld(ctx, spec, repo)
 	}, nil
 }
@@ -180,7 +181,7 @@ func claimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 // (an unreadable store) is reported as present, so a claim is only ever
 // reclaimed on evidence and never on the absence of an answer.
 func environmentHasLiveReleaseHolder(tenant, environment, version string, now time.Time) (bool, error) {
-	held, err := LoadEnvironmentActivityLeases(tenant, environment, now)
+	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
 		return false, err
 	}
@@ -217,7 +218,7 @@ func (h *releaseRepoClaimHandle) set(sha string) {
 // claim is best-effort, matching the local lease's own renewal: a failed
 // renewal keeps the last-known sha and tries again next tick rather than
 // tearing down a release over a transient push failure.
-func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
+func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder activity.EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
 	_, _ = takeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
 
 	sha := repo.get()

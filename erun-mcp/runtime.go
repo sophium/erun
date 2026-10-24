@@ -12,6 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/kube"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 type RuntimeContext struct {
@@ -39,8 +43,8 @@ type RuntimeConfig struct {
 	EnsureKubernetesNamespace      eruncommon.NamespaceEnsurerFunc
 	DeleteKubernetesNamespace      eruncommon.NamespaceDeleterFunc
 	WaitForRemoteRuntime           eruncommon.RemoteRuntimeWaitFunc
-	RunRemoteCommand               eruncommon.RemoteCommandRunnerFunc
-	ResolveRuntimeRegistryVersions eruncommon.RuntimeRegistryVersionResolverFunc
+	RunRemoteCommand               kube.RemoteCommandRunnerFunc
+	ResolveRuntimeRegistryVersions registry.RuntimeRegistryVersionResolverFunc
 }
 
 type CommandOutput struct {
@@ -57,11 +61,11 @@ type CommandOutput struct {
 	// moved without diffing the tree afterwards.
 	Pin *PinOutput `json:"pin,omitempty"`
 	// Write carries what a `write` call actually wrote.
-	Write *eruncommon.WriteWorkingTreeFileResult `json:"write,omitempty"`
+	Write *gitx.WriteWorkingTreeFileResult `json:"write,omitempty"`
 	// Commit carries what a `commit` call actually committed.
-	Commit *eruncommon.CommitWorkingTreeResult `json:"commit,omitempty"`
+	Commit *gitx.CommitWorkingTreeResult `json:"commit,omitempty"`
 	// Push carries what a `push` call actually pushed.
-	Push *eruncommon.PushWorkingTreeBranchResult `json:"push,omitempty"`
+	Push *gitx.PushWorkingTreeBranchResult `json:"push,omitempty"`
 	// Merge carries what an `exec_merge` call actually merged.
 	Merge *eruncommon.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
 	// GateMerge carries what an `exec_gate-merge` call actually squash-merged.
@@ -107,20 +111,20 @@ func normalizeRuntimeConfigBuildDefaults(cfg RuntimeConfig) RuntimeConfig {
 func normalizeRuntimeConfigRemoteDefaults(cfg RuntimeConfig) RuntimeConfig {
 	namespaceEnsurer := cfg.EnsureKubernetesNamespace
 	if namespaceEnsurer == nil {
-		namespaceEnsurer = eruncommon.EnsureKubernetesNamespace
+		namespaceEnsurer = kube.EnsureKubernetesNamespace
 	}
 	cfg.DeployHelmChart = eruncommon.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
 	if cfg.WaitForRemoteRuntime == nil {
 		cfg.WaitForRemoteRuntime = eruncommon.WaitForShellDeployment
 	}
 	if cfg.RunRemoteCommand == nil {
-		cfg.RunRemoteCommand = eruncommon.RunRemoteCommand
+		cfg.RunRemoteCommand = kube.RunRemoteCommand
 	}
 	if cfg.DeleteKubernetesNamespace == nil {
-		cfg.DeleteKubernetesNamespace = eruncommon.DeleteKubernetesNamespace
+		cfg.DeleteKubernetesNamespace = kube.DeleteKubernetesNamespace
 	}
 	if cfg.ResolveRuntimeRegistryVersions == nil {
-		cfg.ResolveRuntimeRegistryVersions = eruncommon.ResolveDefaultRuntimeRegistryVersions
+		cfg.ResolveRuntimeRegistryVersions = registry.ResolveDefaultRuntimeRegistryVersions
 	}
 	return cfg
 }
@@ -202,7 +206,7 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, log i
 	traceOutput := new(bytes.Buffer)
 	traceSink := mirrorToJobLog(traceOutput, log)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceSink, traceSink)
-	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
+	ctx.KubernetesContextPreflight = cloud.CloudContextPreflight(runtime.Store, cloud.CloudContextDependencies{})
 	// Surfaces agent-driven operations in the desktop's Diagnostics console,
 	// matching the CLI's trace contract. Read-only tools (idle, raw, list,
 	// version) deliberately bypass runRuntimeCommand so probe polls cannot

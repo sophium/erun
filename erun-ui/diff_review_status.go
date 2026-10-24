@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // diff_review_status.go resolves the diff panel's review-status chip: where
@@ -88,7 +89,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 		return *early, nil
 	}
 
-	reviews, err := platform.client.ListReviews(requestCtx, eruncommon.PlatformReviewFilter{
+	reviews, err := platform.client.ListReviews(requestCtx, platformclient.PlatformReviewFilter{
 		SourceBranch: sourceBranch,
 		TargetBranch: targetBranch,
 	})
@@ -116,7 +117,7 @@ func (a *App) DiffReviewStatus(input uiDiffReviewStatusInput) (uiDiffReviewStatu
 // resolveDiffReviewPlatform resolved, once past every state where the chip
 // has nothing further to read.
 type diffReviewPlatform struct {
-	client       *eruncommon.PlatformClient
+	client       *platformclient.PlatformClient
 	capabilities model.PlatformCapabilities
 	canAdvance   bool
 }
@@ -149,7 +150,7 @@ func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (dif
 }
 
 // applyDiffReviewLadderState fills in the state a review actually occupies.
-func applyDiffReviewLadderState(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewLadderState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
 	switch strings.ToUpper(strings.TrimSpace(review.Status)) {
 	case "OPEN":
 		status.State = diffReviewStateOpen
@@ -172,7 +173,7 @@ func applyDiffReviewLadderState(ctx context.Context, client *eruncommon.Platform
 // chip's vantage: Blocked when its comment threads are unresolved (mirrors
 // AdvanceMergeQueueAction's own gate -- merge-queue/advance refuses the same
 // review for the same reason), Ready with its queue position otherwise.
-func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformClient, capabilities model.PlatformCapabilities, review eruncommon.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
 			count := eruncommon.CountUnresolvedThreads(comments)
@@ -188,7 +189,7 @@ func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformC
 		// The review's own repository's queue: a review's queue position is
 		// meaningless against another repository's queue that happens to share
 		// the target branch.
-		if queue, err := client.ListMergeQueue(ctx, eruncommon.PlatformMergeQueueParams{
+		if queue, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{
 			Repository: review.Repository, TargetBranch: review.TargetBranch,
 		}); err == nil {
 			status.QueuePosition = reviewQueuePosition(queue, review.ReviewID)
@@ -200,8 +201,8 @@ func applyDiffReviewReadyState(ctx context.Context, client *eruncommon.PlatformC
 // can return more than one across the pair's history (a prior review closed
 // or merged, then reopened), and the most recently updated one is the one the
 // chip should describe.
-func mostRecentPlatformReview(reviews []eruncommon.PlatformReview) (eruncommon.PlatformReview, bool) {
-	var best eruncommon.PlatformReview
+func mostRecentPlatformReview(reviews []platformclient.PlatformReview) (platformclient.PlatformReview, bool) {
+	var best platformclient.PlatformReview
 	found := false
 	for _, review := range reviews {
 		if !found || review.UpdatedAt.After(best.UpdatedAt) {

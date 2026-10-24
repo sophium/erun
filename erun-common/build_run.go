@@ -7,7 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 func RunDockerBuild(ctx core.Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
@@ -256,7 +261,7 @@ func traceBuildUmbrella(ctx core.Context) (core.Context, func(*error)) {
 // run to the erun platform, best-effort, once it finishes (erun#1954) --
 // pass a nil store from a caller that has none (build never fails or
 // changes its own output because reporting is unavailable).
-func RunBuildExecution(ctx core.Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+func RunBuildExecution(ctx core.Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -265,7 +270,7 @@ func RunBuildExecution(ctx core.Context, execution BuildExecutionSpec, runScript
 
 // RunBuildExecutionAndDeploy is RunBuildExecution's `--deploy` counterpart;
 // see its doc comment for store/deps.
-func RunBuildExecutionAndDeploy(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store CloudReadStore, deps CloudDependencies) (err error) {
+func RunBuildExecutionAndDeploy(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc, store config.CloudReadStore, deps cloud.CloudDependencies) (err error) {
 	defer func() { reportBuildExecutionOutcome(ctx, execution, store, deps, err) }()
 	ctx, finish := traceBuildUmbrella(ctx)
 	defer finish(&err)
@@ -281,7 +286,7 @@ func RunBuildExecutionAndDeploy(ctx core.Context, execution BuildExecutionSpec, 
 // benefit. `erun build --release` (a snapshot vs. stable version choice, not
 // a different command) still goes through RunBuildExecution above and does
 // get reported, same as any other build.
-func reportBuildExecutionOutcome(ctx core.Context, execution BuildExecutionSpec, store CloudReadStore, deps CloudDependencies, err error) {
+func reportBuildExecutionOutcome(ctx core.Context, execution BuildExecutionSpec, store config.CloudReadStore, deps cloud.CloudDependencies, err error) {
 	if store == nil {
 		return
 	}
@@ -332,7 +337,7 @@ func buildExecutionProjectRootAndEnvironment(execution BuildExecutionSpec) (stri
 // umbrella the desktop activity queue expects for a release rather than the
 // `==> Building` one. Both entrypoints share one execution so the flow cannot
 // drift between them.
-func RunReleaseExecution(ctx core.Context, execution BuildExecutionSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
+func RunReleaseExecution(ctx core.Context, execution BuildExecutionSpec, runGit gitx.GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (err error) {
 	ctx, finish := traceReleaseUmbrella(ctx, releaseExecutionVersion(execution))
 	defer finish(&err)
 	return runBuildExecution(ctx, execution, nil, runGit, runScript, build, push, nil)
@@ -343,14 +348,14 @@ func RunReleaseExecution(ctx core.Context, execution BuildExecutionSpec, runGit 
 // no chart -- runs no work and tests nothing, so reporting success for it turns
 // "not tested" into "tested and green" for every caller reading the exit code.
 // That precondition is checked here, before the execution it guards.
-func runBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if !buildExecutionPlansWork(execution) {
 		return newEmptyBuildPlanError("the resolved plan has nothing to build or test")
 	}
 	return runResolvedBuildExecution(ctx, execution, deploySpecs, runGit, runScript, build, push, deploy)
 }
 
-func runResolvedBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runResolvedBuildExecution(ctx core.Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runGit gitx.GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
 		// The release owns the publish rather than following it: its stages run
 		// around the build+push so the version's images and charts exist, and
@@ -532,7 +537,7 @@ func RunDockerPushSpec(ctx core.Context, pushInput DockerPushSpec, buildInput *D
 		if buildInput.Push {
 			// The multi-arch build already pushed the image, so only the chart
 			// remains; a single-image push aligns chart and image versions.
-			return publishComponentChart(ctx, buildInput.Image, buildInput.Image.Version)
+			return helm.PublishComponentChart(ctx, buildInput.Image, buildInput.Image.Version)
 		}
 	}
 	if push == nil {
@@ -543,7 +548,7 @@ func RunDockerPushSpec(ctx core.Context, pushInput DockerPushSpec, buildInput *D
 	if err := push(ctx, pushInput); err != nil {
 		return err
 	}
-	return publishComponentChart(ctx, pushInput.Image, pushInput.Image.Version)
+	return helm.PublishComponentChart(ctx, pushInput.Image, pushInput.Image.Version)
 }
 
 func RunDockerPushExecution(ctx core.Context, execution DockerPushExecutionSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
@@ -623,10 +628,10 @@ func preflightRegistryPushAccess(ctx core.Context, execution DockerPushExecution
 		}
 	}
 	for _, chart := range execution.componentCharts {
-		if err := VerifyGHCRChartCredentialConfigured(chart.OCIRepo); err != nil {
+		if err := registrypkg.VerifyGHCRChartCredentialConfigured(chart.OCIRepo); err != nil {
 			return err
 		}
-		if err := VerifyGHCRCanPushChart(context.Background(), nil, chart.OCIRepo, chart.ChartName); err != nil {
+		if err := registrypkg.VerifyGHCRCanPushChart(context.Background(), nil, chart.OCIRepo, chart.ChartName); err != nil {
 			return err
 		}
 	}
@@ -653,11 +658,11 @@ func (c *registryPushAccessChecker) checkImageTag(tag string) error {
 	if err := c.checkRegistryScopeOnce(tag); err != nil {
 		return err
 	}
-	return VerifyGHCRCanPushImage(context.Background(), nil, tag)
+	return registrypkg.VerifyGHCRCanPushImage(context.Background(), nil, tag)
 }
 
 func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
-	registry := dockerRegistryFromImageTag(tag)
+	registry := registrypkg.DockerRegistryFromImageTag(tag)
 	if registry == "" {
 		return nil
 	}
@@ -665,14 +670,14 @@ func (c *registryPushAccessChecker) checkRegistryScopeOnce(tag string) error {
 		return nil
 	}
 	c.checkedRegistries[registry] = struct{}{}
-	if err := VerifyGHCRCredentialConfigured(tag); err != nil {
+	if err := registrypkg.VerifyGHCRCredentialConfigured(tag); err != nil {
 		return err
 	}
-	return VerifyGHCRPushScope(context.Background(), nil, tag)
+	return registrypkg.VerifyGHCRPushScope(context.Background(), nil, tag)
 }
 
 // publishComponentCharts packages+pushes then verifies each resolved chart.
-func publishComponentCharts(ctx core.Context, specs []HelmChartPublishSpec) error {
+func publishComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec) error {
 	published := make([]string, 0, len(specs))
 	for i, spec := range specs {
 		spec.Verbosity = ctx.Verbosity
@@ -687,11 +692,11 @@ func publishComponentCharts(ctx core.Context, specs []HelmChartPublishSpec) erro
 	return nil
 }
 
-func publishAndVerifyHelmChart(ctx core.Context, spec HelmChartPublishSpec) error {
-	if err := RunHelmChartPublish(ctx, spec); err != nil {
+func publishAndVerifyHelmChart(ctx core.Context, spec helm.HelmChartPublishSpec) error {
+	if err := helm.RunHelmChartPublish(ctx, spec); err != nil {
 		return err
 	}
-	return VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version)
+	return helm.VerifyPublishedHelmChart(ctx, spec.OCIRepo, spec.ChartName, spec.Version)
 }
 
 // newPartialChartPublishError reports a chart publish that stopped mid-set. By
@@ -700,7 +705,7 @@ func publishAndVerifyHelmChart(ctx core.Context, spec HelmChartPublishSpec) erro
 // consumers cannot resolve every chart. The operator needs the exact split to
 // recover, and re-running push is the recovery: publishing a chart already
 // published is harmless.
-func newPartialChartPublishError(failed HelmChartPublishSpec, published []string, remaining []HelmChartPublishSpec, err error) error {
+func newPartialChartPublishError(failed helm.HelmChartPublishSpec, published []string, remaining []helm.HelmChartPublishSpec, err error) error {
 	notAttempted := make([]string, 0, len(remaining))
 	for _, spec := range remaining {
 		notAttempted = append(notAttempted, spec.ChartName)
@@ -724,9 +729,9 @@ func describeChartNames(names []string) string {
 // packageComponentCharts packages each resolved chart locally (validate + record
 // identity) without publishing — the build-only counterpart of
 // publishComponentCharts.
-func packageComponentCharts(ctx core.Context, specs []HelmChartPublishSpec) error {
+func packageComponentCharts(ctx core.Context, specs []helm.HelmChartPublishSpec) error {
 	for _, spec := range specs {
-		if err := PackageResolvedChart(ctx, spec); err != nil {
+		if err := helm.PackageResolvedChart(ctx, spec); err != nil {
 			return err
 		}
 	}

@@ -12,9 +12,9 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/secrets"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // ProvisionInput is the workflow input DBOS checkpoints. Because the checkpoint
@@ -139,7 +139,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}
-	params := eruncommon.InitCloudContextParams{
+	params := cloud.InitCloudContextParams{
 		Name:               input.Name,
 		CloudProviderAlias: input.CloudProviderAlias,
 		Region:             input.Region,
@@ -147,7 +147,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		DiskType:           input.DiskType,
 		DiskSizeGB:         input.DiskSizeGB,
 	}
-	status, err := eruncommon.InitCloudContext(ectx, store, params, eruncommon.CloudContextDependencies{
+	status, err := cloud.InitCloudContext(ectx, store, params, cloud.CloudContextDependencies{
 		RunAWS:     runner.runAWS(c),
 		RunKubectl: func(core.Context, []string) error { return nil },
 		// Deterministic token from the context id: a crash-resumed re-run (reusing

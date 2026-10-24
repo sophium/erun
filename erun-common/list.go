@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 type ListStore interface {
@@ -17,12 +18,12 @@ type ListStore interface {
 }
 
 type ListResult struct {
-	ConfigDirectory  string                     `json:"configDirectory,omitempty"`
-	Defaults         ListDefaultsResult         `json:"defaults"`
-	CurrentDirectory ListCurrentDirectoryResult `json:"currentDirectory"`
-	CloudProviders   []CloudProviderStatus      `json:"cloudProviders,omitempty"`
-	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
-	Orchestrators    []ListOrchestratorResult   `json:"orchestrators,omitempty"`
+	ConfigDirectory  string                      `json:"configDirectory,omitempty"`
+	Defaults         ListDefaultsResult          `json:"defaults"`
+	CurrentDirectory ListCurrentDirectoryResult  `json:"currentDirectory"`
+	CloudProviders   []cloud.CloudProviderStatus `json:"cloudProviders,omitempty"`
+	Tenants          []ListTenantResult          `json:"tenants,omitempty"`
+	Orchestrators    []ListOrchestratorResult    `json:"orchestrators,omitempty"`
 	// OrphanedSSHAliases are the host's own ~/.ssh/config Host blocks naming an
 	// erun environment alias no configured environment claims. Nothing else in
 	// erun looks at these: `sshd init` writes blocks and env deletion removes
@@ -200,7 +201,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	if err != nil {
 		return ListResult{}, err
 	}
-	cloudProviders, err := ListCloudProviderStatuses(store, DefaultCloudDependencies())
+	cloudProviders, err := cloud.ListCloudProviderStatuses(store, cloud.DefaultCloudDependencies())
 	if err != nil {
 		return ListResult{}, err
 	}
@@ -433,15 +434,15 @@ func listEnvironmentOpenResult(tenant configpkg.TenantConfig, env configpkg.EnvC
 	}
 }
 
-func listEnvironmentIsActive(store CloudReadStore, env configpkg.EnvConfig) bool {
+func listEnvironmentIsActive(store configpkg.CloudReadStore, env configpkg.EnvConfig) bool {
 	if !env.RemoteWorktree() {
 		return false
 	}
-	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	status, ok, err := configpkg.FindCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return false
 	}
-	return strings.TrimSpace(status.Status) == CloudContextStatusRunning
+	return strings.TrimSpace(status.Status) == cloud.CloudContextStatusRunning
 }
 
 func listSSHResult(result configpkg.OpenResult) ListSSHResult {

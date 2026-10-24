@@ -26,7 +26,9 @@ linters:
     # The package layers of #2741 (AGENTS.md "Package layers"): every package
     # may import only the layers below it. Each rule denies the whole module
     # and allows what lies beneath, so a new package is held to the table the
-    # moment its directory exists.
+    # moment its directory exists. An infra package names exactly the infra
+    # packages it uses: a new edge between two external systems is a decision
+    # recorded here, not something an import can add on its own.
     depguard:
       rules:
         base-model:
@@ -52,6 +54,92 @@ linters:
           deny:
             - pkg: github.com/sophium/erun/erun-common
               desc: base/config may import only base/core and base/model
+        infra-mcptools:
+          list-mode: lax
+          files: ["**/erun-common/infra/mcptools/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/mcptools may import base/* and no other infra package
+        infra-mcpauth:
+          list-mode: lax
+          files: ["**/erun-common/infra/mcpauth/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/mcptools$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/mcpauth may import base/* and infra/mcptools
+        infra-kube:
+          list-mode: lax
+          files: ["**/erun-common/infra/kube/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/kube may import base/* and no other infra package
+        infra-gitx:
+          list-mode: lax
+          files: ["**/erun-common/infra/gitx/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/kube$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/gitx may import base/* and infra/kube
+        infra-registry:
+          list-mode: lax
+          files: ["**/erun-common/infra/registry/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/kube$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/registry may import base/* and infra/kube
+        infra-helm:
+          list-mode: lax
+          files: ["**/erun-common/infra/helm/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/helm may import base/* and no other infra package
+        infra-activity:
+          list-mode: lax
+          files: ["**/erun-common/infra/activity/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/activity may import base/* and no other infra package
+        infra-platformclient:
+          list-mode: lax
+          files: ["**/erun-common/infra/platformclient/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/platformclient may import base/* and no other infra package
+        infra-cloud:
+          list-mode: lax
+          files: ["**/erun-common/infra/cloud/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/activity$
+            - github.com/sophium/erun/erun-common/infra/platformclient$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/cloud may import base/* and infra/activity, infra/platformclient
+        infra-mcp:
+          list-mode: lax
+          files: ["**/erun-common/infra/mcp/*.go"]
+          allow:
+            - github.com/sophium/erun/erun-common/base/
+            - github.com/sophium/erun/erun-common/infra/kube$
+          deny:
+            - pkg: github.com/sophium/erun/erun-common
+              desc: infra/mcp may import base/* and infra/kube
     funlen:
       lines: 100
       statements: 50

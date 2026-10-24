@@ -12,6 +12,9 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/infra/mcp"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
@@ -37,9 +40,9 @@ var reattachMCPChannel = reattachEnvironmentMCPChannel
 // hand-rolled retry loop falls into — probing the port binding is worthless
 // (a stale forward still accepts the connection), and a bare `erun open`
 // would silently start an environment the operator deliberately stopped.
-func callMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (common.MCPToolCallResult, error) {
-	call := func() (common.MCPToolCallResult, error) {
-		return common.CallMCPTool(ctx, common.MCPToolCallParams{
+func callMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (mcp.MCPToolCallResult, error) {
+	call := func() (mcp.MCPToolCallResult, error) {
+		return mcp.CallMCPTool(ctx, mcp.MCPToolCallParams{
 			Endpoint:      target.endpoint,
 			MintToken:     mcpEdgeTokenMinter(target),
 			ClientVersion: currentBuildInfo().Version,
@@ -49,7 +52,7 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx core.Context, targe
 		})
 	}
 	result, err := call()
-	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
+	if err != nil && errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 		// A preview resolves and traces; it never executes. Reattaching spawns a
 		// real `erun open --reconnect` child that keeps running past the
 		// preview, so a --dry-run reports the channel as unreachable instead of
@@ -68,7 +71,7 @@ func callMCPToolWithReattach(ctx context.Context, commandCtx core.Context, targe
 // channel-unreachable failure must carry (see mcpChannelUnreachableExitCode).
 func mcpEdgeErrorWithExitCode(target mcpEdgeTarget, err error) error {
 	wrapped := mcpEdgeError(target, err)
-	if errors.Is(err, common.ErrMCPEndpointUnreachable) {
+	if errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 		return internal.WithExitCode(wrapped, mcpChannelUnreachableExitCode)
 	}
 	return wrapped
@@ -196,7 +199,7 @@ func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen
 	if err != nil {
 		if tool == "activity_lease_take" {
 			exclusive, _ := toolArguments["exclusive"].(bool)
-			err = common.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, exclusive, err)
+			err = activity.DescribeExclusiveActivityLeaseVersionSkew(target.tenant, target.environment, exclusive, err)
 		}
 		return mcpEdgeErrorWithExitCode(target, err)
 	}
@@ -230,9 +233,9 @@ func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 // listMCPToolsWithReattach is listMCPTools's counterpart to
 // callMCPToolWithReattach: the same one-shot reattach-then-retry for a
 // dropped or stale channel.
-func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget) (common.MCPToolListResult, error) {
-	list := func() (common.MCPToolListResult, error) {
-		return common.ListMCPTools(ctx, common.MCPToolListParams{
+func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target mcpEdgeTarget) (mcp.MCPToolListResult, error) {
+	list := func() (mcp.MCPToolListResult, error) {
+		return mcp.ListMCPTools(ctx, mcp.MCPToolListParams{
 			Endpoint:      target.endpoint,
 			MintToken:     mcpEdgeTokenMinter(target),
 			ClientVersion: currentBuildInfo().Version,
@@ -240,7 +243,7 @@ func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, targ
 		})
 	}
 	result, err := list()
-	if err != nil && errors.Is(err, common.ErrMCPEndpointUnreachable) {
+	if err != nil && errors.Is(err, mcp.ErrMCPEndpointUnreachable) {
 		if reattachErr := reattachEnvironmentMCPChannel(commandCtx, target.tenant, target.environment); reattachErr == nil {
 			result, err = list()
 		}
@@ -254,13 +257,13 @@ func runMCPTokenCommand(commandCtx core.Context, resolveOpen OpenResolver, param
 		return err
 	}
 
-	commandCtx.TraceCommand("", "mcp", "mint-token", common.MCPTokenAudience(target.tenant, target.environment))
+	commandCtx.TraceCommand("", "mcp", "mint-token", mcpauth.MCPTokenAudience(target.tenant, target.environment))
 	if commandCtx.DryRun {
 		return nil
 	}
 
 	now := time.Now()
-	token, err := common.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, now)
+	token, err := mcpauth.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, now)
 	if err != nil {
 		return err
 	}
@@ -269,8 +272,8 @@ func runMCPTokenCommand(commandCtx core.Context, resolveOpen OpenResolver, param
 			Tenant:      target.tenant,
 			Environment: target.environment,
 			Endpoint:    target.endpoint,
-			Issuer:      common.DesktopMCPIssuer(),
-			Audience:    common.MCPTokenAudience(target.tenant, target.environment),
+			Issuer:      mcpauth.DesktopMCPIssuer(),
+			Audience:    mcpauth.MCPTokenAudience(target.tenant, target.environment),
 			ExpiresAt:   now.Add(core.DesktopMCPTokenTTL).UTC().Format(time.RFC3339),
 			Token:       token,
 		})
@@ -292,7 +295,7 @@ func resolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params com
 		tenant:      result.Tenant,
 		environment: result.Environment,
 		port:        port,
-		endpoint:    common.MCPLocalEndpoint(port),
+		endpoint:    mcp.MCPLocalEndpoint(port),
 	}
 	ctx.Trace(fmt.Sprintf("mcp: %s/%s edge resolved to %s", target.tenant, target.environment, target.endpoint))
 	return target, nil
@@ -300,9 +303,9 @@ func resolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params com
 
 // mcpEdgeTokenMinter mints per request rather than once per command, so a tool
 // call that runs longer than the token's lifetime still starts with a fresh one.
-func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
+func mcpEdgeTokenMinter(target mcpEdgeTarget) mcp.MCPTokenMinter {
 	return func() (string, error) {
-		return common.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, time.Now())
+		return mcpauth.MintDesktopMCPToken(core.DefaultDesktopIdentityDir(), target.tenant, target.environment, time.Now())
 	}
 }
 
@@ -319,13 +322,13 @@ func mcpEdgeTokenMinter(target mcpEdgeTarget) common.MCPTokenMinter {
 // this client's session — keeps working meanwhile.
 func mcpEdgeError(target mcpEdgeTarget, err error) error {
 	switch {
-	case errors.Is(err, common.ErrMCPTargetNotAnswering):
+	case errors.Is(err, mcp.ErrMCPTargetNotAnswering):
 		return fmt.Errorf("%w; the port-forward is up, so retry in a few seconds once %s/%s has finished starting — re-establish the forward with `erun open %s %s --reconnect` only if it stays unresponsive", err, target.tenant, target.environment, target.tenant, target.environment)
-	case errors.Is(err, common.ErrMCPSessionLost):
+	case errors.Is(err, mcp.ErrMCPSessionLost):
 		return fmt.Errorf("%w; %s/%s is up and dispatchable — what is broken is this MCP client's session with its edge, not the environment. Calling again re-handshakes; to dispatch work now, use the CLI, which needs no MCP session of its own: `erun exec job start --tenant %s --environment %s --id <job id> --name <name> -- <command>`", err, target.tenant, target.environment, target.tenant, target.environment)
-	case errors.Is(err, common.ErrMCPEndpointUnreachable):
+	case errors.Is(err, mcp.ErrMCPEndpointUnreachable):
 		return fmt.Errorf("%w; run `erun open %s %s` so the local MCP port-forward is up", err, target.tenant, target.environment)
-	case errors.Is(err, common.ErrMCPUnauthorized):
+	case errors.Is(err, mcp.ErrMCPUnauthorized):
 		return fmt.Errorf("%w; %s/%s was deployed without this machine's MCP public key, so redeploy it from the ERun desktop app", err, target.tenant, target.environment)
 	}
 	return err
@@ -354,7 +357,7 @@ func compactMCPArguments(arguments map[string]any) string {
 	return string(encoded)
 }
 
-func writeMCPCallText(ctx core.Context, result common.MCPToolCallResult) error {
+func writeMCPCallText(ctx core.Context, result mcp.MCPToolCallResult) error {
 	if text := strings.TrimRight(result.Text, "\n"); text != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, text); err != nil {
 			return err
@@ -369,7 +372,7 @@ func writeMCPCallText(ctx core.Context, result common.MCPToolCallResult) error {
 	return err
 }
 
-func writeMCPToolsText(ctx core.Context, target mcpEdgeTarget, list common.MCPToolListResult) error {
+func writeMCPToolsText(ctx core.Context, target mcpEdgeTarget, list mcp.MCPToolListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Tools on %s/%s (%s):\n", target.tenant, target.environment, target.endpoint); err != nil {
 		return err
 	}

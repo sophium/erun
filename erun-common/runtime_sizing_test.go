@@ -16,7 +16,7 @@ const (
 
 // usageHistory builds a history with the aggregates a recommendation reads, plus
 // a sample count and window, without running the sampler.
-func usageHistory(window time.Duration, samples int, latest RuntimeUsage) RuntimeUsageHistory {
+func usageHistory(window time.Duration, samples int, latest config.RuntimeUsage) RuntimeUsageHistory {
 	start := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	history := RuntimeUsageHistory{FirstObservedAt: start, LastObservedAt: start.Add(window)}
 	for i := 0; i < samples; i++ {
@@ -88,7 +88,7 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 		{
 			name: "peak at 95 percent of limit raises on high confidence",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeakMemoryBytes = 2*testGi - 100*testMi
 				return h
 			}(),
@@ -101,7 +101,7 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 			// the allocation that was refused never reached memory.peak.
 			name: "a single oom kill raises even though the peak looks comfortable",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(time.Minute, 2, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(time.Minute, 2, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeakMemoryBytes = 512 * testMi
 				h.ObservedOOMKills = 1
 				return h
@@ -115,7 +115,7 @@ func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
 			// it can admit is a size Kubernetes would refuse to schedule.
 			name: "a raise is bounded by the namespace quota",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 20 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 20 * testGi}})
 				h.ObservedOOMKills = 2
 				return h
 			}(),
@@ -137,7 +137,7 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 		{
 			name: "peak at 20 percent lowers to the headroom multiple",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 2 * testGi
 				return h
 			}(),
@@ -148,7 +148,7 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 		{
 			name: "a short window recommends nothing",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(time.Hour, 100, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
+				h := usageHistory(time.Hour, 100, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 1 * testGi
 				return h
 			}(),
@@ -159,7 +159,7 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 			// nothing. The span alone is not coverage.
 			name: "a long window with too few samples recommends nothing",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, 4, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
+				h := usageHistory(quietWindow, 4, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 1 * testGi
 				return h
 			}(),
@@ -167,16 +167,16 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 		},
 		{
 			name: "no limit is reported as unmeasurable, not as zero",
-			history: usageHistory(quietWindow, quietSamples, RuntimeUsage{
-				CPU:    RuntimeCPUUsage{QuotaCores: 1},
-				Memory: RuntimeMemoryUsage{Unavailable: "memory.max was not readable"},
+			history: usageHistory(quietWindow, quietSamples, config.RuntimeUsage{
+				CPU:    config.RuntimeCPUUsage{QuotaCores: 1},
+				Memory: config.RuntimeMemoryUsage{Unavailable: "memory.max was not readable"},
 			}),
 			wantAction: RuntimeSizingUnknown,
 		},
 		{
 			name: "a peak just under the raise margin holds rather than shrinking",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
 				h.ObservedPeakMemoryBytes = 8 * testGi
 				return h
 			}(),
@@ -200,7 +200,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 			// 425/308631 throttled periods must not grow the environment.
 			name: "a 0.14 percent throttle ratio does not raise cpu",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{CPU: RuntimeCPUUsage{QuotaCores: 1}, Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 1}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 308631
 				h.ObservedThrottledPeriods = 425
 				h.ObservedPeakCPUMilli = 200
@@ -216,7 +216,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 			// one-core quota leaves no room to shrink into either way.
 			name: "sub-threshold throttling disqualifies a shrink",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{CPU: RuntimeCPUUsage{QuotaCores: 4}, Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 4}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 308631
 				h.ObservedThrottledPeriods = 425
 				h.ObservedPeakCPUMilli = 200
@@ -227,7 +227,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 		{
 			name: "a sustained throttle ratio raises cpu",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{CPU: RuntimeCPUUsage{QuotaCores: 2}, Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 2}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 100000
 				h.ObservedThrottledPeriods = 12000
 				h.ObservedPeakCPUMilli = 1900
@@ -241,7 +241,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 			// and a busiest interval well under half the quota.
 			name: "an unthrottled quota well above the busiest interval lowers cpu",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{CPU: RuntimeCPUUsage{QuotaCores: 12}, Memory: RuntimeMemoryUsage{LimitBytes: 23 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 12}, Memory: config.RuntimeMemoryUsage{LimitBytes: 23 * testGi}})
 				h.ObservedPeriods = 376556
 				h.ObservedThrottledPeriods = 0
 				h.ObservedPeakCPUMilli = 4567
@@ -253,7 +253,7 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 		{
 			name: "too few scheduling periods recommends nothing",
 			history: func() RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, RuntimeUsage{CPU: RuntimeCPUUsage{QuotaCores: 1}, Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
+				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 1}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
 				h.ObservedPeriods = 500
 				h.ObservedPeakCPUMilli = 100
 				return h
@@ -262,9 +262,9 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 		},
 		{
 			name: "no quota is reported as unmeasurable",
-			history: usageHistory(quietWindow, quietSamples, RuntimeUsage{
-				Memory: RuntimeMemoryUsage{LimitBytes: 2 * testGi},
-				CPU:    RuntimeCPUUsage{Unavailable: "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"},
+			history: usageHistory(quietWindow, quietSamples, config.RuntimeUsage{
+				Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi},
+				CPU:    config.RuntimeCPUUsage{Unavailable: "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"},
 			}),
 			wantAction: RuntimeSizingUnknown,
 		},
@@ -302,7 +302,7 @@ func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
 			for _, window := range windows {
 				for _, samples := range sampleCounts {
 					peak := int64(float64(limit) * fraction)
-					history := usageHistory(window, samples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: limit}, CPU: RuntimeCPUUsage{QuotaCores: 4}})
+					history := usageHistory(window, samples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: limit}, CPU: config.RuntimeCPUUsage{QuotaCores: 4}})
 					history.ObservedPeakMemoryBytes = peak
 					recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{History: history})
 					if !ok {
@@ -312,7 +312,7 @@ func TestRecommendRuntimeSizingNeverShrinksBelowHeadroom(t *testing.T) {
 					if verdict.Action != RuntimeSizingLower {
 						continue
 					}
-					suggestedMi, err := ParseKubernetesMemoryToMi(verdict.Suggested)
+					suggestedMi, err := config.ParseKubernetesMemoryToMi(verdict.Suggested)
 					if err != nil {
 						t.Fatalf("unparseable suggestion %q: %v", verdict.Suggested, err)
 					}
@@ -336,7 +336,7 @@ func TestRecommendRuntimeSizingAnyOOMKillRaises(t *testing.T) {
 		for _, samples := range []int{1, 240} {
 			for _, peakFraction := range []float64{0.0, 0.05, 0.5, 0.99} {
 				limit := 8 * testGi
-				history := usageHistory(window, samples, RuntimeUsage{Memory: RuntimeMemoryUsage{LimitBytes: limit}, CPU: RuntimeCPUUsage{QuotaCores: 4}})
+				history := usageHistory(window, samples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: limit}, CPU: config.RuntimeCPUUsage{QuotaCores: 4}})
 				history.ObservedPeakMemoryBytes = int64(float64(limit) * peakFraction)
 				history.ObservedOOMKills = 1
 				recommendation, ok := RecommendRuntimeSizing(RuntimeSizingParams{History: history})
@@ -365,15 +365,15 @@ func TestRecommendRuntimeSizingWithoutHistoryStaysSilent(t *testing.T) {
 func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	history := RuntimeUsageHistory{}
-	history = AppendRuntimeUsageSample(history, RuntimeUsage{
-		Memory: RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 6 * testGi, OOMKills: 1},
-		CPU:    RuntimeCPUUsage{UsageUsec: 1_000_000, Periods: 5000, ThrottledPeriods: 10},
+	history = AppendRuntimeUsageSample(history, config.RuntimeUsage{
+		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 6 * testGi, OOMKills: 1},
+		CPU:    config.RuntimeCPUUsage{UsageUsec: 1_000_000, Periods: 5000, ThrottledPeriods: 10},
 	}, base)
 	// A restart: every cumulative counter starts over, and the new peak is
 	// lower than the one already observed.
-	history = AppendRuntimeUsageSample(history, RuntimeUsage{
-		Memory: RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
-		CPU:    RuntimeCPUUsage{UsageUsec: 100, Periods: 3},
+	history = AppendRuntimeUsageSample(history, config.RuntimeUsage{
+		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
+		CPU:    config.RuntimeCPUUsage{UsageUsec: 100, Periods: 3},
 	}, base.Add(time.Hour))
 
 	if history.Restarts != 1 {
@@ -409,14 +409,14 @@ func TestAppendRuntimeUsageSampleRetainsPeakAcrossARestart(t *testing.T) {
 // push that sample out of the window entirely.
 func TestAppendRuntimeUsageSampleBoundsTheWindow(t *testing.T) {
 	base := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
-	history := AppendRuntimeUsageSample(RuntimeUsageHistory{}, RuntimeUsage{
-		Memory: RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 7 * testGi},
-		CPU:    RuntimeCPUUsage{UsageUsec: 900_000_000, Periods: 90000},
+	history := AppendRuntimeUsageSample(RuntimeUsageHistory{}, config.RuntimeUsage{
+		Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 7 * testGi},
+		CPU:    config.RuntimeCPUUsage{UsageUsec: 900_000_000, Periods: 90000},
 	}, base)
 	for i := 1; i < runtimeUsageHistorySampleCap*3; i++ {
-		history = AppendRuntimeUsageSample(history, RuntimeUsage{
-			Memory: RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
-			CPU:    RuntimeCPUUsage{UsageUsec: int64(i) * 1_000_000, Periods: int64(i) * 30},
+		history = AppendRuntimeUsageSample(history, config.RuntimeUsage{
+			Memory: config.RuntimeMemoryUsage{LimitBytes: 8 * testGi, PeakBytes: 1 * testGi},
+			CPU:    config.RuntimeCPUUsage{UsageUsec: int64(i) * 1_000_000, Periods: int64(i) * 30},
 		}, base.Add(time.Duration(i)*30*time.Second))
 	}
 	if len(history.Samples) != runtimeUsageHistorySampleCap {
@@ -446,8 +446,8 @@ func TestReadLocalRuntimeUsageReadsCgroupV2(t *testing.T) {
 		"memory.peak":    "12742377472\n",
 		"memory.events":  "low 0\nhigh 0\nmax 21292\noom 0\noom_kill 0\n",
 	})
-	usage := ReadLocalRuntimeUsage(root)
-	if got := runtimeQuotaMilli(usage.CPU.QuotaCores); got != 12000 {
+	usage := config.ReadLocalRuntimeUsage(root)
+	if got := config.RuntimeQuotaMilli(usage.CPU.QuotaCores); got != 12000 {
 		t.Fatalf("cpu quota = %d milli, want 12000", got)
 	}
 	if usage.Memory.LimitBytes != 24696061952 || usage.Memory.PeakBytes != 12742377472 {
@@ -474,7 +474,7 @@ func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 		"memory.max":     "max\n",
 		"memory.current": "1024\n",
 	})
-	usage := ReadLocalRuntimeUsage(root)
+	usage := config.ReadLocalRuntimeUsage(root)
 	if usage.Memory.LimitBytes != 0 || usage.CPU.QuotaCores != 0 {
 		t.Fatalf("an unlimited cgroup must report no limit, got %+v", usage)
 	}
@@ -490,7 +490,7 @@ func TestReadLocalRuntimeUsageTreatsUnlimitedAsUnavailable(t *testing.T) {
 // host without the files. The reader runs on the monitor's tick, so it must
 // degrade rather than break the loop.
 func TestReadLocalRuntimeUsageNeverFailsOnAbsentCounters(t *testing.T) {
-	usage := ReadLocalRuntimeUsage(t.TempDir() + "/missing")
+	usage := config.ReadLocalRuntimeUsage(t.TempDir() + "/missing")
 	if usage.HasCounters() {
 		t.Fatal("a host with no cgroup v2 files must report no counters")
 	}

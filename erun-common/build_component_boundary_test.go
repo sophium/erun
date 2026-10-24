@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
 const unconsumedTestStageDockerfileContent = "" +
@@ -172,7 +173,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) DockerBuildSpec {
 	return DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, dockerfile),
-		Image:          DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
+		Image:          helm.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
 		Platforms:      []string{"linux/amd64"},
 	}
 }

@@ -19,13 +19,13 @@ import (
 // for each case.
 
 func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
-	if got := computeObserveDrift(ShellLaunchParams{RuntimeVersion: "1.0.0"}, nil, nil); got != nil {
+	if got := computeObserveDrift(config.ShellLaunchParams{RuntimeVersion: "1.0.0"}, nil, nil); got != nil {
 		t.Fatalf("drift = %v, want nil", got)
 	}
 }
 
 func TestComputeObserveDriftGenuinelyAbsentReleaseReportsNotFound(t *testing.T) {
-	req := ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
+	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
 	release := &ObservedHelmRelease{Name: "team-devops"}
 
 	got := computeObserveDrift(req, release, nil)
@@ -37,7 +37,7 @@ func TestComputeObserveDriftGenuinelyAbsentReleaseReportsNotFound(t *testing.T) 
 }
 
 func TestComputeObserveDriftUnreadableReleaseNamesTheReasonNotFoundPhrasing(t *testing.T) {
-	req := ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
+	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
 	release := &ObservedHelmRelease{Name: "team-devops", Error: "observe: not authorized to read helm release \"team-devops\""}
 
 	got := computeObserveDrift(req, release, nil)
@@ -55,7 +55,7 @@ func TestComputeObserveDriftUnreadableReleaseNamesTheReasonNotFoundPhrasing(t *t
 }
 
 func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing(t *testing.T) {
-	req := ShellLaunchParams{Namespace: "team-dev"}
+	req := config.ShellLaunchParams{Namespace: "team-dev"}
 	release := &ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
 
 	got := computeObserveDrift(req, release, nil)
@@ -76,7 +76,7 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 // verdict without recomputing the diff the command had already done. The
 // field must marshal, and marshal as [].
 func TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList(t *testing.T) {
-	req := ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
+	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
 	release := &ObservedHelmRelease{Name: "team-devops", Found: true, AppVersion: "1.0.0"}
 
 	encoded, err := json.Marshal(ObserveResult{Drift: computeObserveDrift(req, release, nil)})
@@ -94,7 +94,7 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 	// cannot produce today (a failed `helm status` returns before any config
 	// is parsed) but the drift computation must not assume that of its input;
 	// it evaluates whatever runningImageDrift's own inputs allow.
-	req := ShellLaunchParams{Namespace: "team-dev"}
+	req := config.ShellLaunchParams{Namespace: "team-dev"}
 	release := &ObservedHelmRelease{
 		Name:           "team-devops",
 		Error:          "observe: not authorized to read helm release",
@@ -122,7 +122,7 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 }
 
 func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodAvailable(t *testing.T) {
-	req := ShellLaunchParams{Namespace: "team-dev", RuntimePod: config.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
+	req := config.ShellLaunchParams{Namespace: "team-dev", RuntimePod: config.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
 	release := &ObservedHelmRelease{
 		Name:       "team-devops",
 		Error:      "observe: not authorized to read helm release",
@@ -143,7 +143,7 @@ func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodA
 }
 
 func TestComputeObserveDriftFoundReleaseKeepsExistingChecks(t *testing.T) {
-	req := ShellLaunchParams{RuntimeVersion: "1.0.0", RuntimeImage: "registry.example/erun-devops:1.0.0", Namespace: "team-dev"}
+	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", RuntimeImage: "registry.example/erun-devops:1.0.0", Namespace: "team-dev"}
 	release := &ObservedHelmRelease{
 		Name:           "team-devops",
 		Found:          true,

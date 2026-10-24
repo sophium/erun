@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -220,7 +221,7 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing conf
 	if _, err := updated.Idle.Resolve(); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
-	if err := eruncommon.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
+	if err := configpkg.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
 		return configpkg.EnvConfig{}, err
 	}
 	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
@@ -485,7 +486,7 @@ var environmentCloudProviderTypes = []string{
 // that type exists; and keep a currently-attached alias whose provider config
 // was deleted as an option, so the operator can still see and clear it
 // (recognition over recall).
-func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config configpkg.EnvConfig) []uiEnvironmentCloudAlias {
+func environmentCloudAliasSlots(store configpkg.CloudReadStore, config configpkg.EnvConfig) []uiEnvironmentCloudAlias {
 	optionsByType := configuredCloudAliasesByType(store)
 	attached := config.ResolvedCloudAliases()
 	slots := make([]uiEnvironmentCloudAlias, 0, len(environmentCloudProviderTypes))
@@ -507,9 +508,9 @@ func environmentCloudAliasSlots(store eruncommon.CloudReadStore, config configpk
 	return slots
 }
 
-func configuredCloudAliasesByType(store eruncommon.CloudReadStore) map[string][]string {
+func configuredCloudAliasesByType(store configpkg.CloudReadStore) map[string][]string {
 	grouped := make(map[string][]string)
-	providers, err := eruncommon.ListCloudProviders(store)
+	providers, err := cloud.ListCloudProviders(store)
 	if err != nil {
 		return grouped
 	}
@@ -536,8 +537,8 @@ func cloudAliasListContains(values []string, target string) bool {
 	return false
 }
 
-func environmentCloudProviderAliases(store eruncommon.CloudReadStore, current string) []string {
-	providers, err := eruncommon.ListCloudProviders(store)
+func environmentCloudProviderAliases(store configpkg.CloudReadStore, current string) []string {
+	providers, err := cloud.ListCloudProviders(store)
 	if err != nil {
 		return nil
 	}
@@ -790,7 +791,7 @@ func copyStringPtr(value *string) *string {
 }
 
 func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConfig {
-	config = eruncommon.NormalizeRuntimePodResources(config)
+	config = configpkg.NormalizeRuntimePodResources(config)
 	return uiRuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
@@ -798,7 +799,7 @@ func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConf
 }
 
 func runtimePodConfigFromUI(config uiRuntimePodConfig) configpkg.RuntimePodResources {
-	return eruncommon.NormalizeRuntimePodResources(configpkg.RuntimePodResources{
+	return configpkg.NormalizeRuntimePodResources(configpkg.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	})
@@ -816,25 +817,25 @@ func idleConfigValue(value, fallback string) string {
 // filled from the background poller's in-memory cache. The persisted config no
 // longer carries Status, so a missing cache entry surfaces as Status="" that
 // callers must treat as "not yet observed," not "stopped."
-func (a *App) linkedCloudContext(config configpkg.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+func (a *App) linkedCloudContext(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
 	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
 }
 
 // linkedCloudContextFor is the same resolution keyed on the two fields it
 // actually reads, for read-model callers that hold a list result rather than a
 // full EnvConfig.
-func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (eruncommon.CloudContextStatus, bool, error) {
+func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (configpkg.CloudContextStatus, bool, error) {
 	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
 	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
-		return eruncommon.CloudContextStatus{}, false, nil
+		return configpkg.CloudContextStatus{}, false, nil
 	}
-	statuses, err := eruncommon.ListCloudContextStatuses(a.deps.store)
+	statuses, err := cloud.ListCloudContextStatuses(a.deps.store)
 	if err != nil {
-		return eruncommon.CloudContextStatus{}, false, err
+		return configpkg.CloudContextStatus{}, false, err
 	}
 	for _, status := range statuses {
-		context := eruncommon.NormalizeCloudContextConfig(status.CloudContextConfig)
+		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
 		if cloudProviderAlias != "" && strings.TrimSpace(context.CloudProviderAlias) != cloudProviderAlias {
 			continue
 		}
@@ -844,22 +845,22 @@ func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string
 			return status, true, nil
 		}
 	}
-	return eruncommon.CloudContextStatus{}, false, nil
+	return configpkg.CloudContextStatus{}, false, nil
 }
 
-func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
 	status, ok, err := a.linkedCloudContext(config)
 	if err != nil || !ok {
 		return status, ok, err
 	}
-	if strings.TrimSpace(status.Status) == eruncommon.CloudContextStatusRunning {
+	if strings.TrimSpace(status.Status) == cloud.CloudContextStatusRunning {
 		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)))
 		return status, true, nil
 	}
 	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
-	status, err = eruncommon.StartCloudContext(core.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
+	status, err = cloud.StartCloudContext(core.Context{}, a.deps.store, cloud.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
 	if err != nil {
-		return eruncommon.CloudContextStatus{}, true, err
+		return configpkg.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
 	a.setCloudContextStatusInCache(status.Name, status.Status)
@@ -867,7 +868,7 @@ func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (erunc
 	return status, true, nil
 }
 
-func (a *App) stopCloudContext(name string) (eruncommon.CloudContextStatus, error) {
+func (a *App) stopCloudContext(name string) (configpkg.CloudContextStatus, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()

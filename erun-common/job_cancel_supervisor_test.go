@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // A job's supervisor is the one process a cancel must never reach: it is what
@@ -64,7 +65,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 	if !strings.Contains(err.Error(), "work's process") {
 		t.Fatalf("cancel error = %q, want one naming the missing work pid so a caller knows to retry", err)
 	}
-	if !ProcessAlive(supervisor.Pid) {
+	if !activity.ProcessAlive(supervisor.Pid) {
 		t.Fatalf("cancel killed the job's supervisor (pid %d): nothing is left to record the outcome, which is the unknown-outcome failure this guards", supervisor.Pid)
 	}
 }

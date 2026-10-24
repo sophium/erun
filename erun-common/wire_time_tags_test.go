@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // wireTimeOmitzeroRoots are the JSON roots a machine consumer actually reads:
@@ -12,14 +15,14 @@ import (
 // timestamp reachable from one of them must render an unset value by
 // disappearing, never as the Go zero instant.
 var wireTimeOmitzeroRoots = []any{
-	EnvironmentIdleStatus{},
-	EnvironmentActivitySnapshot{},
-	EnvironmentIdleMarkerClient{},
-	EnvironmentActivityLease{},
-	EnvironmentStopPending{},
-	EnvironmentStopHistoryEntry{},
+	activity.EnvironmentIdleStatus{},
+	activity.EnvironmentActivitySnapshot{},
+	activity.EnvironmentIdleMarkerClient{},
+	activity.EnvironmentActivityLease{},
+	activity.EnvironmentStopPending{},
+	activity.EnvironmentStopHistoryEntry{},
 	EnvironmentJob{},
-	AISessionStatus{},
+	model.AISessionStatus{},
 	RuntimeUsageHistory{},
 	HostCredentialsRefresh{},
 	HostCredentialsStatus{},

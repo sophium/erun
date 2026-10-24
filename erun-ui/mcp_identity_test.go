@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 func mustNoErr(t *testing.T, err error, what string) {
@@ -25,7 +25,7 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 
 	pubPath, err := id.ensurePublicKeyPath()
 	mustNoErr(t, err, "ensurePublicKeyPath")
-	if pubPath != eruncommon.DesktopIdentityPublicKeyPath(dir) {
+	if pubPath != mcpauth.DesktopIdentityPublicKeyPath(dir) {
 		t.Fatalf("public key path = %q", pubPath)
 	}
 	_, err = os.Stat(pubPath)
@@ -34,29 +34,29 @@ func TestDesktopIdentityRoundTrip(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	token, err := id.signToken("acme", "prod", now)
 	mustNoErr(t, err, "signToken")
-	issuer, err := eruncommon.UnverifiedMCPTokenIssuer(token)
+	issuer, err := mcpauth.UnverifiedMCPTokenIssuer(token)
 	mustNoErr(t, err, "UnverifiedMCPTokenIssuer")
-	if issuer != eruncommon.DesktopMCPIssuer() {
-		t.Fatalf("token issuer = %q, want %q", issuer, eruncommon.DesktopMCPIssuer())
+	if issuer != mcpauth.DesktopMCPIssuer() {
+		t.Fatalf("token issuer = %q, want %q", issuer, mcpauth.DesktopMCPIssuer())
 	}
 
-	priv, err := os.ReadFile(eruncommon.DesktopIdentityKeyPath(dir))
+	priv, err := os.ReadFile(mcpauth.DesktopIdentityKeyPath(dir))
 	mustNoErr(t, err, "read persisted private key")
-	localIssuer := eruncommon.FileIssuer(pubPath)
-	audience := eruncommon.MCPTokenAudience("acme", "prod")
-	verifyToken, err := eruncommon.SignMCPToken(priv, eruncommon.MCPTokenClaims{
+	localIssuer := mcpauth.FileIssuer(pubPath)
+	audience := mcpauth.MCPTokenAudience("acme", "prod")
+	verifyToken, err := mcpauth.SignMCPToken(priv, mcpauth.MCPTokenClaims{
 		Issuer:    localIssuer,
 		Audience:  audience,
 		ExpiresAt: now.Add(time.Hour).Unix(),
 	})
 	mustNoErr(t, err, "sign verify token")
-	claims, err := eruncommon.VerifyMCPToken(context.Background(), nil, verifyToken, localIssuer, audience, now)
+	claims, err := mcpauth.VerifyMCPToken(context.Background(), nil, verifyToken, localIssuer, audience, now)
 	mustNoErr(t, err, "VerifyMCPToken against persisted key")
 	if claims.Audience != audience {
 		t.Fatalf("verified audience = %q, want %q", claims.Audience, audience)
 	}
 
-	priv2, err := os.ReadFile(eruncommon.DesktopIdentityKeyPath(dir))
+	priv2, err := os.ReadFile(mcpauth.DesktopIdentityKeyPath(dir))
 	mustNoErr(t, err, "re-read persisted private key")
 	if string(priv) != string(priv2) {
 		t.Fatal("private key was regenerated on second ensure")

@@ -45,7 +45,7 @@ func e2eTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, 
 				Target: eruncommon.E2ETarget{
 					Tenant:            runtime.Context.Tenant,
 					Environment:       runtime.Context.Environment,
-					Namespace:         eruncommon.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),
+					Namespace:         config.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),
 					KubernetesContext: strings.TrimSpace(runtime.Context.KubernetesContext),
 				},
 				BaseURL: baseURL,

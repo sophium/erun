@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -62,7 +63,7 @@ type ObserveResult struct {
 // itself. It is read-only by construction: every kubectl call below is a
 // literal `get` against a fixed resource kind, and the one helm call is a
 // literal `status`, never a caller-supplied verb.
-func RunObservation(ctx core.Context, req ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
+func RunObservation(ctx core.Context, req config.ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
 	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
 	podArgs := observeGetArgs(req, "pods")
@@ -71,7 +72,7 @@ func RunObservation(ctx core.Context, req ShellLaunchParams, params ObserveParam
 	ingressArgs := observeGetArgs(req, "ingress")
 	serviceArgs := observeGetArgs(req, "service")
 	certArgs := observeGetArgs(req, "certificates.cert-manager.io")
-	releaseName := RuntimeReleaseName(req.Tenant)
+	releaseName := config.RuntimeReleaseName(req.Tenant)
 	helmArgs := observeHelmStatusArgs(req)
 	helmListArgs := observeHelmListArgs(req, releaseName)
 
@@ -131,8 +132,8 @@ func RunObservation(ctx core.Context, req ShellLaunchParams, params ObserveParam
 // observeGetArgs builds a read-only `kubectl get <resource> [name] -o json`
 // invocation. name is optional: omitted, it lists every object of that kind in
 // the namespace.
-func observeGetArgs(req ShellLaunchParams, resource string, name ...string) []string {
-	args := kubectlTargetArgs(req)
+func observeGetArgs(req config.ShellLaunchParams, resource string, name ...string) []string {
+	args := config.KubectlTargetArgs(req)
 	args = append(args, "get", resource)
 	args = append(args, name...)
 	return append(args, "-o", "json")

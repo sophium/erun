@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcptools"
 )
 
 // listTools returns the full Tool objects, not just names, so the wire metadata
@@ -25,7 +25,7 @@ func listTools(t *testing.T, session *mcp.ClientSession) []*mcp.Tool {
 // `version` and `list` were advertised as destructive open-world tools, leaving
 // a client that wanted to gate on destructiveHint gating everything or nothing.
 func TestNoToolShipsOnTheSpecDefaults(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	tools := listTools(t, session)
 	if len(tools) == 0 {
 		t.Fatal("no tools listed; the rest of this test would pass vacuously")
@@ -76,7 +76,7 @@ func assertToolAdvertisedReadOnly(t *testing.T, byName map[string]*mcp.Tool, nam
 }
 
 func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	byName := map[string]*mcp.Tool{}
 	for _, tool := range listTools(t, session) {
 		byName[tool.Name] = tool
@@ -106,13 +106,13 @@ func TestReadOnlyToolsSaySoOnTheWire(t *testing.T) {
 // TestRenamedToolsKeepTheirOldNamesForOneRelease: the rename is worth doing, but
 // not at the cost of breaking a client pinned to `raw` on an upgrade.
 func TestRenamedToolsKeepTheirOldNamesForOneRelease(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	present := map[string]bool{}
 	for _, tool := range listTools(t, session) {
 		present[tool.Name] = true
 	}
 
-	for old, current := range eruncommon.MCPToolRenames() {
+	for old, current := range mcptools.MCPToolRenames() {
 		if old == "workspace_sync" {
 			continue // host-served by the CLI proxy, not this server.
 		}
@@ -130,9 +130,9 @@ func TestRenamedToolsKeepTheirOldNamesForOneRelease(t *testing.T) {
 // and it means a tool cannot be added without a decision about its blast radius,
 // which is what let the surface drift in the first place.
 func TestEveryRegisteredToolIsDescribed(t *testing.T) {
-	session := connectWithCapabilities(t, string(eruncommon.MCPCapabilityAdmin))
+	session := connectWithCapabilities(t, string(mcptools.MCPCapabilityAdmin))
 	for _, tool := range listTools(t, session) {
-		if _, ok := eruncommon.MCPToolDescriptorFor(tool.Name); !ok {
+		if _, ok := mcptools.MCPToolDescriptorFor(tool.Name); !ok {
 			t.Errorf("%s is registered but has no descriptor; addTool should have panicked", tool.Name)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -441,7 +442,7 @@ func runKubectlGetPods(parent context.Context, params podWatchParams) ([]byte, e
 func libraryListReleasePods(parent context.Context, params podWatchParams) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, defaultPodWatchKubectlTimeout)
 	defer cancel()
-	clientset, err := kubernetesClientsetForContext(strings.TrimSpace(params.KubernetesContext))
+	clientset, err := kube.KubernetesClientsetForContext(strings.TrimSpace(params.KubernetesContext))
 	if err != nil {
 		return nil, err
 	}

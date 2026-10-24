@@ -6,6 +6,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 func cloudflareSecretName(releaseName string) string {
@@ -36,7 +38,7 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySp
 	if !deployInput.CloudflareEnabled || strings.TrimSpace(deployInput.CloudflareSecretName) == "" {
 		return nil
 	}
-	args := kubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
+	args := kube.KubectlApplyStdinArgs(deployInput.Namespace, deployInput.KubernetesContext)
 	ctx.Trace("apply cloudflare credentials secret " + deployInput.CloudflareSecretName + " (token redacted)")
 	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
@@ -45,7 +47,7 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySp
 	if strings.TrimSpace(deployInput.CloudflareTokenRef) == "" {
 		return fmt.Errorf("deploy %s: cloudflare alias has no token reference", deployInput.ReleaseName)
 	}
-	store, err := DefaultCloudSecretStore()
+	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
 		return fmt.Errorf("resolve cloud secret store: %w", err)
 	}
@@ -58,13 +60,13 @@ func applyCloudflareCredentialsSecret(ctx core.Context, deployInput HelmDeploySp
 		deployInput.Namespace,
 		token,
 	)
-	return applySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "cloudflare credentials secret", manifest, args)
+	return kube.ApplySecretManifest(deployInput.KubernetesContext, deployInput.Namespace, "cloudflare credentials secret", manifest, args)
 }
 
 // applyCloudflareDeployMetadata populates the Cloudflare deploy fields from the
 // env's attached alias; the Secret itself is applied later at execution time,
 // not here.
-func applyCloudflareDeployMetadata(store CloudReadStore, env config.EnvConfig, deployInput *HelmDeploySpec) {
+func applyCloudflareDeployMetadata(store config.CloudReadStore, env config.EnvConfig, deployInput *HelmDeploySpec) {
 	if deployInput == nil {
 		return
 	}
@@ -72,7 +74,7 @@ func applyCloudflareDeployMetadata(store CloudReadStore, env config.EnvConfig, d
 	if alias == "" {
 		return
 	}
-	provider, err := ResolveCloudProvider(store, alias)
+	provider, err := cloud.ResolveCloudProvider(store, alias)
 	if err != nil || provider.Provider != config.CloudProviderCloudflare || provider.Cloudflare == nil {
 		return
 	}

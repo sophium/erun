@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
 // runtime_usage.go wires the desktop's Runtime tab to the same reader
@@ -78,7 +80,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 // timeout, since a CLI or MCP call is fine waiting on a real terminal; a UI
 // probe on a refresh button is not.
 func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandRunnerFunc {
-	return func(req eruncommon.ShellLaunchParams, container, script string) (eruncommon.RemoteCommandResult, error) {
+	return func(req config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
 		args := make([]string, 0, 10)
 		if kubernetesContext := strings.TrimSpace(req.KubernetesContext); kubernetesContext != "" {
 			args = append(args, "--context", kubernetesContext)
@@ -87,14 +89,14 @@ func runtimeUsageRunner(ctx context.Context) eruncommon.RuntimeContainerCommandR
 			args = append(args, "--namespace", namespace)
 		}
 		args = append(args, "exec", "-c", strings.TrimSpace(container),
-			"deployment/"+eruncommon.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
+			"deployment/"+config.RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		core.HideConsoleWindow(cmd)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		err := cmd.Run()
-		return eruncommon.RemoteCommandResult{Stdout: stdout.String(), Stderr: stderr.String()}, err
+		return kube.RemoteCommandResult{Stdout: stdout.String(), Stderr: stderr.String()}, err
 	}
 }
 
@@ -120,7 +122,7 @@ func runtimePodRequestsRunner(ctx context.Context) eruncommon.RuntimePodRequests
 // uiRuntimeUsageFromReading maps the shared reader's output onto the UI
 // model. Every field carries its own unavailability rather than collapsing to
 // zero, matching the reader's own fail-soft contract.
-func uiRuntimeUsageFromReading(reading eruncommon.RuntimeUsage) uiRuntimeUsage {
+func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
 	usage := uiRuntimeUsage{
 		Tenant:         reading.Tenant,
 		Environment:    reading.Environment,
@@ -149,7 +151,7 @@ func uiRuntimeUsageFromReading(reading eruncommon.RuntimeUsage) uiRuntimeUsage {
 	return usage
 }
 
-func uiRuntimeCPUUsageFromReading(cpu eruncommon.RuntimeCPUUsage) uiRuntimeCPUUsage {
+func uiRuntimeCPUUsageFromReading(cpu config.RuntimeCPUUsage) uiRuntimeCPUUsage {
 	// UsageUsec travels with both branches: it is read before the quota is
 	// resolved (erun-common's runtimeCPUUsageFromValues), so a container with no
 	// ceiling still reports the work it has done.
@@ -166,7 +168,7 @@ func uiRuntimeCPUUsageFromReading(cpu eruncommon.RuntimeCPUUsage) uiRuntimeCPUUs
 	}
 }
 
-func uiRuntimeMemoryUsageFromReading(memory eruncommon.RuntimeMemoryUsage) uiRuntimeMemoryUsage {
+func uiRuntimeMemoryUsageFromReading(memory config.RuntimeMemoryUsage) uiRuntimeMemoryUsage {
 	if memory.Unavailable != "" {
 		return uiRuntimeMemoryUsage{Unavailable: memory.Unavailable}
 	}
@@ -192,13 +194,13 @@ func uiRuntimeMemoryUsageFromReading(memory eruncommon.RuntimeMemoryUsage) uiRun
 // never asked) stays nil, while a pod spec that could not be read arrives as an
 // unavailable reading with its reason -- so the card renders "not read" and
 // never a reservation of nothing.
-func uiRuntimeUsageRequestsFromReading(requests *eruncommon.RuntimeUsageRequests) *uiRuntimeUsageRequests {
+func uiRuntimeUsageRequestsFromReading(requests *config.RuntimeUsageRequests) *uiRuntimeUsageRequests {
 	if requests == nil {
 		return nil
 	}
 	return &uiRuntimeUsageRequests{
 		Unavailable: requests.Unavailable,
-		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[eruncommon.DevopsComponentName]),
+		Runtime:     uiRuntimeContainerRequestsFromReading(requests.Containers[config.DevopsComponentName]),
 	}
 }
 
@@ -207,13 +209,13 @@ func uiRuntimeUsageRequestsFromReading(requests *eruncommon.RuntimeUsageRequests
 // are what the card sorts and labels against a limit, and the rendered CPU/
 // memory are formatted once here so the hover card, the Runtime tab and the
 // Manage dialog cannot spell the same reservation differently.
-func uiRuntimeContainerRequestsFromReading(requests eruncommon.KubernetesRequests) uiRuntimeContainerRequests {
+func uiRuntimeContainerRequestsFromReading(requests config.KubernetesRequests) uiRuntimeContainerRequests {
 	rendered := uiRuntimeContainerRequests{
 		CPUMilli:    requests.CPUMilli,
 		MemoryBytes: requests.MemoryBytes,
 	}
 	if requests.CPUMilli > 0 {
-		rendered.CPU = eruncommon.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
+		rendered.CPU = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
 	}
 	if requests.MemoryBytes > 0 {
 		rendered.Memory = formatRuntimeUsageBytes(requests.MemoryBytes)
@@ -221,7 +223,7 @@ func uiRuntimeContainerRequestsFromReading(requests eruncommon.KubernetesRequest
 	return rendered
 }
 
-func uiRuntimeDiskUsageFromReading(disk eruncommon.RuntimeDiskUsage) uiRuntimeDiskUsage {
+func uiRuntimeDiskUsageFromReading(disk config.RuntimeDiskUsage) uiRuntimeDiskUsage {
 	if disk.Unavailable != "" {
 		return uiRuntimeDiskUsage{Mount: disk.Mount, Unavailable: disk.Unavailable}
 	}

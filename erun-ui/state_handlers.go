@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 func (a *App) LoadState() (uiState, error) {
@@ -75,7 +76,7 @@ func (a *App) LoadState() (uiState, error) {
 	return state, nil
 }
 
-func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (eruncommon.RuntimeRegistryVersions, error) {
+func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (registrypkg.RuntimeRegistryVersions, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
@@ -85,7 +86,7 @@ func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) 
 	}
 	repository := config.DefaultRuntimeImageName
 	if tenant = strings.TrimSpace(tenant); tenant != "" {
-		repository = eruncommon.RuntimeReleaseName(tenant)
+		repository = config.RuntimeReleaseName(tenant)
 	}
 	return a.deps.resolveImageRegistry(ctx, namespace, repository)
 }
@@ -126,7 +127,7 @@ func (a *App) runtimeVersionSuggestions(info model.BuildInfo, tenant, environmen
 		return suggestions, appendVersionNotice(nil, notice)
 	}
 
-	tenantImage := eruncommon.RuntimeReleaseName(tenant)
+	tenantImage := config.RuntimeReleaseName(tenant)
 	suggestions := make([]uiVersion, 0, 8)
 	notices := make([]uiVersionNotice, 0, 4)
 	for _, registry := range a.environmentDiscoveryRegistries(tenant, environment) {
@@ -153,11 +154,11 @@ func (a *App) suggestionsForImage(info model.BuildInfo, source, image, namespace
 	if err != nil {
 		return nil, &uiVersionNotice{Image: image, Kind: versionNoticeKind(err)}
 	}
-	return labelRuntimeVersionSuggestions(source, image, eruncommon.RuntimeDeployVersionSuggestions(info, versions)), nil
+	return labelRuntimeVersionSuggestions(source, image, registrypkg.RuntimeDeployVersionSuggestions(info, versions)), nil
 }
 
 func versionNoticeKind(err error) string {
-	if errors.Is(err, eruncommon.ErrRegistryAuthRequired) {
+	if errors.Is(err, registrypkg.ErrRegistryAuthRequired) {
 		return "auth"
 	}
 	return "unreachable"

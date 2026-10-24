@@ -14,6 +14,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/helm"
+	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
 const fingerprintTagPrefix = "fp-"
@@ -312,7 +315,7 @@ func tagStableBaseVersionAfterBuild(buildInput DockerBuildSpec, platform string,
 
 // stableBaseVersionTag returns the unsuffixed local tag a wrapper resolves from
 // `FROM image:${ERUN_VERSION}`.
-func stableBaseVersionTag(image DockerImageReference) string {
+func stableBaseVersionTag(image helm.DockerImageReference) string {
 	baseVersion := strings.TrimSpace(image.BaseVersion)
 	if baseVersion == "" {
 		return ""
@@ -329,7 +332,7 @@ func stableBaseVersionTag(image DockerImageReference) string {
 	return tag
 }
 
-func fingerprintTag(image DockerImageReference, fingerprint, platform string) string {
+func fingerprintTag(image helm.DockerImageReference, fingerprint, platform string) string {
 	registry := strings.TrimSpace(image.Registry)
 	repo := image.ImageName
 	if registry != "" {
@@ -391,7 +394,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 	if push && IsDockerPushAuthorizationError(message) {
 		return message, DockerRegistryAuthError{
 			Tag:      authContextTag,
-			Registry: dockerRegistryFromImageTag(authContextTag),
+			Registry: registrypkg.DockerRegistryFromImageTag(authContextTag),
 			Message:  strings.TrimSpace(message),
 			Err:      err,
 		}
@@ -733,7 +736,7 @@ func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) erro
 	if IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
 			Tag:      tag,
-			Registry: dockerRegistryFromImageTag(tag),
+			Registry: registrypkg.DockerRegistryFromImageTag(tag),
 			Message:  strings.TrimSpace(message),
 			Err:      err,
 		}
@@ -764,7 +767,7 @@ func (e dockerPushError) Unwrap() error {
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
-	if isGHCRRegistry(registry) {
+	if registrypkg.IsGHCRRegistry(registry) {
 		ok, err := tryGHCRLoginViaGH(registry, stdout, stderr)
 		if err != nil {
 			return err
@@ -786,11 +789,6 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 	return loginCmd.Run()
 }
 
-func isGHCRRegistry(registry string) bool {
-	registry = strings.ToLower(strings.TrimSpace(registry))
-	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
-}
-
 func isHostedRegistry(registry string) bool {
 	return strings.EqualFold(strings.TrimSpace(registry), config.HostedRegistryHost)
 }
@@ -801,7 +799,7 @@ func isHostedRegistry(registry string) bool {
 // api-protocol.md), minted from their configured erun cloud provider alias —
 // never a secret an operator could type by hand. Every other registry falls
 // through to DockerRegistryLogin unchanged.
-func DockerRegistryLoginWithHostedRegistry(store CloudReadStore, deps CloudDependencies) DockerRegistryLoginFunc {
+func DockerRegistryLoginWithHostedRegistry(store config.CloudReadStore, deps cloud.CloudDependencies) DockerRegistryLoginFunc {
 	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
 		if isHostedRegistry(registry) {
 			return hostedRegistryDockerLogin(store, deps, stdout, stderr)
@@ -814,12 +812,12 @@ func DockerRegistryLoginWithHostedRegistry(store CloudReadStore, deps CloudDepen
 // platform cloud provider alias, mints a fresh bearer token from it, and feeds
 // that token to `docker login` as the password over stdin — never argv, so it
 // never appears in a process listing.
-func hostedRegistryDockerLogin(store CloudReadStore, deps CloudDependencies, stdout, stderr io.Writer) error {
+func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDependencies, stdout, stderr io.Writer) error {
 	provider, err := ResolveERunPlatformAlias(store, "")
 	if err != nil {
 		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
 	}
-	token, err := CloudProviderBearerToken(core.Context{}, store, CloudBearerParams{Alias: provider.Alias}, deps)
+	token, err := cloud.CloudProviderBearerToken(core.Context{}, store, cloud.CloudBearerParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		return fmt.Errorf("mint erun-api bearer token for hosted registry login: %w", err)
 	}
@@ -838,7 +836,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 		return false, nil
 	}
 
-	user, err := captureGHCommand("api", "user", "--jq", ".login")
+	user, err := registrypkg.CaptureGHCommand("api", "user", "--jq", ".login")
 	if err != nil {
 		return false, nil
 	}
@@ -847,7 +845,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 		return false, nil
 	}
 
-	token, err := captureGHCommand("auth", "token")
+	token, err := registrypkg.CaptureGHCommand("auth", "token")
 	if err != nil {
 		return false, nil
 	}
@@ -866,15 +864,6 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 	return true, nil
 }
 
-func captureGHCommand(args ...string) (string, error) {
-	cmd := core.Command("gh", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
-}
-
 // RefreshGHCRPackageScopes widens the gh-stored token to write:packages so a
 // push denied for lacking that scope can succeed. Call it only after
 // TryGHCRNamespaceLogin + retry still fails scope-denied: that means the token
@@ -887,10 +876,10 @@ func captureGHCommand(args ...string) (string, error) {
 // in a headless pod or any non-interactive context (MCP, CI, pipes) where the
 // prompt could never advance.
 func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
-	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+	if !registrypkg.IsGHCRRegistry(registrypkg.DockerRegistryFromImageTag(tag)) {
 		return false, nil
 	}
-	namespace := DockerNamespaceFromTag(tag)
+	namespace := registrypkg.DockerNamespaceFromTag(tag)
 	if namespace == "" {
 		return false, nil
 	}
@@ -948,7 +937,7 @@ func interactiveGHAuthAllowed(stdin io.Reader) bool {
 }
 
 func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
-	registry := dockerRegistryFromImageTag(tag)
+	registry := registrypkg.DockerRegistryFromImageTag(tag)
 	if registry == "" {
 		registry = "ghcr.io"
 	}
@@ -971,10 +960,10 @@ func newNonInteractiveGHCRScopeRefreshError(tag, namespace string) error {
 // IsDockerCreatePackageDenied, to try an automatic auth switch before falling
 // back to an interactive prompt.
 func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
-	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+	if !registrypkg.IsGHCRRegistry(registrypkg.DockerRegistryFromImageTag(tag)) {
 		return false, nil
 	}
-	namespace := DockerNamespaceFromTag(tag)
+	namespace := registrypkg.DockerNamespaceFromTag(tag)
 	if namespace == "" {
 		return false, nil
 	}
@@ -982,7 +971,7 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 		return false, nil
 	}
 
-	token, err := captureGHCommand("auth", "token", "-u", namespace, "-h", "github.com")
+	token, err := registrypkg.CaptureGHCommand("auth", "token", "-u", namespace, "-h", "github.com")
 	if err != nil {
 		return false, nil
 	}

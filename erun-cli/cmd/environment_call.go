@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	common "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
@@ -20,7 +20,7 @@ import (
 // environmentTargetsItself reports whether this process is the environment the
 // verb is about, and may therefore serve it from the local store.
 func environmentTargetsItself() bool {
-	return common.IsInRuntimeEnvironment(nil)
+	return config.IsInRuntimeEnvironment(nil)
 }
 
 // callEnvironmentTool runs one tool on the environment's MCP edge and decodes

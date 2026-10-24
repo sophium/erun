@@ -10,10 +10,12 @@ import (
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/cloud"
+	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/spf13/cobra"
 )
 
-func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen OpenResolver, store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit gitx.GitCommandRunnerFunc, runRaw core.RawCommandRunnerFunc, resolveOpen OpenResolver, store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	// job's supervise leaf is mounted only here, under exec, since
 	// environmentJobSupervisorArgs always re-execs `exec job supervise`
 	// regardless of which entry point (this one, or the deprecated top-level
@@ -40,7 +42,7 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 	)
 }
 
-func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) *cobra.Command {
+func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit gitx.GitCommandRunnerFunc) *cobra.Command {
 	var (
 		jsonOutput     bool
 		scope          string
@@ -171,7 +173,7 @@ func runExecWriteCommand(ctx core.Context, findProjectRoot common.ProjectFinderF
 	if err != nil {
 		return fmt.Errorf("read content from stdin: %w", err)
 	}
-	result, err := common.WriteWorkingTreeFile(ctx, projectRoot, common.WriteWorkingTreeFileParams{
+	result, err := gitx.WriteWorkingTreeFile(ctx, projectRoot, gitx.WriteWorkingTreeFileParams{
 		Path:    path,
 		Content: string(content),
 	})
@@ -221,11 +223,11 @@ func runExecCommitCommand(ctx core.Context, findProjectRoot common.ProjectFinder
 	if err != nil {
 		return fmt.Errorf("read commit message from stdin: %w", err)
 	}
-	result, err := common.CommitWorkingTree(ctx, projectRoot, common.CommitWorkingTreeParams{
+	result, err := gitx.CommitWorkingTree(ctx, projectRoot, gitx.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: string(message),
 		Paths:   paths,
-	}, common.CommitWorkingTreeDependencies{})
+	}, gitx.CommitWorkingTreeDependencies{})
 	if err != nil {
 		return err
 	}
@@ -236,7 +238,7 @@ func runExecCommitCommand(ctx core.Context, findProjectRoot common.ProjectFinder
 	return ctx.WriteResult(result)
 }
 
-func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies) *cobra.Command {
+func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
 	var remote string
 	cmd := &cobra.Command{
 		Use:   "push BRANCH",
@@ -251,7 +253,7 @@ func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store common.Cloud
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecPushCommand(commandContext(cmd), findProjectRoot, store, cloudDeps, common.PushWorkingTreeBranchDependencies{}, args[0], remote)
+			return runExecPushCommand(commandContext(cmd), findProjectRoot, store, cloudDeps, gitx.PushWorkingTreeBranchDependencies{}, args[0], remote)
 		},
 	}
 	cmd.Flags().StringVar(&remote, "remote", "", "Git remote to push to (defaults to origin)")
@@ -259,7 +261,7 @@ func newExecPushCmd(findProjectRoot common.ProjectFinderFunc, store common.Cloud
 	return cmd
 }
 
-func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, store common.CloudReadStore, cloudDeps common.CloudDependencies, pushDeps common.PushWorkingTreeBranchDependencies, branch, remote string) error {
+func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, store config.CloudReadStore, cloudDeps cloud.CloudDependencies, pushDeps gitx.PushWorkingTreeBranchDependencies, branch, remote string) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}
@@ -267,7 +269,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot common.ProjectFinderFu
 	if err != nil {
 		return err
 	}
-	result, err := common.PushWorkingTreeBranch(ctx, projectRoot, common.PushWorkingTreeBranchParams{
+	result, err := gitx.PushWorkingTreeBranch(ctx, projectRoot, gitx.PushWorkingTreeBranchParams{
 		Branch: branch,
 		Remote: remote,
 	}, pushDeps)
@@ -608,7 +610,7 @@ func runExecClosePRCommand(ctx core.Context, branch, target, remoteURL, gatedCom
 	return ctx.WriteResult(result)
 }
 
-func newExecReconcileBypassCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		remoteURL      string
 		rulesetID      int64
@@ -777,7 +779,7 @@ func orUnknown(value string) string {
 // plane. A route can merge, get unit-tested, and close its issue while
 // still 404ing on the live control plane for months, because nothing but a
 // human running the CLI by hand had ever exercised the deployed route.
-func newExecRouteCheckCmd(store common.CloudReadStore, deps common.CloudDependencies) *cobra.Command {
+func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobra.Command {
 	var (
 		routesDir string
 		alias     string
@@ -812,7 +814,7 @@ func newExecRouteCheckCmd(store common.CloudReadStore, deps common.CloudDependen
 	return cmd
 }
 
-func runExecRouteCheckCommand(ctx core.Context, store common.CloudReadStore, alias string, params common.RouteCheckParams, deps common.CloudDependencies) error {
+func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, alias string, params common.RouteCheckParams, deps cloud.CloudDependencies) error {
 	result, err := common.RunRouteCheck(ctx, store, alias, params, deps)
 	if err != nil {
 		return err
@@ -878,7 +880,7 @@ func routeCheckExitError(result common.RouteCheckResult) error {
 	return fmt.Errorf("of %d route(s) checked on %s: %s", result.RoutesChecked, result.APIURL, strings.Join(problems, "; "))
 }
 
-func runExecReconcileBypassCommand(ctx core.Context, store common.CloudReadStore, alias string, params common.ReconcileBypassParams, deps common.CloudDependencies) error {
+func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore, alias string, params common.ReconcileBypassParams, deps cloud.CloudDependencies) error {
 	result, err := common.ReconcileBypass(ctx, store, alias, params, deps, common.ReconcileBypassDependencies{})
 	if err != nil {
 		return err
@@ -945,7 +947,7 @@ type execDiffOptions struct {
 	SelectedCommit string
 }
 
-func runExecDiffCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, opts execDiffOptions) error {
+func runExecDiffCommand(ctx core.Context, findProjectRoot common.ProjectFinderFunc, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) error {
 	if findProjectRoot == nil {
 		findProjectRoot = config.FindProjectRoot
 	}
@@ -969,7 +971,7 @@ func runExecDiffCommand(ctx core.Context, findProjectRoot common.ProjectFinderFu
 	return common.WriteRawDiff(ctx.Stdout, result)
 }
 
-func resolveExecDiff(projectRoot string, runGit common.GitCommandRunnerFunc, opts execDiffOptions) (common.DiffResult, error) {
+func resolveExecDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) (common.DiffResult, error) {
 	if opts.Scope == "" && opts.SelectedCommit == "" {
 		return common.ResolveGitDiff(projectRoot, runGit)
 	}

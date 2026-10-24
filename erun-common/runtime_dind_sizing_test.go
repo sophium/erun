@@ -1,6 +1,10 @@
 package eruncommon
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/sophium/erun/erun-common/base/config"
+)
 
 // TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants is the sizing rule
 // itself: the node's CPUs divided by the build-capable environments expected
@@ -49,7 +53,7 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 			// Nothing has measured this node; the honest answer is the
 			// conservative constant, the same posture every other unresolved
 			// dind value takes.
-			nodeCPU: 0, coTenants: 2, wantCPU: MinimumRuntimeDindCPU,
+			nodeCPU: 0, coTenants: 2, wantCPU: config.MinimumRuntimeDindCPU,
 		},
 		{
 			name: "a missing co-tenant count is one, not zero",
@@ -64,7 +68,7 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := RuntimeDindCPULimit(tc.nodeCPU, tc.coTenants); got != tc.wantCPU {
+			if got := config.RuntimeDindCPULimit(tc.nodeCPU, tc.coTenants); got != tc.wantCPU {
 				t.Fatalf("RuntimeDindCPULimit(%d, %d) = %q, want %q", tc.nodeCPU, tc.coTenants, got, tc.wantCPU)
 			}
 		})
@@ -77,19 +81,19 @@ func TestRuntimeDindCPULimitSizesFromNodeCapacityAndCoTenants(t *testing.T) {
 // default through an input the table does not happen to name.
 func TestRuntimeDindCPULimitNeverSizesBelowTheFloor(t *testing.T) {
 	t.Parallel()
-	floor, err := ParseKubernetesCPUToMilli(MinimumRuntimeDindCPU)
+	floor, err := config.ParseKubernetesCPUToMilli(config.MinimumRuntimeDindCPU)
 	if err != nil {
-		t.Fatalf("MinimumRuntimeDindCPU %q does not parse as a CPU quantity: %v", MinimumRuntimeDindCPU, err)
+		t.Fatalf("MinimumRuntimeDindCPU %q does not parse as a CPU quantity: %v", config.MinimumRuntimeDindCPU, err)
 	}
 	for _, nodeCPU := range []int64{0, 1, 500, 1000, 4000, 8000, 24000, 96000} {
 		for _, coTenants := range []int{-1, 0, 1, 2, 4, 8, 64, 1000} {
-			got := RuntimeDindCPULimit(nodeCPU, coTenants)
-			milli, err := ParseKubernetesCPUToMilli(got)
+			got := config.RuntimeDindCPULimit(nodeCPU, coTenants)
+			milli, err := config.ParseKubernetesCPUToMilli(got)
 			if err != nil {
 				t.Fatalf("RuntimeDindCPULimit(%d, %d) = %q, which is not a CPU quantity: %v", nodeCPU, coTenants, got, err)
 			}
 			if milli < floor {
-				t.Errorf("RuntimeDindCPULimit(%d, %d) = %q, below the %s floor", nodeCPU, coTenants, got, MinimumRuntimeDindCPU)
+				t.Errorf("RuntimeDindCPULimit(%d, %d) = %q, below the %s floor", nodeCPU, coTenants, got, config.MinimumRuntimeDindCPU)
 			}
 			if milli%1000 != 0 {
 				t.Errorf("RuntimeDindCPULimit(%d, %d) = %q, not a whole core count", nodeCPU, coTenants, got)
@@ -105,15 +109,15 @@ func TestRuntimeDindCPULimitNeverSizesBelowTheFloor(t *testing.T) {
 // derives -- exactly what the flat "4" was.
 func TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode(t *testing.T) {
 	t.Parallel()
-	want := RuntimeDindCPULimit(DefaultRuntimeDindCPUNodeCPUMilli, DefaultRuntimeDindCPUCoTenants)
-	if DefaultRuntimeDindCPU != want {
+	want := config.RuntimeDindCPULimit(config.DefaultRuntimeDindCPUNodeCPUMilli, config.DefaultRuntimeDindCPUCoTenants)
+	if config.DefaultRuntimeDindCPU != want {
 		t.Fatalf("DefaultRuntimeDindCPU = %q, but the rule gives %q for a %d milli-CPU node with %d co-tenants",
-			DefaultRuntimeDindCPU, want, DefaultRuntimeDindCPUNodeCPUMilli, DefaultRuntimeDindCPUCoTenants)
+			config.DefaultRuntimeDindCPU, want, config.DefaultRuntimeDindCPUNodeCPUMilli, config.DefaultRuntimeDindCPUCoTenants)
 	}
-	if DefaultRuntimeDindCPU == MinimumRuntimeDindCPU {
+	if config.DefaultRuntimeDindCPU == config.MinimumRuntimeDindCPU {
 		t.Fatalf("DefaultRuntimeDindCPU is still the floor (%q); the reference node is sized for a node larger than the "+
 			"smallest one this rule will size, so the two cannot be the same value without the default being flat again",
-			MinimumRuntimeDindCPU)
+			config.MinimumRuntimeDindCPU)
 	}
 }
 
@@ -123,16 +127,16 @@ func TestDefaultRuntimeDindCPUIsTheRulesAnswerForTheReferenceNode(t *testing.T) 
 // the *sized* default rather than at the old constant.
 func TestMinimumRuntimeNamespaceQuotaAdmitsTheDefaultPod(t *testing.T) {
 	t.Parallel()
-	cpu, _, _ := MinimumRuntimeNamespaceQuota()
-	runtimeCPU, err := ParseKubernetesCPUToMilli(DefaultRuntimePodCPU)
+	cpu, _, _ := config.MinimumRuntimeNamespaceQuota()
+	runtimeCPU, err := config.ParseKubernetesCPUToMilli(config.DefaultRuntimePodCPU)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dindCPU, err := ParseKubernetesCPUToMilli(DefaultRuntimeDindCPU)
+	dindCPU, err := config.ParseKubernetesCPUToMilli(config.DefaultRuntimeDindCPU)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cpu != runtimeCPU+dindCPU {
-		t.Fatalf("namespace quota floor is %dm, want %dm (runtime %s + dind %s)", cpu, runtimeCPU+dindCPU, DefaultRuntimePodCPU, DefaultRuntimeDindCPU)
+		t.Fatalf("namespace quota floor is %dm, want %dm (runtime %s + dind %s)", cpu, runtimeCPU+dindCPU, config.DefaultRuntimePodCPU, config.DefaultRuntimeDindCPU)
 	}
 }

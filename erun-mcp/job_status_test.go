@@ -9,7 +9,8 @@ import (
 	"testing"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // exec_job_status and exec_job_await both echo back a job's command, and for
@@ -26,7 +27,7 @@ import (
 // liveness reconciliation that only applies to a job still claiming running.
 func writeJobFixture(t *testing.T, tenant, environment string, job eruncommon.EnvironmentJob) {
 	t.Helper()
-	dir, err := eruncommon.EnvironmentActivityDir(tenant, environment)
+	dir, err := activity.EnvironmentActivityDir(tenant, environment)
 	if err != nil {
 		t.Fatalf("EnvironmentActivityDir: %v", err)
 	}

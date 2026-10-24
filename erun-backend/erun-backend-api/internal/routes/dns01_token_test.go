@@ -10,12 +10,12 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/mcptoken"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 func dns01Signer(t *testing.T) *mcptoken.Signer {
 	t.Helper()
-	privatePEM, _, err := eruncommon.GenerateDesktopIdentity()
+	privatePEM, _, err := mcpauth.GenerateDesktopIdentity()
 	if err != nil {
 		t.Fatalf("generate identity: %v", err)
 	}

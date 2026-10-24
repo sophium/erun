@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 // requireEchoedTarget fails the test unless the result echoes the given
@@ -27,9 +28,9 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	isolateLeaseCache(t)
 	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
 
-	if err := eruncommon.RecordAISessionEvent(eruncommon.AISessionEventParams{
+	if err := activity.RecordAISessionEvent(model.AISessionEventParams{
 		Tenant: "tenant-a", Environment: "dev", SessionID: "sess-1",
-		Tool: "claude", Event: eruncommon.AISessionEventTurnEnd,
+		Tool: "claude", Event: model.AISessionEventTurnEnd,
 	}); err != nil {
 		t.Fatalf("record turn-end: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestAISessionsToolResolvesAgainstServerContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve single session: %v", err)
 	}
-	if len(one.Sessions) != 1 || one.Sessions[0].State != eruncommon.AISessionStateAwaitingInput {
+	if len(one.Sessions) != 1 || one.Sessions[0].State != model.AISessionStateAwaitingInput {
 		t.Fatalf("expected one awaiting-input session, got %+v", one.Sessions)
 	}
 	requireEchoedTarget(t, one, "tenant-a", "dev")
@@ -90,7 +91,7 @@ func TestAISessionsToolUnknownSessionReadsAsIdle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve unknown session: %v", err)
 	}
-	if len(result.Sessions) != 1 || result.Sessions[0].State != eruncommon.AISessionStateIdle {
+	if len(result.Sessions) != 1 || result.Sessions[0].State != model.AISessionStateIdle {
 		t.Fatalf("expected an idle status for an unrecorded session, got %+v", result.Sessions)
 	}
 }

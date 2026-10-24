@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
 // Changing an environment's erun version means moving every place that version
@@ -198,7 +199,7 @@ func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 		}
 		return nil, err
 	}
-	var versions eruncommon.RuntimeRegistryVersions
+	var versions registry.RuntimeRegistryVersions
 	if unmarshalErr := json.Unmarshal(stdout, &versions); unmarshalErr != nil {
 		return nil, fmt.Errorf("read the published versions: %w", unmarshalErr)
 	}

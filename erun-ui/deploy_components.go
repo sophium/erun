@@ -84,7 +84,7 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 		return components
 	}
 
-	runtimeChart := eruncommon.RuntimeReleaseName(tenant)
+	runtimeChart := config.RuntimeReleaseName(tenant)
 	probe := make([]string, 0, len(components)+1)
 	for _, component := range components {
 		if !component.Runtime {
@@ -94,7 +94,7 @@ func (a *App) filterDeployComponentsByChartAvailability(tenant, environment, ver
 	// Probe the tenant's own runtime chart too so the runtime row can name the
 	// chart the deploy will actually install — the tenant's <tenant>-devops when
 	// it is published at this version, else the canonical erun-devops fallback.
-	if runtimeChart != eruncommon.DevopsComponentName {
+	if runtimeChart != config.DevopsComponentName {
 		probe = append(probe, runtimeChart)
 	}
 	available := a.publishedComponentChartAvailability(tenant, environment, version, probe)

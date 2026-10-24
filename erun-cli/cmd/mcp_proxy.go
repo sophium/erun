@@ -8,6 +8,7 @@ import (
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +53,7 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 		return nil
 	}
 
-	return common.RunMCPStdioProxy(ctx, common.MCPStdioProxyParams{
+	return mcp.RunMCPStdioProxy(ctx, mcp.MCPStdioProxyParams{
 		Endpoint:      target.endpoint,
 		MintToken:     mcpEdgeTokenMinter(target),
 		ClientVersion: currentBuildInfo().Version,
@@ -60,7 +61,7 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 		Out:           commandCtx.Stdout,
 		Diagnostics:   commandCtx.Stderr,
 		DescribeError: func(err error) string { return mcpEdgeError(target, err).Error() },
-		LocalTools: []common.MCPLocalTool{
+		LocalTools: []mcp.MCPLocalTool{
 			sshdSyncLocalTool(resolveOpen, params),
 			// Deprecated alias for one release (#1186), so an upgrade does not
 			// break a client pinned to the old name. Same handler; only the name
@@ -76,7 +77,7 @@ func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 // with "_" for spaces, and this one drifted from `erun sshd sync` (#1186); the
 // alias keeps the retired name callable for one release rather than breaking a
 // pinned client on an upgrade.
-func deprecatedAlias(tool common.MCPLocalTool, retired, replacement string) common.MCPLocalTool {
+func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCPLocalTool {
 	tool.Name = retired
 	tool.Description = "Deprecated: use " + replacement + ". Retained for one release; this name will be removed."
 	return tool
@@ -87,8 +88,8 @@ func deprecatedAlias(tool common.MCPLocalTool, retired, replacement string) comm
 // workspaceSyncLocalTool: it is served here rather than by the edge because
 // the source file is on this host, and the edge runs in the pod with no path
 // back to it.
-func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
-	return common.MCPLocalTool{
+func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
 			"Runs on the host, where the source file lives. remotePath is the full absolute destination inside the pod, including the file name — there is no default, so it can never silently land somewhere a background process (such as sshd_sync's mirror) reconciles away. Set preview to resolve the transfer and trace what would happen without sending anything. Refuses clearly, naming why, when the local file is missing, remotePath is not absolute, the channel to the pod is down, or the destination directory is not writable.",
@@ -132,8 +133,8 @@ func inputsUploadLocalTool(resolveOpen OpenResolver, params common.OpenParams) c
 // than by the edge because the mirror is on this host: the edge runs in the pod
 // and has nothing to write to. The environment is resolved per call, so a mirror
 // enabled mid-session is picked up without restarting the session.
-func sshdSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) common.MCPLocalTool {
-	return common.MCPLocalTool{
+func sshdSyncLocalTool(resolveOpen OpenResolver, params common.OpenParams) mcp.MCPLocalTool {
+	return mcp.MCPLocalTool{
 		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +
 			"Runs on the host, where the mirror lives. Set preview to report what a pass would change without touching the mirror. Refuses, naming which, when the environment is not a remote-agent env, has workspace sync disabled, has no configured local path, or its SSH channel is down.",

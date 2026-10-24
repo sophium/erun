@@ -10,11 +10,10 @@ import (
 	"strings"
 	"time"
 
-	eruncommon "github.com/sophium/erun/erun-common"
-
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 var (
@@ -476,7 +475,7 @@ func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {
 	// the CLI, the console, or an MCP tool call, so nothing about the request
 	// otherwise distinguishes them; PlatformClient.WithMCPTool sets this header
 	// only when erun-mcp made the call, naming which tool did.
-	if tool := strings.TrimSpace(r.Header.Get(eruncommon.MCPToolAuditHeader)); tool != "" {
+	if tool := strings.TrimSpace(r.Header.Get(platformclient.MCPToolAuditHeader)); tool != "" {
 		event.Type = model.AuditEventTypeMCP
 		event.MCPTool = tool
 	}
