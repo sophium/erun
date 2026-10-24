@@ -383,3 +383,25 @@ func TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 	goIn(t, dir, "test", "./...")
 }
+
+// TestApplyDropsACopyWhoseOwnPackageIsEmptied pins emptying a package: a test
+// helper a destination already declares is kept where it is only while its
+// own package survives, and dropped when everything else leaves it.
+func TestApplyDropsACopyWhoseOwnPackageIsEmptied(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"root.go":            "package fixture\n\nfunc Root() int { return 1 }\n",
+		"helper_test.go":     "package fixture\n\nfunc helper() int { return 2 }\n",
+		"root_test.go":       "package fixture\n\nimport \"testing\"\n\nfunc TestRoot(t *testing.T) {\n\tif Root()+helper() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/sub.go":         "package sub\n\nfunc Sub() int { return 0 }\n",
+		"sub/helper_test.go": "package sub\n\nfunc helper() int { return 2 }\n",
+		"packages.map":       "sub root.go\nsub root_test.go\nsub helper_test.go\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "helper_test.go")); !os.IsNotExist(err) {
+		t.Error("the root copy must go once nothing else stays in the root package")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}

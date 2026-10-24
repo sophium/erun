@@ -103,6 +103,11 @@ type declTarget struct {
 	// tok its keyword; zero for a declaration that is not one spec of a group.
 	group int
 	tok   string
+	// kept marks a test-only copy left in place because dest, where its file
+	// goes, already declares it; drop removes it when its own package is
+	// emptied, so references to it resolve to that twin.
+	kept, drop bool
+	dest       string
 }
 
 func (w *world) decide(m packageMap) decisions {
@@ -625,7 +630,7 @@ func (w *world) collisions(d decisions) []string {
 	var errs []string
 	for _, key := range sortedKeys(w.objects) {
 		o := w.objects[key]
-		if o.member || neverCollides(o.name) {
+		if o.member || neverCollides(o.name) || w.dropped(key, d) {
 			continue
 		}
 		name := o.name
@@ -642,6 +647,12 @@ func (w *world) collisions(d decisions) []string {
 	}
 	sort.Strings(errs)
 	return errs
+}
+
+// dropped says whether an object is declared by a copy that is dropped.
+func (w *world) dropped(key string, d decisions) bool {
+	decl := d.declAt(w.objects[key].file, offsetOf(key))
+	return decl != nil && decl.drop
 }
 
 // neverCollides says whether a package may declare a name any number of
@@ -832,10 +843,51 @@ func (w *world) keepCopiesInPlace(d decisions) {
 		home := path.Dir(sf.rel)
 		for i := range decls {
 			if decls[i].dir != home && w.declaresAllIn(&decls[i], file, decls[i].dir) {
+				decls[i].dest = decls[i].dir
 				decls[i].dir = home
+				decls[i].kept = true
 			}
 		}
 	}
+	dropCopiesOfEmptiedPackages(w, d)
+}
+
+// dropCopiesOfEmptiedPackages drops a copy kept in place when nothing else of
+// its package stays there: the package is going away, and the destination
+// already declares the same thing.
+func dropCopiesOfEmptiedPackages(w *world, d decisions) {
+	stays := packagesKeepingDeclarations(w, d)
+	for file, decls := range d.decls {
+		sf := w.files[file]
+		if sf == nil || stays[path.Dir(sf.rel)] {
+			continue
+		}
+		for i := range decls {
+			if decls[i].kept {
+				decls[i].drop = true
+				decls[i].dir = decls[i].dest
+			}
+		}
+	}
+}
+
+// packagesKeepingDeclarations are the packages some declaration other than a
+// kept copy stays in.
+func packagesKeepingDeclarations(w *world, d decisions) map[string]bool {
+	stays := map[string]bool{}
+	for file, decls := range d.decls {
+		sf := w.files[file]
+		if sf == nil {
+			continue
+		}
+		home := path.Dir(sf.rel)
+		for _, decl := range decls {
+			if decl.dir == home && !decl.kept {
+				stays[home] = true
+			}
+		}
+	}
+	return stays
 }
 
 func (w *world) declaresAllIn(decl *declTarget, file, dir string) bool {

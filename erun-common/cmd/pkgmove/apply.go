@@ -140,6 +140,9 @@ func (r *rewriter) fileFragments(sf *sourceFile) []*fragment {
 		prev = p.placeGroup(sf, entries[i:j], prev)
 		i = j
 	}
+	if len(p.order) == 0 && allDropped(entries) {
+		return nil
+	}
 	primary := p.byDir[home]
 	if primary == nil {
 		if len(p.order) == 0 {
@@ -173,7 +176,21 @@ func (p *fragmentPlan) get(dir string, dup bool) *fragment {
 
 // place puts one declaration's text in its package and in every package a
 // copy of it goes to.
+// allDropped says whether every declaration of a file is dropped, so the file
+// goes away instead of being left with nothing but its package clause.
+func allDropped(entries []declTarget) bool {
+	for _, e := range entries {
+		if !e.drop {
+			return false
+		}
+	}
+	return len(entries) > 0
+}
+
 func (p *fragmentPlan) place(e declTarget, rg [2]int) {
+	if e.drop {
+		return
+	}
 	p.get(e.dir, false).addRange(rg)
 	for _, dir := range sortedKeys(e.dups) {
 		p.get(dir, true).addRange(rg)
@@ -494,7 +511,7 @@ func dedupe(lines []string) []string {
 }
 
 func (r *rewriter) changed(sf *sourceFile, frags []*fragment) bool {
-	if len(frags) > 1 || len(frags[0].edits) > 0 {
+	if len(frags) != 1 || len(frags[0].edits) > 0 {
 		return true
 	}
 	return sf.inModule && frags[0].dir != path.Dir(sf.rel)
