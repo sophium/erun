@@ -27,7 +27,7 @@ var modules = []string{
 var gate = [][]string{
 	{"build", "./..."},
 	{"vet", "./..."},
-	{"test", "-count=1", "-run", "^$", "./..."},
+	{"test", "-run", "^$", "./..."},
 }
 
 type editList []string
