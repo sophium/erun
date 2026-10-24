@@ -75,6 +75,9 @@ func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 		t.Errorf("expected the refusal before any platform call, got %d calls", calls.Load())
 	}
 
+	if err := ensureNotKnownInfrastructureBuildFailure(false, "#16 213.0 error Error: https://registry.yarnpkg.com/lucide-react/-/lucide-react-1.34.0.tgz: ESOCKETTIMEDOUT"); err == nil {
+		t.Error("a registry download that timed out mid-install must not be recorded as FAILED")
+	}
 	if err := ensureNotKnownInfrastructureBuildFailure(false, "make: *** [Makefile:1060: check] Error 2"); err != nil {
 		t.Errorf("an ordinary red build must still be recordable as FAILED, got %v", err)
 	}
