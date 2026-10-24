@@ -4,29 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
-
-// ObservedResourceQuota pairs a ResourceQuota cap with current usage.
-type ObservedResourceQuota struct {
-	Name string            `json:"name"`
-	Hard map[string]string `json:"hard,omitempty"`
-	Used map[string]string `json:"used,omitempty"`
-}
-
-// ObservedLimitRange is a namespace's LimitRange, per constraint entry.
-type ObservedLimitRange struct {
-	Name   string                   `json:"name"`
-	Limits []ObservedLimitRangeItem `json:"limits,omitempty"`
-}
-
-type ObservedLimitRangeItem struct {
-	Type           string            `json:"type"`
-	Max            map[string]string `json:"max,omitempty"`
-	Min            map[string]string `json:"min,omitempty"`
-	Default        map[string]string `json:"default,omitempty"`
-	DefaultRequest map[string]string `json:"defaultRequest,omitempty"`
-}
 
 // Deliberately partial parses, so kubectl version drift does not break observe.
 type resourceQuotaList struct {
@@ -64,7 +44,7 @@ type limitRangeLimitEntry struct {
 	DefaultRequest map[string]string `json:"defaultRequest"`
 }
 
-func fetchObservedResourceQuotas(args []string) ([]ObservedResourceQuota, error) {
+func fetchObservedResourceQuotas(args []string) ([]model.ObservedResourceQuota, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		return nil, fmt.Errorf("observe: get resourcequota: %w", deploy.KubectlErrorMessage(err, stderr))
@@ -73,14 +53,14 @@ func fetchObservedResourceQuotas(args []string) ([]ObservedResourceQuota, error)
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("observe: parse resourcequota: %w", err)
 	}
-	quotas := make([]ObservedResourceQuota, 0, len(list.Items))
+	quotas := make([]model.ObservedResourceQuota, 0, len(list.Items))
 	for _, item := range list.Items {
-		quotas = append(quotas, ObservedResourceQuota{Name: item.Metadata.Name, Hard: item.Status.Hard, Used: item.Status.Used})
+		quotas = append(quotas, model.ObservedResourceQuota{Name: item.Metadata.Name, Hard: item.Status.Hard, Used: item.Status.Used})
 	}
 	return quotas, nil
 }
 
-func fetchObservedLimitRanges(args []string) ([]ObservedLimitRange, error) {
+func fetchObservedLimitRanges(args []string) ([]model.ObservedLimitRange, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		return nil, fmt.Errorf("observe: get limitrange: %w", deploy.KubectlErrorMessage(err, stderr))
@@ -89,11 +69,11 @@ func fetchObservedLimitRanges(args []string) ([]ObservedLimitRange, error) {
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("observe: parse limitrange: %w", err)
 	}
-	ranges := make([]ObservedLimitRange, 0, len(list.Items))
+	ranges := make([]model.ObservedLimitRange, 0, len(list.Items))
 	for _, item := range list.Items {
-		lr := ObservedLimitRange{Name: item.Metadata.Name}
+		lr := model.ObservedLimitRange{Name: item.Metadata.Name}
 		for _, l := range item.Spec.Limits {
-			lr.Limits = append(lr.Limits, ObservedLimitRangeItem(l))
+			lr.Limits = append(lr.Limits, model.ObservedLimitRangeItem(l))
 		}
 		ranges = append(ranges, lr)
 	}

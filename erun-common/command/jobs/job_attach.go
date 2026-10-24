@@ -7,24 +7,12 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-type AttachEnvironmentJobParams struct {
-	Tenant      string
-	Environment string
-	ID          string
-	Name        string
-	// PID decides the job's state; erun never sees its exit status, so it
-	// resolves to unknown, not a made-up outcome.
-	PID int
-	// LogPath is where the caller already writes the work's output.
-	LogPath  string
-	LeaseTTL time.Duration
-}
-
-func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (shared.EnvironmentJob, error) {
+func AttachEnvironmentJob(ctx core.Context, params model.AttachEnvironmentJobParams) (shared.EnvironmentJob, error) {
 	dir, job, ttl, err := resolveAttachedEnvironmentJob(params)
 	if err != nil {
 		return shared.EnvironmentJob{}, err
@@ -51,7 +39,7 @@ func AttachEnvironmentJob(ctx core.Context, params AttachEnvironmentJobParams) (
 	return job, nil
 }
 
-func resolveAttachedEnvironmentJob(params AttachEnvironmentJobParams) (string, shared.EnvironmentJob, time.Duration, error) {
+func resolveAttachedEnvironmentJob(params model.AttachEnvironmentJobParams) (string, shared.EnvironmentJob, time.Duration, error) {
 	name := strings.TrimSpace(params.Name)
 	id, err := normalizeEnvironmentJobIdentity(params.Tenant, params.Environment, name, params.ID)
 	if err != nil {

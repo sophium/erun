@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -17,7 +17,7 @@ var (
 	IdeStat        = os.Stat
 )
 
-func ResolveIntelliJOptionsDir(hostOS core.HostOS) (string, error) {
+func ResolveIntelliJOptionsDir(hostOS model.HostOS) (string, error) {
 	baseDir, err := intelliJOptionsBaseDir(hostOS)
 	if err != nil {
 		return "", err
@@ -43,22 +43,22 @@ type intelliJOptionsCandidate struct {
 	modTime time.Time
 }
 
-func intelliJOptionsBaseDir(hostOS core.HostOS) (string, error) {
+func intelliJOptionsBaseDir(hostOS model.HostOS) (string, error) {
 	homeDir, err := IdeUserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return filepath.Join(homeDir, "Library", "Application Support", "JetBrains"), nil
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		return filepath.Join(homeDir, ".config", "JetBrains"), nil
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
 			return filepath.Join(appData, "JetBrains"), nil
 		}
 		return "", fmt.Errorf("JetBrains options directory base is not configured")
-	case core.HostOSUnknown:
+	case model.HostOSUnknown:
 	}
 	return "", fmt.Errorf("unsupported host OS: %s", hostOS)
 }

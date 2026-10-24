@@ -1,9 +1,8 @@
 package main
 
 import (
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 type uiState struct {
@@ -33,13 +32,13 @@ type uiEnvironment struct {
 	APIURL         string `json:"apiUrl,omitempty"`
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	// These mirror lifecycle.ListEnvironmentResult's fields of the same name.
-	RuntimeVersionLine       *deploy.RuntimeVersionLine                `json:"runtimeVersionLine,omitempty"`
-	ErunVersion              *deploy.ErunVersion                       `json:"erunVersion,omitempty"`
-	RuntimeImageLineMismatch *lifecycle.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
-	KubernetesContext        string                                    `json:"kubernetesContext,omitempty"`
-	IsActive                 bool                                      `json:"isActive,omitempty"`
-	SSHDEnabled              bool                                      `json:"sshdEnabled,omitempty"`
-	AutoStart                *bool                                     `json:"autoStart,omitempty"`
+	RuntimeVersionLine       *model.RuntimeVersionLine             `json:"runtimeVersionLine,omitempty"`
+	ErunVersion              *model.ErunVersion                    `json:"erunVersion,omitempty"`
+	RuntimeImageLineMismatch *model.RuntimeImageLineMismatchResult `json:"runtimeImageLineMismatch,omitempty"`
+	KubernetesContext        string                                `json:"kubernetesContext,omitempty"`
+	IsActive                 bool                                  `json:"isActive,omitempty"`
+	SSHDEnabled              bool                                  `json:"sshdEnabled,omitempty"`
+	AutoStart                *bool                                 `json:"autoStart,omitempty"`
 	// Activity seeds a frontend store reset; the poller only emits on transitions.
 	// nil means not yet observed.
 	Activity *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`

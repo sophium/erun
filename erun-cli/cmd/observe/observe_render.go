@@ -7,13 +7,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/observe"
-	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func writeObserveResult(ctx core.Context, result observe.ObserveResult) error {
+func writeObserveResult(ctx core.Context, result model.ObserveResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", shared.ValueOrNone(result.Namespace)); err != nil {
 		return err
 	}
@@ -44,7 +42,7 @@ func writeObserveResult(ctx core.Context, result observe.ObserveResult) error {
 	return writeObserveDrift(ctx, result.Drift)
 }
 
-func writeObservePods(ctx core.Context, pods []observe.ObservedPod) error {
+func writeObservePods(ctx core.Context, pods []model.ObservedPod) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Pods (%d):\n", len(pods)); err != nil {
 		return err
 	}
@@ -68,7 +66,7 @@ func writeObservePods(ctx core.Context, pods []observe.ObservedPod) error {
 	return nil
 }
 
-func writeObserveResourceQuotas(ctx core.Context, quotas []observe.ObservedResourceQuota) error {
+func writeObserveResourceQuotas(ctx core.Context, quotas []model.ObservedResourceQuota) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "ResourceQuotas (%d):\n", len(quotas)); err != nil {
 		return err
 	}
@@ -80,7 +78,7 @@ func writeObserveResourceQuotas(ctx core.Context, quotas []observe.ObservedResou
 	return nil
 }
 
-func writeObserveLimitRanges(ctx core.Context, limitRanges []observe.ObservedLimitRange) error {
+func writeObserveLimitRanges(ctx core.Context, limitRanges []model.ObservedLimitRange) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "LimitRanges (%d):\n", len(limitRanges)); err != nil {
 		return err
 	}
@@ -98,7 +96,7 @@ func writeObserveLimitRanges(ctx core.Context, limitRanges []observe.ObservedLim
 	return nil
 }
 
-func writeObserveServices(ctx core.Context, services []clusterread.ObservedService) error {
+func writeObserveServices(ctx core.Context, services []model.ObservedService) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Services (%d):\n", len(services)); err != nil {
 		return err
 	}
@@ -119,7 +117,7 @@ func writeObserveServices(ctx core.Context, services []clusterread.ObservedServi
 	return nil
 }
 
-func writeObserveIngresses(ctx core.Context, ingresses []clusterread.ObservedIngress) error {
+func writeObserveIngresses(ctx core.Context, ingresses []model.ObservedIngress) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Ingresses (%d):\n", len(ingresses)); err != nil {
 		return err
 	}
@@ -141,7 +139,7 @@ func writeObserveIngresses(ctx core.Context, ingresses []clusterread.ObservedIng
 	return nil
 }
 
-func writeObserveCertificates(ctx core.Context, certificates []clusterread.ObservedCertificate) error {
+func writeObserveCertificates(ctx core.Context, certificates []model.ObservedCertificate) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Certificates (%d):\n", len(certificates)); err != nil {
 		return err
 	}
@@ -166,7 +164,7 @@ func writeObserveCertificates(ctx core.Context, certificates []clusterread.Obser
 	return nil
 }
 
-func writeObserveCertificateOrders(ctx core.Context, orders []clusterread.ObservedCertificateOrder) error {
+func writeObserveCertificateOrders(ctx core.Context, orders []model.ObservedCertificateOrder) error {
 	for _, order := range orders {
 		if _, err := fmt.Fprintf(ctx.Stdout, "    order %s: state %s, reason %s\n", order.Name, shared.ValueOrNone(order.State), shared.ValueOrNone(order.Reason)); err != nil {
 			return err
@@ -181,7 +179,7 @@ func writeObserveCertificateOrders(ctx core.Context, orders []clusterread.Observ
 	return nil
 }
 
-func writeObserveSecrets(ctx core.Context, secrets []observe.ObservedSecretCheck) error {
+func writeObserveSecrets(ctx core.Context, secrets []model.ObservedSecretCheck) error {
 	if len(secrets) == 0 {
 		return nil
 	}
@@ -200,7 +198,7 @@ func writeObserveSecrets(ctx core.Context, secrets []observe.ObservedSecretCheck
 	return nil
 }
 
-func writeObserveHelmRelease(ctx core.Context, release *clusterread.ObservedHelmRelease) error {
+func writeObserveHelmRelease(ctx core.Context, release *model.ObservedHelmRelease) error {
 	if release == nil {
 		return nil
 	}
@@ -218,7 +216,7 @@ func writeObserveHelmRelease(ctx core.Context, release *clusterread.ObservedHelm
 }
 
 // writeObserveHelmReleaseNotFound distinguishes a confirmed absence from a failed read.
-func writeObserveHelmReleaseNotFound(ctx core.Context, release *clusterread.ObservedHelmRelease) error {
+func writeObserveHelmReleaseNotFound(ctx core.Context, release *model.ObservedHelmRelease) error {
 	if release.Error != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: could not read: %s\n", release.Name, release.Error)
 		return err
@@ -227,7 +225,7 @@ func writeObserveHelmReleaseNotFound(ctx core.Context, release *clusterread.Obse
 	return err
 }
 
-func writeObserveHelmReleaseDetails(ctx core.Context, release *clusterread.ObservedHelmRelease) error {
+func writeObserveHelmReleaseDetails(ctx core.Context, release *model.ObservedHelmRelease) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Helm release %s: revision %d, status %s, chart %s-%s, appVersion %s\n",
 		release.Name, release.Revision, shared.ValueOrNone(release.Status), shared.ValueOrNone(release.Chart), shared.ValueOrNone(release.ChartVersion), shared.ValueOrNone(release.AppVersion)); err != nil {
 		return err
@@ -237,7 +235,7 @@ func writeObserveHelmReleaseDetails(ctx core.Context, release *clusterread.Obser
 			return err
 		}
 	}
-	if release.RuntimePod != (config.RuntimePodResources{}) {
+	if release.RuntimePod != (model.RuntimePodResources{}) {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  runtime pod limits: cpu %s, memory %s\n", release.RuntimePod.CPU, release.RuntimePod.Memory); err != nil {
 			return err
 		}

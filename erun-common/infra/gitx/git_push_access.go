@@ -6,36 +6,18 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
-// GitPushAccessStatus reports fetch and push capability separately: a public repo fetches
-// anonymously, so a missing push credential otherwise surfaces only at the final push.
-type GitPushAccessStatus struct {
-	// RemoteURL is empty when there is no origin; other fields are then meaningless.
-	RemoteURL string
-	FetchOK   bool
-	// GHAuthenticated never runs gh login/refresh/switch, whose interactive flow cannot finish in a pod.
-	GHAuthenticated bool
-	// PushCredential: a gh session counts only with `repo` scope or no scope list (fine-grained
-	// tokens list none); GH_TOKEN/GITHUB_TOKEN always count. For SSH, any exit other than 255
-	// (ssh's own failure code) means the host accepted the key.
-	PushCredential bool
-}
-
-// FetchWorksPushDoesNot reports a readable origin with no credential that could push.
-func (s GitPushAccessStatus) FetchWorksPushDoesNot() bool {
-	return s.RemoteURL != "" && s.FetchOK && !s.PushCredential
-}
-
 // InspectGitPushAccess runs a read-only script that never invokes gh's interactive subcommands.
-func InspectGitPushAccess(ctx core.Context, runner kube.RemoteCommandRunnerFunc, req config.ShellLaunchParams, repoPath string) (GitPushAccessStatus, error) {
+func InspectGitPushAccess(ctx core.Context, runner kube.RemoteCommandRunnerFunc, req config.ShellLaunchParams, repoPath string) (model.GitPushAccessStatus, error) {
 	out, err := kube.RunTracedRemoteCommand(ctx, runner, req, "git-push-access-script", gitPushAccessScript(repoPath))
 	if err != nil {
-		return GitPushAccessStatus{}, fmt.Errorf("read git push access%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
+		return model.GitPushAccessStatus{}, fmt.Errorf("read git push access%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	if ctx.DryRun {
-		return GitPushAccessStatus{}, nil
+		return model.GitPushAccessStatus{}, nil
 	}
 	return parseGitPushAccessReport(out.Stdout), nil
 }
@@ -84,8 +66,8 @@ func gitPushAccessScript(repoPath string) string {
 	}, "\n")
 }
 
-func parseGitPushAccessReport(stdout string) GitPushAccessStatus {
-	var status GitPushAccessStatus
+func parseGitPushAccessReport(stdout string) model.GitPushAccessStatus {
+	var status model.GitPushAccessStatus
 	for _, line := range strings.Split(stdout, "\n") {
 		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
 		if !ok {

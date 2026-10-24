@@ -7,12 +7,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 // signedInDefaultHostStore uses the real config and secret stores, proving the
 // deploying host's own config is what gets read.
-func signedInDefaultHostStore(t *testing.T, provider configpkg.CloudProviderConfig) {
+func signedInDefaultHostStore(t *testing.T, provider model.CloudProviderConfig) {
 	t.Helper()
 	store, err := cloud.DefaultCloudSecretStore()
 	if err != nil {
@@ -21,7 +22,7 @@ func signedInDefaultHostStore(t *testing.T, provider configpkg.CloudProviderConf
 	if err := store.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 		t.Fatalf("save refresh token: %v", err)
 	}
-	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []configpkg.CloudProviderConfig{provider}}); err != nil {
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []model.CloudProviderConfig{provider}}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
 }

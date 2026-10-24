@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // toolsListPayload holds real descriptors, one destructive and one read-only.
@@ -61,7 +63,7 @@ type toolHints struct {
 
 func encodeToolList(t *testing.T, payload string) []byte {
 	t.Helper()
-	var decoded MCPToolListResult
+	var decoded model.MCPToolListResult
 	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
 		t.Fatalf("decode tools/list payload: %v", err)
 	}

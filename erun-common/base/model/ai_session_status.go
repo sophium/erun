@@ -1,9 +1,6 @@
 package model
 
 import (
-	"fmt"
-	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -38,14 +35,6 @@ const (
 // AISessionExitReasonOOM maps an exit event to AISessionStateOOMKilled.
 const AISessionExitReasonOOM = "oom"
 
-var validAISessionEventKinds = []AISessionEventKind{
-	AISessionEventTurnStart,
-	AISessionEventToolUse,
-	AISessionEventTurnEnd,
-	AISessionEventNotify,
-	AISessionEventExit,
-}
-
 // AISessionRecord is the on-disk last event of one session; only that session's hook writes it.
 type AISessionRecord struct {
 	SessionID  string             `json:"sessionId"`
@@ -77,69 +66,4 @@ type AISessionEventParams struct {
 	ExitCode    *int
 	ExitReason  string
 	Now         time.Time
-}
-
-// ResolveAISessionStatus derives state from the last event only, never from
-// elapsed time, so AwaitingInput persists until another event.
-func ResolveAISessionStatus(record AISessionRecord) AISessionStatus {
-	status := AISessionStatus{
-		SessionID:    record.SessionID,
-		Tool:         record.Tool,
-		LastActivity: record.At,
-		ExitCode:     record.ExitCode,
-	}
-	switch record.Event {
-	case AISessionEventExit:
-		if strings.EqualFold(strings.TrimSpace(record.ExitReason), AISessionExitReasonOOM) {
-			status.State = AISessionStateOOMKilled
-			status.Reason = "the tool's process was killed by an out-of-memory event"
-		} else {
-			status.State = AISessionStateExited
-			status.Reason = exitReason(record)
-		}
-	case AISessionEventTurnEnd:
-		status.State = AISessionStateAwaitingInput
-		status.Reason = "finished its turn and is waiting for your next message"
-	case AISessionEventNotify:
-		status.State = AISessionStateAwaitingInput
-		status.Reason = "is waiting on you: a permission or a question is pending"
-	case AISessionEventTurnStart, AISessionEventToolUse:
-		status.State = AISessionStateBusy
-		status.Reason = "working"
-	default:
-		status.State = AISessionStateIdle
-		status.Reason = "no AI session activity recorded for this id"
-	}
-	return status
-}
-
-func exitReason(record AISessionRecord) string {
-	if reason := strings.TrimSpace(record.ExitReason); reason != "" {
-		return reason
-	}
-	if record.ExitCode != nil {
-		return fmt.Sprintf("exited with code %d", *record.ExitCode)
-	}
-	return "exited"
-}
-
-// ValidateAISessionID requires a plain path segment so the id cannot escape the
-// sessions directory.
-func ValidateAISessionID(sessionID string) error {
-	if sessionID == "" {
-		return fmt.Errorf("AI session id is required")
-	}
-	if sessionID != filepath.Base(sessionID) || sessionID == "." || sessionID == ".." {
-		return fmt.Errorf("invalid AI session id %q", sessionID)
-	}
-	return nil
-}
-
-func ValidAISessionEventKind(kind AISessionEventKind) bool {
-	for _, candidate := range validAISessionEventKinds {
-		if kind == candidate {
-			return true
-		}
-	}
-	return false
 }

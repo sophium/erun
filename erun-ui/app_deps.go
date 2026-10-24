@@ -289,8 +289,8 @@ func withDefaultPodDeps(deps erunUIDeps) erunUIDeps {
 		deps.recordActivity = activity.RecordEnvironmentActivity
 	}
 	if deps.stopCloudContext == nil {
-		deps.stopCloudContext = func(_ context.Context, name string) (config.CloudContextStatus, error) {
-			return cloud.StopCloudContext(core.Context{}, deps.store, cloud.CloudContextParams{Name: name}, deps.cloudContextDeps)
+		deps.stopCloudContext = func(_ context.Context, name string) (model.CloudContextStatus, error) {
+			return cloud.StopCloudContext(core.Context{}, deps.store, model.CloudContextParams{Name: name}, deps.cloudContextDeps)
 		}
 	}
 	return deps

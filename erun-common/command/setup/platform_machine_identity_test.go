@@ -13,6 +13,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -20,7 +21,7 @@ import (
 func machineIdentityHostStore(apiURL string) staticCloudStore {
 	provider := testPlatformAliasProvider()
 	provider.ERun.APIURL = apiURL
-	return staticCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
+	return staticCloudStore{config: config.ERunConfig{CloudProviders: []model.CloudProviderConfig{provider}}}
 }
 
 func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdentity) *httptest.Server {
@@ -33,7 +34,7 @@ func fakePlatformAPI(t *testing.T, identity platformclient.PlatformMachineIdenti
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/environments":
-			_ = json.NewEncoder(w).Encode([]platformclient.PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
+			_ = json.NewEncoder(w).Encode([]model.PlatformEnvironment{{EnvironmentID: identity.EnvironmentID, Name: identity.EnvironmentName}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/environments/"+identity.EnvironmentID+"/machine-identity":
 			_ = json.NewEncoder(w).Encode(identity)
 		default:

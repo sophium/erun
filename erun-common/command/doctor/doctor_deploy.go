@@ -7,17 +7,18 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // DeployRecoveryActionPromptLabel is the confirm prompt shown before the action runs.
-func DeployRecoveryActionPromptLabel(action deploy.DeployRecoveryAction, req config.ShellLaunchParams) string {
+func DeployRecoveryActionPromptLabel(action model.DeployRecoveryAction, req config.ShellLaunchParams) string {
 	target := strings.TrimSpace(req.Tenant) + "/" + strings.TrimSpace(req.Environment)
 	switch action {
-	case deploy.DeployRecoveryClearPendingHelm:
+	case model.DeployRecoveryClearPendingHelm:
 		return fmt.Sprintf("Clear the stuck pending helm release for %s?", target)
-	case deploy.DeployRecoveryRollback:
+	case model.DeployRecoveryRollback:
 		return fmt.Sprintf("Roll back %s to its last successful revision?", target)
 	default:
 		return fmt.Sprintf("Run deploy recovery %q for %s?", action, target)
@@ -26,11 +27,11 @@ func DeployRecoveryActionPromptLabel(action deploy.DeployRecoveryAction, req con
 
 // DeployRecoveryActionWithoutPromptHint names the flag that skips the prompt,
 // for a caller whose stdin hit EOF.
-func DeployRecoveryActionWithoutPromptHint(action deploy.DeployRecoveryAction) string {
+func DeployRecoveryActionWithoutPromptHint(action model.DeployRecoveryAction) string {
 	switch action {
-	case deploy.DeployRecoveryClearPendingHelm:
+	case model.DeployRecoveryClearPendingHelm:
 		return "Re-run with --clear-pending-helm to run it without a prompt."
-	case deploy.DeployRecoveryRollback:
+	case model.DeployRecoveryRollback:
 		return "Re-run with --rollback to run it without a prompt."
 	default:
 		return "Re-run with the matching flag to run it without a prompt."
@@ -38,11 +39,11 @@ func DeployRecoveryActionWithoutPromptHint(action deploy.DeployRecoveryAction) s
 }
 
 // DeployRecoveryActionDescription is the one-line "Running: …" label.
-func DeployRecoveryActionDescription(action deploy.DeployRecoveryAction) string {
+func DeployRecoveryActionDescription(action model.DeployRecoveryAction) string {
 	switch action {
-	case deploy.DeployRecoveryClearPendingHelm:
+	case model.DeployRecoveryClearPendingHelm:
 		return "Clear pending helm release"
-	case deploy.DeployRecoveryRollback:
+	case model.DeployRecoveryRollback:
 		return "Roll back to the last successful revision"
 	default:
 		return string(action)
@@ -62,9 +63,9 @@ func helmRollbackArgs(req config.ShellLaunchParams) []string {
 }
 
 // RunDeployRecovery runs the helm recovery; dry-run does not mutate the cluster.
-func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action deploy.DeployRecoveryAction) (string, error) {
+func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action model.DeployRecoveryAction) (string, error) {
 	switch action {
-	case deploy.DeployRecoveryClearPendingHelm:
+	case model.DeployRecoveryClearPendingHelm:
 		recovery := deploy.HelmReleaseRecoveryParams{
 			ReleaseName:       config.RuntimeReleaseName(req.Tenant),
 			Namespace:         strings.TrimSpace(req.Namespace),
@@ -80,7 +81,7 @@ func RunDeployRecovery(ctx core.Context, req config.ShellLaunchParams, action de
 		recovery.Stderr = &out
 		err := deploy.ClearHelmReleasePendingOperation(recovery)
 		return strings.TrimSpace(out.String()), err
-	case deploy.DeployRecoveryRollback:
+	case model.DeployRecoveryRollback:
 		args := helmRollbackArgs(req)
 		ctx.TraceCommand("", "helm", args...)
 		if ctx.DryRun {

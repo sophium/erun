@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -24,9 +24,9 @@ type ReviewListInput struct {
 }
 
 type ReviewListResult struct {
-	Preview bool                            `json:"preview"`
-	Reviews []platformclient.PlatformReview `json:"reviews,omitempty"`
-	Trace   []string                        `json:"trace,omitempty"`
+	Preview bool                   `json:"preview"`
+	Reviews []model.PlatformReview `json:"reviews,omitempty"`
+	Trace   []string               `json:"trace,omitempty"`
 }
 
 func ReviewListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewListInput) (*mcp.CallToolResult, ReviewListResult, error) {
@@ -34,7 +34,7 @@ func ReviewListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Cal
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_list"
-		reviews, err := reviewpkg.RunReviewList(ctx, runtime.Store, input.Alias, reviewpkg.ReviewListParams{
+		reviews, err := reviewpkg.RunReviewList(ctx, runtime.Store, input.Alias, model.ReviewListParams{
 			Repository:   input.Repository,
 			TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch, Status: input.Status,
 			AuthorUserID: input.AuthorUserID, ReviewerUserID: input.ReviewerUserID,
@@ -53,9 +53,9 @@ type ReviewShowInput struct {
 }
 
 type ReviewShowResult struct {
-	Preview bool                   `json:"preview"`
-	Detail  reviewpkg.ReviewDetail `json:"detail,omitempty"`
-	Trace   []string               `json:"trace,omitempty"`
+	Preview bool               `json:"preview"`
+	Detail  model.ReviewDetail `json:"detail,omitempty"`
+	Trace   []string           `json:"trace,omitempty"`
 }
 
 func ReviewShowTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewShowInput) (*mcp.CallToolResult, ReviewShowResult, error) {
@@ -84,9 +84,9 @@ type ReviewCreateInput struct {
 }
 
 type ReviewResult struct {
-	Preview bool                          `json:"preview"`
-	Review  platformclient.PlatformReview `json:"review,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                 `json:"preview"`
+	Review  model.PlatformReview `json:"review,omitempty"`
+	Trace   []string             `json:"trace,omitempty"`
 }
 
 func ReviewCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCreateInput) (*mcp.CallToolResult, ReviewResult, error) {
@@ -97,7 +97,7 @@ func ReviewCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_create"
-		review, err := reviewpkg.RunReviewCreate(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateReviewParams{
+		review, err := reviewpkg.RunReviewCreate(ctx, runtime.Store, input.Alias, model.PlatformCreateReviewParams{
 			Repository: input.Repository, Name: input.Name, TargetBranch: input.TargetBranch, SourceBranch: input.SourceBranch,
 			IssueRef: input.IssueRef,
 		}, shared.CloudDependencies())
@@ -121,9 +121,9 @@ type ReviewCommentInput struct {
 }
 
 type ReviewCommentResult struct {
-	Preview bool                           `json:"preview"`
-	Comment platformclient.PlatformComment `json:"comment,omitempty"`
-	Trace   []string                       `json:"trace,omitempty"`
+	Preview bool                  `json:"preview"`
+	Comment model.PlatformComment `json:"comment,omitempty"`
+	Trace   []string              `json:"trace,omitempty"`
 }
 
 func ReviewCommentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewCommentInput) (*mcp.CallToolResult, ReviewCommentResult, error) {
@@ -145,7 +145,7 @@ func ReviewCommentTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_comment"
-		comment, err := reviewpkg.RunReviewComment(ctx, runtime.Store, input.Alias, reviewpkg.ReviewCommentParams{
+		comment, err := reviewpkg.RunReviewComment(ctx, runtime.Store, input.Alias, model.ReviewCommentParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, FilePath: input.FilePath,
 			Line: input.Line, Body: input.Body, ParentCommentID: input.ParentCommentID,
 		}, shared.CloudDependencies())
@@ -187,9 +187,9 @@ type ReviewRecordBuildInput struct {
 }
 
 type ReviewRecordBuildResult struct {
-	Preview bool                         `json:"preview"`
-	Build   platformclient.PlatformBuild `json:"build,omitempty"`
-	Trace   []string                     `json:"trace,omitempty"`
+	Preview bool                `json:"preview"`
+	Build   model.PlatformBuild `json:"build,omitempty"`
+	Trace   []string            `json:"trace,omitempty"`
 }
 
 // ReviewRecordBuildTool moves a review off OPEN to READY or FAILED, and to
@@ -205,7 +205,7 @@ func ReviewRecordBuildTool(runtime shared.RuntimeConfig) func(context.Context, *
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_record-build"
-		build, err := reviewpkg.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, reviewpkg.ReviewRecordBuildParams{
+		build, err := reviewpkg.RunReviewRecordBuild(ctx, runtime.Store, input.Alias, model.ReviewRecordBuildParams{
 			ReviewID: input.ReviewID, CommitID: input.CommitID, Version: input.Version,
 			Successful: input.Successful, FailureDetail: input.FailureDetail,
 		}, shared.CloudDependencies())
@@ -224,9 +224,9 @@ type ReviewReportMergedInput struct {
 }
 
 type ReviewReportMergedResult struct {
-	Preview bool                          `json:"preview"`
-	Review  platformclient.PlatformReview `json:"review,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                 `json:"preview"`
+	Review  model.PlatformReview `json:"review,omitempty"`
+	Trace   []string             `json:"trace,omitempty"`
 }
 
 // ReviewReportMergedTool reports a landed merge; the platform verifies it, and
@@ -314,9 +314,9 @@ type ReviewReviewersListInput struct {
 }
 
 type ReviewReviewersListResult struct {
-	Preview   bool                              `json:"preview"`
-	Reviewers []platformclient.PlatformReviewer `json:"reviewers,omitempty"`
-	Trace     []string                          `json:"trace,omitempty"`
+	Preview   bool                     `json:"preview"`
+	Reviewers []model.PlatformReviewer `json:"reviewers,omitempty"`
+	Trace     []string                 `json:"trace,omitempty"`
 }
 
 func ReviewReviewersListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewersListInput) (*mcp.CallToolResult, ReviewReviewersListResult, error) {
@@ -342,9 +342,9 @@ type ReviewReviewerAddInput struct {
 }
 
 type ReviewReviewerResult struct {
-	Preview  bool                            `json:"preview"`
-	Reviewer platformclient.PlatformReviewer `json:"reviewer,omitempty"`
-	Trace    []string                        `json:"trace,omitempty"`
+	Preview  bool                   `json:"preview"`
+	Reviewer model.PlatformReviewer `json:"reviewer,omitempty"`
+	Trace    []string               `json:"trace,omitempty"`
 }
 
 func ReviewReviewerAddTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReviewReviewerAddInput) (*mcp.CallToolResult, ReviewReviewerResult, error) {
@@ -403,7 +403,7 @@ func ReviewMergeQueueListTool(runtime shared.RuntimeConfig) func(context.Context
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_list"
-		reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
+		reviews, err := reviewpkg.RunReviewMergeQueueList(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, shared.CloudDependencies())
 		if err != nil {
@@ -427,7 +427,7 @@ func ReviewMergeQueueAdvanceTool(runtime shared.RuntimeConfig) func(context.Cont
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_advance"
-		review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
+		review, err := reviewpkg.RunReviewMergeQueueAdvance(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, shared.CloudDependencies())
 		if err != nil {
@@ -452,7 +452,7 @@ func ReviewMergeQueueOverrideAdvanceTool(runtime shared.RuntimeConfig) func(cont
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "review_queue_override-advance"
-		review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, platformclient.PlatformMergeQueueParams{
+		review, err := reviewpkg.RunReviewMergeQueueOverrideAdvance(ctx, runtime.Store, input.Alias, model.PlatformMergeQueueParams{
 			Repository: input.Repository, TargetBranch: input.TargetBranch,
 		}, input.Reason, shared.CloudDependencies())
 		if err != nil {

@@ -5,14 +5,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportGitPushAccess flags a pod worktree with no push credential, which anonymous
 // fetches of a public repo hide until the first push. Degrades on an unreachable pod.
-func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
+func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis model.DeployDiagnosisResult) error {
 	if !result.EnvConfig.RemoteWorktree() {
 		return nil
 	}
@@ -35,14 +35,14 @@ func reportGitPushAccess(ctx core.Context, result config.OpenResult, diagnosis d
 	return err
 }
 
-func gitFetchStatusLine(status gitx.GitPushAccessStatus) string {
+func gitFetchStatusLine(status model.GitPushAccessStatus) string {
 	if status.FetchOK {
 		return "ok"
 	}
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func gitPushStatusLine(result config.OpenResult, status gitx.GitPushAccessStatus) string {
+func gitPushStatusLine(result config.OpenResult, status model.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

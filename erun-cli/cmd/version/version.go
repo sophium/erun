@@ -62,11 +62,11 @@ func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveR
 				ctx.Logger.Debug("resolved project version from " + info.VersionFilePath)
 			}
 
-			versions := registry.RuntimeRegistryVersions{}
+			versions := model.RuntimeRegistryVersions{}
 			if !noRegistry {
 				versions = resolveRegistryVersionsForVersionCommand(cmd.Context(), ctx, resolveRegistryVersions)
 			}
-			if ctx.Output == core.OutputJSON {
+			if ctx.Output == model.OutputJSON {
 				return ctx.WriteResult(versionCommandResultFor(info, versions))
 			}
 			return writeVersionLines(ctx, info, versions)
@@ -79,8 +79,8 @@ func NewVersionCmd(resolveBuildInfo func() (VersionCommandInfo, error), resolveR
 	return cmd
 }
 
-func versionCommandResultFor(info VersionCommandInfo, versions registry.RuntimeRegistryVersions) versionCommandResult {
-	build := model.NormalizeBuildInfo(info.Build)
+func versionCommandResultFor(info VersionCommandInfo, versions model.RuntimeRegistryVersions) versionCommandResult {
+	build := core.NormalizeBuildInfo(info.Build)
 	result := versionCommandResult{
 		Erun: versionBuildResult{
 			Version: build.Version,
@@ -100,8 +100,8 @@ func versionCommandResultFor(info VersionCommandInfo, versions registry.RuntimeR
 	return result
 }
 
-func writeVersionLines(ctx core.Context, info VersionCommandInfo, versions registry.RuntimeRegistryVersions) error {
-	if _, err := fmt.Fprintln(ctx.Stdout, model.FormatVersionLine(info.Build)); err != nil {
+func writeVersionLines(ctx core.Context, info VersionCommandInfo, versions model.RuntimeRegistryVersions) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, core.FormatVersionLine(info.Build)); err != nil {
 		return err
 	}
 	if line := formatProjectVersionLine(info); line != "" {
@@ -134,14 +134,14 @@ func formatProjectVersionLine(info VersionCommandInfo) string {
 }
 
 // A registry lookup failure is traced, not fatal.
-func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) registry.RuntimeRegistryVersions {
+func resolveRegistryVersionsForVersionCommand(ctx context.Context, commandCtx core.Context, resolveRegistryVersions registry.RuntimeRegistryVersionResolverFunc) model.RuntimeRegistryVersions {
 	if resolveRegistryVersions == nil {
-		return registry.RuntimeRegistryVersions{}
+		return model.RuntimeRegistryVersions{}
 	}
 	versions, err := resolveRegistryVersions(ctx)
 	if err != nil {
 		commandCtx.Logger.Debug("resolve runtime registry versions: " + err.Error())
-		return registry.RuntimeRegistryVersions{}
+		return model.RuntimeRegistryVersions{}
 	}
 	return versions
 }

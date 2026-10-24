@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // inPodEnvLookup matches what the runtime chart injects into every container.
@@ -42,7 +43,7 @@ func TestInPodRuntimeOnlySelectionLeavesARealSelectionUnchanged(t *testing.T) {
 			if got := strings.Join(selected, ","); got != strings.Join(components, ",") {
 				t.Fatalf("selection = %v, want %v", selected, components)
 			}
-			if err := guardInPodBlindRuntimeOnlySelection(inPod, resolvedTarget, DeployTarget{}, selected, source); err != nil {
+			if err := guardInPodBlindRuntimeOnlySelection(inPod, resolvedTarget, model.DeployTarget{}, selected, source); err != nil {
 				t.Fatalf("guard refused a real selection: %v", err)
 			}
 		})
@@ -63,7 +64,7 @@ func TestInPodRuntimeOnlySelectionLeavesTheOffPodFallbackAlone(t *testing.T) {
 		{"runtime pod of another tenant", inPodEnvLookup("erun", "prod")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := guardInPodBlindRuntimeOnlySelection(tc.env, resolvedTarget, DeployTarget{}, selected, source); err != nil {
+			if err := guardInPodBlindRuntimeOnlySelection(tc.env, resolvedTarget, model.DeployTarget{}, selected, source); err != nil {
 				t.Fatalf("off-pod fallback was refused: %v", err)
 			}
 		})
@@ -79,7 +80,7 @@ func TestInPodRuntimeOnlySelectionIgnoresAnIncompleteInjectedIdentity(t *testing
 		}
 		return ""
 	}
-	if err := guardInPodBlindRuntimeOnlySelection(env, resolvedTarget, DeployTarget{}, selected, source); err != nil {
+	if err := guardInPodBlindRuntimeOnlySelection(env, resolvedTarget, model.DeployTarget{}, selected, source); err != nil {
 		t.Fatalf("a half-set injected identity must not be treated as in-pod: %v", err)
 	}
 }

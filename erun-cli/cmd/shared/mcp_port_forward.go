@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 )
@@ -20,7 +21,7 @@ const McpPortForwardStartupTimeout = 5 * time.Second
 type MCPForwarder func(core.Context, config.OpenResult) error
 
 // Aliased so the CLI's and desktop's state shapes cannot drift.
-type McpPortForwardState = kube.PortForwardState
+type McpPortForwardState = model.PortForwardState
 
 // ReusableRecordedPortForward reports whether the recorded forward still carries traffic,
 // stopping it otherwise; a forward to a replaced pod still holds the port.

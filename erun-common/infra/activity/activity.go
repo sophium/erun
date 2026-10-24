@@ -10,108 +10,41 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var environmentActivityKinds = []string{configpkg.ActivityKindSSH, configpkg.ActivityKindAPI, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindCodex, ActivityKindProcess}
-
-type EnvironmentActivityParams struct {
-	Tenant        string
-	Environment   string
-	Kind          string
-	Seen          bool
-	Bytes         int64
-	ClientUpdates []EnvironmentActivityClientUpdate
-	Now           time.Time
-}
-
-// EnvironmentActivityClientUpdate carries a per-client byte delta for attribution.
-type EnvironmentActivityClientUpdate struct {
-	Address string
-	Bytes   int64
-}
 
 type EnvironmentIdleStore interface {
 	configpkg.CloudReadStore
 	LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error)
 }
 
-// Timestamps use omitzero: omitempty never omits a time.Time, so it would render a
-// never-set field as the zero instant.
-
-// EnvironmentActivitySnapshot is the on-disk record for one activity kind; Clients is bounded.
-type EnvironmentActivitySnapshot struct {
-	LastActivity time.Time                            `json:"lastActivity,omitzero"`
-	LastSeen     time.Time                            `json:"lastSeen,omitzero"`
-	Bytes        int64                                `json:"bytes,omitempty"`
-	Clients      map[string]EnvironmentActivityClient `json:"clients,omitempty"`
-}
-
-type EnvironmentActivityClient struct {
-	Bytes        int64     `json:"bytes,omitempty"`
-	LastActivity time.Time `json:"lastActivity,omitzero"`
-}
-
-type EnvironmentIdleMarker struct {
-	Name             string                        `json:"name"`
-	Idle             bool                          `json:"idle"`
-	Reason           string                        `json:"reason,omitempty"`
-	SecondsRemaining int64                         `json:"secondsRemaining,omitempty"`
-	LastActivity     time.Time                     `json:"lastActivity,omitzero"`
-	LastSeen         time.Time                     `json:"lastSeen,omitzero"`
-	Clients          []EnvironmentIdleMarkerClient `json:"clients,omitempty"`
-}
-
-// EnvironmentIdleMarkerClient is the marker's per-client view for renderers.
-type EnvironmentIdleMarkerClient struct {
-	Address      string    `json:"address"`
-	Bytes        int64     `json:"bytes,omitempty"`
-	LastActivity time.Time `json:"lastActivity,omitzero"`
-	SecondsAgo   int64     `json:"secondsAgo,omitempty"`
-}
-
 const environmentActivityClientCap = 8
 
-type EnvironmentIdleStatus struct {
-	Policy              configpkg.EnvironmentIdlePolicy        `json:"policy"`
-	OutsideWorkingHours bool                                   `json:"outsideWorkingHours"`
-	ManagedCloud        bool                                   `json:"managedCloud"`
-	StopEligible        bool                                   `json:"stopEligible"`
-	StopBlockedReason   string                                 `json:"stopBlockedReason,omitempty"`
-	StopError           string                                 `json:"stopError,omitempty"`
-	SecondsUntilStop    int64                                  `json:"secondsUntilStop,omitempty"`
-	Markers             []EnvironmentIdleMarker                `json:"markers"`
-	Activity            map[string]EnvironmentActivitySnapshot `json:"activity,omitempty"`
-	// Leases say what is deferring auto-stop.
-	Leases []EnvironmentActivityLease `json:"leases,omitempty"`
-	// StopPendingSince is when the auto-stop grace period was armed (RFC3339).
-	StopPendingSince       string `json:"stopPendingSince,omitempty"`
-	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
-	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
-}
-
-func ResolveEnvironmentIdleStatus(config configpkg.EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, now time.Time) (EnvironmentIdleStatus, error) {
+func ResolveEnvironmentIdleStatus(config configpkg.EnvironmentIdleConfig, activity map[string]model.EnvironmentActivitySnapshot, leases []model.EnvironmentActivityLease, now time.Time) (model.EnvironmentIdleStatus, error) {
 	policy, err := config.Resolve()
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	if now.IsZero() {
 		now = time.Now()
 	}
 	if activity == nil {
-		activity = map[string]EnvironmentActivitySnapshot{}
+		activity = map[string]model.EnvironmentActivitySnapshot{}
 	}
 
 	outsideWorkingHours, secondsUntilWorkingHoursEnd, err := WorkingHoursStatus(policy.WorkingHours, policy.Timezone, now)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 
 	markers := environmentIdleMarkers(activity, leases, policy, now, outsideWorkingHours, secondsUntilWorkingHoursEnd)
 	stopEligible, secondsUntilStop := environmentStopEligibility(markers, outsideWorkingHours)
 	stopBlockedReason := environmentBlockedReason(markers, stopEligible)
 
-	return EnvironmentIdleStatus{
+	return model.EnvironmentIdleStatus{
 		Policy:              policy,
 		OutsideWorkingHours: outsideWorkingHours,
 		StopEligible:        stopEligible,
@@ -123,8 +56,8 @@ func ResolveEnvironmentIdleStatus(config configpkg.EnvironmentIdleConfig, activi
 	}, nil
 }
 
-func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, leases []EnvironmentActivityLease, policy configpkg.EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
-	markers := []EnvironmentIdleMarker{{
+func environmentIdleMarkers(activity map[string]model.EnvironmentActivitySnapshot, leases []model.EnvironmentActivityLease, policy model.EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []model.EnvironmentIdleMarker {
+	markers := []model.EnvironmentIdleMarker{{
 		Name:             "working-hours",
 		Idle:             outsideWorkingHours,
 		Reason:           workingHoursReason(outsideWorkingHours, policy.WorkingHours),
@@ -137,7 +70,7 @@ func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, lea
 	return append(markers, leaseIdleMarker(leases, now))
 }
 
-func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingHours bool) (bool, int64) {
+func environmentStopEligibility(markers []model.EnvironmentIdleMarker, outsideWorkingHours bool) (bool, int64) {
 	stopEligible := true
 	secondsUntilStop := int64(0)
 	for _, marker := range markers {
@@ -159,41 +92,41 @@ func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingH
 	return false, secondsUntilStop
 }
 
-func environmentBlockedReason(markers []EnvironmentIdleMarker, stopEligible bool) string {
+func environmentBlockedReason(markers []model.EnvironmentIdleMarker, stopEligible bool) string {
 	if stopEligible {
 		return ""
 	}
 	return environmentStopBlockedReason(markers)
 }
 
-func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, environment string, now time.Time) (EnvironmentIdleStatus, error) {
+func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, environment string, now time.Time) (model.EnvironmentIdleStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	if store == nil {
-		return EnvironmentIdleStatus{}, fmt.Errorf("store is required")
+		return model.EnvironmentIdleStatus{}, fmt.Errorf("store is required")
 	}
-	if err := model.ErrMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
-		return EnvironmentIdleStatus{}, err
+	if err := core.ErrMissingTenantOrEnvironment("resolve environment idle status", tenant, environment); err != nil {
+		return model.EnvironmentIdleStatus{}, err
 	}
 	config, _, err := store.LoadEnvConfig(tenant, environment)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	activity, err := LoadEnvironmentActivity(tenant, environment)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	leases, err := LoadEnvironmentActivityLeases(tenant, environment, now)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	status, err := ResolveEnvironmentIdleStatus(config.Idle, activity, leases, now)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	managedCloud, err := ManagedCloudEnvironment(store, config)
 	if err != nil {
-		return EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	status.ManagedCloud = managedCloud
 	if !managedCloud {
@@ -206,7 +139,7 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 }
 
 // overlayStopPending exposes the grace window to read-only consumers too.
-func overlayStopPending(status EnvironmentIdleStatus, tenant, environment string, now time.Time) EnvironmentIdleStatus {
+func overlayStopPending(status model.EnvironmentIdleStatus, tenant, environment string, now time.Time) model.EnvironmentIdleStatus {
 	if !status.ManagedCloud || !status.StopEligible {
 		// Eligibility lapsed; the next MaybeArmOrFireIdleStop clears the stale entry.
 		return status
@@ -279,11 +212,11 @@ func ManagedCloudEnvironment(store configpkg.CloudReadStore, env configpkg.EnvCo
 	return true, nil
 }
 
-func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
+func RecordEnvironmentActivity(params model.EnvironmentActivityParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	kind := strings.TrimSpace(params.Kind)
-	if err := model.ErrMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("record environment activity", tenant, environment); err != nil {
 		return err
 	}
 	if !validEnvironmentActivityKind(kind) {
@@ -323,12 +256,12 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	return configpkg.ReplaceFileAtomically(path, data, 0o644)
 }
 
-func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, updates []EnvironmentActivityClientUpdate, now time.Time) {
+func mergeEnvironmentActivityClients(snapshot *model.EnvironmentActivitySnapshot, updates []model.EnvironmentActivityClientUpdate, now time.Time) {
 	if len(updates) == 0 {
 		return
 	}
 	if snapshot.Clients == nil {
-		snapshot.Clients = make(map[string]EnvironmentActivityClient, len(updates))
+		snapshot.Clients = make(map[string]model.EnvironmentActivityClient, len(updates))
 	}
 	for _, update := range updates {
 		address := strings.TrimSpace(update.Address)
@@ -345,7 +278,7 @@ func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, upda
 	evictOldestEnvironmentActivityClients(snapshot.Clients, environmentActivityClientCap)
 }
 
-func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivityClient, limit int) {
+func evictOldestEnvironmentActivityClients(clients map[string]model.EnvironmentActivityClient, limit int) {
 	if limit <= 0 || len(clients) <= limit {
 		return
 	}
@@ -367,12 +300,12 @@ func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivit
 	}
 }
 
-func LoadEnvironmentActivity(tenant, environment string) (map[string]EnvironmentActivitySnapshot, error) {
+func LoadEnvironmentActivity(tenant, environment string) (map[string]model.EnvironmentActivitySnapshot, error) {
 	dir, err := EnvironmentActivityDir(tenant, environment)
 	if err != nil {
 		return nil, err
 	}
-	result := map[string]EnvironmentActivitySnapshot{}
+	result := map[string]model.EnvironmentActivitySnapshot{}
 	for _, kind := range environmentActivityKinds {
 		snapshot, err := loadEnvironmentActivitySnapshot(filepath.Join(dir, kind+".json"))
 		if os.IsNotExist(err) {
@@ -389,14 +322,14 @@ func LoadEnvironmentActivity(tenant, environment string) (map[string]Environment
 func EnvironmentActivityDir(tenant, environment string) (string, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := model.ErrMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve environment activity directory", tenant, environment); err != nil {
 		return "", err
 	}
 	return configpkg.ResolveCacheFilePath(filepath.Join("erun", "activity", tenant, environment))
 }
 
-func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, policy configpkg.EnvironmentIdlePolicy, now time.Time) EnvironmentIdleMarker {
-	marker := EnvironmentIdleMarker{
+func activityIdleMarker(kind string, snapshot model.EnvironmentActivitySnapshot, policy model.EnvironmentIdlePolicy, now time.Time) model.EnvironmentIdleMarker {
+	marker := model.EnvironmentIdleMarker{
 		Name:         kind,
 		LastActivity: snapshot.LastActivity,
 		LastSeen:     snapshot.LastSeen,
@@ -425,13 +358,13 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 }
 
 // Nil, not empty, so omitempty drops it.
-func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, now time.Time) []EnvironmentIdleMarkerClient {
+func environmentIdleMarkerClients(clients map[string]model.EnvironmentActivityClient, now time.Time) []model.EnvironmentIdleMarkerClient {
 	if len(clients) == 0 {
 		return nil
 	}
-	out := make([]EnvironmentIdleMarkerClient, 0, len(clients))
+	out := make([]model.EnvironmentIdleMarkerClient, 0, len(clients))
 	for address, client := range clients {
-		entry := EnvironmentIdleMarkerClient{
+		entry := model.EnvironmentIdleMarkerClient{
 			Address:      address,
 			Bytes:        client.Bytes,
 			LastActivity: client.LastActivity,
@@ -456,7 +389,7 @@ func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, 
 var environmentOperatorPresenceMarkers = []string{configpkg.ActivityKindSSH}
 
 // EnvironmentOperatorPresenceReason infers operator presence from markers, worded like the sidebar.
-func EnvironmentOperatorPresenceReason(status EnvironmentIdleStatus) (string, bool) {
+func EnvironmentOperatorPresenceReason(status model.EnvironmentIdleStatus) (string, bool) {
 	for _, marker := range status.Markers {
 		if marker.Idle {
 			continue
@@ -490,7 +423,7 @@ func EnvironmentActivityMarkerDetail(marker string) string {
 	}
 }
 
-func environmentStopBlockedReason(markers []EnvironmentIdleMarker) string {
+func environmentStopBlockedReason(markers []model.EnvironmentIdleMarker) string {
 	for _, marker := range markers {
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
@@ -508,14 +441,14 @@ func environmentStopBlockedReason(markers []EnvironmentIdleMarker) string {
 	return ""
 }
 
-func loadEnvironmentActivitySnapshot(path string) (EnvironmentActivitySnapshot, error) {
+func loadEnvironmentActivitySnapshot(path string) (model.EnvironmentActivitySnapshot, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return EnvironmentActivitySnapshot{}, err
+		return model.EnvironmentActivitySnapshot{}, err
 	}
-	var snapshot EnvironmentActivitySnapshot
+	var snapshot model.EnvironmentActivitySnapshot
 	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return EnvironmentActivitySnapshot{}, err
+		return model.EnvironmentActivitySnapshot{}, err
 	}
 	return snapshot, nil
 }

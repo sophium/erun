@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/spf13/cobra"
 )
@@ -60,7 +61,7 @@ func runIdleCommand(ctx context.Context, commandCtx core.Context, store config.O
 }
 
 // WriteIdleResult keeps --output json and --json from diverging.
-func WriteIdleResult(commandCtx core.Context, status activity.EnvironmentIdleStatus, jsonOutput bool) error {
+func WriteIdleResult(commandCtx core.Context, status model.EnvironmentIdleStatus, jsonOutput bool) error {
 	if shared.CommandWantsJSON(commandCtx, jsonOutput) {
 		encoder := json.NewEncoder(commandCtx.Stdout)
 		encoder.SetIndent("", "  ")
@@ -70,15 +71,15 @@ func WriteIdleResult(commandCtx core.Context, status activity.EnvironmentIdleSta
 }
 
 // resolveEnvironmentIdleStatus reads the local store only inside the asked-about environment.
-func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen shared.OpenResolver, tenant, environment string) (activity.EnvironmentIdleStatus, bool, error) {
+func resolveEnvironmentIdleStatus(ctx context.Context, commandCtx core.Context, store config.OpenStore, resolveOpen shared.OpenResolver, tenant, environment string) (model.EnvironmentIdleStatus, bool, error) {
 	if shared.EnvironmentTargetsItself() {
 		status, err := activity.ResolveStoredEnvironmentIdleStatus(store, tenant, environment, time.Now())
 		return status, err == nil, err
 	}
-	return shared.CallEnvironmentTool[activity.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
+	return shared.CallEnvironmentTool[model.EnvironmentIdleStatus](ctx, commandCtx, resolveOpen, tenant, environment, "idle", nil, true)
 }
 
-func writeIdleStatus(ctx core.Context, status activity.EnvironmentIdleStatus) error {
+func writeIdleStatus(ctx core.Context, status model.EnvironmentIdleStatus) error {
 	if err := shared.WriteLabeledValue(ctx, "timeout", fmt.Sprintf("%d seconds", int64(status.Policy.Timeout/time.Second))); err != nil {
 		return err
 	}
@@ -109,7 +110,7 @@ func writeOptionalIdleValue(ctx core.Context, label, value string) error {
 	return shared.WriteLabeledValue(ctx, label, value)
 }
 
-func idleMarkerValue(marker activity.EnvironmentIdleMarker) string {
+func idleMarkerValue(marker model.EnvironmentIdleMarker) string {
 	value := "active"
 	if marker.Idle {
 		value = "idle"

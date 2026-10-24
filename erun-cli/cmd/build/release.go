@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/orchestration/execute"
@@ -42,7 +43,7 @@ func NewReleaseCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Projec
 }
 
 func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, force bool, runGit gitx.GitCommandRunnerFunc, buildDockerImage build.DockerImageBuilderFunc, loginToDockerRegistry build.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push build.DockerPushFunc) error {
-	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, sharedpkg.DockerCommandTarget{Release: true, Force: force})
+	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, model.DockerCommandTarget{Release: true, Force: force})
 	if err != nil {
 		return err
 	}

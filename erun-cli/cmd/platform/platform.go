@@ -6,9 +6,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +48,7 @@ func newPlatformWhoamiCmd(store config.CloudReadStore, alias *string, deps cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform whoami planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "%s (tenant %s named %q, user %s)\n", shared.QuotedValueOrNone(whoami.Username), whoami.TenantID, shared.QuotedValueOrNone(whoami.TenantName), whoami.UserID); err != nil {
 					return err
 				}
@@ -82,7 +82,7 @@ func newPlatformVersionCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform version lookup planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "erun platform version %s (%s)\n", info.Version, info.APIURL); err != nil {
 					return err
 				}
@@ -105,7 +105,7 @@ func newPlatformTenantCmd(store config.CloudReadStore, alias *string, deps cloud
 }
 
 func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateTenantParams
+	var params model.PlatformCreateTenantParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Register a new tenant on the erun platform",
@@ -126,7 +126,7 @@ func newPlatformTenantCreateCmd(store config.CloudReadStore, alias *string, deps
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant creation planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "created tenant %s (%s)\n", tenant.Name, tenant.TenantID); err != nil {
 					return err
 				}
@@ -160,7 +160,7 @@ func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformTenantList(ctx, tenants); err != nil {
 					return err
 				}
@@ -172,7 +172,7 @@ func newPlatformTenantListCmd(store config.CloudReadStore, alias *string, deps c
 	return cmd
 }
 
-func writePlatformTenantList(ctx core.Context, tenants []platformclient.PlatformTenant) error {
+func writePlatformTenantList(ctx core.Context, tenants []model.PlatformTenant) error {
 	if len(tenants) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no tenants")
 		return err
@@ -187,7 +187,7 @@ func writePlatformTenantList(ctx core.Context, tenants []platformclient.Platform
 
 // tenantUnreachableSuffix flags a tenant whose issuer mapping no token resolves.
 // A nil Resolvable means "not computed" and stays silent.
-func tenantUnreachableSuffix(tenant platformclient.PlatformTenant) string {
+func tenantUnreachableSuffix(tenant model.PlatformTenant) string {
 	if tenant.Resolvable == nil || *tenant.Resolvable {
 		return ""
 	}
@@ -197,7 +197,7 @@ func tenantUnreachableSuffix(tenant platformclient.PlatformTenant) string {
 // newPlatformTenantRepairOrgMappingCmd fixes a tenant with an unresolvable (issuer, org)
 // mapping; the platform has no tenant delete, so repair is the only way back.
 func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformRepairTenantIssuerOrgMappingParams
+	var params model.PlatformRepairTenantIssuerOrgMappingParams
 	cmd := &cobra.Command{
 		Use:   "repair-org-mapping",
 		Short: "Repair a tenant's dead (issuer, org) mapping so it resolves again",
@@ -221,7 +221,7 @@ func newPlatformTenantRepairOrgMappingCmd(store config.CloudReadStore, alias *st
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform tenant org-mapping repair planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "repaired %s: org-field-value now %s\n", issuer.Issuer, issuer.OrgFieldValue); err != nil {
 					return err
 				}
@@ -254,7 +254,7 @@ func newPlatformIdentityOrgCmd(store config.CloudReadStore, alias *string, deps 
 }
 
 func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateOrgParams
+	var params model.PlatformCreateOrgParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create an organization on the erun platform's own identity provider",
@@ -277,7 +277,7 @@ func newPlatformIdentityOrgCreateCmd(store config.CloudReadStore, alias *string,
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform identity org creation planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "created org %s (%s) -- pass this id as --org-field-value\n", org.Name, org.ID); err != nil {
 					return err
 				}

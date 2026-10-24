@@ -5,13 +5,13 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
 func TestLeasesCarryTheirJobOnlyWhenAJobHoldsThem(t *testing.T) {
 	now := time.Unix(1700000100, 0)
-	out := environmentLeasesToUI([]activity.EnvironmentActivityLease{
+	out := environmentLeasesToUI([]model.EnvironmentActivityLease{
 		{ID: "job-gate-1", Name: "repo gate", StartedAt: time.Unix(1700000000, 0)},
 		{ID: "orchestrator-erun", Name: "erun", StartedAt: time.Unix(1700000000, 0)},
 	}, now)
@@ -36,7 +36,7 @@ func TestVerifyLeaseJobIDsClearsAJobIDWithNoJobBehindIt(t *testing.T) {
 	const tenant = "erun"
 	const environment = "ux"
 
-	if _, err := jobs.AttachEnvironmentJob(core.Context{}, jobs.AttachEnvironmentJobParams{
+	if _, err := jobs.AttachEnvironmentJob(core.Context{}, model.AttachEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          "gate-9",

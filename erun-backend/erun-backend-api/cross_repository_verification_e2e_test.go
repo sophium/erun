@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	modelpkg "github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // Repositories of one tenant share branch names, so a MERGED report must be
@@ -122,7 +122,7 @@ func TestReportMergedDoesNotAnchorALegacyReviewOnAnotherRepositorysMergeCommit(t
 	if merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("review B status = %s, want MERGED", merged.Status)
 	}
-	wantRepository, err := modelpkg.RepositoryIdentity(repoB.url)
+	wantRepository, err := core.RepositoryIdentity(repoB.url)
 	mustNoErr(t, err, "canonicalize repository B")
 	if merged.Repository != wantRepository {
 		t.Fatalf("review B repository = %q, want the repository its report named, %q", merged.Repository, wantRepository)
@@ -162,7 +162,7 @@ func TestReportMergedVerifiesARecordedReviewAgainstItsOwnRepositoryOnly(t *testi
 	if merged.Status != model.ReviewStatusMerged {
 		t.Fatalf("status = %s, want MERGED", merged.Status)
 	}
-	wantRepository, err := modelpkg.RepositoryIdentity(repoA.url)
+	wantRepository, err := core.RepositoryIdentity(repoA.url)
 	mustNoErr(t, err, "canonicalize repository A")
 	if merged.Repository != wantRepository {
 		t.Fatalf("repository = %q, want the review's own %q", merged.Repository, wantRepository)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -13,7 +14,7 @@ import (
 )
 
 func NewPublishCmd(store deploy.DeployStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc) *cobra.Command {
-	target := deploy.DeployTarget{}
+	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:   "publish [TENANT] [ENVIRONMENT]",
 		Short: "Mirror a built version's images to the shared registry",

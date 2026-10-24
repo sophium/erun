@@ -10,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -64,7 +65,7 @@ func execRawForeground(runtime shared.RuntimeConfig, input RawInput) (shared.Job
 	}
 
 	output, err := shared.RunCommandOutput(ctx, workDir, traceOutput, nil, func(runCtx core.Context) error {
-		return core.RunRawCommand(runCtx, core.RawCommandSpec{
+		return core.RunRawCommand(runCtx, model.RawCommandSpec{
 			Dir:  workDir,
 			Args: input.Command,
 		}, nil)

@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
@@ -19,7 +19,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	if err := errMissingTenantOrEnvironment("load idle status", selection.Tenant, selection.Environment); err != nil {
 		return uiIdleStatus{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -53,7 +53,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 
 type resolvedUIIdleStatus struct {
 	ui     uiIdleStatus
-	status activity.EnvironmentIdleStatus
+	status model.EnvironmentIdleStatus
 }
 
 // loadLocalIdleStatus is the host-side fallback when the pod cannot be asked;
@@ -66,7 +66,7 @@ func (a *App) loadLocalIdleStatus(result config.OpenResult) (resolvedUIIdleStatu
 	return resolvedUIIdleStatus{ui: a.idleStatusToUI(result, status, false), status: status}, nil
 }
 
-func (a *App) idleStatusToUI(result config.OpenResult, status activity.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
+func (a *App) idleStatusToUI(result config.OpenResult, status model.EnvironmentIdleStatus, fromPod bool) uiIdleStatus {
 	ui := idleStatusToUI(status)
 	ui.FromPod = fromPod
 	a.verifyLeaseJobIDs(result.Tenant, result.Environment, ui.Leases)
@@ -84,7 +84,7 @@ func (a *App) idleStatusToUI(result config.OpenResult, status activity.Environme
 	return ui
 }
 
-func idleStatusToUI(status activity.EnvironmentIdleStatus) uiIdleStatus {
+func idleStatusToUI(status model.EnvironmentIdleStatus) uiIdleStatus {
 	markers := make([]uiIdleMarker, 0, len(status.Markers))
 	for _, marker := range status.Markers {
 		markers = append(markers, uiIdleMarker{
@@ -113,7 +113,7 @@ func idleStatusToUI(status activity.EnvironmentIdleStatus) uiIdleStatus {
 }
 
 // The JobID is only an id-shape match; verifyLeaseJobIDs confirms it.
-func environmentLeasesToUI(leases []activity.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
+func environmentLeasesToUI(leases []model.EnvironmentActivityLease, now time.Time) []uiEnvironmentLease {
 	if len(leases) == 0 {
 		return nil
 	}
@@ -161,7 +161,7 @@ func (a *App) verifyLeaseJobIDs(tenant, environment string, leases []uiEnvironme
 	}
 }
 
-func idleMarkerClientsToUI(clients []activity.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
+func idleMarkerClientsToUI(clients []model.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
 	if len(clients) == 0 {
 		return nil
 	}
@@ -176,7 +176,7 @@ func idleMarkerClientsToUI(clients []activity.EnvironmentIdleMarkerClient) []uiI
 	return out
 }
 
-func (a *App) mergeLocalIdleActivity(result config.OpenResult, status activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
+func (a *App) mergeLocalIdleActivity(result config.OpenResult, status model.EnvironmentIdleStatus) model.EnvironmentIdleStatus {
 	local, err := activity.ResolveStoredEnvironmentIdleStatus(a.deps.store, result.Tenant, result.Environment, time.Now())
 	if err != nil {
 		return status
@@ -193,7 +193,7 @@ func (a *App) mergeLocalIdleActivity(result config.OpenResult, status activity.E
 	return mergeNewerActivityMarkers(status, local)
 }
 
-func mergeNewerActivityMarkers(status, local activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
+func mergeNewerActivityMarkers(status, local model.EnvironmentIdleStatus) model.EnvironmentIdleStatus {
 	status.ManagedCloud = local.ManagedCloud
 	status.StopBlockedReason = local.StopBlockedReason
 	for _, localMarker := range local.Markers {
@@ -218,7 +218,7 @@ func mergeNewerActivityMarkers(status, local activity.EnvironmentIdleStatus) act
 	return recomputeStopEligible(status)
 }
 
-func recomputeStopEligible(status activity.EnvironmentIdleStatus) activity.EnvironmentIdleStatus {
+func recomputeStopEligible(status model.EnvironmentIdleStatus) model.EnvironmentIdleStatus {
 	if !status.ManagedCloud {
 		status.StopEligible = false
 		if status.StopBlockedReason == "" {
@@ -246,7 +246,7 @@ func recomputeStopEligible(status activity.EnvironmentIdleStatus) activity.Envir
 	return status
 }
 
-func uiStopBlockedReason(markers []activity.EnvironmentIdleMarker) string {
+func uiStopBlockedReason(markers []model.EnvironmentIdleMarker) string {
 	for _, marker := range markers {
 		if marker.Name == "working-hours" || marker.Idle {
 			continue
@@ -266,7 +266,7 @@ func uiStopBlockedReason(markers []activity.EnvironmentIdleMarker) string {
 
 // The in-pod monitor owns auto-stop; this only clears the post-fire latch when
 // an env runs again.
-func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ activity.EnvironmentIdleStatus) {
+func (a *App) maybeStopIdleCloudEnvironment(result config.OpenResult, _ model.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
@@ -282,7 +282,7 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	if err := errMissingTenantOrEnvironment("cancel pending idle stop", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -307,7 +307,7 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextName string) {
 	selections := a.selectionsForCloudContext(cloudContextName)
 	for _, selection := range selections {
-		result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+		result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 			Tenant:      selection.Tenant,
 			Environment: selection.Environment,
 		})
@@ -333,7 +333,7 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 	if err := errMissingTenantOrEnvironment("load stop history", selection.Tenant, selection.Environment); err != nil {
 		return nil, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -384,7 +384,7 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 }
 
 // Older rows pre-date the policy snapshot; render nothing, not "Timeout: 0s".
-func idlePolicyIsZero(p config.EnvironmentIdlePolicy) bool {
+func idlePolicyIsZero(p model.EnvironmentIdlePolicy) bool {
 	return p.Timeout == 0 && strings.TrimSpace(p.WorkingHours) == "" && strings.TrimSpace(p.Timezone) == "" && p.IdleTrafficBytes == 0
 }
 
@@ -433,7 +433,7 @@ func (a *App) selectionKeysForCloudContext(name string) []string {
 	return cleared
 }
 
-func activitySecondsUntilIdle(status activity.EnvironmentIdleStatus) int64 {
+func activitySecondsUntilIdle(status model.EnvironmentIdleStatus) int64 {
 	var seconds int64
 	for _, marker := range status.Markers {
 		if marker.Name == "working-hours" || marker.Idle {

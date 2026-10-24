@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -44,21 +45,15 @@ const (
 	diskOwnUsageTimeoutSeconds = 30
 )
 
-// RuntimeUsageParams configures one usage read.
-type RuntimeUsageParams struct {
-	// Interval is the CPU sample window, clamped to [100ms, 30s]; zero uses the default.
-	Interval time.Duration
-}
-
 // RunRuntimeUsage execs the reading script into the runtime container, and into the
 // erun-dind sidecar when present. The sidecar read and the pod-spec requests read fail
 // soft so the runtime reading is never lost.
-func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params RuntimeUsageParams) (config.RuntimeUsage, error) {
+func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, podRequests RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams, params model.RuntimeUsageParams) (model.RuntimeUsage, error) {
 	interval := clampRuntimeUsageInterval(params.Interval)
 	script := runtimeUsageScript(interval)
 	result, err := diagnosis.RunTracedRuntimeContainerCommand(ctx, runner, req, runtimeUsageContainer, "usage", script)
 	if err != nil {
-		return config.RuntimeUsage{}, err
+		return model.RuntimeUsage{}, err
 	}
 	usesDind := req.Type.UsesDindSidecar()
 	var dindResult kube.RemoteCommandResult
@@ -69,7 +64,7 @@ func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 	// Read after the execs so a dry run traces actions in run order.
 	requests := readRuntimeUsageRequests(ctx, podRequests, req)
 	if ctx.DryRun {
-		return config.RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: usesDind}, nil
+		return model.RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: usesDind}, nil
 	}
 	usage := parseRuntimeUsage(req, result.Stdout, interval)
 	usage.Requests = requests
@@ -83,7 +78,7 @@ func RunRuntimeUsage(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 // applyRetainedUsageWarnings adds memory warnings the retained history proves but the
 // restart-reset cgroup counters cannot. Retained figures are scored against the current
 // limit, so raising runtimepod clears the peak warning.
-func applyRetainedUsageWarnings(usage config.RuntimeUsage) config.RuntimeUsage {
+func applyRetainedUsageWarnings(usage model.RuntimeUsage) model.RuntimeUsage {
 	history, err := deploy.LoadRuntimeUsageHistory(usage.Tenant, usage.Environment)
 	if err != nil {
 		// No readable history means nothing observed yet, not a warning.
@@ -97,7 +92,7 @@ func applyRetainedUsageWarnings(usage config.RuntimeUsage) config.RuntimeUsage {
 	return usage
 }
 
-func retainedMemoryUsageWarnings(memory config.RuntimeMemoryUsage, history deploy.RuntimeUsageHistory) []string {
+func retainedMemoryUsageWarnings(memory model.RuntimeMemoryUsage, history deploy.RuntimeUsageHistory) []string {
 	if memory.Unavailable != "" || memory.Unlimited || memory.LimitBytes <= 0 {
 		return nil
 	}
@@ -188,12 +183,12 @@ func runtimeUsageScript(interval time.Duration) string {
 	return strings.Replace(script, "__RUNTIME_USAGE_DISK_OWN_TIMEOUT_SECONDS__", strconv.Itoa(diskOwnUsageTimeoutSeconds), 1)
 }
 
-func parseRuntimeUsage(req config.ShellLaunchParams, output string, interval time.Duration) config.RuntimeUsage {
+func parseRuntimeUsage(req config.ShellLaunchParams, output string, interval time.Duration) model.RuntimeUsage {
 	values := parseRuntimeUsageValues(output)
-	usage := config.RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}
+	usage := model.RuntimeUsage{Tenant: req.Tenant, Environment: req.Environment, ExcludesBuilds: req.Type.UsesDindSidecar()}
 	usage.CPU = runtimeCPUUsageFromValues(values, interval)
 	usage.Memory = config.RuntimeMemoryUsageFromValues(values)
-	usage.Disk = []config.RuntimeDiskUsage{runtimeDiskUsageFromValues(values)}
+	usage.Disk = []model.RuntimeDiskUsage{runtimeDiskUsageFromValues(values)}
 	usage.Warnings = runtimeUsageWarnings(usage)
 	return usage
 }
@@ -210,8 +205,8 @@ func parseRuntimeUsageValues(output string) map[string]string {
 	return values
 }
 
-func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) config.RuntimeCPUUsage {
-	c := config.RuntimeCPUUsage{IntervalSeconds: interval.Seconds()}
+func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) model.RuntimeCPUUsage {
+	c := model.RuntimeCPUUsage{IntervalSeconds: interval.Seconds()}
 	if !config.RuntimeCgroupV2Available(v) {
 		c.Unavailable = "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat"
 		return c
@@ -240,8 +235,8 @@ func runtimeCPUUsageFromValues(v map[string]string, interval time.Duration) conf
 	return c
 }
 
-func runtimeDiskUsageFromValues(v map[string]string) config.RuntimeDiskUsage {
-	d := config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true}
+func runtimeDiskUsageFromValues(v map[string]string) model.RuntimeDiskUsage {
+	d := model.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true}
 	if ownKB, ok := core.ParseRuntimeInt64(v["disk_own_used_kb"]); ok {
 		d.OwnUsedBytes = ownKB * 1024
 		d.OwnUsageObserved = true
@@ -281,7 +276,7 @@ func parseRuntimeDFUsage(line string) (totalBytes, usedBytes int64, ok bool) {
 	return 0, 0, false
 }
 
-func runtimeUsageWarnings(u config.RuntimeUsage) []string {
+func runtimeUsageWarnings(u model.RuntimeUsage) []string {
 	warnings := runtimeMemoryUsageWarnings("", u.Memory)
 	for _, d := range u.Disk {
 		if d.Unavailable == "" && d.PercentUsed >= RuntimeUsageDiskWarnPercent {
@@ -300,7 +295,7 @@ func runtimeUsageWarnings(u config.RuntimeUsage) []string {
 // runtimeBuildThrottleWarnings names sidecar CPU starvation, which utilisation alone cannot
 // show. Counters are cumulative, so it fires only on a material ratio; raw periods stay in
 // the reading either way.
-func runtimeBuildThrottleWarnings(dind *config.RuntimeDindUsage) []string {
+func runtimeBuildThrottleWarnings(dind *model.RuntimeDindUsage) []string {
 	if dind == nil || dind.CPU.Unavailable != "" {
 		return nil
 	}
@@ -318,7 +313,7 @@ func runtimeBuildThrottleIsStarvation(throttled, periods int64) bool {
 }
 
 // scope prefixes warnings so runtime and erun-dind crossings are distinguishable.
-func runtimeMemoryUsageWarnings(scope string, memory config.RuntimeMemoryUsage) []string {
+func runtimeMemoryUsageWarnings(scope string, memory model.RuntimeMemoryUsage) []string {
 	var warnings []string
 	if memory.Unavailable == "" && !memory.Unlimited && memory.LimitBytes > 0 {
 		if memory.PercentOfLimit >= deploy.RuntimeUsageMemoryWarnPercent {
@@ -341,9 +336,9 @@ func runtimeMemoryUsageWarnings(scope string, memory config.RuntimeMemoryUsage) 
 	return warnings
 }
 
-func parseRuntimeDindUsage(output string, interval time.Duration) *config.RuntimeDindUsage {
+func parseRuntimeDindUsage(output string, interval time.Duration) *model.RuntimeDindUsage {
 	values := parseRuntimeUsageValues(output)
-	return &config.RuntimeDindUsage{
+	return &model.RuntimeDindUsage{
 		CPU:    runtimeCPUUsageFromValues(values, interval),
 		Memory: config.RuntimeMemoryUsageFromValues(values),
 	}

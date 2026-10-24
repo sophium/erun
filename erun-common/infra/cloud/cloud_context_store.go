@@ -14,9 +14,10 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func saveCloudContextConfig(store CloudContextStore, context configpkg.CloudContextConfig) error {
+func saveCloudContextConfig(store CloudContextStore, context model.CloudContextConfig) error {
 	context = configpkg.NormalizeCloudContextConfig(context)
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
@@ -28,27 +29,27 @@ func saveCloudContextConfig(store CloudContextStore, context configpkg.CloudCont
 	return store.SaveERunConfig(config)
 }
 
-func findCloudContext(store configpkg.CloudReadStore, name string) (configpkg.CloudContextConfig, bool, error) {
+func findCloudContext(store configpkg.CloudReadStore, name string) (model.CloudContextConfig, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return configpkg.CloudContextConfig{}, false, fmt.Errorf("cloud context name is required")
+		return model.CloudContextConfig{}, false, fmt.Errorf("cloud context name is required")
 	}
 	contexts, err := configpkg.ListCloudContexts(store)
 	if err != nil {
-		return configpkg.CloudContextConfig{}, false, err
+		return model.CloudContextConfig{}, false, err
 	}
 	for _, context := range contexts {
 		if context.Name == name || context.KubernetesContext == name {
 			return context, true, nil
 		}
 	}
-	return configpkg.CloudContextConfig{}, false, nil
+	return model.CloudContextConfig{}, false, nil
 }
 
-func UpsertCloudContext(contexts []configpkg.CloudContextConfig, context configpkg.CloudContextConfig) []configpkg.CloudContextConfig {
+func UpsertCloudContext(contexts []model.CloudContextConfig, context model.CloudContextConfig) []model.CloudContextConfig {
 	context = configpkg.NormalizeCloudContextConfig(context)
 	updated := false
-	result := make([]configpkg.CloudContextConfig, 0, len(contexts)+1)
+	result := make([]model.CloudContextConfig, 0, len(contexts)+1)
 	for _, existing := range contexts {
 		existing = configpkg.NormalizeCloudContextConfig(existing)
 		if existing.Name == "" {
@@ -97,7 +98,7 @@ func validCloudContextRegion(value string) bool {
 	return false
 }
 
-func generatedCloudContextName(provider configpkg.CloudProviderConfig, region string, existingContexts []configpkg.CloudContextConfig) string {
+func generatedCloudContextName(provider model.CloudProviderConfig, region string, existingContexts []model.CloudContextConfig) string {
 	parts := make([]string, 0, 2)
 	switch {
 	case provider.AccountID != "":
@@ -114,7 +115,7 @@ func generatedCloudContextName(provider configpkg.CloudProviderConfig, region st
 	return nextCloudContextName(tail, existingContexts)
 }
 
-func nextCloudContextName(tail string, existingContexts []configpkg.CloudContextConfig) string {
+func nextCloudContextName(tail string, existingContexts []model.CloudContextConfig) string {
 	tail = sanitizeCloudContextName(tail)
 	if tail == "" {
 		tail = "context"
@@ -179,7 +180,7 @@ func normalizeCloudContextDependencies(deps CloudContextDependencies) CloudConte
 	return deps
 }
 
-func defaultRunCloudContextAWS(ctx core.Context, provider configpkg.CloudProviderConfig, region string, args []string) (string, error) {
+func defaultRunCloudContextAWS(ctx core.Context, provider model.CloudProviderConfig, region string, args []string) (string, error) {
 	fullArgs := append([]string(nil), args...)
 	if region = strings.TrimSpace(region); region != "" && !containsAWSFlag(fullArgs, "--region") {
 		fullArgs = append(fullArgs, "--region", region)

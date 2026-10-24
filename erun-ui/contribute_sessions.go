@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const (
@@ -49,7 +49,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}
 
 	key := contributeSessionKey(selection, slot, withAI)
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

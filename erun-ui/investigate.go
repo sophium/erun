@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
@@ -95,7 +96,7 @@ func (a *App) attachInvestigationJob(record investigationRecord, name string) st
 		log.Printf("erun-app: investigation %s has no pid to track; it will not appear as a job", record.ID)
 		return ""
 	}
-	job, err := jobs.AttachEnvironmentJob(core.Context{}, jobs.AttachEnvironmentJobParams{
+	job, err := jobs.AttachEnvironmentJob(core.Context{}, model.AttachEnvironmentJobParams{
 		Tenant:      record.Tenant,
 		Environment: record.Environment,
 		ID:          record.ID,

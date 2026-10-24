@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -78,7 +79,7 @@ func normalizedOrchestratorScope(scope []string) []string {
 // orchestratorRolesChanged reports a Role change on a still-linked env. Roles
 // wire no tools, so this is not a restart-required scope mismatch.
 func orchestratorRolesChanged(wiredEnvs, configuredEnvs []configpkg.OrchestratorEnvConfig) bool {
-	wiredRoles := make(map[string]configpkg.OrchestratorEnvRole, len(wiredEnvs))
+	wiredRoles := make(map[string]model.OrchestratorEnvRole, len(wiredEnvs))
 	for _, env := range wiredEnvs {
 		wiredRoles[env.Tenant+"/"+env.Environment] = env.Role
 	}

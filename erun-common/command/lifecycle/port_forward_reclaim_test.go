@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -46,7 +47,7 @@ func TestRunDeleteEnvironmentRemovesTheForwardLogBesideTheStateFile(t *testing.T
 	}
 
 	store := &deleteSSHConfigStore{envs: map[string][]config.EnvConfig{tenant: {{Name: environment}}}}
-	if _, err := RunDeleteEnvironment(core.Context{}, DeleteEnvironmentParams{
+	if _, err := RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant: tenant, Environment: environment,
 	}, store, nil); err != nil {
 		t.Fatalf("delete: %v", err)

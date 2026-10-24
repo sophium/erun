@@ -3,19 +3,10 @@ package observe
 import (
 	"encoding/json"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
-
-// ObservedSecretCheck reports whether a Secret carries a key, never the value. Error carries
-// a non-"not found" failure such as an RBAC denial.
-type ObservedSecretCheck struct {
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Exists bool   `json:"exists"`
-	HasKey bool   `json:"hasKey"`
-	Error  string `json:"error,omitempty"`
-}
 
 // observeSecretItem reads only key names, never values.
 type observeSecretItem struct {
@@ -23,8 +14,8 @@ type observeSecretItem struct {
 	StringData map[string]string `json:"stringData"`
 }
 
-func fetchObservedSecretCheck(args []string, check ObserveSecretCheck) ObservedSecretCheck {
-	result := ObservedSecretCheck{Name: check.Name, Key: check.Key}
+func fetchObservedSecretCheck(args []string, check model.ObserveSecretCheck) model.ObservedSecretCheck {
+	result := model.ObservedSecretCheck{Name: check.Name, Key: check.Key}
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		if clusterread.IsKubectlNotFound(stderr) {

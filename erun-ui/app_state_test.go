@@ -22,8 +22,8 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 			{
 				Name: "erun",
 				Environments: []lifecycle.ListEnvironmentResult{
-					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: lifecycle.ListSSHResult{Enabled: true}},
-					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: configpkg.EnvironmentTypeRemoteAgent, LocalPorts: configpkg.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
+					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: model.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: model.ListSSHResult{Enabled: true}},
+					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: configpkg.EnvironmentTypeRemoteAgent, LocalPorts: model.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
 			},
 		},

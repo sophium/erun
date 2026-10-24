@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Client side of the per-environment MCP edge, over net/http rather than the MCP SDK so it
@@ -66,13 +68,6 @@ type MCPToolCallParams struct {
 	IdleProbe bool
 }
 
-type MCPToolCallResult struct {
-	Tool       string          `json:"tool"`
-	Text       string          `json:"text,omitempty"`
-	Structured json.RawMessage `json:"structured,omitempty"`
-	IsError    bool            `json:"isError,omitempty"`
-}
-
 type MCPToolListParams struct {
 	Endpoint      string
 	MintToken     MCPTokenMinter
@@ -81,58 +76,15 @@ type MCPToolListParams struct {
 	IdleProbe bool
 }
 
-// MCPTool keeps the descriptor's wire JSON so structured output re-emits the protocol's own
-// shape; the typed fields serve the text renderer.
-type MCPTool struct {
-	Name        string
-	Description string
-	InputSchema json.RawMessage
-	// raw is empty only for a tool constructed locally.
-	raw json.RawMessage
-}
-
-func (t *MCPTool) UnmarshalJSON(data []byte) error {
-	var fields struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"inputSchema"`
-	}
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	t.Name = fields.Name
-	t.Description = fields.Description
-	t.InputSchema = fields.InputSchema
-	t.raw = append(json.RawMessage(nil), data...)
-	return nil
-}
-
-// MarshalJSON re-emits the decoded descriptor verbatim so unknown fields survive.
-func (t MCPTool) MarshalJSON() ([]byte, error) {
-	if len(t.raw) > 0 {
-		return t.raw, nil
-	}
-	type constructedTool struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description,omitempty"`
-		InputSchema json.RawMessage `json:"inputSchema,omitempty"`
-	}
-	return json.Marshal(constructedTool{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
-}
-
-type MCPToolListResult struct {
-	Tools []MCPTool `json:"tools"`
-}
-
 // CallMCPTool performs one tool call. A tool-reported failure returns both the result and an error.
-func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResult, error) {
+func CallMCPTool(ctx context.Context, params MCPToolCallParams) (model.MCPToolCallResult, error) {
 	tool := strings.TrimSpace(params.Tool)
 	if tool == "" {
-		return MCPToolCallResult{}, fmt.Errorf("MCP tool name is required")
+		return model.MCPToolCallResult{}, fmt.Errorf("MCP tool name is required")
 	}
 	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion, params.IdleProbe)
 	if err != nil {
-		return MCPToolCallResult{}, err
+		return model.MCPToolCallResult{}, err
 	}
 	arguments := params.Arguments
 	if arguments == nil {
@@ -140,13 +92,13 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 	}
 	raw, err := session.call(ctx, "tools/call", map[string]any{"name": tool, "arguments": arguments})
 	if err != nil {
-		return MCPToolCallResult{}, err
+		return model.MCPToolCallResult{}, err
 	}
 	var payload mcpToolCallPayload
 	if err := json.Unmarshal(raw, &payload); err != nil {
-		return MCPToolCallResult{}, fmt.Errorf("decode MCP result for tool %s: %w", tool, err)
+		return model.MCPToolCallResult{}, fmt.Errorf("decode MCP result for tool %s: %w", tool, err)
 	}
-	result := MCPToolCallResult{
+	result := model.MCPToolCallResult{
 		Tool:       tool,
 		Text:       payload.text(),
 		Structured: payload.StructuredContent,
@@ -163,18 +115,18 @@ func CallMCPTool(ctx context.Context, params MCPToolCallParams) (MCPToolCallResu
 }
 
 // ListMCPTools returns the tools an environment's MCP edge exposes.
-func ListMCPTools(ctx context.Context, params MCPToolListParams) (MCPToolListResult, error) {
+func ListMCPTools(ctx context.Context, params MCPToolListParams) (model.MCPToolListResult, error) {
 	session, err := openMCPSession(ctx, params.Endpoint, params.MintToken, params.ClientVersion, params.IdleProbe)
 	if err != nil {
-		return MCPToolListResult{}, err
+		return model.MCPToolListResult{}, err
 	}
 	raw, err := session.call(ctx, "tools/list", map[string]any{})
 	if err != nil {
-		return MCPToolListResult{}, err
+		return model.MCPToolListResult{}, err
 	}
-	var result MCPToolListResult
+	var result model.MCPToolListResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return MCPToolListResult{}, fmt.Errorf("decode MCP tool list: %w", err)
+		return model.MCPToolListResult{}, fmt.Errorf("decode MCP tool list: %w", err)
 	}
 	return result, nil
 }

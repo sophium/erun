@@ -6,32 +6,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func ResolveDockerBuildContext() (DockerBuildContext, error) {
+func ResolveDockerBuildContext() (model.DockerBuildContext, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return DockerBuildContext{}, err
+		return model.DockerBuildContext{}, err
 	}
 	return DockerBuildContextAtDir(dir)
 }
 
-func DockerBuildContextAtDir(dir string) (DockerBuildContext, error) {
+func DockerBuildContextAtDir(dir string) (model.DockerBuildContext, error) {
 	dockerfilePath := filepath.Join(dir, "Dockerfile")
 	info, err := os.Stat(dockerfilePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return DockerBuildContext{Dir: dir}, nil
+			return model.DockerBuildContext{Dir: dir}, nil
 		}
-		return DockerBuildContext{}, err
+		return model.DockerBuildContext{}, err
 	}
 	if info.IsDir() {
-		return DockerBuildContext{Dir: dir}, nil
+		return model.DockerBuildContext{Dir: dir}, nil
 	}
-	return DockerBuildContext{Dir: dir, DockerfilePath: dockerfilePath}, nil
+	return model.DockerBuildContext{Dir: dir, DockerfilePath: dockerfilePath}, nil
 }
 
-func ResolveDockerBuildContextsAtDir(dir string) ([]DockerBuildContext, error) {
+func ResolveDockerBuildContextsAtDir(dir string) ([]model.DockerBuildContext, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || filepath.Base(dir) != "docker" {
 		return nil, ErrDockerBuildContextNotFound
@@ -51,13 +53,13 @@ func ResolveDockerBuildContextsAtDir(dir string) ([]DockerBuildContext, error) {
 	return buildContexts, nil
 }
 
-func DockerBuildContextsUnderDir(dir string) ([]DockerBuildContext, error) {
+func DockerBuildContextsUnderDir(dir string) ([]model.DockerBuildContext, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	buildContexts := make([]DockerBuildContext, 0, len(entries))
+	buildContexts := make([]model.DockerBuildContext, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

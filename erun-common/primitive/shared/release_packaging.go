@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // erun-app.exe is load-bearing: `erun app`, Homebrew and Scoop launchers depend on the name.
@@ -73,9 +74,9 @@ func checkScoopManifestInvariants(scoopPath string) error {
 	return nil
 }
 
-func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, *ReleasePackagingSyncSpec, error) {
-	updates := make([]ReleaseFileUpdate, 0, 2)
-	syncSpec := &ReleasePackagingSyncSpec{ProjectRoot: projectRoot, Version: version}
+func discoverStableReleasePackaging(projectRoot, version string) ([]model.ReleaseFileUpdate, *model.ReleasePackagingSyncSpec, error) {
+	updates := make([]model.ReleaseFileUpdate, 0, 2)
+	syncSpec := &model.ReleasePackagingSyncSpec{ProjectRoot: projectRoot, Version: version}
 
 	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
 	updates, err := appendReleasePackagingUpdate(updates, formulaPath, version, updateHomebrewFormulaReleaseVersion)
@@ -108,16 +109,16 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 }
 
 func appendReleasePackagingUpdate(
-	updates []ReleaseFileUpdate,
+	updates []model.ReleaseFileUpdate,
 	path, version string,
 	update func(string, string) (string, bool, error),
-) ([]ReleaseFileUpdate, error) {
+) ([]model.ReleaseFileUpdate, error) {
 	content, changed, err := update(path, version)
 	if err != nil {
 		return nil, err
 	}
 	if changed {
-		updates = append(updates, ReleaseFileUpdate{
+		updates = append(updates, model.ReleaseFileUpdate{
 			Path:    path,
 			Content: content,
 		})
@@ -247,12 +248,12 @@ func updateScoopManifestReleaseChecksum(manifestPath, checksum string) (string, 
 	return string(updated) + "\n", true, nil
 }
 
-func syncReleasePackagingChecksums(ctx core.Context, spec ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
+func syncReleasePackagingChecksums(ctx core.Context, spec model.ReleasePackagingSyncSpec) ([]model.ReleaseFileUpdate, error) {
 	if spec.FormulaPath == "" && spec.ScoopPath == "" && spec.MarketplacePath == "" {
 		return nil, nil
 	}
 
-	updates := make([]ReleaseFileUpdate, 0, 3)
+	updates := make([]model.ReleaseFileUpdate, 0, 3)
 	formulaUpdate, ok, err := syncHomebrewReleaseChecksum(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -277,77 +278,77 @@ func syncReleasePackagingChecksums(ctx core.Context, spec ReleasePackagingSyncSp
 	return updates, nil
 }
 
-func syncHomebrewReleaseChecksum(ctx core.Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+func syncHomebrewReleaseChecksum(ctx core.Context, spec model.ReleasePackagingSyncSpec) (model.ReleaseFileUpdate, bool, error) {
 	if spec.FormulaPath == "" {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
 	ctx.TraceCommand("", "curl", "-fsSL", url)
 	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
 	if ctx.DryRun {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	checksum, err := releaseArchiveSHA256(url)
 	if err != nil {
-		return ReleaseFileUpdate{}, false, err
+		return model.ReleaseFileUpdate{}, false, err
 	}
 	content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
 	if err != nil || !changed {
-		return ReleaseFileUpdate{}, false, err
+		return model.ReleaseFileUpdate{}, false, err
 	}
-	return ReleaseFileUpdate{Path: spec.FormulaPath, Content: content}, true, nil
+	return model.ReleaseFileUpdate{Path: spec.FormulaPath, Content: content}, true, nil
 }
 
-func syncScoopReleaseChecksum(ctx core.Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+func syncScoopReleaseChecksum(ctx core.Context, spec model.ReleasePackagingSyncSpec) (model.ReleaseFileUpdate, bool, error) {
 	if spec.ScoopPath == "" {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
 	ctx.TraceCommand("", "curl", "-fsSL", url)
 	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
 	if ctx.DryRun {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	checksum, err := releaseArchiveSHA256(url)
 	if err != nil {
-		return ReleaseFileUpdate{}, false, err
+		return model.ReleaseFileUpdate{}, false, err
 	}
 	content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
 	if err != nil || !changed {
-		return ReleaseFileUpdate{}, false, err
+		return model.ReleaseFileUpdate{}, false, err
 	}
-	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
+	return model.ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
 }
 
 // Needs the release tag to exist, like Homebrew and Scoop.
-func SyncMarketplaceReleaseSHA(ctx core.Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+func SyncMarketplaceReleaseSHA(ctx core.Context, spec model.ReleasePackagingSyncSpec) (model.ReleaseFileUpdate, bool, error) {
 	if spec.MarketplacePath == "" {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	if spec.ProjectRoot == "" {
-		return ReleaseFileUpdate{}, false, fmt.Errorf("release: marketplace sync requires ProjectRoot in sync spec")
+		return model.ReleaseFileUpdate{}, false, fmt.Errorf("release: marketplace sync requires ProjectRoot in sync spec")
 	}
 	ref := "v" + spec.Version + "^{}"
 	ctx.TraceCommand("", "git", "-C", spec.ProjectRoot, "rev-parse", ref)
 	if ctx.DryRun {
-		return ReleaseFileUpdate{}, false, nil
+		return model.ReleaseFileUpdate{}, false, nil
 	}
 	output, err := core.Command("git", "-C", spec.ProjectRoot, "rev-parse", ref).CombinedOutput()
 	if err != nil {
 		if detail := strings.TrimSpace(string(output)); detail != "" {
-			return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w: %s", ref, err, detail)
+			return model.ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w: %s", ref, err, detail)
 		}
-		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
+		return model.ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
 	}
 	sha := strings.TrimSpace(string(output))
 	if sha == "" {
-		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: empty result", ref)
+		return model.ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: empty result", ref)
 	}
 	content, changed, err := updateMarketplaceReleaseSHA(spec.MarketplacePath, sha)
 	if err != nil || !changed {
-		return ReleaseFileUpdate{}, false, err
+		return model.ReleaseFileUpdate{}, false, err
 	}
-	return ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
+	return model.ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
 }
 
 // Text replacement keeps the file's formatting and key order.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -27,7 +28,7 @@ func init() {
 // its running record is durable, then exits.
 func runJobSupervisorSetupFailureHelper() int {
 	id := os.Getenv(jobAliveSupervisorHelperIDEnv)
-	err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      os.Getenv(jobAliveSupervisorHelperTenantEnv),
 		Environment: os.Getenv(jobAliveSupervisorHelperEnvNameEnv),
 		ID:          id,

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -15,8 +16,8 @@ type InjectedRuntimeConfig struct {
 	Tenant      string
 	Environment string
 	Env         configpkg.EnvConfig
-	Providers   []configpkg.CloudProviderConfig
-	Contexts    []configpkg.CloudContextConfig
+	Providers   []model.CloudProviderConfig
+	Contexts    []model.CloudContextConfig
 }
 
 // ResolveInjectedRuntimeConfig reports ok=false without a tenant and environment.
@@ -67,18 +68,18 @@ func ResolveInjectedRuntimeConfig(env func(string) string) (InjectedRuntimeConfi
 	return injected, true
 }
 
-func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]configpkg.CloudProviderConfig, []configpkg.CloudContextConfig) {
+func injectedCloudConfig(provider, alias, region, instanceID, contextName, kubernetesContext string) ([]model.CloudProviderConfig, []model.CloudContextConfig) {
 	if provider == "" || alias == "" {
 		return nil, nil
 	}
 	username, accountID, _, _ := configpkg.ParseCloudProviderAlias(alias)
-	providers := []configpkg.CloudProviderConfig{{Alias: alias, Provider: provider, Username: username, AccountID: accountID}}
+	providers := []model.CloudProviderConfig{{Alias: alias, Provider: provider, Username: username, AccountID: accountID}}
 	if region == "" {
 		return providers, nil
 	}
 	// Normalize like every writer does, or the injected "" never matches the
 	// on-disk default and drift never clears.
-	contexts := []configpkg.CloudContextConfig{configpkg.NormalizeCloudContextConfig(configpkg.CloudContextConfig{
+	contexts := []model.CloudContextConfig{configpkg.NormalizeCloudContextConfig(model.CloudContextConfig{
 		Name:               contextName,
 		Provider:           provider,
 		CloudProviderAlias: alias,

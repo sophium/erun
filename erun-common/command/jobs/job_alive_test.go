@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -34,7 +35,7 @@ func init() {
 
 func runJobAliveSupervisorHelper() int {
 	id := os.Getenv(jobAliveSupervisorHelperIDEnv)
-	err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      os.Getenv(jobAliveSupervisorHelperTenantEnv),
 		Environment: os.Getenv(jobAliveSupervisorHelperEnvNameEnv),
 		ID:          id,
@@ -185,7 +186,7 @@ func TestRegisteredEnvironmentJobIsPublishedWithABeat(t *testing.T) {
 	const environment = "beat-test"
 	const id = "gate"
 
-	if _, err := registerEnvironmentJob(EnvironmentJobSupervisorParams{
+	if _, err := registerEnvironmentJob(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,

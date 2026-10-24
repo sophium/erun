@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -20,7 +21,7 @@ func (emptyCloudConfig) SaveERunConfig(config.ERunConfig) error { return nil }
 
 func TestContextListJSONAlwaysCarriesTheCollection(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
+	ctx := core.Context{Output: model.OutputJSON, Stdout: &buf, Stderr: &buf}
 	if err := runContextListCommand(ctx, emptyCloudConfig{}, cloud.CloudContextDependencies{}); err != nil {
 		t.Fatalf("run context list: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
@@ -34,7 +35,7 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 
 	// A later re-create of this env must fire environment-initialized again.
 	a.clearInitEmitted(selection.Tenant, selection.Environment)
-	result, err := lifecycle.RunDeleteEnvironment(core.Context{}, lifecycle.DeleteEnvironmentParams{
+	result, err := lifecycle.RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}, store, a.deps.deleteNamespace)

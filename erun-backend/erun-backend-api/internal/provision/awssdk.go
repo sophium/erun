@@ -20,8 +20,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
-	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // awsSDKRunner implements the RunAWS seam with aws-sdk-go-v2, so the API image
@@ -54,8 +54,8 @@ func newAWSSDKRunner(credentialsJSON, endpoint string) (*awsSDKRunner, error) {
 	return &awsSDKRunner{creds: creds, endpoint: endpoint, configs: map[string]aws.Config{}}, nil
 }
 
-func (r *awsSDKRunner) runAWS(ctx context.Context) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, region string, args []string) (string, error) {
+func (r *awsSDKRunner) runAWS(ctx context.Context) func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, region string, args []string) (string, error) {
 		return r.run(ctx, region, args)
 	}
 }

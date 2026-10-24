@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // commandWaitDelay bounds the post-exit pipe drain: a leaked write handle (common
@@ -89,12 +91,7 @@ func NewExecCommand(name string, args ...string) *exec.Cmd {
 
 type RawCommandRunnerFunc func(dir, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
 
-type RawCommandSpec struct {
-	Dir  string   `json:"dir,omitempty"`
-	Args []string `json:"args,omitempty"`
-}
-
-func RunRawCommand(ctx Context, spec RawCommandSpec, run RawCommandRunnerFunc) error {
+func RunRawCommand(ctx Context, spec model.RawCommandSpec, run RawCommandRunnerFunc) error {
 	if len(spec.Args) == 0 || strings.TrimSpace(spec.Args[0]) == "" {
 		return fmt.Errorf("raw command is required")
 	}

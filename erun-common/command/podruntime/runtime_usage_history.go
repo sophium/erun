@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -18,7 +18,7 @@ const (
 
 // AppendRuntimeUsageSample folds one reading into the history; RuntimeUsage carries no
 // timestamp, so now is passed in.
-func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample config.RuntimeUsage, now time.Time) deploy.RuntimeUsageHistory {
+func AppendRuntimeUsageSample(history deploy.RuntimeUsageHistory, sample model.RuntimeUsage, now time.Time) deploy.RuntimeUsageHistory {
 	previous, hasPrevious := history.Latest()
 	// A cumulative counter going backwards means the container was replaced; an in-place
 	// restart keeps the pod name, so the hostname cannot tell.
@@ -65,13 +65,13 @@ func runtimeUsageCounterDelta(previous, current int64, continuous bool) int64 {
 	return current - previous
 }
 
-func runtimeUsageCountersReset(previous, current config.RuntimeUsage) bool {
+func runtimeUsageCountersReset(previous, current model.RuntimeUsage) bool {
 	return current.Memory.PeakBytes < previous.Memory.PeakBytes ||
 		current.CPU.UsageUsec < previous.CPU.UsageUsec ||
 		current.CPU.Periods < previous.CPU.Periods
 }
 
-func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed time.Duration) (int64, bool) {
+func runtimeUsageIntervalCPUMilli(previous, current model.RuntimeUsage, elapsed time.Duration) (int64, bool) {
 	usec := current.CPU.UsageUsec - previous.CPU.UsageUsec
 	if usec <= 0 {
 		return 0, false
@@ -80,12 +80,12 @@ func runtimeUsageIntervalCPUMilli(previous, current config.RuntimeUsage, elapsed
 }
 
 // Copy rather than reslice so the trimmed prefix is not retained by the backing array.
-func appendBoundedUsageSamples(samples []config.RuntimeUsage, sample config.RuntimeUsage) []config.RuntimeUsage {
+func appendBoundedUsageSamples(samples []model.RuntimeUsage, sample model.RuntimeUsage) []model.RuntimeUsage {
 	samples = append(samples, sample)
 	if len(samples) <= runtimeUsageHistorySampleCap {
 		return samples
 	}
-	trimmed := make([]config.RuntimeUsage, runtimeUsageHistorySampleCap)
+	trimmed := make([]model.RuntimeUsage, runtimeUsageHistorySampleCap)
 	copy(trimmed, samples[len(samples)-runtimeUsageHistorySampleCap:])
 	return trimmed
 }

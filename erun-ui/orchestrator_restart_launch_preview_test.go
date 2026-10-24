@@ -7,10 +7,10 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func requireLoneRestartPreviewNotice(t *testing.T, preview []core.DesktopRestartReopen, id string, wants ...string) {
+func requireLoneRestartPreviewNotice(t *testing.T, preview []model.DesktopRestartReopen, id string, wants ...string) {
 	t.Helper()
 	if len(preview) != 1 || preview[0].OrchestratorID != id {
 		t.Fatalf("expected one row for %s, got %+v", id, preview)

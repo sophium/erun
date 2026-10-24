@@ -14,6 +14,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -66,15 +67,15 @@ func vscodeRemoteFolderURI(result config.OpenResult) string {
 	return "vscode://vscode-remote/ssh-remote+" + url.PathEscape(info.HostAlias) + (&url.URL{Path: info.WorkspacePath}).EscapedPath()
 }
 
-func ideLaunchCommand(hostOS core.HostOS, uri string) (string, []string, error) {
+func ideLaunchCommand(hostOS model.HostOS, uri string) (string, []string, error) {
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return "open", []string{uri}, nil
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		return "xdg-open", []string{uri}, nil
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", uri}, nil
-	case core.HostOSUnknown:
+	case model.HostOSUnknown:
 		fallthrough
 	default:
 		return "", nil, fmt.Errorf("opening IDE links is unsupported on %s", hostOS)
@@ -125,7 +126,7 @@ func startIDEURICommand(ctx core.Context, command string, args []string) (string
 	return "", nil
 }
 
-func formatIDEOpenError(ideName string, hostOS core.HostOS, result config.OpenResult, technical string, err error, extra string) error {
+func formatIDEOpenError(ideName string, hostOS model.HostOS, result config.OpenResult, technical string, err error, extra string) error {
 	parts := []string{
 		fmt.Sprintf("%s launcher failed on %s.", ideName, hostOSLabel(hostOS)),
 		fmt.Sprintf("Fallback: connect manually in JetBrains over SSH to host %q and open %q.", open.SSHConnectionInfoForResult(result).HostAlias, open.SSHConnectionInfoForResult(result).WorkspacePath),
@@ -141,15 +142,15 @@ func formatIDEOpenError(ideName string, hostOS core.HostOS, result config.OpenRe
 	return errors.New(strings.Join(parts, "\n"))
 }
 
-func hostOSLabel(hostOS core.HostOS) string {
+func hostOSLabel(hostOS model.HostOS) string {
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return "macOS"
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		return "Linux"
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		return "Windows"
-	case core.HostOSUnknown:
+	case model.HostOSUnknown:
 		fallthrough
 	default:
 		return string(hostOS)

@@ -6,9 +6,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +51,7 @@ func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cl
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.CommandContext(cmd)
-			build, err := reviewpkg.RunReviewRecordBuild(ctx, store, *alias, reviewpkg.ReviewRecordBuildParams{
+			build, err := reviewpkg.RunReviewRecordBuild(ctx, store, *alias, model.ReviewRecordBuildParams{
 				ReviewID:      args[0],
 				CommitID:      commitID,
 				Version:       version,
@@ -65,7 +65,7 @@ func newReviewRecordBuildCmd(store config.CloudReadStore, alias *string, deps cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review record-build planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewBuildLine(ctx, build); err != nil {
 					return err
 				}
@@ -125,7 +125,7 @@ func newReviewReportMergedCmd(store config.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review report-merged planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -163,7 +163,7 @@ func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review requeue planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -175,7 +175,7 @@ func newReviewRequeueCmd(store config.CloudReadStore, alias *string, deps cloud.
 	return cmd
 }
 
-func writeReviewBuildLine(ctx core.Context, build platformclient.PlatformBuild) error {
+func writeReviewBuildLine(ctx core.Context, build model.PlatformBuild) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  [%s] successful=%t commit=%s version=%s\n",
 		build.BuildID, build.Successful, build.CommitID, build.Version)
 	return err

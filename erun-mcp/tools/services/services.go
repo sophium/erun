@@ -5,10 +5,10 @@ import (
 	"io"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -21,20 +21,20 @@ type ServicesInput struct {
 
 // ServicesTool lists Services with their ports and any erun-expose public
 // address. It only runs `kubectl get`, so it needs erun:read, not erun:admin.
-func ServicesTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, expose.EnvironmentServiceList, error) {
+func ServicesTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ServicesInput) (*mcp.CallToolResult, model.EnvironmentServiceList, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ServicesInput) (*mcp.CallToolResult, model.EnvironmentServiceList, error) {
 		tenant, environment, err := sharedpkg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, expose.EnvironmentServiceList{}, err
+			return nil, model.EnvironmentServiceList{}, err
 		}
-		target, err := open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+		target, err := open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
-			return nil, expose.EnvironmentServiceList{}, err
+			return nil, model.EnvironmentServiceList{}, err
 		}
 		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
 		result, err := expose.RunListEnvironmentServices(runCtx, cloud.ShellLaunchParamsFromResult(target))
 		if err != nil {
-			return nil, expose.EnvironmentServiceList{}, err
+			return nil, model.EnvironmentServiceList{}, err
 		}
 		return nil, result, nil
 	}

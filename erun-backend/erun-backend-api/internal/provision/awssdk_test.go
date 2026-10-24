@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -194,7 +195,7 @@ func TestInitCloudContextThroughSDKRunner(t *testing.T) {
 			Stderr: io.Discard,
 		},
 		aliasStore{alias: "acme-aws", provider: config.CloudProviderAWS},
-		cloud.InitCloudContextParams{
+		model.InitCloudContextParams{
 			Name:               "erun-test",
 			CloudProviderAlias: "acme-aws",
 			Region:             cloud.DefaultCloudContextRegion,

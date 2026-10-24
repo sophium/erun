@@ -7,6 +7,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	activitypkg "github.com/sophium/erun/erun-mcp/tools/activity"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
@@ -34,7 +35,7 @@ func TestExclusiveLeaseToolRenewalSkipsTheOperatorPresenceGate(t *testing.T) {
 		t.Fatalf("first take: %v", err)
 	}
 	// Only a fresh claim is gated on operator presence; a renewal still succeeds.
-	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	if err := activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
@@ -55,7 +56,7 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
-	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	if err := activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
@@ -64,7 +65,7 @@ func TestExclusiveLeaseToolRefusesAFreshClaimWhileAnOperatorSSHSessionIsActive(t
 	_, _, err := activitypkg.ActivityLeaseTakeTool(runtime)(context.Background(), nil, activitypkg.ActivityLeaseTakeInput{
 		Name: "job-fix-1245", ID: "job-fix-1245", Exclusive: true,
 	})
-	var operatorPresent *activity.EnvironmentOperatorPresentError
+	var operatorPresent *model.EnvironmentOperatorPresentError
 	if !errors.As(err, &operatorPresent) {
 		t.Fatalf("expected a fresh exclusive claim to be refused while an ssh session is active, got %v", err)
 	}
@@ -90,7 +91,7 @@ func TestExclusiveLeaseRenewalNormalizesASanitizedIDForTheSameCaller(t *testing.
 		t.Fatalf("expected the stored lease id to be sanitized, got %+v", first.Lease)
 	}
 
-	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	if err := activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
@@ -112,7 +113,7 @@ func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresen
 			envConfigs: map[string]config.EnvConfig{"erun/ux": {Name: "ux"}},
 		},
 	}
-	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	if err := activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)
@@ -121,7 +122,7 @@ func TestExclusiveLeaseFreshClaimWithASanitizedIDStillRefusedWhileOperatorPresen
 	_, _, err := activitypkg.ActivityLeaseTakeTool(runtime)(context.Background(), nil, activitypkg.ActivityLeaseTakeInput{
 		Name: "release 1.4.2", Exclusive: true,
 	})
-	var operatorPresent *activity.EnvironmentOperatorPresentError
+	var operatorPresent *model.EnvironmentOperatorPresentError
 	if !errors.As(err, &operatorPresent) {
 		t.Fatalf("expected a fresh exclusive claim with a sanitized id to still be refused while an ssh session is active, got %v", err)
 	}
@@ -147,7 +148,7 @@ func TestExclusiveLeaseRenewalNormalizesAnUntrimmedScopeForTheSameCaller(t *test
 		t.Fatalf("expected the stored lease scope to be trimmed, got %+v", first.Lease)
 	}
 
-	if err := activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+	if err := activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 		Tenant: "erun", Environment: "ux", Kind: config.ActivityKindSSH,
 	}); err != nil {
 		t.Fatalf("seed ssh activity: %v", err)

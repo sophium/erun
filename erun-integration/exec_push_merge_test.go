@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/command/mergequeue"
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -67,7 +66,7 @@ func testExecPushRealRunLandsTheBranchOnTheRemote(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.PushWorkingTreeBranchResult
+	var parsed model.PushWorkingTreeBranchResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -132,7 +131,7 @@ func testExecMergeRealRunMergesTheTargetBranch(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed mergequeue.MergeWorkingTreeBranchResult
+	var parsed model.MergeWorkingTreeBranchResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -205,7 +204,7 @@ func testExecMergeRealRunRegeneratesConflictingAtlasSum(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("expected the merge to land with nothing for a human to resolve, got exit %d:\n%s", result.ExitCode, result.Combined)
 	}
-	var parsed mergequeue.MergeWorkingTreeBranchResult
+	var parsed model.MergeWorkingTreeBranchResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}

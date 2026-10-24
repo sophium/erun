@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestWriteResultEmitsAnEmptySliceAsAnArray(t *testing.T) {
@@ -24,7 +26,7 @@ func TestWriteResultEmitsAnEmptySliceAsAnArray(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ctx := Context{Output: OutputJSON, Stdout: &buf, Stderr: &buf}
+			ctx := Context{Output: model.OutputJSON, Stdout: &buf, Stderr: &buf}
 			if err := ctx.WriteResult(tc.value); err != nil {
 				t.Fatalf("write result: %v", err)
 			}
@@ -56,7 +58,7 @@ func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	ctx := Context{Output: OutputJSON, Stdout: &buf, Stderr: &buf}
+	ctx := Context{Output: model.OutputJSON, Stdout: &buf, Stderr: &buf}
 	if err := ctx.WriteResult(optional{}); err != nil {
 		t.Fatalf("write result: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestWriteResultLeavesStructFieldsAlone(t *testing.T) {
 
 func TestWriteResultKeepsTextModeSilent(t *testing.T) {
 	var buf bytes.Buffer
-	ctx := Context{Output: OutputText, Stdout: &buf, Stderr: &buf}
+	ctx := Context{Output: model.OutputText, Stdout: &buf, Stderr: &buf}
 	if err := ctx.WriteResult([]string(nil)); err != nil {
 		t.Fatalf("write result: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -76,13 +77,13 @@ func TestRefusedReleaseDiskPreflightLeavesNoStampCommitAndNoTag(t *testing.T) {
 		Verify:  func(core.Context) error { return nil },
 	}
 
-	spec := ReleaseSpec{
+	spec := model.ReleaseSpec{
 		ProjectRoot: repo,
 		Branch:      "main",
 		Version:     version,
-		Mode:        ReleaseModeStable,
-		Stages: []ReleaseStage{
-			NewReleaseStage(repo, []ReleaseFileUpdate{{Path: versionPath, Content: version + "\n"}}, version, ReleaseModeStable),
+		Mode:        model.ReleaseModeStable,
+		Stages: []model.ReleaseStage{
+			NewReleaseStage(repo, []model.ReleaseFileUpdate{{Path: versionPath, Content: version + "\n"}}, version, model.ReleaseModeStable),
 		},
 	}
 

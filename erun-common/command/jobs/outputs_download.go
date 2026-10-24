@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -32,14 +33,14 @@ type runtimeOutputSource struct {
 
 // DownloadRuntimeOutput fetches one runtime-pod entry in bounded ranges and
 // checks it against the pod's digest; a directory arrives as a gzip tarball.
-func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, params model.RuntimeOutputDownloadParams, run RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
 	dir, err := resolveOutputsDir(params.Dir)
 	if err != nil {
-		return RuntimeOutputResult{}, err
+		return model.RuntimeOutputResult{}, err
 	}
 	name, err := core.SanitizeOutputEntryName(params.Name)
 	if err != nil {
-		return RuntimeOutputResult{}, err
+		return model.RuntimeOutputResult{}, err
 	}
 	if run == nil {
 		run = kube.RunRemoteCommand
@@ -50,30 +51,30 @@ func DownloadRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, param
 	traceRuntimeOutputsScript(ctx, req, "outputs probe script", probe)
 	traceRuntimeOutputsScript(ctx, req, "outputs range script", runtimeOutputRangeScript(target, 0, runtimeOutputChunkBytes))
 	if ctx.DryRun {
-		return RuntimeOutputResult{Name: name}, nil
+		return model.RuntimeOutputResult{Name: name}, nil
 	}
 	return fetchRuntimeOutput(ctx, req, name, probe, run)
 }
 
-func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (RuntimeOutputResult, error) {
+func fetchRuntimeOutput(ctx core.Context, req config.ShellLaunchParams, name, probe string, run RuntimeOutputsRunner) (model.RuntimeOutputResult, error) {
 	out, err := run(req, probe)
 	if err != nil {
-		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, kube.FormatRemoteCommandStderr(out.Stderr), err)
+		return model.RuntimeOutputResult{}, fmt.Errorf("download runtime output %q%s: %w", name, kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	source, head, err := parseRuntimeOutputProbe(name, out.Stdout)
 	if err != nil {
-		return RuntimeOutputResult{}, err
+		return model.RuntimeOutputResult{}, err
 	}
 	if source.IsDir {
 		defer discardRuntimeOutputStagedArchive(ctx, req, source.Path, run)
 	}
 	data, err := transferRuntimeOutput(ctx, req, name, source, head, run)
 	if err != nil {
-		return RuntimeOutputResult{}, err
+		return model.RuntimeOutputResult{}, err
 	}
 	result := newRuntimeOutputResult(name, source.IsDir, data)
 	if source.SHA256 != "" && !strings.EqualFold(source.SHA256, result.SHA256) {
-		return RuntimeOutputResult{}, fmt.Errorf("download runtime output %q: the %d transferred bytes hash to %s but the pod reported %s", name, result.Size, result.SHA256, source.SHA256)
+		return model.RuntimeOutputResult{}, fmt.Errorf("download runtime output %q: the %d transferred bytes hash to %s but the pod reported %s", name, result.Size, result.SHA256, source.SHA256)
 	}
 	return result, nil
 }

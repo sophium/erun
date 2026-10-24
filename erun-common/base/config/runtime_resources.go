@@ -8,26 +8,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-type RuntimePodResources struct {
-	CPU    string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
-	Memory string `yaml:"memory,omitempty" json:"memory,omitempty"`
-}
-
-// NamespaceResourceQuota is a hard per-namespace CPU/memory/storage cap. All
-// three fields are set together: Kubernetes admits unbounded amounts of an
-// uncapped resource.
-type NamespaceResourceQuota struct {
-	CPU     string `yaml:"cpu,omitempty" json:"cpu,omitempty"`
-	Memory  string `yaml:"memory,omitempty" json:"memory,omitempty"`
-	Storage string `yaml:"storage,omitempty" json:"storage,omitempty"`
-}
-
-// IsZero reports no cap, in which case deploy applies no ResourceQuota/LimitRange.
-func (q NamespaceResourceQuota) IsZero() bool {
-	return q == NamespaceResourceQuota{}
-}
 
 // DefaultRuntimePodCPU/Memory size the runtime container and must match the chart
 // fallback in erun-devops/k8s/erun-devops/templates/service.yaml. Memory is sized
@@ -110,7 +92,7 @@ func MinimumRuntimeNamespaceQuota() (cpuMillicores, memoryMB, storageGB int64) {
 	return devopsCPU + dindCPU, devopsMemory + dindMemory, storageGB
 }
 
-func NormalizeRuntimePodResources(resources RuntimePodResources) RuntimePodResources {
+func NormalizeRuntimePodResources(resources model.RuntimePodResources) model.RuntimePodResources {
 	cpu := strings.TrimSpace(resources.CPU)
 	if cpu == "" {
 		cpu = DefaultRuntimePodCPU
@@ -119,10 +101,10 @@ func NormalizeRuntimePodResources(resources RuntimePodResources) RuntimePodResou
 	if memory == "" {
 		memory = DefaultRuntimePodMemory
 	}
-	return RuntimePodResources{CPU: cpu, Memory: memory}
+	return model.RuntimePodResources{CPU: cpu, Memory: memory}
 }
 
-func ValidateRuntimePodResources(resources RuntimePodResources) error {
+func ValidateRuntimePodResources(resources model.RuntimePodResources) error {
 	resources = NormalizeRuntimePodResources(resources)
 	if _, err := ParseKubernetesCPUToMilli(resources.CPU); err != nil {
 		return fmt.Errorf("runtime pod CPU: %w", err)
@@ -137,7 +119,7 @@ func ValidateRuntimePodResources(resources RuntimePodResources) error {
 // because the in-pod env config never carries runtimepod and defaulting would roll
 // back a resized environment. It reads the cgroup only when running in this very
 // environment's chart-rendered pod; configured values always win.
-func ResolveRuntimePodResourcesForDeploy(configured RuntimePodResources, tenant, environment string, env func(string) string, cgroupRoot string) RuntimePodResources {
+func ResolveRuntimePodResourcesForDeploy(configured model.RuntimePodResources, tenant, environment string, env func(string) string, cgroupRoot string) model.RuntimePodResources {
 	resolved := configured
 	if strings.TrimSpace(resolved.CPU) != "" && strings.TrimSpace(resolved.Memory) != "" {
 		return resolved
@@ -162,7 +144,7 @@ func ResolveRuntimePodResourcesForDeploy(configured RuntimePodResources, tenant,
 	return resolved
 }
 
-func liveRuntimePodCPULimit(usage RuntimeUsage) string {
+func liveRuntimePodCPULimit(usage model.RuntimeUsage) string {
 	quota := RuntimeQuotaMilli(usage.CPU.QuotaCores)
 	if quota <= 0 {
 		return ""
@@ -171,7 +153,7 @@ func liveRuntimePodCPULimit(usage RuntimeUsage) string {
 }
 
 // liveRuntimePodMemoryLimit returns "" for an unlimited cgroup: it names no size to preserve.
-func liveRuntimePodMemoryLimit(usage RuntimeUsage) string {
+func liveRuntimePodMemoryLimit(usage model.RuntimeUsage) string {
 	if usage.Memory.Unlimited || usage.Memory.LimitBytes <= 0 {
 		return ""
 	}
@@ -179,7 +161,7 @@ func liveRuntimePodMemoryLimit(usage RuntimeUsage) string {
 }
 
 // NormalizeRuntimeDindPodResources is NormalizeRuntimePodResources for the erun-dind sidecar.
-func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodResources {
+func NormalizeRuntimeDindPodResources(resources model.RuntimePodResources) model.RuntimePodResources {
 	cpu := strings.TrimSpace(resources.CPU)
 	if cpu == "" {
 		cpu = DefaultRuntimeDindCPU
@@ -188,10 +170,10 @@ func NormalizeRuntimeDindPodResources(resources RuntimePodResources) RuntimePodR
 	if memory == "" {
 		memory = DefaultRuntimeDindMemory
 	}
-	return RuntimePodResources{CPU: cpu, Memory: memory}
+	return model.RuntimePodResources{CPU: cpu, Memory: memory}
 }
 
-func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
+func ValidateRuntimeDindPodResources(resources model.RuntimePodResources) error {
 	resources = NormalizeRuntimeDindPodResources(resources)
 	if _, err := ParseKubernetesCPUToMilli(resources.CPU); err != nil {
 		return fmt.Errorf("dind sidecar CPU: %w", err)
@@ -202,7 +184,7 @@ func ValidateRuntimeDindPodResources(resources RuntimePodResources) error {
 	return nil
 }
 
-func ValidateNamespaceResourceQuota(quota NamespaceResourceQuota) error {
+func ValidateNamespaceResourceQuota(quota model.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil
 	}

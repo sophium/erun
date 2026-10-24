@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"path"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type diffTreeBuildNode struct {
@@ -17,7 +19,7 @@ type diffTreeBuildNode struct {
 
 // reorderFilesByTree aligns Files to the tree's leaf order; parsing appends untracked files last,
 // which would make the desktop's file list and diff panel disagree.
-func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
+func reorderFilesByTree(files []model.DiffFile, tree []model.DiffTreeNode) []model.DiffFile {
 	if len(files) <= 1 {
 		return files
 	}
@@ -25,7 +27,7 @@ func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
 	for index, file := range files {
 		indexesByPath[file.Path] = append(indexesByPath[file.Path], index)
 	}
-	ordered := make([]DiffFile, 0, len(files))
+	ordered := make([]model.DiffFile, 0, len(files))
 	used := make([]bool, len(files))
 	for _, node := range tree {
 		if node.Type != "file" {
@@ -48,7 +50,7 @@ func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
 	return ordered
 }
 
-func BuildDiffTree(files []DiffFile) []DiffTreeNode {
+func BuildDiffTree(files []model.DiffFile) []model.DiffTreeNode {
 	root := make([]diffTreeBuildNode, 0)
 	for _, file := range files {
 		parts := strings.Split(cleanDiffPath(file.Path), "/")
@@ -57,14 +59,14 @@ func BuildDiffTree(files []DiffFile) []DiffTreeNode {
 		}
 		root = appendDiffTreeNode(root, parts, file, "")
 	}
-	flat := make([]DiffTreeNode, 0, len(files))
+	flat := make([]model.DiffTreeNode, 0, len(files))
 	for _, node := range root {
 		flat = appendFlattenedDiffTreeNode(flat, node, "", 0)
 	}
 	return flat
 }
 
-func appendDiffTreeNode(nodes []diffTreeBuildNode, parts []string, file DiffFile, parent string) []diffTreeBuildNode {
+func appendDiffTreeNode(nodes []diffTreeBuildNode, parts []string, file model.DiffFile, parent string) []diffTreeBuildNode {
 	name := parts[0]
 	nodePath := name
 	if parent != "" {
@@ -98,7 +100,7 @@ func appendDiffTreeNode(nodes []diffTreeBuildNode, parts []string, file DiffFile
 	return append(nodes, node)
 }
 
-func diffFileTreeNode(file DiffFile, nodePath string) diffTreeBuildNode {
+func diffFileTreeNode(file model.DiffFile, nodePath string) diffTreeBuildNode {
 	return diffTreeBuildNode{
 		Name:      path.Base(nodePath),
 		Path:      file.Path,
@@ -109,8 +111,8 @@ func diffFileTreeNode(file DiffFile, nodePath string) diffTreeBuildNode {
 	}
 }
 
-func appendFlattenedDiffTreeNode(flat []DiffTreeNode, node diffTreeBuildNode, parent string, depth int) []DiffTreeNode {
-	flat = append(flat, DiffTreeNode{
+func appendFlattenedDiffTreeNode(flat []model.DiffTreeNode, node diffTreeBuildNode, parent string, depth int) []model.DiffTreeNode {
+	flat = append(flat, model.DiffTreeNode{
 		Name:       node.Name,
 		Path:       node.Path,
 		ParentPath: parent,

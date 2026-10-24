@@ -125,7 +125,7 @@ func (a *App) resolveDiffReviewPlatform(ctx context.Context, tenant string) (dif
 	return diffReviewPlatform{client: resolution.client, capabilities: whoami.Capabilities, canAdvance: canAdvance}, nil, nil
 }
 
-func applyDiffReviewLadderState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewLadderState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, status *uiDiffReviewStatus) {
 	switch strings.ToUpper(strings.TrimSpace(review.Status)) {
 	case "OPEN":
 		status.State = diffReviewStateOpen
@@ -146,7 +146,7 @@ func applyDiffReviewLadderState(ctx context.Context, client *platformclient.Plat
 
 // applyDiffReviewReadyState marks a READY review Blocked when threads are unresolved,
 // matching merge-queue/advance's gate; otherwise Ready with its queue position.
-func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, status *uiDiffReviewStatus) {
+func applyDiffReviewReadyState(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, status *uiDiffReviewStatus) {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadComments) == "" {
 		if comments, err := client.ListComments(ctx, review.ReviewID); err == nil {
 			count := reviewpkg.CountUnresolvedThreads(comments)
@@ -159,7 +159,7 @@ func applyDiffReviewReadyState(ctx context.Context, client *platformclient.Platf
 	}
 	status.State = diffReviewStateReady
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) == "" {
-		if queue, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{
+		if queue, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{
 			Repository: review.Repository, TargetBranch: review.TargetBranch,
 		}); err == nil {
 			status.QueuePosition = reviewQueuePosition(queue, review.ReviewID)
@@ -168,8 +168,8 @@ func applyDiffReviewReadyState(ctx context.Context, client *platformclient.Platf
 }
 
 // mostRecentPlatformReview picks the most recently updated of the pair's reviews.
-func mostRecentPlatformReview(reviews []platformclient.PlatformReview) (platformclient.PlatformReview, bool) {
-	var best platformclient.PlatformReview
+func mostRecentPlatformReview(reviews []model.PlatformReview) (model.PlatformReview, bool) {
+	var best model.PlatformReview
 	found := false
 	for _, review := range reviews {
 		if !found || review.UpdatedAt.After(best.UpdatedAt) {

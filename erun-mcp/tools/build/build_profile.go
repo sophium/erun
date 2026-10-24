@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
@@ -17,7 +18,7 @@ type BuildProfileInput struct {
 // Record is raw JSON because the SDK cannot derive a schema for the
 // self-referential step type.
 type BuildProfileResult struct {
-	Records []build.TimingRecordSummary `json:"records,omitempty"`
+	Records []model.TimingRecordSummary `json:"records,omitempty"`
 	Record  json.RawMessage             `json:"record,omitempty"`
 }
 

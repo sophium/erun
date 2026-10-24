@@ -8,10 +8,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -25,7 +25,7 @@ type UsageInput struct {
 
 // UsageOutput aliases the shared report so the reading and the sizing
 // recommendation come from one body of evidence.
-type UsageOutput = podruntime.RuntimeUsageReport
+type UsageOutput = model.RuntimeUsageReport
 
 // UsageSizingSurfaces is embedded in the tool description so it cannot drift from the surfaces.
 var UsageSizingSurfaces = []string{
@@ -54,7 +54,7 @@ func UsageTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 		}
 		req := cloud.ShellLaunchParamsFromResult(target)
 		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		params := podruntime.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
+		params := model.RuntimeUsageParams{Interval: usageIntervalFromSeconds(input.IntervalSeconds)}
 		result, err := podruntime.RunRuntimeUsage(runCtx, nil, nil, req, params)
 		if err != nil {
 			return nil, UsageOutput{}, err
@@ -77,5 +77,5 @@ func resolveUsageOpenResult(runtime sharedpkg.RuntimeConfig, input UsageInput) (
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	return open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 }

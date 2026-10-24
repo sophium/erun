@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -15,7 +16,7 @@ const (
 )
 
 // linuxPackageCheckTarget is `test` when declared, otherwise `build`, so untested packages still compile.
-func linuxPackageCheckTarget(pkg shared.LinuxPackageSpec) (string, error) {
+func linuxPackageCheckTarget(pkg model.LinuxPackageSpec) (string, error) {
 	for _, stage := range []string{linuxPackageTestStage, linuxPackageBuildStage} {
 		if shared.DockerfileDeclaresStage(pkg.DockerfilePath, stage) {
 			return stage, nil
@@ -24,7 +25,7 @@ func linuxPackageCheckTarget(pkg shared.LinuxPackageSpec) (string, error) {
 	return "", fmt.Errorf("linux package %s declares neither a `test` nor a `build` stage, so `erun build` has nothing to run: %s", pkg.Name, pkg.DockerfilePath)
 }
 
-func CheckLinuxPackagesBuildable(packages []shared.LinuxPackageSpec) error {
+func CheckLinuxPackagesBuildable(packages []model.LinuxPackageSpec) error {
 	for _, pkg := range packages {
 		if _, err := linuxPackageCheckTarget(pkg); err != nil {
 			return err
@@ -33,12 +34,12 @@ func CheckLinuxPackagesBuildable(packages []shared.LinuxPackageSpec) error {
 	return nil
 }
 
-func linuxPackageCheckArgs(pkg shared.LinuxPackageSpec, target, cgroupParent string) []string {
+func linuxPackageCheckArgs(pkg model.LinuxPackageSpec, target, cgroupParent string) []string {
 	args := []string{"build", "--progress=plain", "--target", target, "--output", "type=cacheonly"}
 	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
 
-func linuxPackageDistArgs(pkg shared.LinuxPackageSpec, version, platform, dest, cgroupParent string) []string {
+func linuxPackageDistArgs(pkg model.LinuxPackageSpec, version, platform, dest, cgroupParent string) []string {
 	args := []string{"build", "--progress=plain", "--platform", platform, "--target", shared.LinuxPackageDistStage, "--build-arg", "ERUN_VERSION=" + version, "--output", "type=local,dest=" + dest}
 	return append(AppendCgroupParentArg(args, cgroupParent), "-f", pkg.DockerfilePath, ".")
 }
@@ -53,7 +54,7 @@ func AppendCgroupParentArg(args []string, cgroupParent string) []string {
 }
 
 // Below debug verbosity output is captured, so the heartbeat is the only liveness signal.
-func runLinuxPackageDockerBuild(ctx core.Context, pkg shared.LinuxPackageSpec, label string, args []string) error {
+func runLinuxPackageDockerBuild(ctx core.Context, pkg model.LinuxPackageSpec, label string, args []string) error {
 	done := ctx.Progress.Begin(label)
 	defer done()
 	if _, err := runDockerBuildOnce(args, pkg.ContextDir, "", false, ctx.Verbosity, ctx.Stdout, ctx.Stderr); err != nil {
@@ -64,7 +65,7 @@ func runLinuxPackageDockerBuild(ctx core.Context, pkg shared.LinuxPackageSpec, l
 
 // RunLinuxPackageChecks runs every package's tests on a plain build. A recorded pass for the
 // fingerprint is reused; only a pass is recorded.
-func RunLinuxPackageChecks(ctx core.Context, packages []shared.LinuxPackageSpec) error {
+func RunLinuxPackageChecks(ctx core.Context, packages []model.LinuxPackageSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
 	cgroupParent := core.BuildContainerCPUCapCgroupParent()
@@ -108,14 +109,14 @@ func linuxPackageTestOutcome(target, tested string) string {
 	return tested
 }
 
-func reportLinuxPackageReuse(ctx core.Context, pkg shared.LinuxPackageSpec, target string) {
+func reportLinuxPackageReuse(ctx core.Context, pkg model.LinuxPackageSpec, target string) {
 	if target != linuxPackageTestStage {
 		ctx.Trace(pkg.Name + ": its " + target + " stage is reused (fingerprint fp-" + pkg.Fingerprint + ")")
 	}
 	ctx.Info(pkg.Name + ": test: " + linuxPackageTestOutcome(target, "reused (fingerprint fp-"+pkg.Fingerprint+")"))
 }
 
-func traceLinuxPackageRunReason(ctx core.Context, pkg shared.LinuxPackageSpec, target string) {
+func traceLinuxPackageRunReason(ctx core.Context, pkg model.LinuxPackageSpec, target string) {
 	switch {
 	case pkg.NoReuseReason != "":
 		ctx.Trace(pkg.Name + ": running its " + target + " stage: " + pkg.NoReuseReason)
@@ -126,7 +127,7 @@ func traceLinuxPackageRunReason(ctx core.Context, pkg shared.LinuxPackageSpec, t
 
 // ExportReleaseLinuxPackages builds every package's `dist` stage for every release platform,
 // inside the publish so a failure stops the release before anything is public.
-func ExportReleaseLinuxPackages(ctx core.Context, spec shared.ReleaseSpec) error {
+func ExportReleaseLinuxPackages(ctx core.Context, spec model.ReleaseSpec) error {
 	ctx, stopProgress := withBuildProgress(ctx)
 	defer stopProgress()
 	cgroupParent := core.BuildContainerCPUCapCgroupParent()

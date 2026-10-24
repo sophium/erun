@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -43,7 +44,7 @@ func loadEnvironmentJobsFromMCP(ctx context.Context, endpoint, bearer string) ([
 	return payload.Jobs, nil
 }
 
-func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error) {
+func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer string, params model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
@@ -77,7 +78,7 @@ func readEnvironmentJobOutputFromMCP(ctx context.Context, endpoint, bearer strin
 }
 
 // cancelEnvironmentJobFromMCP is not idle-probed: cancelling is a real action.
-func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error) {
+func cancelEnvironmentJobFromMCP(ctx context.Context, endpoint, bearer string, params model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {

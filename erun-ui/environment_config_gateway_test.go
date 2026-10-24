@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
@@ -14,7 +15,7 @@ func TestEnvironmentConfigGatewayChoiceReachesTheLaunch(t *testing.T) {
 			DefaultModel: "vendor/model-x",
 			Models:       []configpkg.OpenRouterModel{{ID: "vendor/model-x"}},
 		}},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: t.TempDir(), KubernetesContext: "cluster-local"},
 		},

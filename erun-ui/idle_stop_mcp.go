@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // idleStopMCPTimeout keeps a stale image or wedged port-forward from hanging;
@@ -43,7 +43,7 @@ func cancelStopPendingViaMCP(ctx context.Context, endpoint, bearer, tenant, envi
 	return nil
 }
 
-func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]activity.EnvironmentStopHistoryEntry, error) {
+func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, environment string) ([]model.EnvironmentStopHistoryEntry, error) {
 	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
@@ -73,13 +73,13 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, bearer, tenant, enviro
 		return nil, err
 	}
 	var payload struct {
-		Entries []activity.EnvironmentStopHistoryEntry `json:"entries"`
+		Entries []model.EnvironmentStopHistoryEntry `json:"entries"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return nil, err
 	}
 	if payload.Entries == nil {
-		return []activity.EnvironmentStopHistoryEntry{}, nil
+		return []model.EnvironmentStopHistoryEntry{}, nil
 	}
 	return payload.Entries, nil
 }

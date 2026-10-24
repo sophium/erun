@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -42,10 +43,10 @@ func TestReportCommitStatusPostsToGitHubWithTheRightShape(t *testing.T) {
 			return "gho_test_token", true
 		},
 	}
-	result, err := ReportCommitStatus(core.Context{}, ReportCommitStatusParams{
+	result, err := ReportCommitStatus(core.Context{}, model.ReportCommitStatusParams{
 		RemoteURL:   "git@github.com:sophium/erun.git",
 		Commit:      "abc123def456",
-		State:       CommitStatusSuccess,
+		State:       model.CommitStatusSuccess,
 		Description: "gate build passed",
 		Context:     "erun/merge-gate",
 		TargetURL:   "https://example.com/log",
@@ -71,7 +72,7 @@ func TestReportCommitStatusPostsToGitHubWithTheRightShape(t *testing.T) {
 	if resolvedOwner != "sophium" {
 		t.Fatalf("expected token resolution scoped to owner sophium, got %s", resolvedOwner)
 	}
-	wantResult := ReportCommitStatusResult{Owner: "sophium", Repo: "erun", Commit: "abc123def456", State: "success", Context: "erun/merge-gate"}
+	wantResult := model.ReportCommitStatusResult{Owner: "sophium", Repo: "erun", Commit: "abc123def456", State: "success", Context: "erun/merge-gate"}
 	if result != wantResult {
 		t.Fatalf("unexpected result: got %+v, want %+v", result, wantResult)
 	}

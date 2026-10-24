@@ -6,9 +6,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +22,7 @@ func newReviewReviewersCmd(store config.CloudReadStore, alias *string, deps clou
 	)
 }
 
-func writeReviewerLine(ctx core.Context, reviewer platformclient.PlatformReviewer) error {
+func writeReviewerLine(ctx core.Context, reviewer model.PlatformReviewer) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "  - %s\n", reviewer.UserID)
 	return err
 }
@@ -44,7 +44,7 @@ func newReviewReviewersListCmd(store config.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if len(reviewers) == 0 {
 					if _, err := fmt.Fprintln(ctx.Stdout, "no reviewers"); err != nil {
 						return err
@@ -86,7 +86,7 @@ func newReviewReviewersAddCmd(store config.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers add planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewerLine(ctx, reviewer); err != nil {
 					return err
 				}
@@ -117,7 +117,7 @@ func newReviewReviewersRemoveCmd(store config.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review reviewers remove planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "removed reviewer %s\n", userID); err != nil {
 					return err
 				}

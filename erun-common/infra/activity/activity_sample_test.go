@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // comm carries a space and a paren to exercise the parser's hardest field.
@@ -62,7 +64,7 @@ func TestResidentActivityNeedsCPUToAdvance(t *testing.T) {
 	writeProcEntry(t, root, 103, "erun", 10, 902)
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	first, err := ScanResidentActivity(root, 103, ResidentActivitySample{}, now)
+	first, err := ScanResidentActivity(root, 103, model.ResidentActivitySample{}, now)
 	if err != nil {
 		t.Fatalf("first scan: %v", err)
 	}
@@ -101,7 +103,7 @@ func TestResidentActivityIgnoresNoiseBelowTheCPURateFloor(t *testing.T) {
 	writeProcEntry(t, root, 201, "claude-real", 21529+3884, 900)
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 
-	first, err := ScanResidentActivity(root, 1, ResidentActivitySample{}, now)
+	first, err := ScanResidentActivity(root, 1, model.ResidentActivitySample{}, now)
 	if err != nil {
 		t.Fatalf("first scan: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestResidentActivityIgnoresNoiseBelowTheCPURateFloor(t *testing.T) {
 	// A zero interval must not divide by zero or read busy.
 	writeProcEntry(t, root, 201, "claude-real", 21529+3884+2100, 900)
 	sampledAt := now.Add(30 * time.Second)
-	third, err := ScanResidentActivity(root, 1, ResidentActivitySample{SampledAt: sampledAt, CPU: second.Sample.CPU}, sampledAt)
+	third, err := ScanResidentActivity(root, 1, model.ResidentActivitySample{SampledAt: sampledAt, CPU: second.Sample.CPU}, sampledAt)
 	if err != nil {
 		t.Fatalf("third scan: %v", err)
 	}
@@ -132,7 +134,7 @@ func TestResidentActivityCountsANewlyStartedProcess(t *testing.T) {
 	root := t.TempDir()
 	writeProcEntry(t, root, 201, "node", 40, 700)
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	first, err := ScanResidentActivity(root, 1, ResidentActivitySample{}, now)
+	first, err := ScanResidentActivity(root, 1, model.ResidentActivitySample{}, now)
 	if err != nil {
 		t.Fatalf("first scan: %v", err)
 	}
@@ -152,7 +154,7 @@ func TestResidentActivityIgnoresProcessesNobodyWouldCallWork(t *testing.T) {
 	writeProcEntry(t, root, 301, "sshd", 100, 500)
 	writeProcEntry(t, root, 302, "emcp", 100, 501)
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
-	first, err := ScanResidentActivity(root, 1, ResidentActivitySample{}, now)
+	first, err := ScanResidentActivity(root, 1, model.ResidentActivitySample{}, now)
 	if err != nil {
 		t.Fatalf("first scan: %v", err)
 	}

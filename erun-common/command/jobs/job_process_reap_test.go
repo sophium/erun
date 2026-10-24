@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // reapContractCommand runs a job whose orphaned grandchild exits seconds before
@@ -68,7 +69,7 @@ func TestEnvironmentJobSupervisorReapsAReparentedDescendantThatExitsWhileTheJobR
 	const id = "job"
 	command, pidFile := reapContractCommand(t, 0)
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -98,7 +99,7 @@ func TestEnvironmentJobSupervisorKeepsItsOwnChildsExitStatusWhileReaping(t *test
 	const id = "job"
 	command, pidFile := reapContractCommand(t, 42)
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,

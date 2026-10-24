@@ -5,9 +5,9 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -48,20 +48,20 @@ func newInputsUploadCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, localPath, remotePath string, run inputs.RuntimeInputUploadRunner) error {
+func runInputsUploadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, localPath, remotePath string, run inputs.RuntimeInputUploadRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	out, err := inputs.UploadRuntimeInput(ctx, req, inputs.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
+	out, err := inputs.UploadRuntimeInput(ctx, req, model.UploadRuntimeInputParams{LocalPath: localPath, RemotePath: remotePath}, run)
 	if err != nil {
 		return err
 	}
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(out)
 	}
 	ctx.Info(fmt.Sprintf("Uploaded %s (%s, sha256 %s) to %s", localPath, shared.FormatOutputSize(out.Bytes), out.SHA256, out.RemotePath))

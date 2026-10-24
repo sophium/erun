@@ -4,10 +4,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func ParseGitDiff(raw string) DiffResult {
-	result := DiffResult{
+func ParseGitDiff(raw string) model.DiffResult {
+	result := model.DiffResult{
 		RawDiff: raw,
 		Files:   parseGitDiffFiles(raw),
 	}
@@ -21,7 +23,7 @@ func ParseGitDiff(raw string) DiffResult {
 	return result
 }
 
-func parseGitDiffFiles(raw string) []DiffFile {
+func parseGitDiffFiles(raw string) []model.DiffFile {
 	lines := strings.Split(raw, "\n")
 	parser := diffFileParser{}
 
@@ -36,9 +38,9 @@ func parseGitDiffFiles(raw string) []DiffFile {
 }
 
 type diffFileParser struct {
-	files       []DiffFile
-	current     *DiffFile
-	currentHunk *DiffHunk
+	files       []model.DiffFile
+	current     *model.DiffFile
+	currentHunk *model.DiffHunk
 	oldLine     int
 	newLine     int
 }
@@ -66,7 +68,7 @@ func (p *diffFileParser) parseLine(line string) {
 func (p *diffFileParser) startFile(line string) {
 	p.flush()
 	oldPath, newPath := parseDiffGitHeader(line)
-	p.current = &DiffFile{Path: firstNonEmptyDiffPath(newPath, oldPath), OldPath: oldPath, NewPath: newPath, Status: "modified"}
+	p.current = &model.DiffFile{Path: firstNonEmptyDiffPath(newPath, oldPath), OldPath: oldPath, NewPath: newPath, Status: "modified"}
 }
 
 func (p *diffFileParser) flush() {
@@ -123,7 +125,7 @@ func (p *diffFileParser) appendHunkLine(line string) {
 	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- "):
 		p.appendDeletedLine(line)
 	case strings.HasPrefix(line, "\\"):
-		p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "meta", Content: line})
+		p.currentHunk.Lines = append(p.currentHunk.Lines, model.DiffLine{Kind: "meta", Content: line})
 	default:
 		p.appendContextLine(line)
 	}
@@ -131,18 +133,18 @@ func (p *diffFileParser) appendHunkLine(line string) {
 
 func (p *diffFileParser) appendAddedLine(line string) {
 	p.current.Additions++
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "add", Content: strings.TrimPrefix(line, "+"), NewLine: p.newLine})
+	p.currentHunk.Lines = append(p.currentHunk.Lines, model.DiffLine{Kind: "add", Content: strings.TrimPrefix(line, "+"), NewLine: p.newLine})
 	p.newLine++
 }
 
 func (p *diffFileParser) appendDeletedLine(line string) {
 	p.current.Deletions++
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "delete", Content: strings.TrimPrefix(line, "-"), OldLine: p.oldLine})
+	p.currentHunk.Lines = append(p.currentHunk.Lines, model.DiffLine{Kind: "delete", Content: strings.TrimPrefix(line, "-"), OldLine: p.oldLine})
 	p.oldLine++
 }
 
 func (p *diffFileParser) appendContextLine(line string) {
-	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "context", Content: strings.TrimPrefix(line, " "), OldLine: p.oldLine, NewLine: p.newLine})
+	p.currentHunk.Lines = append(p.currentHunk.Lines, model.DiffLine{Kind: "context", Content: strings.TrimPrefix(line, " "), OldLine: p.oldLine, NewLine: p.newLine})
 	p.oldLine++
 	p.newLine++
 }
@@ -158,8 +160,8 @@ func parseDiffGitHeader(line string) (string, string) {
 	return oldPath, newPath
 }
 
-func parseDiffHunkHeader(line string) DiffHunk {
-	hunk := DiffHunk{Header: line}
+func parseDiffHunkHeader(line string) model.DiffHunk {
+	hunk := model.DiffHunk{Header: line}
 	end := strings.Index(line[3:], " @@")
 	if end < 0 {
 		return hunk
@@ -183,7 +185,7 @@ func parseDiffRange(value, prefix string) (int, int) {
 	return start, lineCount
 }
 
-func normalizeDiffFile(file *DiffFile) {
+func normalizeDiffFile(file *model.DiffFile) {
 	if file == nil {
 		return
 	}

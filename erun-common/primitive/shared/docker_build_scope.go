@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func NormalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc) (DockerStore, ProjectFinderFunc, BuildContextResolverFunc, NowFunc) {
@@ -62,7 +63,7 @@ func IsDockerBuildModuleDir(dir string) (bool, error) {
 	return len(buildContexts) > 0, nil
 }
 
-func ResolveDockerBuildProjectRoot(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (string, error) {
+func ResolveDockerBuildProjectRoot(findProjectRoot ProjectFinderFunc, target model.DockerCommandTarget) (string, error) {
 	if projectRoot := strings.TrimSpace(target.ProjectRoot); projectRoot != "" {
 		return filepath.Clean(projectRoot), nil
 	}

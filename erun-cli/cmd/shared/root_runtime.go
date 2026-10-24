@@ -3,7 +3,7 @@ package shared
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
 )
 
@@ -30,10 +30,10 @@ func NewCommandGroup(use, short string, commands ...*cobra.Command) *cobra.Comma
 
 // ScopedOpenParams maps --tenant/--environment to OpenParams; empty means the current scope.
 // command names the invocation so resolution failures cite it.
-func ScopedOpenParams(command, tenant, environment string) shared.OpenParams {
+func ScopedOpenParams(command, tenant, environment string) model.OpenParams {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	return shared.OpenParams{
+	return model.OpenParams{
 		Tenant:                    tenant,
 		Environment:               environment,
 		UseDefaultTenant:          tenant == "",

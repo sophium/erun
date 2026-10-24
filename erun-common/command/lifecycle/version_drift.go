@@ -6,50 +6,20 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// EnvironmentVersionStatus is one environment's erun version against the tenant's newest.
-type EnvironmentVersionStatus struct {
-	Environment string `json:"environment"`
-	// Version comes from cached config, else a live helm read. Empty is a confirmed absence unless
-	// VersionUnresolved is set.
-	Version string `json:"version,omitempty"`
-	// BehindMax is set only when both versions parse as plain semver.
-	BehindMax bool `json:"behindMax,omitempty"`
-	// VersionUnresolved means neither config nor the cluster could answer; excluded from MaxVersion.
-	VersionUnresolved       bool   `json:"versionUnresolved,omitempty"`
-	VersionUnresolvedReason string `json:"versionUnresolvedReason,omitempty"`
-}
-
-// TenantVersionDrift compares environments within one tenant, not against the registry.
-// GateEnvironment additionally flags a merge-queue gate older than an environment it gates.
-type TenantVersionDrift struct {
-	Tenant       string                     `json:"tenant"`
-	Environments []EnvironmentVersionStatus `json:"environments,omitempty"`
-	MaxVersion   string                     `json:"maxVersion,omitempty"`
-
-	GateEnvironment string `json:"gateEnvironment,omitempty"`
-	GateVersion     string `json:"gateVersion,omitempty"`
-	// GateVersionUnresolved means GateBehind is not a real verdict.
-	GateVersionUnresolved bool `json:"gateVersionUnresolved,omitempty"`
-	// GateVersionUnresolvedReason is also empty for a parsed non-semver (snapshot) version.
-	GateVersionUnresolvedReason string `json:"gateVersionUnresolvedReason,omitempty"`
-	GateBehind                  bool   `json:"gateBehind,omitempty"`
-	// GateOutdatedBy names environments running a newer erun version than the gate.
-	GateOutdatedBy []string `json:"gateOutdatedBy,omitempty"`
-}
-
 // ResolveTenantVersionDrift compares every environment in tenant. An unknown gateEnvironment is an
 // error. Dry-run never reads versions live.
-func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gateEnvironment string) (TenantVersionDrift, error) {
+func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gateEnvironment string) (model.TenantVersionDrift, error) {
 	tenant = strings.TrimSpace(tenant)
 	gateEnvironment = strings.TrimSpace(gateEnvironment)
 
 	tenantResult, ok := findListTenant(result, tenant)
 	if !ok {
-		return TenantVersionDrift{}, fmt.Errorf("tenant %q not found", tenant)
+		return model.TenantVersionDrift{}, fmt.Errorf("tenant %q not found", tenant)
 	}
 
 	resolutions := make(map[string]environmentVersionResolution, len(tenantResult.Environments))
@@ -57,7 +27,7 @@ func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gate
 		resolutions[env.Name] = resolveEnvironmentVersionForDrift(ctx, tenant, env)
 	}
 
-	drift := TenantVersionDrift{Tenant: tenant}
+	drift := model.TenantVersionDrift{Tenant: tenant}
 	maxVersion, hasMax := maxResolvedVersion(tenantResult.Environments, resolutions)
 	if hasMax {
 		drift.MaxVersion = registry.FormatSemver(maxVersion)
@@ -73,8 +43,8 @@ func ResolveTenantVersionDrift(ctx core.Context, result ListResult, tenant, gate
 }
 
 // Neither a confirmed absence nor an unknown can be behind.
-func environmentVersionStatus(name string, resolution environmentVersionResolution, maxVersion registry.Semver, hasMax bool) EnvironmentVersionStatus {
-	status := EnvironmentVersionStatus{Environment: name, Version: resolution.Version}
+func environmentVersionStatus(name string, resolution environmentVersionResolution, maxVersion registry.Semver, hasMax bool) model.EnvironmentVersionStatus {
+	status := model.EnvironmentVersionStatus{Environment: name, Version: resolution.Version}
 	if resolution.Version == "" {
 		status.VersionUnresolved = !resolution.ConfirmedAbsent
 		status.VersionUnresolvedReason = resolution.UnresolvedReason
@@ -88,10 +58,10 @@ func environmentVersionStatus(name string, resolution environmentVersionResoluti
 	return status
 }
 
-func addGateVerdict(drift TenantVersionDrift, tenantResult ListTenantResult, tenant, gateEnvironment string, resolutions map[string]environmentVersionResolution) (TenantVersionDrift, error) {
+func addGateVerdict(drift model.TenantVersionDrift, tenantResult ListTenantResult, tenant, gateEnvironment string, resolutions map[string]environmentVersionResolution) (model.TenantVersionDrift, error) {
 	drift.GateEnvironment = gateEnvironment
 	if _, found := findListEnvironment(tenantResult, gateEnvironment); !found {
-		return TenantVersionDrift{}, fmt.Errorf("gate environment %q not found in tenant %q", gateEnvironment, tenant)
+		return model.TenantVersionDrift{}, fmt.Errorf("gate environment %q not found in tenant %q", gateEnvironment, tenant)
 	}
 	gateResolution := resolutions[gateEnvironment]
 	drift.GateVersion = gateResolution.Version

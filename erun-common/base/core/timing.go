@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // stepTiming is one measured step in a command's run, arranged as a tree.
@@ -23,7 +25,7 @@ type stepTiming struct {
 	cache         *CacheDecision
 	Children      []*stepTiming
 	cgroupBefore  BuildCgroupSnapshot
-	cgroupMetrics *BuildCgroupMetrics
+	cgroupMetrics *model.BuildCgroupMetrics
 }
 
 // CacheDecision records whether an image build hit the fingerprint cache and why.
@@ -75,7 +77,7 @@ func (s *stepTiming) Child(name string) *stepTiming {
 
 // AddFinishedChild records a step whose duration and cgroup metrics the caller
 // already measured.
-func (s *stepTiming) AddFinishedChild(name string, elapsed time.Duration, err error, cache *CacheDecision, cgroup *BuildCgroupMetrics) *stepTiming {
+func (s *stepTiming) AddFinishedChild(name string, elapsed time.Duration, err error, cache *CacheDecision, cgroup *model.BuildCgroupMetrics) *stepTiming {
 	now := s.now()
 	child := &stepTiming{Name: name, now: s.now, start: now.Add(-elapsed), end: now, ended: true, cache: cache, cgroupMetrics: cgroup}
 	if err != nil {
@@ -128,7 +130,7 @@ type stepSnapshot struct {
 	failed   bool
 	errMsg   string
 	cache    *CacheDecision
-	cgroup   *BuildCgroupMetrics
+	cgroup   *model.BuildCgroupMetrics
 	children []*stepTiming
 }
 
@@ -184,12 +186,12 @@ func (c Context) RecordTimingCache(cache *CacheDecision) {
 
 // TimingPlatformObserver records each per-architecture build as a child of the
 // current step, broken down into its BuildKit steps.
-func (c Context) TimingPlatformObserver(cache *CacheDecision) func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
+func (c Context) TimingPlatformObserver(cache *CacheDecision) func(platform string, elapsed time.Duration, err error, cgroup *model.BuildCgroupMetrics, buildOutput string) {
 	if c.Timing == nil {
-		return func(string, time.Duration, error, *BuildCgroupMetrics, string) {}
+		return func(string, time.Duration, error, *model.BuildCgroupMetrics, string) {}
 	}
 	step := c.Timing
-	return func(platform string, elapsed time.Duration, err error, cgroup *BuildCgroupMetrics, buildOutput string) {
+	return func(platform string, elapsed time.Duration, err error, cgroup *model.BuildCgroupMetrics, buildOutput string) {
 		child := step.AddFinishedChild(platform, elapsed, err, cache, cgroup)
 		AttachBuildProgressPhases(child, buildOutput)
 	}
@@ -295,36 +297,9 @@ func RenderStepTimingRows(step *stepTiming, depth int) []string {
 	return rows
 }
 
-// TimingRecord is the per-run JSON counterpart to the timing table.
-type TimingRecord struct {
-	Command         string              `json:"command"`
-	StartedAt       time.Time           `json:"startedAt"`
-	DurationSeconds float64             `json:"durationSeconds"`
-	Duration        string              `json:"duration"`
-	Failed          bool                `json:"failed"`
-	Error           string              `json:"error,omitempty"`
-	Cgroup          *BuildCgroupMetrics `json:"cgroup,omitempty"`
-	Steps           []TimingStepJSON    `json:"steps,omitempty"`
-}
-
-// TimingStepJSON keeps children in insertion order so two records diff cleanly.
-type TimingStepJSON struct {
-	Name               string              `json:"name"`
-	DurationSeconds    float64             `json:"durationSeconds"`
-	Duration           string              `json:"duration"`
-	Failed             bool                `json:"failed,omitempty"`
-	Error              string              `json:"error,omitempty"`
-	CacheHit           *bool               `json:"cacheHit,omitempty"`
-	CacheMissReason    string              `json:"cacheMissReason,omitempty"`
-	UnaccountedSeconds float64             `json:"unaccountedSeconds,omitempty"`
-	OverlapSeconds     float64             `json:"overlapSeconds,omitempty"`
-	Cgroup             *BuildCgroupMetrics `json:"cgroup,omitempty"`
-	Steps              []TimingStepJSON    `json:"steps,omitempty"`
-}
-
-func (s *stepTiming) toStepJSON() TimingStepJSON {
+func (s *stepTiming) toStepJSON() model.TimingStepJSON {
 	snap := s.Snapshot()
-	out := TimingStepJSON{
+	out := model.TimingStepJSON{
 		Name:            snap.name,
 		DurationSeconds: snap.dur.Seconds(),
 		Duration:        snap.dur.String(),
@@ -338,7 +313,7 @@ func (s *stepTiming) toStepJSON() TimingStepJSON {
 		out.CacheMissReason = missReason
 	}
 	if len(snap.children) > 0 {
-		out.Steps = make([]TimingStepJSON, 0, len(snap.children))
+		out.Steps = make([]model.TimingStepJSON, 0, len(snap.children))
 		for _, child := range snap.children {
 			out.Steps = append(out.Steps, child.toStepJSON())
 		}
@@ -352,9 +327,9 @@ func (s *stepTiming) toStepJSON() TimingStepJSON {
 	return out
 }
 
-func (s *stepTiming) ToRecord(command string) TimingRecord {
+func (s *stepTiming) ToRecord(command string) model.TimingRecord {
 	snap := s.Snapshot()
-	record := TimingRecord{
+	record := model.TimingRecord{
 		Command:         command,
 		StartedAt:       snap.Start,
 		DurationSeconds: snap.dur.Seconds(),

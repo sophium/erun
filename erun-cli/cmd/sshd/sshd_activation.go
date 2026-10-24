@@ -6,6 +6,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
@@ -33,7 +34,7 @@ func NewSSHDActivator(runRemoteCommand kube.RemoteCommandRunnerFunc) shared.SSHD
 
 // emitSSHDConnectionInfo prints connection details on a terminal only: under --no-shell
 // stdout is eval'd, and stderr stays quiet by design.
-func emitSSHDConnectionInfo(ctx core.Context, info open.SSHConnectionInfo) error {
+func emitSSHDConnectionInfo(ctx core.Context, info model.SSHConnectionInfo) error {
 	if ctx.Stdout == nil || !shared.WriterIsTerminal(ctx.Stdout) {
 		return nil
 	}

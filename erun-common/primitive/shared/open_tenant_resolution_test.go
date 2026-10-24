@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type openTenantResolutionStore struct {
@@ -20,8 +21,8 @@ func (s openTenantResolutionStore) LoadERunConfig() (config.ERunConfig, string, 
 	return config.ERunConfig{DefaultTenant: s.defaultTenant}, "", nil
 }
 
-func (s openTenantResolutionStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
-	return config.TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
+func (s openTenantResolutionStore) LoadTenantConfig(name string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
 }
 
 func (s openTenantResolutionStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
@@ -34,7 +35,7 @@ func noProjectRoot() (string, string, error) {
 
 func TestResolveOpenTenantInferenceForbidden(t *testing.T) {
 	store := openTenantResolutionStore{}
-	_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{UseDefaultTenant: false})
+	_, err := ResolveOpenTenant(store, noProjectRoot, model.OpenParams{UseDefaultTenant: false})
 	if err == nil {
 		t.Fatal("expected an error when no tenant is given and inference is not permitted")
 	}
@@ -65,7 +66,7 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
-			_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{
+			_, err := ResolveOpenTenant(store, noProjectRoot, model.OpenParams{
 				UseDefaultTenant:          true,
 				Command:                   tt.command,
 				CommandScopesTenantByFlag: tt.scopesTenantByFlag,
@@ -98,7 +99,7 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 	store := openTenantResolutionStore{}
 	const adopting = "erun summarize"
-	_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{
+	_, err := ResolveOpenTenant(store, noProjectRoot, model.OpenParams{
 		UseDefaultTenant:          true,
 		Command:                   adopting,
 		CommandScopesTenantByFlag: true,
@@ -120,7 +121,7 @@ func TestResolveOpenTenantRecoveryFollowsANewlyAdoptingCommand(t *testing.T) {
 // list's --tenant means something else, so it is not offered as the fix.
 func TestResolveOpenTenantCommandWithNonScopingTenantFlagOmitsFlagRemedy(t *testing.T) {
 	store := openTenantResolutionStore{}
-	_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{
+	_, err := ResolveOpenTenant(store, noProjectRoot, model.OpenParams{
 		UseDefaultTenant:          true,
 		Command:                   "erun list",
 		CommandScopesTenantByFlag: false,

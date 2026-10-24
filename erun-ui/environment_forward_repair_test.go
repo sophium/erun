@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
@@ -76,7 +77,7 @@ func forwardRepairTestApp(
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -91,12 +92,12 @@ func forwardRepairTestApp(
 		resolveCLIPath:      func() string { return "/tmp/erun" },
 		canConnectLocalPort: func(int) bool { return probe.bound() },
 		canReachMCPEndpoint: func(int) bool { return probe.answers() },
-		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+		loadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 			if !probe.answers() {
-				return activity.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+				return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 			}
-			return activity.EnvironmentIdleStatus{
-				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			return model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			}, nil
 		},
 		reconnectMCP: func(context.Context, config.OpenResult, func(string)) error {
@@ -105,8 +106,8 @@ func forwardRepairTestApp(
 		readRuntimeRunState: readRunState,
 		// Only "erun/fresh" reaches the pod fallback; answer idle as a neutral default.
 		execRuntimePod: func(context.Context, uiSelection, string) (string, error) {
-			data, err := json.Marshal(activity.EnvironmentIdleStatus{
-				Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+			data, err := json.Marshal(model.EnvironmentIdleStatus{
+				Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 			})
 			if err != nil {
 				return "", err
@@ -268,8 +269,8 @@ func TestServingForwardIsLeftAlone(t *testing.T) {
 	}
 
 	// The tunnel carries traffic but the idle query fails.
-	app.deps.loadIdleStatus = func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-		return activity.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
+	app.deps.loadIdleStatus = func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+		return model.EnvironmentIdleStatus{}, errors.New("401 unauthorized")
 	}
 	state := sweepUntilRebindSettles(t, app)
 	if !state.reachable || state.observed {

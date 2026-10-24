@@ -6,21 +6,22 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // OrchestratorEnvRoleNone is the CLI token for undeclaring a role, since "" means "no flag given".
 const OrchestratorEnvRoleNone = "none"
 
 // ParseOrchestratorEnvRoleFlag resolves a role token: "code", "build", "runtime", or OrchestratorEnvRoleNone.
-func ParseOrchestratorEnvRoleFlag(value string) (configpkg.OrchestratorEnvRole, error) {
+func ParseOrchestratorEnvRoleFlag(value string) (model.OrchestratorEnvRole, error) {
 	trimmed := strings.TrimSpace(value)
 	if strings.EqualFold(trimmed, OrchestratorEnvRoleNone) {
 		return "", nil
 	}
-	role := configpkg.OrchestratorEnvRole(trimmed)
+	role := model.OrchestratorEnvRole(trimmed)
 	if !role.IsValid() || role == "" {
 		return "", fmt.Errorf("invalid role %q: must be %q, %q, %q, or %q (undeclared)",
-			value, configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime, OrchestratorEnvRoleNone)
+			value, model.OrchestratorEnvRoleCode, model.OrchestratorEnvRoleBuild, model.OrchestratorEnvRoleRuntime, OrchestratorEnvRoleNone)
 	}
 	return role, nil
 }
@@ -32,16 +33,9 @@ type OrchestratorRoleStore interface {
 	LoadEnvConfig(tenant, environment string) (configpkg.EnvConfig, string, error)
 }
 
-type SetOrchestratorEnvRoleParams struct {
-	OrchestratorID string
-	Tenant         string
-	Environment    string
-	Role           configpkg.OrchestratorEnvRole
-}
-
 // SetOrchestratorEnvRole sets the role of an already-linked environment, re-checking
 // OrchestratorEnvRoleAllowed exactly as the desktop does. Invalid persisted pairings still load.
-func SetOrchestratorEnvRole(ctx core.Context, store OrchestratorRoleStore, params SetOrchestratorEnvRoleParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorEnvRole(ctx core.Context, store OrchestratorRoleStore, params model.SetOrchestratorEnvRoleParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}
@@ -51,7 +45,7 @@ func SetOrchestratorEnvRole(ctx core.Context, store OrchestratorRoleStore, param
 	}
 	if !params.Role.IsValid() {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("invalid role %q: must be %q, %q, or %q, or empty for undeclared",
-			params.Role, configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, configpkg.OrchestratorEnvRoleRuntime)
+			params.Role, model.OrchestratorEnvRoleCode, model.OrchestratorEnvRoleBuild, model.OrchestratorEnvRoleRuntime)
 	}
 
 	config, _, err := store.LoadERunConfig()
@@ -114,14 +108,14 @@ func findOrchestratorEnvLink(config configpkg.ERunConfig, orchestratorID, tenant
 }
 
 // roleLabel renders "" as "undeclared".
-func roleLabel(role configpkg.OrchestratorEnvRole) string {
+func roleLabel(role model.OrchestratorEnvRole) string {
 	if role == "" {
 		return "undeclared"
 	}
 	return string(role)
 }
 
-func normalizeOrchestratorEnvRoleParams(params SetOrchestratorEnvRoleParams) (string, string, string, error) {
+func normalizeOrchestratorEnvRoleParams(params model.SetOrchestratorEnvRoleParams) (string, string, string, error) {
 	orchestratorID := strings.TrimSpace(params.OrchestratorID)
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -21,8 +22,8 @@ func (s BootstrapRunner) resolveKubernetesContext(params open.BootstrapInitParam
 	}
 
 	if s.PromptKubernetesContext == nil {
-		return "", BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-			Type:  BootstrapInitInteractionKubernetesContext,
+		return "", BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+			Type:  model.BootstrapInitInteractionKubernetesContext,
 			Label: kubernetesContextLabel(tenant, envName),
 		}}
 	}
@@ -99,8 +100,8 @@ func (s BootstrapRunner) projectContainerRegistry(projectRoot, envName string) (
 
 func (s BootstrapRunner) promptContainerRegistry(tenant, envName string) (string, error) {
 	if s.PromptContainerRegistry == nil {
-		return "", BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-			Type:         BootstrapInitInteractionContainerRegistry,
+		return "", BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+			Type:         model.BootstrapInitInteractionContainerRegistry,
 			Label:        containerRegistryLabel(tenant, envName),
 			DefaultValue: configpkg.DefaultContainerRegistry,
 		}}

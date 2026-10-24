@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -140,7 +140,7 @@ func TestExecuteDockerBuildNamesTheImageItIsBuildingWhileItRuns(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), Progress: heartbeat}
 
 	spec := shared.DockerBuildSpec{
-		Image:          helm.DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
+		Image:          model.DockerImageReference{Tag: "ghcr.io/sophium/erun-devops:1.0.290", ImageName: "erun-devops"},
 		DockerfilePath: "Dockerfile", ContextDir: ".",
 	}
 	duringBuild := ""

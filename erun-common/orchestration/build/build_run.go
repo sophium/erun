@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
@@ -12,7 +13,7 @@ import (
 )
 
 // BuildExecutionProfile summarizes this run's timing tree; nil when no timing root is active.
-func BuildExecutionProfile(ctx core.Context) *core.BuildProfileSummary {
+func BuildExecutionProfile(ctx core.Context) *model.BuildProfileSummary {
 	if ctx.Timing == nil {
 		return nil
 	}

@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestRemoveSSHConfigAliasRemovesOnlyTheNamedBlock(t *testing.T) {
 	existing := UpsertSSHConfigContent("",
-		SSHHostEntry{Alias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun"})
+		model.SSHHostEntry{Alias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun"})
 	existing = UpsertSSHConfigContent(existing,
-		SSHHostEntry{Alias: "erun-team-keep", HostName: "127.0.0.1", Port: 17122, User: "erun"})
+		model.SSHHostEntry{Alias: "erun-team-keep", HostName: "127.0.0.1", Port: 17122, User: "erun"})
 	existing = "Host github.com\n  User git\n\n" + existing
 
 	updated, removed := RemoveSSHConfigAliasContent(existing, "erun-team-dev")
@@ -44,7 +46,7 @@ func TestRemoveSSHConfigAliasIsIdempotent(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
 	path := filepath.Join(homeDir, ".ssh", "config")
-	entry := SSHHostEntry{Alias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun"}
+	entry := model.SSHHostEntry{Alias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun"}
 	if err := UpsertSSHConfig(path, entry); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}

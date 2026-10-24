@@ -2,6 +2,8 @@ package config
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestClusterRegistryWithDefaults(t *testing.T) {
@@ -46,7 +48,7 @@ func TestClusterContainerRegistries(t *testing.T) {
 func TestClusterContainerRegistriesRolesAndValidate(t *testing.T) {
 	list := ClusterContainerRegistries(ClusterRegistry{Insecure: true})
 	entry := list[0]
-	if !entry.HasRole(RegistryRoleBuild) || !entry.HasRole(RegistryRoleDeploy) {
+	if !entry.HasRole(model.RegistryRoleBuild) || !entry.HasRole(model.RegistryRoleDeploy) {
 		t.Errorf("roles = %v, want build+deploy", entry.Roles)
 	}
 	if err := list.Validate(); err != nil {
@@ -58,7 +60,7 @@ func TestContainerRegistriesValidateRejectsBothRegistryAndCluster(t *testing.T) 
 	list := ContainerRegistries{{
 		Registry: "ghcr.io/sophium",
 		Cluster:  &ClusterRegistry{},
-		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 	if err := list.Validate(); err == nil {
 		t.Fatal("expected error when both registry and cluster are set")
@@ -67,8 +69,8 @@ func TestContainerRegistriesValidateRejectsBothRegistryAndCluster(t *testing.T) 
 
 func TestContainerRegistriesConcreteExpandsClusterEntry(t *testing.T) {
 	list := ContainerRegistries{
-		{Cluster: &ClusterRegistry{}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy, RegistryRoleFrom}},
-		{Registry: "ghcr.io/sophium", Roles: []RegistryRole{RegistryRoleTo}},
+		{Cluster: &ClusterRegistry{}, Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy, model.RegistryRoleFrom}},
+		{Registry: "ghcr.io/sophium", Roles: []model.RegistryRole{model.RegistryRoleTo}},
 	}
 	resolve := func(c ClusterRegistry) (ClusterRegistryAddresses, error) {
 		return ClusterRegistryAddresses{Push: "localhost:41000", Pull: "10.43.0.50:5000"}, nil
@@ -95,7 +97,7 @@ func TestContainerRegistriesConcreteExpandsClusterEntry(t *testing.T) {
 }
 
 func TestContainerRegistriesConcreteRequiresResolver(t *testing.T) {
-	list := ContainerRegistries{{Cluster: &ClusterRegistry{}, Roles: []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy}}}
+	list := ContainerRegistries{{Cluster: &ClusterRegistry{}, Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy}}}
 	if _, err := list.Concrete(nil); err == nil {
 		t.Fatal("expected error when resolver is nil for a cluster entry")
 	}

@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
-	modelpkg "github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 type ReviewRepository interface {
@@ -103,7 +103,7 @@ func (s *ReviewService) PrepareCreate(review model.Review) (model.Review, error)
 		return model.Review{}, err
 	}
 	review.Repository = repositoryIdentity
-	issueRef, err := modelpkg.NormalizeIssueRef(review.DeclaredIssueRef, repositoryIdentity)
+	issueRef, err := core.NormalizeIssueRef(review.DeclaredIssueRef, repositoryIdentity)
 	if err != nil {
 		return model.Review{}, &InvalidIssueRefError{Reason: err.Error()}
 	}
@@ -115,7 +115,7 @@ func canonicalRepository(repository string) (string, error) {
 	if strings.TrimSpace(repository) == "" {
 		return "", nil
 	}
-	identity, err := modelpkg.RepositoryIdentity(repository)
+	identity, err := core.RepositoryIdentity(repository)
 	if err != nil {
 		return "", &InvalidRepositoryError{Reason: err.Error()}
 	}

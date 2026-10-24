@@ -3,6 +3,7 @@ package jobs
 import (
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -38,7 +39,7 @@ func TestResolveReleaseVersionCommitSkipsPastAnUnpushedLeftoverStampAndMintsTheO
 	if err != nil {
 		t.Fatalf("GitShortCommit at work commit: %v", err)
 	}
-	wantVersion := shared.ResolveReleaseVersion("1.0.268", workCommit, shared.ReleaseModePrerelease)
+	wantVersion := shared.ResolveReleaseVersion("1.0.268", workCommit, model.ReleaseModePrerelease)
 
 	writeAndCommit(t, repo, "chart-version.txt", wantVersion+"\n", shared.ReleaseStampCommitPrefix+wantVersion)
 
@@ -49,7 +50,7 @@ func TestResolveReleaseVersionCommitSkipsPastAnUnpushedLeftoverStampAndMintsTheO
 	if got != workCommit {
 		t.Fatalf("expected the retry to resolve the real work commit %q, got %q", workCommit, got)
 	}
-	if gotVersion := shared.ResolveReleaseVersion("1.0.268", got, shared.ReleaseModePrerelease); gotVersion != wantVersion {
+	if gotVersion := shared.ResolveReleaseVersion("1.0.268", got, model.ReleaseModePrerelease); gotVersion != wantVersion {
 		t.Fatalf("expected the retry to mint the original version %q, got %q", wantVersion, gotVersion)
 	}
 }

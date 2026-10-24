@@ -90,7 +90,7 @@ func loadTenantDashboardEnvironments(ctx context.Context, client *platformclient
 	return ""
 }
 
-func uiPlatformContexts(contexts []platformclient.PlatformContext) []uiPlatformContext {
+func uiPlatformContexts(contexts []model.PlatformContext) []uiPlatformContext {
 	converted := make([]uiPlatformContext, 0, len(contexts))
 	for _, cloudContext := range contexts {
 		converted = append(converted, uiPlatformContextFrom(cloudContext))
@@ -98,7 +98,7 @@ func uiPlatformContexts(contexts []platformclient.PlatformContext) []uiPlatformC
 	return converted
 }
 
-func uiPlatformContextFrom(cloudContext platformclient.PlatformContext) uiPlatformContext {
+func uiPlatformContextFrom(cloudContext model.PlatformContext) uiPlatformContext {
 	return uiPlatformContext{
 		ContextID:          cloudContext.ContextID,
 		Name:               cloudContext.Name,
@@ -112,7 +112,7 @@ func uiPlatformContextFrom(cloudContext platformclient.PlatformContext) uiPlatfo
 	}
 }
 
-func uiPlatformEnvironments(environments []platformclient.PlatformEnvironment) []uiPlatformEnvironment {
+func uiPlatformEnvironments(environments []model.PlatformEnvironment) []uiPlatformEnvironment {
 	converted := make([]uiPlatformEnvironment, 0, len(environments))
 	for _, environment := range environments {
 		converted = append(converted, uiPlatformEnvironmentFrom(environment))
@@ -120,7 +120,7 @@ func uiPlatformEnvironments(environments []platformclient.PlatformEnvironment) [
 	return converted
 }
 
-func uiPlatformEnvironmentFrom(environment platformclient.PlatformEnvironment) uiPlatformEnvironment {
+func uiPlatformEnvironmentFrom(environment model.PlatformEnvironment) uiPlatformEnvironment {
 	return uiPlatformEnvironment{
 		EnvironmentID:     environment.EnvironmentID,
 		Name:              environment.Name,
@@ -182,7 +182,7 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 	}
 	defer cancel()
 
-	result, err := client.CreateContext(requestCtx, platformclient.PlatformCreateContextParams{
+	result, err := client.CreateContext(requestCtx, model.PlatformCreateContextParams{
 		Name:               name,
 		CloudProviderAlias: alias,
 		Region:             region,
@@ -207,13 +207,13 @@ func (a *App) CreatePlatformContext(input uiCreatePlatformContextInput) (uiPlatf
 
 // createEnvironmentParams is shared so preview and register never send
 // different fields for the same input.
-func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (platformclient.PlatformCreateEnvironmentParams, error) {
+func createEnvironmentParams(input uiRegisterPlatformEnvironmentInput) (model.PlatformCreateEnvironmentParams, error) {
 	name := strings.TrimSpace(input.Name)
 	envType := strings.TrimSpace(input.Type)
 	if name == "" || envType == "" {
-		return platformclient.PlatformCreateEnvironmentParams{}, fmt.Errorf("environment name and type are required")
+		return model.PlatformCreateEnvironmentParams{}, fmt.Errorf("environment name and type are required")
 	}
-	return platformclient.PlatformCreateEnvironmentParams{
+	return model.PlatformCreateEnvironmentParams{
 		Name:              name,
 		Type:              envType,
 		ContextID:         strings.TrimSpace(input.ContextID),
@@ -287,26 +287,26 @@ func (a *App) RegisterPlatformEnvironment(input uiRegisterPlatformEnvironmentInp
 
 // DeployPlatformEnvironment starts a server-side deploy of a runtime environment.
 func (a *App) DeployPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
-		return client.DeployEnvironment(requestCtx, environmentID, platformclient.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
+	return a.platformEnvironmentAction(input, actionDeployEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+		return client.DeployEnvironment(requestCtx, environmentID, model.PlatformDeployEnvironmentParams{Version: strings.TrimSpace(input.Version)})
 	})
 }
 
 // StopPlatformEnvironment scales a runtime environment to zero.
 func (a *App) StopPlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
+	return a.platformEnvironmentAction(input, actionStopEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
 		return client.StopEnvironment(requestCtx, environmentID)
 	})
 }
 
 // DeletePlatformEnvironment tears down a hosted environment; the UI confirms first.
 func (a *App) DeletePlatformEnvironment(input uiPlatformEnvironmentActionInput) (uiPlatformEnvironmentOutcome, error) {
-	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error) {
+	return a.platformEnvironmentAction(input, actionDeleteEnv, func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error) {
 		return client.DeleteEnvironment(requestCtx, environmentID)
 	})
 }
 
-func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (platformclient.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
+func (a *App) platformEnvironmentAction(input uiPlatformEnvironmentActionInput, action platformAction, call func(client *platformclient.PlatformClient, requestCtx context.Context, environmentID string) (model.PlatformEnvironment, error)) (uiPlatformEnvironmentOutcome, error) {
 	tenant, err := requireTenant(string(action), input.Tenant)
 	if err != nil {
 		return uiPlatformEnvironmentOutcome{}, err

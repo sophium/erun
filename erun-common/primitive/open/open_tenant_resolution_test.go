@@ -2,6 +2,7 @@ package open
 
 import (
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // openTenantResolutionStore is a minimal OpenStore for exercising
@@ -18,8 +19,8 @@ func (s openTenantResolutionStore) LoadERunConfig() (config.ERunConfig, string, 
 	return config.ERunConfig{DefaultTenant: s.defaultTenant}, "", nil
 }
 
-func (s openTenantResolutionStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
-	return config.TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
+func (s openTenantResolutionStore) LoadTenantConfig(name string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{Name: name, DefaultEnvironment: s.defaultEnvironment}, "", nil
 }
 
 func (s openTenantResolutionStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {

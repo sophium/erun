@@ -7,16 +7,16 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // whipEnvironmentViaMCP lets the pod decide and push. tenant/environment are
 // restated so a stale edge surfaces as a mismatch, not a wrong-target write.
-func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (orchestrator.WhipResult, error) {
+func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, bearer string) (model.WhipResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, false), nil)
 	if err != nil {
-		return orchestrator.WhipResult{}, err
+		return model.WhipResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -27,31 +27,31 @@ func whipEnvironmentViaMCP(ctx context.Context, tenant, environment, endpoint, b
 		Arguments: map[string]any{"preview": false, "tenant": tenant, "environment": environment},
 	})
 	if err != nil {
-		return orchestrator.WhipResult{}, formatWhipMCPError(err)
+		return model.WhipResult{}, formatWhipMCPError(err)
 	}
 	return decodeWhipMCPResult(result)
 }
 
-func decodeWhipMCPResult(result *mcp.CallToolResult) (orchestrator.WhipResult, error) {
+func decodeWhipMCPResult(result *mcp.CallToolResult) (model.WhipResult, error) {
 	// Tool errors arrive as IsError with no StructuredContent, not as a JSON-RPC error.
 	if result.IsError {
-		return orchestrator.WhipResult{}, formatWhipMCPError(fmt.Errorf("%s", mcpResultText(result)))
+		return model.WhipResult{}, formatWhipMCPError(fmt.Errorf("%s", mcpResultText(result)))
 	}
 	// Unmarshalling null is a no-op and would yield a fake zero result.
 	if result.StructuredContent == nil {
-		return orchestrator.WhipResult{}, fmt.Errorf("whip: environment returned no result")
+		return model.WhipResult{}, fmt.Errorf("whip: environment returned no result")
 	}
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return orchestrator.WhipResult{}, err
+		return model.WhipResult{}, err
 	}
-	var decoded orchestrator.WhipResult
+	var decoded model.WhipResult
 	if err := json.Unmarshal(data, &decoded); err != nil {
-		return orchestrator.WhipResult{}, err
+		return model.WhipResult{}, err
 	}
 	// The pod always stamps Candidate.ID; empty means not a real decision.
 	if decoded.Candidate.ID == "" {
-		return orchestrator.WhipResult{}, fmt.Errorf("whip: environment returned an empty result")
+		return model.WhipResult{}, fmt.Errorf("whip: environment returned an empty result")
 	}
 	return decoded, nil
 }

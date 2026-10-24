@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func normalBuildCgroupExecOutputFixture() string {
@@ -206,13 +207,13 @@ func TestBuildCgroupSummaryOmitsUnavailableAndNil(t *testing.T) {
 	if got := core.BuildCgroupSummary(nil); got != "" {
 		t.Errorf("nil metrics: got %q, want empty", got)
 	}
-	if got := core.BuildCgroupSummary(&core.BuildCgroupMetrics{Available: false, Unavailable: "no cgroup"}); got != "" {
+	if got := core.BuildCgroupSummary(&model.BuildCgroupMetrics{Available: false, Unavailable: "no cgroup"}); got != "" {
 		t.Errorf("unavailable metrics: got %q, want empty", got)
 	}
 }
 
 func TestBuildCgroupSummaryIncludesThrottlingWhenPresent(t *testing.T) {
-	summary := core.BuildCgroupSummary(&core.BuildCgroupMetrics{
+	summary := core.BuildCgroupSummary(&model.BuildCgroupMetrics{
 		Available: true, CPUSeconds: 12.3, CPUPercentOfQuota: 87, ThrottledPeriods: 9, TotalPeriods: 65,
 	})
 	for _, want := range []string{"cpu=12.3s", "87% of quota", "throttled 9/65 periods"} {

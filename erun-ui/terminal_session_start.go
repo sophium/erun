@@ -7,9 +7,9 @@ import (
 	goruntime "runtime"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY through the per-env action
@@ -38,7 +38,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := openSessionKey(selection, slot)
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -127,7 +127,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	key := localSessionKey(selection, slot)
 
 	repoPath := ""
-	if result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	if result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}); err == nil {
@@ -208,7 +208,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	cols, rows = clampTerminalSize(cols, rows)
 
 	key := aiSessionKey(selection, slot)
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

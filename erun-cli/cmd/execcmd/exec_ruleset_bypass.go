@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
@@ -44,7 +45,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecReconcileBypassCommand(shared.CommandContext(cmd), store, alias, review.ReconcileBypassParams{
+			return runExecReconcileBypassCommand(shared.CommandContext(cmd), store, alias, model.ReconcileBypassParams{
 				RemoteURL:      remoteURL,
 				RulesetID:      rulesetID,
 				TargetBranch:   targetBranch,
@@ -65,7 +66,7 @@ func newExecReconcileBypassCmd(store config.CloudReadStore, deps cloud.CloudDepe
 
 // newExecPlanRulesetBypassCmd plans narrowing a branch's bypass grant; it never changes settings.
 func newExecPlanRulesetBypassCmd() *cobra.Command {
-	var params review.PlanRulesetBypassParams
+	var params model.PlanRulesetBypassParams
 	cmd := &cobra.Command{
 		Use:   "plan-ruleset-bypass",
 		Short: "Plan narrowing a ruleset's bypass grant to one non-human queue identity",
@@ -101,7 +102,7 @@ func newExecPlanRulesetBypassCmd() *cobra.Command {
 	return cmd
 }
 
-func runExecPlanRulesetBypassCommand(ctx core.Context, params review.PlanRulesetBypassParams) error {
+func runExecPlanRulesetBypassCommand(ctx core.Context, params model.PlanRulesetBypassParams) error {
 	result, err := review.PlanRulesetBypass(ctx, params, review.PlanRulesetBypassDependencies{})
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func runExecPlanRulesetBypassCommand(ctx core.Context, params review.PlanRuleset
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec plan-ruleset-bypass planned.")
 		return err
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if err := writeRulesetBypassPlan(ctx, result); err != nil {
 			return err
 		}
@@ -119,7 +120,7 @@ func runExecPlanRulesetBypassCommand(ctx core.Context, params review.PlanRuleset
 }
 
 // writeRulesetBypassPlan renders apply, verify, and revert commands.
-func writeRulesetBypassPlan(ctx core.Context, result review.PlanRulesetBypassResult) error {
+func writeRulesetBypassPlan(ctx core.Context, result model.PlanRulesetBypassResult) error {
 	out := new(strings.Builder)
 	fmt.Fprintf(out, "Ruleset %d (%q) on %s/%s\n", result.RulesetID, result.RulesetName, result.Owner, result.Repo)
 	fmt.Fprintf(out, "  bypass actors today (%d):\n", len(result.CurrentBypassActors))
@@ -193,7 +194,7 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecRouteCheckCommand(shared.CommandContext(cmd), store, alias, expose.RouteCheckParams{
+			return runExecRouteCheckCommand(shared.CommandContext(cmd), store, alias, model.RouteCheckParams{
 				RoutesDir: routesDir,
 			}, deps)
 		},
@@ -205,7 +206,7 @@ func newExecRouteCheckCmd(store config.CloudReadStore, deps cloud.CloudDependenc
 	return cmd
 }
 
-func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, alias string, params expose.RouteCheckParams, deps cloud.CloudDependencies) error {
+func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, alias string, params model.RouteCheckParams, deps cloud.CloudDependencies) error {
 	result, err := expose.RunRouteCheck(ctx, store, alias, params, deps)
 	if err != nil {
 		return err
@@ -214,7 +215,7 @@ func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, ali
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec route-check planned.")
 		return err
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if err := writeRouteCheckReport(ctx, result); err != nil {
 			return err
 		}
@@ -226,7 +227,7 @@ func runExecRouteCheckCommand(ctx core.Context, store config.CloudReadStore, ali
 }
 
 // writeRouteCheckReport always prints a summary so a clean run is visibly clean.
-func writeRouteCheckReport(ctx core.Context, result expose.RouteCheckResult) error {
+func writeRouteCheckReport(ctx core.Context, result model.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		_, err := fmt.Fprintf(ctx.Stdout, "%s did not answer the sanity probe (%s); no routes were checked.\n",
 			result.APIURL, result.UnreachableReason)
@@ -248,7 +249,7 @@ func writeRouteCheckReport(ctx core.Context, result expose.RouteCheckResult) err
 }
 
 // routeCheckExitError fails after the full report has printed.
-func routeCheckExitError(result expose.RouteCheckResult) error {
+func routeCheckExitError(result model.RouteCheckResult) error {
 	if !result.PlaneReachable {
 		return fmt.Errorf("route-check: %s did not answer the sanity probe (%s); refusing to report on an unreachable plane",
 			result.APIURL, result.UnreachableReason)
@@ -266,7 +267,7 @@ func routeCheckExitError(result expose.RouteCheckResult) error {
 	return fmt.Errorf("of %d route(s) checked on %s: %s", result.RoutesChecked, result.APIURL, strings.Join(problems, "; "))
 }
 
-func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore, alias string, params review.ReconcileBypassParams, deps cloud.CloudDependencies) error {
+func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore, alias string, params model.ReconcileBypassParams, deps cloud.CloudDependencies) error {
 	result, err := review.ReconcileBypass(ctx, store, alias, params, deps, review.ReconcileBypassDependencies{})
 	if err != nil {
 		return err
@@ -275,7 +276,7 @@ func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun exec reconcile-bypass planned.")
 		return err
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if err := writeReconcileBypassReport(ctx, result); err != nil {
 			return err
 		}
@@ -287,7 +288,7 @@ func runExecReconcileBypassCommand(ctx core.Context, store config.CloudReadStore
 }
 
 // reconcileBypassExitError names both failures; they have different remedies.
-func reconcileBypassExitError(result review.ReconcileBypassResult) error {
+func reconcileBypassExitError(result model.ReconcileBypassResult) error {
 	var problems []string
 	if result.Unreconciled > 0 {
 		problems = append(problems, fmt.Sprintf("%d have no successful build and no release tag accounting for them",
@@ -303,7 +304,7 @@ func reconcileBypassExitError(result review.ReconcileBypassResult) error {
 		len(result.Pushes), result.TargetBranch, strings.Join(problems, "; "))
 }
 
-func writeReconcileBypassReport(ctx core.Context, result review.ReconcileBypassResult) error {
+func writeReconcileBypassReport(ctx core.Context, result model.ReconcileBypassResult) error {
 	if len(result.Pushes) == 0 {
 		_, err := fmt.Fprintf(ctx.Stdout, "No bypassed pushes found for %s/%s ruleset %d on %s.\n",
 			result.Owner, result.Repo, result.RulesetID, result.TargetBranch)

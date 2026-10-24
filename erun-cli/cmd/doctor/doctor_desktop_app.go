@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -35,8 +36,8 @@ type installedDesktopApp struct {
 
 // installedDesktopAppCandidates lists the copies `erun app` launches from first,
 // then macOS installs with ~/Applications shadowing /Applications.
-func installedDesktopAppCandidates(hostOS core.HostOS) []string {
-	if hostOS != core.HostOSDarwin {
+func installedDesktopAppCandidates(hostOS model.HostOS) []string {
+	if hostOS != model.HostOSDarwin {
 		return nil
 	}
 	seen := make(map[string]struct{}, 4)
@@ -77,7 +78,7 @@ func desktopAppExecutableDir() string {
 }
 
 // launchedDesktopAppPath uses the launch's own resolution, or "" when there is none.
-func launchedDesktopAppPath(hostOS core.HostOS) string {
+func launchedDesktopAppPath(hostOS model.HostOS) string {
 	dir := desktopAppExecutableDir()
 	if dir == "" {
 		return ""
@@ -93,7 +94,7 @@ func systemApplicationsDir() string {
 	return "/Applications"
 }
 
-func inspectInstalledDesktopApps(hostOS core.HostOS) []installedDesktopApp {
+func inspectInstalledDesktopApps(hostOS model.HostOS) []installedDesktopApp {
 	launched := launchedDesktopAppPath(hostOS)
 	var found []installedDesktopApp
 	for _, bundlePath := range installedDesktopAppCandidates(hostOS) {

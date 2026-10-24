@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -68,7 +68,7 @@ func testExecCommitCommitsDangerousMessageAndReportsResult(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -125,7 +125,7 @@ func testExecCommitScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -203,7 +203,7 @@ func testExecCommitScopedPathsAcceptsDirectoryScope(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -234,7 +234,7 @@ func testExecCommitScopedPathsAcceptsNonAsciiFilename(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -294,7 +294,7 @@ func testExecCommitReportsTheBranchTheCommitActuallyLandedOn(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}
@@ -319,7 +319,7 @@ func testExecCommitRootNotGitToplevelIgnoresChangesOutsideRoot(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed gitx.CommitWorkingTreeResult
+	var parsed model.CommitWorkingTreeResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, result.Stdout)
 	}

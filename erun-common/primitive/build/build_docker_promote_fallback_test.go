@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -135,7 +135,7 @@ func testPromoteBuildInput() shared.DockerBuildSpec {
 	return shared.DockerBuildSpec{
 		ContextDir:     "/tmp",
 		DockerfilePath: "Dockerfile",
-		Image: helm.DockerImageReference{
+		Image: model.DockerImageReference{
 			Registry:  "ghcr.io/sophium",
 			ImageName: "erun-console",
 			Tag:       "ghcr.io/sophium/erun-console:1.0.246",
@@ -212,7 +212,7 @@ func assertCorrectedTimingTable(t *testing.T, rows []string, wantRows int) {
 	}
 }
 
-func assertCorrectedTimingRecord(t *testing.T, record core.TimingRecord) {
+func assertCorrectedTimingRecord(t *testing.T, record model.TimingRecord) {
 	t.Helper()
 	if len(record.Steps) != 1 {
 		t.Fatalf("expected one image step in the record, got %d", len(record.Steps))

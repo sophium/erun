@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -257,7 +258,7 @@ func TestReclaimAgentJobWorkCloneCheckpointedAndPushedIsReclaimedAfterTheCheckpo
 	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
 
 	const tenant, environment, id = "reclaim-contract", "checkpointed", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant: tenant, Environment: environment, ID: id, Name: id,
 		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "printf 'work\\n' > uncommitted.txt"},
 	}); err != nil {
@@ -289,7 +290,7 @@ func TestReclaimAgentJobWorkCloneCommandJobsAreNeverReclaimed(t *testing.T) {
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
 	const tenant, environment, id = "reclaim-contract", "command-kind", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant: tenant, Environment: environment, ID: id, Name: id,
 		Dir: repo, Command: []string{"sh", "-c", "exit 0"},
 	}); err != nil {
@@ -318,7 +319,7 @@ func TestReclaimAgentJobWorkCloneOutsideWorkRootIsNeverReclaimed(t *testing.T) {
 	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
 
 	const tenant, environment, id = "reclaim-contract", "outside-root", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant: tenant, Environment: environment, ID: id, Name: id,
 		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
 	}); err != nil {
@@ -349,7 +350,7 @@ func TestReclaimAgentJobWorkCloneStillRunningIsNeverTouched(t *testing.T) {
 	const tenant, environment, id = "reclaim-contract", "still-running", "job"
 	done := make(chan error, 1)
 	go func() {
-		done <- RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		done <- RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 			Tenant: tenant, Environment: environment, ID: id, Name: id,
 			Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "sleep 0.5"},
 		})
@@ -427,7 +428,7 @@ func TestReclaimAgentJobWorkCloneNeverReportsFinishedAheadOfSettledReclaim(t *te
 		}
 	}()
 
-	err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant: tenant, Environment: environment, ID: id, Name: id,
 		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
 	})
@@ -461,7 +462,7 @@ func TestReclaimAgentJobWorkCloneRemovalFailureIsKeptNeverReclaimed(t *testing.T
 	t.Cleanup(func() { workCloneRemoveAll = originalRemoveAll })
 
 	const tenant, environment, id = "reclaim-contract", "removal-failure", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant: tenant, Environment: environment, ID: id, Name: id,
 		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
 	}); err != nil {

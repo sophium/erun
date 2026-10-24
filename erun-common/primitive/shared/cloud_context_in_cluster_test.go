@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -26,8 +27,8 @@ func inClusterPreflightTestContext() core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 }
 
-func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, _ []string) (string, error) {
+func countingRunAWS(calls *int) func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, _ string, _ []string) (string, error) {
 		*calls++
 		return "", nil
 	}

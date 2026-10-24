@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ResolveReviewRepository returns the named remote, else the checkout's origin.
@@ -22,7 +21,7 @@ func ResolveReviewRepository(ctx core.Context, remoteURL, traceLabel string) (st
 		remote = origin
 		ctx.Trace(traceLabel + ": origin = " + remote)
 	}
-	identity, err := model.RepositoryIdentity(remote)
+	identity, err := core.RepositoryIdentity(remote)
 	if err != nil {
 		ctx.Trace(traceLabel + ": repository resolution failed: " + err.Error())
 		return "", err

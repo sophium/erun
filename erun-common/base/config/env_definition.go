@@ -7,76 +7,65 @@ import (
 	"reflect"
 	"sort"
 	"strings"
-)
 
-// EnvConfigFieldClass classifies EnvConfig fields for definition transfer. The table
-// is default-deny so a new field never travels until opted in; the root config.yaml
-// (plaintext AdminToken) is permanently out of scope.
-type EnvConfigFieldClass string
-
-const (
-	EnvFieldPortable EnvConfigFieldClass = "portable"
-	// EnvFieldHostOwned fields describe this machine or a cluster-local object; never transferred.
-	EnvFieldHostOwned EnvConfigFieldClass = "host-owned"
-	// EnvFieldPlatformOwned fields mirror the environment row; a local difference refuses.
-	EnvFieldPlatformOwned EnvConfigFieldClass = "platform-owned"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type envConfigField struct {
-	Class EnvConfigFieldClass
+	Class model.EnvConfigFieldClass
 	// Note is operator-facing: it is rendered in refusals and the docs.
 	Note string
 }
 
 // portableEnvConfigFields classifies every top-level EnvConfig field by Go name.
 var portableEnvConfigFields = map[string]envConfigField{
-	"RuntimeVersion": {EnvFieldPortable, "the release this environment runs"},
-	"RuntimeImage":   {EnvFieldPortable, "which runtime image, when it is not the stock default"},
-	"RuntimeChart":   {EnvFieldPortable, "which runtime chart the environment rides"},
-	"RuntimePod":     {EnvFieldPortable, "authored container sizing"},
-	"RuntimeDindPod": {EnvFieldPortable, "authored sidecar sizing"},
-	"NamespaceQuota": {EnvFieldPortable, "authored namespace ceiling"},
-	"Idle":           {EnvFieldPortable, "idle policy — the authored intent, not the observed state"},
-	"Claude":         {EnvFieldPortable, "how the environment's in-pod agent is configured"},
-	"AITool":         {EnvFieldPortable, "which AI tool the environment uses"},
-	"AutoUpgrade":    {EnvFieldPortable, "whether the environment rides upgrades"},
-	"UpgradeChannel": {EnvFieldPortable, "which channel it rides"},
+	"RuntimeVersion": {model.EnvFieldPortable, "the release this environment runs"},
+	"RuntimeImage":   {model.EnvFieldPortable, "which runtime image, when it is not the stock default"},
+	"RuntimeChart":   {model.EnvFieldPortable, "which runtime chart the environment rides"},
+	"RuntimePod":     {model.EnvFieldPortable, "authored container sizing"},
+	"RuntimeDindPod": {model.EnvFieldPortable, "authored sidecar sizing"},
+	"NamespaceQuota": {model.EnvFieldPortable, "authored namespace ceiling"},
+	"Idle":           {model.EnvFieldPortable, "idle policy — the authored intent, not the observed state"},
+	"Claude":         {model.EnvFieldPortable, "how the environment's in-pod agent is configured"},
+	"AITool":         {model.EnvFieldPortable, "which AI tool the environment uses"},
+	"AutoUpgrade":    {model.EnvFieldPortable, "whether the environment rides upgrades"},
+	"UpgradeChannel": {model.EnvFieldPortable, "which channel it rides"},
 	// init nulls ContainerRegistries for non-remote worktrees, so a sync must not
 	// read that absence as a removal.
-	"ContainerRegistries": {EnvFieldPortable, "the marked registry list"},
+	"ContainerRegistries": {model.EnvFieldPortable, "the marked registry list"},
 
-	"Name":              {EnvFieldPlatformOwned, "the environment row's name, and the local config path derived from it"},
-	"Type":              {EnvFieldPlatformOwned, "the environment row's type"},
-	"KubernetesContext": {EnvFieldPlatformOwned, "the Kubernetes context the environment row was registered with"},
+	"Name":              {model.EnvFieldPlatformOwned, "the environment row's name, and the local config path derived from it"},
+	"Type":              {model.EnvFieldPlatformOwned, "the environment row's type"},
+	"KubernetesContext": {model.EnvFieldPlatformOwned, "the Kubernetes context the environment row was registered with"},
 
-	"LocalRepoPath":                {EnvFieldHostOwned, "where this machine keeps the checkout"},
-	"LocalPortRangeStart":          {EnvFieldHostOwned, "this machine's local port allocation"},
-	"SSHD":                         {EnvFieldHostOwned, "host keys, ports and paths for tunnelling into this machine"},
-	"MCPAuthPublicKeyPath":         {EnvFieldHostOwned, "a path to a key on this machine"},
-	"RuntimeRunningImage":          {EnvFieldHostOwned, "a deploy-derived display memo, not authored intent"},
-	"ImagePullSecrets":             {EnvFieldHostOwned, "names a cluster-local Kubernetes Secret; its absence elsewhere is not an error"},
-	"RegistryCredentialSecretName": {EnvFieldHostOwned, "names a cluster-local Kubernetes Secret"},
-	"PlatformAliasSecretName":      {EnvFieldHostOwned, "names a cluster-local Kubernetes Secret"},
-	"CloudProviderAlias":           {EnvFieldHostOwned, "binds to this machine's cloud credentials"},
-	"CloudProviderAliases":         {EnvFieldHostOwned, "binds to this machine's cloud credentials"},
-	"ManagedCloud":                 {EnvFieldHostOwned, "records that the platform manages this environment's lifecycle, which the hosted marker does not replace"},
-	"RuntimeRegistry":              {EnvFieldHostOwned, "this machine's registry endpoint"},
-	"RemoteHostCredentials":        {EnvFieldHostOwned, "host credential delivery"},
-	"PlatformAccount":              {EnvFieldHostOwned, "grants the environment's ServiceAccount cluster-admin, a decision about this cluster"},
-	"AutoStart":                    {EnvFieldHostOwned, "whether this machine starts the environment"},
-	"Stopped":                      {EnvFieldHostOwned, "the durable half of a stop this machine performed"},
-	"DisableBuildScript":           {EnvFieldHostOwned, "how this machine builds"},
-	"Hosted":                       {EnvFieldHostOwned, "the local marker of which platform row this environment corresponds to"},
-	"MountSource":                  {EnvFieldHostOwned, "how the local worktree is populated"},
-	"RepoURL":                      {EnvFieldHostOwned, "the remote this machine's checkout came from"},
-	"Deploy":                       {EnvFieldHostOwned, "deploy.components is this machine's saved selection; deploy.timeout travels separately"},
+	"LocalRepoPath":                {model.EnvFieldHostOwned, "where this machine keeps the checkout"},
+	"LocalPortRangeStart":          {model.EnvFieldHostOwned, "this machine's local port allocation"},
+	"SSHD":                         {model.EnvFieldHostOwned, "host keys, ports and paths for tunnelling into this machine"},
+	"MCPAuthPublicKeyPath":         {model.EnvFieldHostOwned, "a path to a key on this machine"},
+	"RuntimeRunningImage":          {model.EnvFieldHostOwned, "a deploy-derived display memo, not authored intent"},
+	"ImagePullSecrets":             {model.EnvFieldHostOwned, "names a cluster-local Kubernetes Secret; its absence elsewhere is not an error"},
+	"RegistryCredentialSecretName": {model.EnvFieldHostOwned, "names a cluster-local Kubernetes Secret"},
+	"PlatformAliasSecretName":      {model.EnvFieldHostOwned, "names a cluster-local Kubernetes Secret"},
+	"CloudProviderAlias":           {model.EnvFieldHostOwned, "binds to this machine's cloud credentials"},
+	"CloudProviderAliases":         {model.EnvFieldHostOwned, "binds to this machine's cloud credentials"},
+	"ManagedCloud":                 {model.EnvFieldHostOwned, "records that the platform manages this environment's lifecycle, which the hosted marker does not replace"},
+	"RuntimeRegistry":              {model.EnvFieldHostOwned, "this machine's registry endpoint"},
+	"RemoteHostCredentials":        {model.EnvFieldHostOwned, "host credential delivery"},
+	"PlatformAccount":              {model.EnvFieldHostOwned, "grants the environment's ServiceAccount cluster-admin, a decision about this cluster"},
+	"AutoStart":                    {model.EnvFieldHostOwned, "whether this machine starts the environment"},
+	"Stopped":                      {model.EnvFieldHostOwned, "the durable half of a stop this machine performed"},
+	"DisableBuildScript":           {model.EnvFieldHostOwned, "how this machine builds"},
+	"Hosted":                       {model.EnvFieldHostOwned, "the local marker of which platform row this environment corresponds to"},
+	"MountSource":                  {model.EnvFieldHostOwned, "how the local worktree is populated"},
+	"RepoURL":                      {model.EnvFieldHostOwned, "the remote this machine's checkout came from"},
+	"Deploy":                       {model.EnvFieldHostOwned, "deploy.components is this machine's saved selection; deploy.timeout travels separately"},
 }
 
 // PortableEnvConfigFieldNames returns the transferred field names, sorted.
 func PortableEnvConfigFieldNames() []string {
 	names := make([]string, 0, len(portableEnvConfigFields))
 	for name, entry := range portableEnvConfigFields {
-		if entry.Class == EnvFieldPortable {
+		if entry.Class == model.EnvFieldPortable {
 			names = append(names, name)
 		}
 	}
@@ -88,7 +77,7 @@ func PortableEnvConfigFieldNames() []string {
 func HostOwnedEnvConfigFieldNames() []string {
 	names := make([]string, 0, len(portableEnvConfigFields))
 	for name, entry := range portableEnvConfigFields {
-		if entry.Class == EnvFieldHostOwned {
+		if entry.Class == model.EnvFieldHostOwned {
 			names = append(names, name)
 		}
 	}
@@ -131,18 +120,18 @@ func unclassifiedEnvConfigFields() []string {
 // a pull leave unset fields alone; JSON keys are explicit because several
 // EnvConfig fields have no json tag.
 type PlatformEnvDefinition struct {
-	RuntimeVersion      *string                  `json:"runtimeVersion,omitempty"`
-	RuntimeImage        *string                  `json:"runtimeImage,omitempty"`
-	RuntimeChart        *string                  `json:"runtimeChart,omitempty"`
-	RuntimePod          *RuntimePodResources     `json:"runtimePod,omitempty"`
-	RuntimeDindPod      *RuntimePodResources     `json:"runtimeDindPod,omitempty"`
-	NamespaceQuota      *NamespaceResourceQuota  `json:"namespaceQuota,omitempty"`
-	Idle                *EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Claude              *EnvironmentClaudeConfig `json:"claude,omitempty"`
-	AITool              *string                  `json:"aiTool,omitempty"`
-	AutoUpgrade         *bool                    `json:"autoUpgrade,omitempty"`
-	UpgradeChannel      *string                  `json:"upgradeChannel,omitempty"`
-	ContainerRegistries *ContainerRegistries     `json:"containerRegistries,omitempty"`
+	RuntimeVersion      *string                       `json:"runtimeVersion,omitempty"`
+	RuntimeImage        *string                       `json:"runtimeImage,omitempty"`
+	RuntimeChart        *string                       `json:"runtimeChart,omitempty"`
+	RuntimePod          *model.RuntimePodResources    `json:"runtimePod,omitempty"`
+	RuntimeDindPod      *model.RuntimePodResources    `json:"runtimeDindPod,omitempty"`
+	NamespaceQuota      *model.NamespaceResourceQuota `json:"namespaceQuota,omitempty"`
+	Idle                *EnvironmentIdleConfig        `json:"idle,omitempty"`
+	Claude              *EnvironmentClaudeConfig      `json:"claude,omitempty"`
+	AITool              *string                       `json:"aiTool,omitempty"`
+	AutoUpgrade         *bool                         `json:"autoUpgrade,omitempty"`
+	UpgradeChannel      *string                       `json:"upgradeChannel,omitempty"`
+	ContainerRegistries *ContainerRegistries          `json:"containerRegistries,omitempty"`
 	// DeployTimeout is the portable half of EnvConfig.Deploy.
 	DeployTimeout *string `json:"deployTimeout,omitempty"`
 }
@@ -249,25 +238,25 @@ var platformDefinitionFields = []platformDefinitionField{
 	},
 	{
 		Field: "RuntimePod", Label: "runtime pod sizing",
-		Stored: renderField(func(d PlatformEnvDefinition) *RuntimePodResources { return d.RuntimePod }, renderRuntimePodResources),
+		Stored: renderField(func(d PlatformEnvDefinition) *model.RuntimePodResources { return d.RuntimePod }, renderRuntimePodResources),
 		Local:  func(c EnvConfig) string { return renderRuntimePodResources(c.RuntimePod) },
 		Apply:  func(c *EnvConfig, d PlatformEnvDefinition) { setStruct(&c.RuntimePod, d.RuntimePod) },
 		Project: func(d *PlatformEnvDefinition, c EnvConfig) {
-			d.RuntimePod = pointerIfSet(c.RuntimePod, c.RuntimePod != RuntimePodResources{})
+			d.RuntimePod = pointerIfSet(c.RuntimePod, c.RuntimePod != model.RuntimePodResources{})
 		},
 	},
 	{
 		Field: "RuntimeDindPod", Label: "runtime dind sizing",
-		Stored: renderField(func(d PlatformEnvDefinition) *RuntimePodResources { return d.RuntimeDindPod }, renderRuntimePodResources),
+		Stored: renderField(func(d PlatformEnvDefinition) *model.RuntimePodResources { return d.RuntimeDindPod }, renderRuntimePodResources),
 		Local:  func(c EnvConfig) string { return renderRuntimePodResources(c.RuntimeDindPod) },
 		Apply:  func(c *EnvConfig, d PlatformEnvDefinition) { setStruct(&c.RuntimeDindPod, d.RuntimeDindPod) },
 		Project: func(d *PlatformEnvDefinition, c EnvConfig) {
-			d.RuntimeDindPod = pointerIfSet(c.RuntimeDindPod, c.RuntimeDindPod != RuntimePodResources{})
+			d.RuntimeDindPod = pointerIfSet(c.RuntimeDindPod, c.RuntimeDindPod != model.RuntimePodResources{})
 		},
 	},
 	{
 		Field: "NamespaceQuota", Label: "namespace quota",
-		Stored: renderField(func(d PlatformEnvDefinition) *NamespaceResourceQuota { return d.NamespaceQuota }, renderNamespaceQuota),
+		Stored: renderField(func(d PlatformEnvDefinition) *model.NamespaceResourceQuota { return d.NamespaceQuota }, renderNamespaceQuota),
 		Local:  func(c EnvConfig) string { return renderNamespaceQuota(c.NamespaceQuota) },
 		Apply:  func(c *EnvConfig, d PlatformEnvDefinition) { setStruct(&c.NamespaceQuota, d.NamespaceQuota) },
 		Project: func(d *PlatformEnvDefinition, c EnvConfig) {

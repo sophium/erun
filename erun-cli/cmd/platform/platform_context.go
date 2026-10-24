@@ -6,9 +6,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func newPlatformContextCmd(store config.CloudReadStore, alias *string, deps clou
 }
 
 func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateContextParams
+	var params model.PlatformCreateContextParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Bootstrap or preview a cloud context (managed cluster) on the erun platform",
@@ -45,7 +45,7 @@ func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context creation planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformCreateContextResult(ctx, result); err != nil {
 					return err
 				}
@@ -64,7 +64,7 @@ func newPlatformContextCreateCmd(store config.CloudReadStore, alias *string, dep
 	return cmd
 }
 
-func writePlatformCreateContextResult(ctx core.Context, result platformclient.PlatformCreateContextResult) error {
+func writePlatformCreateContextResult(ctx core.Context, result model.PlatformCreateContextResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err
@@ -93,7 +93,7 @@ func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformContextList(ctx, contexts); err != nil {
 					return err
 				}
@@ -105,7 +105,7 @@ func newPlatformContextListCmd(store config.CloudReadStore, alias *string, deps 
 	return cmd
 }
 
-func writePlatformContextList(ctx core.Context, contexts []platformclient.PlatformContext) error {
+func writePlatformContextList(ctx core.Context, contexts []model.PlatformContext) error {
 	if len(contexts) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no contexts")
 		return err
@@ -134,7 +134,7 @@ func newPlatformContextGetCmd(store config.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform context lookup planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "  - %s (%s) status=%s region=%s\n", cloudContext.Name, cloudContext.ContextID, cloudContext.Status, shared.QuotedValueOrNone(cloudContext.Region)); err != nil {
 					return err
 				}

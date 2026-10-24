@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // An activity lease names the long job keeping an environment busy, which per-request
@@ -47,47 +48,6 @@ const (
 	environmentActivityExclusiveLeaseDirName = "exclusive"
 )
 
-// EnvironmentActivityLeaseHolder identifies a lease's claimant. Tenant and User come from
-// resolved auth, never caller input.
-type EnvironmentActivityLeaseHolder struct {
-	Orchestrator string `json:"orchestrator,omitempty"`
-	Tenant       string `json:"tenant,omitempty"`
-	User         string `json:"user,omitempty"`
-}
-
-// String renders the holder for errors and busy details.
-func (h EnvironmentActivityLeaseHolder) String() string {
-	parts := make([]string, 0, 3)
-	if v := strings.TrimSpace(h.Orchestrator); v != "" {
-		parts = append(parts, "orchestrator "+v)
-	}
-	if v := strings.TrimSpace(h.User); v != "" {
-		parts = append(parts, "user "+v)
-	}
-	if v := strings.TrimSpace(h.Tenant); v != "" {
-		parts = append(parts, "tenant "+v)
-	}
-	if len(parts) == 0 {
-		return "an unnamed holder"
-	}
-	return strings.Join(parts, ", ")
-}
-
-// EnvironmentActivityLease is one held claim on an environment.
-type EnvironmentActivityLease struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	// PID is 0 when there is no process to watch; a dead PID reclaims the lease.
-	PID       int       `json:"pid,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
-	RenewedAt time.Time `json:"renewedAt,omitzero"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	// Scope and Exclusive are set only on an exclusive claim.
-	Scope     string                         `json:"scope,omitempty"`
-	Exclusive bool                           `json:"exclusive,omitempty"`
-	Holder    EnvironmentActivityLeaseHolder `json:"holder,omitempty"`
-}
-
 // TakeEnvironmentActivityLeaseParams takes a lease; taking an existing ID renews it.
 type TakeEnvironmentActivityLeaseParams struct {
 	Tenant      string
@@ -100,7 +60,7 @@ type TakeEnvironmentActivityLeaseParams struct {
 	// Scope defaults to "worktree" when Exclusive is set.
 	Scope     string
 	Exclusive bool
-	Holder    EnvironmentActivityLeaseHolder
+	Holder    model.EnvironmentActivityLeaseHolder
 }
 
 // normalize rejects a lease that names no work or never lapses.
@@ -139,10 +99,10 @@ func (p TakeEnvironmentActivityLeaseParams) normalize() (TakeEnvironmentActivity
 }
 
 // TakeEnvironmentActivityLease writes the lease and returns what was persisted.
-func TakeEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (EnvironmentActivityLease, error) {
+func TakeEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, error) {
 	params, err := params.normalize()
 	if err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 	if params.Exclusive {
 		return takeExclusiveEnvironmentActivityLease(params)
@@ -150,18 +110,18 @@ func TakeEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (En
 	return takeSharedEnvironmentActivityLease(params)
 }
 
-func takeSharedEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (EnvironmentActivityLease, error) {
+func takeSharedEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, error) {
 	id, name, now := params.ID, params.Name, params.Now
 	dir, err := environmentActivityLeaseDir(params.Tenant, params.Environment)
 	if err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 
 	path := filepath.Join(dir, id+".json")
-	lease := EnvironmentActivityLease{ID: id, Name: name, PID: params.PID, StartedAt: now, Holder: params.Holder}
+	lease := model.EnvironmentActivityLease{ID: id, Name: name, PID: params.PID, StartedAt: now, Holder: params.Holder}
 	// A dead holder's id starts a fresh claim, or it would inherit an expired start.
 	if existing, err := loadEnvironmentActivityLease(path); err == nil && environmentActivityLeaseHeld(existing, now, ProcessAlive) {
 		lease.StartedAt = existing.StartedAt
@@ -175,7 +135,7 @@ func takeSharedEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParam
 // EnvironmentActivityLeaseConflictError names the holder of a conflicting exclusive claim.
 type EnvironmentActivityLeaseConflictError struct {
 	Scope  string
-	Holder EnvironmentActivityLease
+	Holder model.EnvironmentActivityLease
 }
 
 func (e *EnvironmentActivityLeaseConflictError) Error() string {
@@ -183,26 +143,16 @@ func (e *EnvironmentActivityLeaseConflictError) Error() string {
 		e.Scope, e.Holder.Holder.String(), e.Holder.Name, e.Holder.ID)
 }
 
-// EnvironmentOperatorPresentError refuses a fresh exclusive take while an operator is present;
-// renewals are never refused.
-type EnvironmentOperatorPresentError struct {
-	Reason string
-}
-
-func (e *EnvironmentOperatorPresentError) Error() string {
-	return fmt.Sprintf("refusing exclusive lease: %s", e.Reason)
-}
-
 // takeExclusiveEnvironmentActivityLease keys the file by scope so rivals collide on one
 // path; the exclusive create decides the race.
-func takeExclusiveEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (EnvironmentActivityLease, error) {
+func takeExclusiveEnvironmentActivityLease(params TakeEnvironmentActivityLeaseParams) (model.EnvironmentActivityLease, error) {
 	id, now, scope := params.ID, params.Now, params.Scope
 	path, err := prepareExclusiveEnvironmentActivityLeasePath(params.Tenant, params.Environment, scope)
 	if err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 
-	lease := EnvironmentActivityLease{
+	lease := model.EnvironmentActivityLease{
 		ID: id, Name: params.Name, PID: params.PID, StartedAt: now,
 		Scope: scope, Exclusive: true, Holder: params.Holder,
 	}
@@ -211,21 +161,21 @@ func takeExclusiveEnvironmentActivityLease(params TakeEnvironmentActivityLeasePa
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		decision, existing, staleRecordPresent := decideExclusiveEnvironmentActivityLeaseClaim(path, id, now)
 		if decision == exclusiveClaimConflict {
-			return EnvironmentActivityLease{}, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
+			return model.EnvironmentActivityLease{}, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
 		}
 		if decision == exclusiveClaimRenew {
 			return renewExclusiveEnvironmentActivityLeaseClaim(path, lease, existing, params.TTL, now)
 		}
 		claimed, updated, err := tryClaimFreeExclusiveEnvironmentActivityLeaseScope(path, lease, params.TTL, now, staleRecordPresent)
 		if err != nil {
-			return EnvironmentActivityLease{}, err
+			return model.EnvironmentActivityLease{}, err
 		}
 		if claimed {
 			return updated, nil
 		}
 		// Another create won between our check and attempt; re-read the holder.
 	}
-	return EnvironmentActivityLease{}, exclusiveEnvironmentActivityLeaseContendedError(path, scope)
+	return model.EnvironmentActivityLease{}, exclusiveEnvironmentActivityLeaseContendedError(path, scope)
 }
 
 func prepareExclusiveEnvironmentActivityLeasePath(tenant, environment, scope string) (string, error) {
@@ -239,7 +189,7 @@ func prepareExclusiveEnvironmentActivityLeasePath(tenant, environment, scope str
 	return exclusiveEnvironmentActivityLeasePath(tenant, environment, scope)
 }
 
-func renewExclusiveEnvironmentActivityLeaseClaim(path string, lease, existing EnvironmentActivityLease, ttl time.Duration, now time.Time) (EnvironmentActivityLease, error) {
+func renewExclusiveEnvironmentActivityLeaseClaim(path string, lease, existing model.EnvironmentActivityLease, ttl time.Duration, now time.Time) (model.EnvironmentActivityLease, error) {
 	lease.StartedAt = existing.StartedAt
 	lease.RenewedAt = now
 	lease.ExpiresAt = capEnvironmentActivityLeaseExpiry(lease.StartedAt, now.Add(ttl))
@@ -248,14 +198,14 @@ func renewExclusiveEnvironmentActivityLeaseClaim(path string, lease, existing En
 
 // tryClaimFreeExclusiveEnvironmentActivityLeaseScope removes a stale file only when one was read,
 // then races the exclusive create; claimed=false with nil error means it lost.
-func tryClaimFreeExclusiveEnvironmentActivityLeaseScope(path string, lease EnvironmentActivityLease, ttl time.Duration, now time.Time, staleRecordPresent bool) (bool, EnvironmentActivityLease, error) {
+func tryClaimFreeExclusiveEnvironmentActivityLeaseScope(path string, lease model.EnvironmentActivityLease, ttl time.Duration, now time.Time, staleRecordPresent bool) (bool, model.EnvironmentActivityLease, error) {
 	if staleRecordPresent {
 		_ = os.Remove(path)
 	}
 	lease.ExpiresAt = capEnvironmentActivityLeaseExpiry(lease.StartedAt, now.Add(ttl))
 	created, err := createExclusiveEnvironmentActivityLeaseFile(path, lease)
 	if err != nil {
-		return false, EnvironmentActivityLease{}, err
+		return false, model.EnvironmentActivityLease{}, err
 	}
 	return created, lease, nil
 }
@@ -279,11 +229,11 @@ const (
 
 // decideExclusiveEnvironmentActivityLeaseClaim also reports whether a stale record was read;
 // without one the caller must not remove, or it could clobber a concurrent creator.
-func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time) (exclusiveEnvironmentActivityLeaseClaim, EnvironmentActivityLease, bool) {
+func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time) (exclusiveEnvironmentActivityLeaseClaim, model.EnvironmentActivityLease, bool) {
 	existing, err := loadEnvironmentActivityLease(path)
 	staleRecordPresent := err == nil
 	if !staleRecordPresent || !environmentActivityLeaseHeld(existing, now, ProcessAlive) {
-		return exclusiveClaimFree, EnvironmentActivityLease{}, staleRecordPresent
+		return exclusiveClaimFree, model.EnvironmentActivityLease{}, staleRecordPresent
 	}
 	if existing.ID == id {
 		return exclusiveClaimRenew, existing, true
@@ -293,7 +243,7 @@ func decideExclusiveEnvironmentActivityLeaseClaim(path, id string, now time.Time
 
 // createExclusiveEnvironmentActivityLeaseFile publishes via hard link so no empty claim is
 // ever visible (a reader reclaims unparseable leases). created=false means it lost the race.
-func createExclusiveEnvironmentActivityLeaseFile(path string, lease EnvironmentActivityLease) (bool, error) {
+func createExclusiveEnvironmentActivityLeaseFile(path string, lease model.EnvironmentActivityLease) (bool, error) {
 	data, err := json.MarshalIndent(lease, "", "  ")
 	if err != nil {
 		return false, err
@@ -328,24 +278,24 @@ func createExclusiveEnvironmentActivityLeaseFile(path string, lease EnvironmentA
 // exclusiveLeaseClaimVisible is a test hook fired when a new claim first exists.
 var exclusiveLeaseClaimVisible = func(string) {}
 
-func writeEnvironmentActivityLease(path string, lease EnvironmentActivityLease) (EnvironmentActivityLease, error) {
+func writeEnvironmentActivityLease(path string, lease model.EnvironmentActivityLease) (model.EnvironmentActivityLease, error) {
 	data, err := json.MarshalIndent(lease, "", "  ")
 	if err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 	// Replace atomically: a reader reclaims an unparseable lease, so a torn renewal would delete it.
 	if err := config.ReplaceFileAtomically(path, append(data, '\n'), 0o644); err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 	return lease, nil
 }
 
 // LoadEnvironmentActivityLeases returns held leases, reclaiming expired and orphaned ones.
-func LoadEnvironmentActivityLeases(tenant, environment string, now time.Time) ([]EnvironmentActivityLease, error) {
+func LoadEnvironmentActivityLeases(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error) {
 	return loadEnvironmentActivityLeases(tenant, environment, now, ProcessAlive)
 }
 
-func loadEnvironmentActivityLeases(tenant, environment string, now time.Time, alive func(int) bool) ([]EnvironmentActivityLease, error) {
+func loadEnvironmentActivityLeases(tenant, environment string, now time.Time, alive func(int) bool) ([]model.EnvironmentActivityLease, error) {
 	dir, err := environmentActivityLeaseDir(tenant, environment)
 	if err != nil {
 		return nil, err
@@ -377,7 +327,7 @@ func loadEnvironmentActivityLeases(tenant, environment string, now time.Time, al
 }
 
 // collectHeldEnvironmentActivityLeases treats a missing directory as no leases.
-func collectHeldEnvironmentActivityLeases(dir string, now time.Time, alive func(int) bool) ([]EnvironmentActivityLease, error) {
+func collectHeldEnvironmentActivityLeases(dir string, now time.Time, alive func(int) bool) ([]model.EnvironmentActivityLease, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -385,7 +335,7 @@ func collectHeldEnvironmentActivityLeases(dir string, now time.Time, alive func(
 		}
 		return nil, err
 	}
-	var held []EnvironmentActivityLease
+	var held []model.EnvironmentActivityLease
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
@@ -398,16 +348,16 @@ func collectHeldEnvironmentActivityLeases(dir string, now time.Time, alive func(
 }
 
 // readHeldEnvironmentActivityLease reclaims an unreadable lease, or it would block idle-stop forever.
-func readHeldEnvironmentActivityLease(path string, now time.Time, alive func(int) bool) (EnvironmentActivityLease, bool) {
+func readHeldEnvironmentActivityLease(path string, now time.Time, alive func(int) bool) (model.EnvironmentActivityLease, bool) {
 	lease, err := loadEnvironmentActivityLease(path)
 	if err != nil || !environmentActivityLeaseHeld(lease, now, alive) {
 		_ = os.Remove(path)
-		return EnvironmentActivityLease{}, false
+		return model.EnvironmentActivityLease{}, false
 	}
 	return lease, true
 }
 
-func environmentActivityLeaseHeld(lease EnvironmentActivityLease, now time.Time, alive func(int) bool) bool {
+func environmentActivityLeaseHeld(lease model.EnvironmentActivityLease, now time.Time, alive func(int) bool) bool {
 	if strings.TrimSpace(lease.ID) == "" {
 		return false
 	}
@@ -487,26 +437,26 @@ func exclusiveEnvironmentActivityLeasePath(tenant, environment, scope string) (s
 	return filepath.Join(dir, sanitized+".json"), nil
 }
 
-func loadEnvironmentActivityLease(path string) (EnvironmentActivityLease, error) {
+func loadEnvironmentActivityLease(path string) (model.EnvironmentActivityLease, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
-	var lease EnvironmentActivityLease
+	var lease model.EnvironmentActivityLease
 	if err := json.Unmarshal(data, &lease); err != nil {
-		return EnvironmentActivityLease{}, err
+		return model.EnvironmentActivityLease{}, err
 	}
 	return lease, nil
 }
 
 // FormatLeaseHolders renders one clause per distinct holder, listing its leases.
-func FormatLeaseHolders(leases []EnvironmentActivityLease) string {
+func FormatLeaseHolders(leases []model.EnvironmentActivityLease) string {
 	type leaseHolderGroup struct {
-		holder EnvironmentActivityLeaseHolder
+		holder model.EnvironmentActivityLeaseHolder
 		names  []string
 	}
 	var groups []leaseHolderGroup
-	index := make(map[EnvironmentActivityLeaseHolder]int)
+	index := make(map[model.EnvironmentActivityLeaseHolder]int)
 	for _, lease := range leases {
 		i, ok := index[lease.Holder]
 		if !ok {
@@ -531,8 +481,8 @@ func FormatLeaseHolders(leases []EnvironmentActivityLease) string {
 	return strings.Join(clauses, "; ")
 }
 
-func leaseIdleMarker(leases []EnvironmentActivityLease, now time.Time) EnvironmentIdleMarker {
-	marker := EnvironmentIdleMarker{Name: environmentActivityLeaseMarker}
+func leaseIdleMarker(leases []model.EnvironmentActivityLease, now time.Time) model.EnvironmentIdleMarker {
+	marker := model.EnvironmentIdleMarker{Name: environmentActivityLeaseMarker}
 	if len(leases) == 0 {
 		marker.Idle = true
 		marker.Reason = "no work leases held"

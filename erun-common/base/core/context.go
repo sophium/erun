@@ -8,6 +8,8 @@ import (
 	"os"
 	"reflect"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // RegistryForwarder owns the port-forwards to an in-cluster registry.
@@ -21,7 +23,7 @@ type Context struct {
 	Verbosity int
 	DryRun    bool
 	// Output selects the result format; JSON goes to Stdout, logging stays on Stderr.
-	Output OutputMode
+	Output model.OutputMode
 	// BuildJobs caps concurrent image builds; zero means resolve it, one is sequential.
 	// It lives here because policy must not leak into the env-agnostic resolvers.
 	BuildJobs int
@@ -51,7 +53,7 @@ type Context struct {
 
 // WriteResult emits v as the command's structured result.
 func (c Context) WriteResult(v any) error {
-	if c.Output != OutputJSON {
+	if c.Output != model.OutputJSON {
 		return nil
 	}
 	out := c.Stdout

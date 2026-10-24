@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -23,9 +24,9 @@ type ExecClosePRInput struct {
 
 func ExecClosePRTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecClosePRInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecClosePRInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-		var closed *review.ClosePullRequestResult
+		var closed *model.ClosePullRequestResult
 		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
-			result, err := review.ClosePullRequest(runCtx, review.ClosePullRequestParams{
+			result, err := review.ClosePullRequest(runCtx, model.ClosePullRequestParams{
 				RemoteURL:     input.RemoteURL,
 				Branch:        input.Branch,
 				TargetBranch:  input.TargetBranch,

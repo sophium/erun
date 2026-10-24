@@ -6,8 +6,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -42,10 +42,10 @@ func ResizeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 			findProjectRoot := func() (string, string, error) {
 				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
 			}
-			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+			resolveBuildContext := func() (model.DockerBuildContext, error) {
 				return shared.DockerBuildContextAtDir(workDir)
 			}
-			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return deploy.KubernetesDeployContextAtDir(workDir), nil
 			}
 			_, err := lifecycle.RunRuntimeResize(runCtx, lifecycle.RuntimeResizeDependencies{
@@ -55,10 +55,10 @@ func ResizeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 				ResolveDockerBuildContext:      resolveBuildContext,
 				ResolveKubernetesDeployContext: resolveDeployContext,
 				DeployHelmChart:                runtime.DeployHelmChart,
-			}, lifecycle.RuntimeResizeParams{
+			}, model.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
-				Input: lifecycle.RuntimeResizeInput{
+				Input: model.RuntimeResizeInput{
 					CPU:                 strings.TrimSpace(input.CPU),
 					Memory:              strings.TrimSpace(input.Memory),
 					DindCPU:             strings.TrimSpace(input.DindCPU),
@@ -66,7 +66,7 @@ func ResizeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 					ApplyRecommendation: input.ApplyRecommendation,
 				},
 				OverrideLease: input.OverrideLease,
-				Holder: activity.EnvironmentActivityLeaseHolder{
+				Holder: model.EnvironmentActivityLeaseHolder{
 					Orchestrator: input.Orchestrator,
 					Tenant:       identity.Tenant,
 					User:         identity.User,

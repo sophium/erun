@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -25,7 +26,7 @@ func (a *App) LoadDeployComponents(selection uiSelection) (uiDeployComponents, e
 		nil,
 		nil,
 		nil,
-		deploy.DeployTarget{Tenant: tenant, Environment: environment},
+		model.DeployTarget{Tenant: tenant, Environment: environment},
 	)
 	if err != nil {
 		return uiDeployComponents{}, err

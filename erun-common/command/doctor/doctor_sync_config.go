@@ -8,33 +8,10 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-// `--sync-config` rewrites the in-pod config from the chart-injected ERUN_* env
-// (env wins); keys the env does not carry are preserved untouched.
-
-// ConfigDriftKind classifies why an on-disk key disagrees with the injected env.
-type ConfigDriftKind string
-
-const (
-	// ConfigDriftMissing: the injected env carries the key but the disk does not.
-	ConfigDriftMissing ConfigDriftKind = "missing"
-	// ConfigDriftWrong: both carry the key with different values.
-	ConfigDriftWrong ConfigDriftKind = "wrong"
-	// ConfigDriftLegacyKey: the on-disk config still carries a legacy key such as `remote:`.
-	ConfigDriftLegacyKey ConfigDriftKind = "legacy"
-)
-
-// ConfigDriftField is one key that disagrees between on-disk config and injected env.
-type ConfigDriftField struct {
-	Scope    string // "env" or "root"
-	Key      string
-	OnDisk   string
-	Injected string
-	Kind     ConfigDriftKind
-}
 
 // ConfigSyncInspection is the result of comparing in-pod config with the injected env.
 type ConfigSyncInspection struct {
@@ -43,7 +20,7 @@ type ConfigSyncInspection struct {
 	Environment string
 	HasInjected bool
 	Injected    shared.InjectedRuntimeConfig
-	Drift       []ConfigDriftField
+	Drift       []model.ConfigDriftField
 }
 
 // InSync reports whether the on-disk config matches the injected env.
@@ -91,20 +68,20 @@ func InspectRuntimeConfigSync(configHome string, env func(string) string) (Confi
 }
 
 // envTypeDrift flags a lingering legacy `remote:` key even when the value matches.
-func envTypeDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) (ConfigDriftField, bool) {
+func envTypeDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) (model.ConfigDriftField, bool) {
 	if _, hasLegacyRemote := raw["remote"]; hasLegacyRemote {
-		return ConfigDriftField{Scope: "env", Key: "type", OnDisk: "remote", Injected: string(injected.Type), Kind: ConfigDriftLegacyKey}, true
+		return model.ConfigDriftField{Scope: "env", Key: "type", OnDisk: "remote", Injected: string(injected.Type), Kind: model.ConfigDriftLegacyKey}, true
 	}
 	if onDisk.Type != injected.Type {
-		return ConfigDriftField{Scope: "env", Key: "type", OnDisk: string(onDisk.Type), Injected: string(injected.Type), Kind: driftKind(string(onDisk.Type))}, true
+		return model.ConfigDriftField{Scope: "env", Key: "type", OnDisk: string(onDisk.Type), Injected: string(injected.Type), Kind: driftKind(string(onDisk.Type))}, true
 	}
-	return ConfigDriftField{}, false
+	return model.ConfigDriftField{}, false
 }
 
-func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []ConfigDriftField {
-	var drift []ConfigDriftField
-	add := func(key, onDiskVal, injectedVal string, kind ConfigDriftKind) {
-		drift = append(drift, ConfigDriftField{Scope: "env", Key: key, OnDisk: onDiskVal, Injected: injectedVal, Kind: kind})
+func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []model.ConfigDriftField {
+	var drift []model.ConfigDriftField
+	add := func(key, onDiskVal, injectedVal string, kind model.ConfigDriftKind) {
+		drift = append(drift, model.ConfigDriftField{Scope: "env", Key: key, OnDisk: onDiskVal, Injected: injectedVal, Kind: kind})
 	}
 
 	if field, ok := envTypeDrift(injected, onDisk, raw); ok {
@@ -118,7 +95,7 @@ func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []
 		add("cloudprovideralias", onDisk.CloudProviderAlias, injected.CloudProviderAlias, driftKind(onDisk.CloudProviderAlias))
 	}
 	if onDisk.ManagedCloud != injected.ManagedCloud {
-		add("managedcloud", formatBool(onDisk.ManagedCloud), formatBool(injected.ManagedCloud), ConfigDriftWrong)
+		add("managedcloud", formatBool(onDisk.ManagedCloud), formatBool(injected.ManagedCloud), model.ConfigDriftWrong)
 	}
 	if onDisk.Idle != injected.Idle {
 		add("idle", "", "", driftKindForIdle(onDisk.Idle))
@@ -127,48 +104,48 @@ func envConfigDrift(injected, onDisk configpkg.EnvConfig, raw map[string]any) []
 		add("runtimeregistry", onDisk.RuntimeRegistry, injected.RuntimeRegistry, driftKind(onDisk.RuntimeRegistry))
 	}
 	if !reflect.DeepEqual(normalizeRegistries(onDisk.ContainerRegistries), normalizeRegistries(injected.ContainerRegistries)) {
-		kind := ConfigDriftWrong
+		kind := model.ConfigDriftWrong
 		if onDisk.ContainerRegistries.IsZero() {
-			kind = ConfigDriftMissing
+			kind = model.ConfigDriftMissing
 		}
 		add("containerregistries", "", "", kind)
 	}
 	if onDisk.DisableBuildScript != injected.DisableBuildScript {
-		add("disablebuildscript", formatBool(onDisk.DisableBuildScript), formatBool(injected.DisableBuildScript), ConfigDriftWrong)
+		add("disablebuildscript", formatBool(onDisk.DisableBuildScript), formatBool(injected.DisableBuildScript), model.ConfigDriftWrong)
 	}
 	return drift
 }
 
-func rootConfigDrift(injected shared.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []ConfigDriftField {
-	var drift []ConfigDriftField
+func rootConfigDrift(injected shared.InjectedRuntimeConfig, onDisk configpkg.ERunConfig) []model.ConfigDriftField {
+	var drift []model.ConfigDriftField
 	for _, provider := range injected.Providers {
 		existing, found := configpkg.FindCloudProvider(onDisk.CloudProviders, provider.Alias)
 		switch {
 		case !found:
-			drift = append(drift, ConfigDriftField{Scope: "root", Key: "cloudproviders", Injected: provider.Alias, Kind: ConfigDriftMissing})
+			drift = append(drift, model.ConfigDriftField{Scope: "root", Key: "cloudproviders", Injected: provider.Alias, Kind: model.ConfigDriftMissing})
 		case !reflect.DeepEqual(existing, provider):
-			drift = append(drift, ConfigDriftField{Scope: "root", Key: "cloudproviders", OnDisk: existing.Alias, Injected: provider.Alias, Kind: ConfigDriftWrong})
+			drift = append(drift, model.ConfigDriftField{Scope: "root", Key: "cloudproviders", OnDisk: existing.Alias, Injected: provider.Alias, Kind: model.ConfigDriftWrong})
 		}
 	}
 	for _, context := range injected.Contexts {
 		existing, found := findCloudContextByName(onDisk.CloudContexts, context.Name)
 		switch {
 		case !found:
-			drift = append(drift, ConfigDriftField{Scope: "root", Key: "cloudcontexts", Injected: context.Name, Kind: ConfigDriftMissing})
+			drift = append(drift, model.ConfigDriftField{Scope: "root", Key: "cloudcontexts", Injected: context.Name, Kind: model.ConfigDriftMissing})
 		case existing.Region != context.Region || existing.InstanceID != context.InstanceID || existing.CloudProviderAlias != context.CloudProviderAlias || existing.Provider != context.Provider:
-			drift = append(drift, ConfigDriftField{Scope: "root", Key: "cloudcontexts", OnDisk: existing.Name, Injected: context.Name, Kind: ConfigDriftWrong})
+			drift = append(drift, model.ConfigDriftField{Scope: "root", Key: "cloudcontexts", OnDisk: existing.Name, Injected: context.Name, Kind: model.ConfigDriftWrong})
 		}
 	}
 	return drift
 }
 
-func findCloudContextByName(contexts []configpkg.CloudContextConfig, name string) (configpkg.CloudContextConfig, bool) {
+func findCloudContextByName(contexts []model.CloudContextConfig, name string) (model.CloudContextConfig, bool) {
 	for _, context := range contexts {
 		if context.Name == name {
 			return context, true
 		}
 	}
-	return configpkg.CloudContextConfig{}, false
+	return model.CloudContextConfig{}, false
 }
 
 func normalizeRegistries(registries configpkg.ContainerRegistries) configpkg.ContainerRegistries {
@@ -178,18 +155,18 @@ func normalizeRegistries(registries configpkg.ContainerRegistries) configpkg.Con
 	return registries
 }
 
-func driftKind(onDiskValue string) ConfigDriftKind {
+func driftKind(onDiskValue string) model.ConfigDriftKind {
 	if strings.TrimSpace(onDiskValue) == "" {
-		return ConfigDriftMissing
+		return model.ConfigDriftMissing
 	}
-	return ConfigDriftWrong
+	return model.ConfigDriftWrong
 }
 
-func driftKindForIdle(onDisk configpkg.EnvironmentIdleConfig) ConfigDriftKind {
+func driftKindForIdle(onDisk configpkg.EnvironmentIdleConfig) model.ConfigDriftKind {
 	if onDisk == (configpkg.EnvironmentIdleConfig{}) {
-		return ConfigDriftMissing
+		return model.ConfigDriftMissing
 	}
-	return ConfigDriftWrong
+	return model.ConfigDriftWrong
 }
 
 func formatBool(value bool) string {

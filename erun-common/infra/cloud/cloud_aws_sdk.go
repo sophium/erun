@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // awsSTSIdentityExecutionOperation keys the `aws sts get-caller-identity` call sites.
@@ -35,16 +36,16 @@ func libraryResolveAWSIdentity(ctx core.Context, profile string) (AWSIdentity, e
 }
 
 // libraryCheckAWSStatus never reports "aws CLI not installed"; other statuses match.
-func libraryCheckAWSStatus(_ core.Context, provider config.CloudProviderConfig) CloudProviderStatus {
+func libraryCheckAWSStatus(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
 	_, err := awsSDKCallerIdentity(context.Background(), provider.Profile)
 	if err == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 	}
 	status := config.CloudTokenStatusExpired
 	if isAWSProfileNotConfiguredError(err) {
 		status = config.CloudTokenStatusNotConfigured
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: awsSDKErrorMessage(err)}
+	return model.CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: awsSDKErrorMessage(err)}
 }
 
 // libraryRunAWSBearerToken traces the same CLI line for parity, then uses aws-sdk-go-v2.

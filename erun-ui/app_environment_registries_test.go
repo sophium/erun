@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *testing.T) {
@@ -17,7 +18,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 				},
 			},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
@@ -60,7 +61,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/shared")},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
@@ -70,7 +71,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
-				RuntimePod: configpkg.RuntimePodResources{
+				RuntimePod: model.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
@@ -111,7 +112,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("ghcr.io/acme")},
 		},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, KubernetesContext: "c", Type: configpkg.EnvironmentTypeLocalAgent},
 		},
@@ -150,7 +151,7 @@ func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *tes
 func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {Name: "local", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeLocalAgent},
 		},
@@ -175,7 +176,7 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {Name: "prod", LocalRepoPath: projectRoot, Type: configpkg.EnvironmentTypeRuntime},
 		},
@@ -202,7 +203,7 @@ func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
 func TestSaveEnvironmentConfigRoundTripsRuntimeChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
 		envs: map[string]configpkg.EnvConfig{

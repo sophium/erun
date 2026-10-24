@@ -5,55 +5,46 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 )
 
-type (
-	DoctorAction string
-)
-
-const (
-	DoctorActionPruneImages     DoctorAction = "prune_images"
-	DoctorActionPruneBuildCache DoctorAction = "prune_build_cache"
-	DoctorActionPruneContainers DoctorAction = "prune_containers"
-)
-
 type DoctorInspectionResult struct {
-	Daemon DoctorDockerDaemon
+	Daemon model.DoctorDockerDaemon
 	Stdout string
 	Stderr string
 }
 
-func DoctorActions() []DoctorAction {
-	return []DoctorAction{
-		DoctorActionPruneImages,
-		DoctorActionPruneBuildCache,
-		DoctorActionPruneContainers,
+func DoctorActions() []model.DoctorAction {
+	return []model.DoctorAction{
+		model.DoctorActionPruneImages,
+		model.DoctorActionPruneBuildCache,
+		model.DoctorActionPruneContainers,
 	}
 }
 
-func DoctorActionPromptLabel(action DoctorAction, result config.OpenResult) string {
+func DoctorActionPromptLabel(action model.DoctorAction, result config.OpenResult) string {
 	target := result.Tenant + "/" + result.Environment
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		return fmt.Sprintf("Prune unused Docker images in %s?", target)
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		return fmt.Sprintf("Prune unused BuildKit cache in %s?", target)
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		return fmt.Sprintf("Prune stopped Docker containers in %s?", target)
 	default:
 		return fmt.Sprintf("Run doctor action %q in %s?", action, target)
 	}
 }
 
-func DoctorActionDescription(action DoctorAction) string {
+func DoctorActionDescription(action model.DoctorAction) string {
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		return "Remove unused Docker images"
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		return "Remove unused BuildKit cache"
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		return "Remove stopped Docker containers"
 	default:
 		return string(action)
@@ -65,7 +56,7 @@ func DoctorActionDescription(action DoctorAction) string {
 func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams) (DoctorInspectionResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
-		return DoctorInspectionResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
+		return DoctorInspectionResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
 	if err := waitForDoctorDaemon(ctx, req, daemon); err != nil {
 		return DoctorInspectionResult{Daemon: daemon}, err
@@ -76,10 +67,10 @@ func RunDoctorInspection(ctx core.Context, runner diagnosis.RuntimeContainerComm
 
 // RunDoctorAction prunes the environment's build daemon, with store readings
 // around the prune so a no-op prune is reported as one.
-func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action DoctorAction) (DoctorDockerResult, error) {
+func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, action model.DoctorAction) (DoctorDockerResult, error) {
 	daemon := ResolveDoctorDockerDaemon(req)
 	if daemon.Unavailable() {
-		return DoctorDockerResult{Daemon: daemon}, DoctorDockerDaemonUnavailableError{Daemon: daemon}
+		return DoctorDockerResult{Daemon: daemon}, model.DoctorDockerDaemonUnavailableError{Daemon: daemon}
 	}
 	steps, err := doctorActionSteps(action)
 	if err != nil {
@@ -92,8 +83,8 @@ func RunDoctorAction(ctx core.Context, runner diagnosis.RuntimeContainerCommandR
 }
 
 // waitForDoctorDaemon waits for a pod-hosted daemon; a host daemon needs no cluster.
-func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon DoctorDockerDaemon) error {
-	if daemon.Kind == DoctorDockerDaemonHost {
+func waitForDoctorDaemon(ctx core.Context, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon) error {
+	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return nil
 	}
 	return cloud.TraceAndWaitForRuntime(ctx, req)

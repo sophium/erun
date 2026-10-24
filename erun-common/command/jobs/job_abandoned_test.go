@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -20,7 +21,7 @@ func TestEnvironmentJobThatExitsCleanlyStillSucceeds(t *testing.T) {
 	const environment = "clean-test"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -84,7 +85,7 @@ func TestEnvironmentJobThatEndsWhileAJobItStartedIsStillRunningIsNotReportedAsSu
 		t.Fatalf("seed child job record: %v", err)
 	}
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          parentID,

@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -17,10 +18,10 @@ import (
 
 // NewPinCmd re-pins every recorded erun version for an environment. It only edits
 // sources; terraform apply and deploy stay separate steps.
-func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
+func NewPinCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, listEnvConfigs func(string) ([]config.EnvConfig, error), findProjectRoot sharedpkg.ProjectFinderFunc) *cobra.Command {
 	var version string
 	var latest, revert, list bool
-	target := sharedpkg.OpenParams{}
+	target := model.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:   "pin [TENANT] [ENVIRONMENT]",
@@ -131,7 +132,7 @@ func runPinCommand(ctx context.Context, cmdCtx core.Context, result config.OpenR
 }
 
 // applyPinCommand writes a resolved, drifted plan.
-func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
+func applyPinCommand(cmdCtx core.Context, projectRoot string, result config.OpenResult, plan model.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	// Recorded first so a revert has a target even if the rewrite fails partway.
 	if err := lifecycle.RecordPinPrevious(projectRoot, result.Tenant, result.Environment, plan.Previous); err != nil {
 		return err
@@ -190,7 +191,7 @@ func resolvePinTarget(ctx context.Context, cmdCtx core.Context, result config.Op
 }
 
 // verifyPinTargetPublished refuses a target the registry lacks. An empty listing means "cannot check".
-func verifyPinTargetPublished(target string, versions registry.RuntimeRegistryVersions) error {
+func verifyPinTargetPublished(target string, versions model.RuntimeRegistryVersions) error {
 	wanted := strings.TrimPrefix(strings.TrimSpace(target), "v")
 	if len(versions.Tags) == 0 {
 		return nil
@@ -203,7 +204,7 @@ func verifyPinTargetPublished(target string, versions registry.RuntimeRegistryVe
 	return fmt.Errorf("erun version %s is not published in %s — pin to a released version (see `erun pin --list`)", target, versions.Image)
 }
 
-func resolvePinRegistryVersions(ctx context.Context) (registry.RuntimeRegistryVersions, error) {
+func resolvePinRegistryVersions(ctx context.Context) (model.RuntimeRegistryVersions, error) {
 	return registry.ResolveDefaultRuntimeRegistryVersions(ctx)
 }
 
@@ -231,7 +232,7 @@ func resolvePinProjectRoot(result config.OpenResult, listEnvConfigs func(string)
 
 // savePinnedEnvConfig persists only fields the plan has sites for; skipped
 // tenant-owned values must stay untouched.
-func savePinnedEnvConfig(result config.OpenResult, plan lifecycle.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
+func savePinnedEnvConfig(result config.OpenResult, plan model.PinPlan, saveEnvConfig func(string, config.EnvConfig) error) error {
 	if saveEnvConfig == nil {
 		return nil
 	}
@@ -243,7 +244,7 @@ func savePinnedEnvConfig(result config.OpenResult, plan lifecycle.PinPlan, saveE
 }
 
 // tracePinPlan renders every site's old→new value, on real runs too.
-func tracePinPlan(cmdCtx core.Context, plan lifecycle.PinPlan) {
+func tracePinPlan(cmdCtx core.Context, plan model.PinPlan) {
 	cmdCtx.Trace(fmt.Sprintf("pin %s/%s -> %s (project root %s)", plan.Tenant, plan.Environment, plan.Target, plan.ProjectRoot))
 	if plan.ProjectRootNote != "" {
 		cmdCtx.Trace("  " + plan.ProjectRootNote)
@@ -263,7 +264,7 @@ func tracePinPlan(cmdCtx core.Context, plan lifecycle.PinPlan) {
 	}
 }
 
-func pinSiteLabel(site lifecycle.PinSite) string {
+func pinSiteLabel(site model.PinSite) string {
 	if strings.TrimSpace(site.Path) == "" {
 		return site.Detail
 	}

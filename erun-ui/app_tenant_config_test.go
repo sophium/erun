@@ -8,19 +8,20 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	openpkg "github.com/sophium/erun/erun-common/primitive/open"
 )
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
-	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:         "team-cloud",
 		Provider:      configpkg.CloudProviderAWS,
 		OIDCIssuerURL: "https://issuer.team.example",
 	}}}
 	store := stubUIStore{
 		config: &rootConfig,
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name:                      "frs",
 				DefaultEnvironment:        "dev",
@@ -68,7 +69,7 @@ func assertLoadedTenantConfig(t *testing.T, loaded uiTenantConfig) {
 }
 
 func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
-	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    "team-cloud",
 		Provider: configpkg.CloudProviderAWS,
 		Profile:  "team",
@@ -84,8 +85,8 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 				}
 				return testUIJWT("https://sts.aws.example/.well-known/openid-configuration"), nil
 			},
-			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -101,7 +102,7 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 
 func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 	jwt := testUIJWT("https://sts.aws.example/.well-known/openid-configuration")
-	rootConfig := configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	rootConfig := configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    "team-cloud",
 		Provider: configpkg.CloudProviderAWS,
 		Profile:  "team",
@@ -116,8 +117,8 @@ func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
 				}
 				return jwt, nil
 			},
-			CheckAWSStatus: func(_ core.Context, provider configpkg.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -170,10 +171,10 @@ func testUIJWTWithSubject(issuer, subject string) string {
 
 func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	rootConfig := &configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{
+		CloudProviders: []model.CloudProviderConfig{
 			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []configpkg.CloudContextConfig{
+		CloudContexts: []model.CloudContextConfig{
 			{
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
@@ -188,7 +189,7 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: rootConfig},
 		cloudContextDeps: cloud.CloudContextDependencies{
-			RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
+			RunAWS: func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 				awsCalls = append(awsCalls, strings.Join(args, " "))
 				return "i-test\tstopped\n", nil
 			},
@@ -215,13 +216,13 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 	app := NewApp(erunUIDeps{store: stubUIStore{}})
 	defer app.shutdown(context.Background())
 
-	app.applyCloudContextStatusesToCache([]configpkg.CloudContextStatus{
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
 		{
-			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
+			CloudContextConfig: model.CloudContextConfig{Name: "ctx-a"},
 			Status:             cloud.CloudContextStatusRunning,
 		},
 		{
-			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
+			CloudContextConfig: model.CloudContextConfig{Name: "ctx-b"},
 			Status:             cloud.CloudContextStatusStopped,
 		},
 	})
@@ -232,18 +233,18 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 		t.Fatalf("seed stopped, got %q", got)
 	}
 
-	app.applyCloudContextStatusesToCache([]configpkg.CloudContextStatus{
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{
 		{
-			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-a"},
+			CloudContextConfig: model.CloudContextConfig{Name: "ctx-a"},
 			Status:             cloud.CloudContextStatusUnknown,
 			Message:            "status refresh failed: token expired",
 		},
 		{
-			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-b"},
+			CloudContextConfig: model.CloudContextConfig{Name: "ctx-b"},
 			Status:             cloud.CloudContextStatusRunning,
 		},
 		{
-			CloudContextConfig: configpkg.CloudContextConfig{Name: "ctx-c"},
+			CloudContextConfig: model.CloudContextConfig{Name: "ctx-c"},
 			Status:             cloud.CloudContextStatusUnknown,
 		},
 	})
@@ -261,7 +262,7 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	projectRoot := openpkg.RemoteWorktreePathForRepoName("frs")
 	rootConfig := &configpkg.ERunConfig{
-		CloudContexts: []configpkg.CloudContextConfig{{
+		CloudContexts: []model.CloudContextConfig{{
 			Name:               "team-context",
 			CloudProviderAlias: "team-cloud",
 			KubernetesContext:  "cluster-dev",
@@ -269,7 +270,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name:               "frs",
 				DefaultEnvironment: "dev",

@@ -8,7 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const (
@@ -20,13 +20,13 @@ const (
 
 type DeployStore interface {
 	configpkg.OpenStore
-	ListTenantConfigs() ([]configpkg.TenantConfig, error)
+	ListTenantConfigs() ([]model.TenantConfig, error)
 	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 }
 
 type (
-	DeployContextResolverFunc       func() (shared.KubernetesDeployContext, error)
-	KubernetesDeploymentCheckerFunc func(core.Context, KubernetesDeploymentCheckParams) (bool, error)
+	DeployContextResolverFunc       func() (model.KubernetesDeployContext, error)
+	KubernetesDeploymentCheckerFunc func(core.Context, model.KubernetesDeploymentCheckParams) (bool, error)
 	HelmChartDeployerFunc           func(HelmDeployParams) error
 	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
 )
@@ -98,11 +98,11 @@ type HelmDeploySpec struct {
 	Claude                  configpkg.EnvironmentClaudeConfig
 	// OpenRouter comes from root config, not EnvConfig: one catalog every env selects from. Nil renders nothing.
 	OpenRouter *configpkg.OpenRouterConfig
-	RuntimePod configpkg.RuntimePodResources
+	RuntimePod model.RuntimePodResources
 	// RuntimeDindPod sizes the erun-dind sidecar; zero normalizes to DefaultRuntimeDindCPU/Memory.
-	RuntimeDindPod configpkg.RuntimePodResources
+	RuntimeDindPod model.RuntimePodResources
 	// NamespaceQuota is a per-namespace ResourceQuota + LimitRange ceiling; zero applies none.
-	NamespaceQuota configpkg.NamespaceResourceQuota
+	NamespaceQuota model.NamespaceResourceQuota
 	// Stopped re-renders replicas: 0 so an upgrade does not wake a stopped env; only `erun open` wakes.
 	Stopped bool
 	Version string
@@ -160,45 +160,10 @@ type HelmReleasePendingOperationError struct {
 	Err         error
 }
 
-type KubernetesDeploymentCheckParams struct {
-	Name               string
-	Namespace          string
-	KubernetesContext  string
-	ExpectedRepoPath   string
-	ExpectedSSHD       *bool
-	ExpectedMCPPort    int
-	ExpectedSSHPort    int
-	ExpectedRuntimePod configpkg.RuntimePodResources
-}
-
-type DeployTarget struct {
-	Tenant          string
-	Environment     string
-	RepoPath        string
-	VersionOverride string
-	// Components, when non-empty, fully determines what deploys, overriding the saved set and plan.
-	// Unknown names error at resolve.
-	Components []string
-	// Force re-runs the helm upgrade even when the release already matches the version.
-	Force bool
-	// RolloutTimeout overrides deploy.timeout and DefaultHelmDeploymentTimeout for this deploy only.
-	RolloutTimeout string
-	// NamespaceQuotaOverride overrides the env's namespace ceiling for this deploy only.
-	NamespaceQuotaOverride configpkg.NamespaceResourceQuota
-	// MCPAuthPublicKeyPath empty rethreads the recorded key, so auth survives a version bump.
-	MCPAuthPublicKeyPath string
-	// DisableMCPAuth is the only way to turn auth off, so no deploy downgrades an edge by omission.
-	DisableMCPAuth bool
-	// RuntimeImageOverride lets an env run another image before its own <tenant>-devops image exists.
-	RuntimeImageOverride string
-	// RuntimeChartOverride is an OCI chart reference, optionally versioned, stated by the operator.
-	RuntimeChartOverride string
-}
-
 // DeploySpec is a pure helm-install plan by reference; deploy never builds, pushes, or publishes.
 type DeploySpec struct {
 	Target        configpkg.OpenResult
-	DeployContext shared.KubernetesDeployContext
+	DeployContext model.KubernetesDeployContext
 	Deploy        HelmDeploySpec
 	// SkipHelm suppresses the upgrade when every image was promoted from cache, so pods are not rolled.
 	SkipHelm bool
@@ -318,7 +283,7 @@ func (d HelmDeploySpec) resolvedChartVersion() string {
 
 // applyRuntimeChartOverride installs the operator-named runtime chart. erun publishes the chart on
 // its own line, so a tenant-versioned image may have no chart at its version.
-func applyRuntimeChartOverride(ctx core.Context, target DeployTarget, spec *DeploySpec) {
+func applyRuntimeChartOverride(ctx core.Context, target model.DeployTarget, spec *DeploySpec) {
 	override := strings.TrimSpace(target.RuntimeChartOverride)
 	if override == "" || spec == nil {
 		return

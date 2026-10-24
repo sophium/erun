@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
@@ -46,11 +47,11 @@ func TestTheRestartFlagComparesWhatTheSessionRunsOn(t *testing.T) {
 		_, err := app.StartOrchestrator(created.ID, 80, 24)
 		mustNoErr(t, err, "StartOrchestrator")
 
-		_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
+		_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, model.SetOrchestratorModelParams{OrchestratorID: created.ID, Model: "opus"})
 		mustNoErr(t, err, "SetOrchestratorModel")
 		requireLoneLaunchSettingsRow(t, app, "after set-model opus", orchestratorLaunchInput{Model: "opus"}, false)
 
-		_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
+		_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, model.SetOrchestratorEffortParams{OrchestratorID: created.ID, Effort: "ultracode"})
 		mustNoErr(t, err, "SetOrchestratorEffort")
 		explicit := orchestratorLaunchInput{Model: "opus", Effort: "ultracode"}
 		requireLoneLaunchSettingsRow(t, app, "after set-effort ultracode", explicit, false)

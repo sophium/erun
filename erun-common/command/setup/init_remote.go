@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -76,7 +77,7 @@ func (s BootstrapRunner) ensureRemoteRepository(params open.BootstrapInitParams,
 	return req, repository, provisioned, s.cloneRemoteRepository(req, projectRoot, repository)
 }
 
-func (s BootstrapRunner) writeRemoteInitMarker(req config.ShellLaunchParams, marker remoteinit.RemoteInitMarker) error {
+func (s BootstrapRunner) writeRemoteInitMarker(req config.ShellLaunchParams, marker model.RemoteInitMarker) error {
 	script := strings.Join([]string{
 		"set -eu",
 		remoteInitMarkerWriteScript(marker),
@@ -134,8 +135,8 @@ func (s BootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesC
 	}
 }
 
-func remoteRepositoryTenantConfig(tenant, envName string) config.TenantConfig {
-	return config.TenantConfig{Name: tenant, DefaultEnvironment: envName}
+func remoteRepositoryTenantConfig(tenant, envName string) model.TenantConfig {
+	return model.TenantConfig{Name: tenant, DefaultEnvironment: envName}
 }
 
 func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType config.EnvironmentType) config.EnvConfig {
@@ -146,14 +147,14 @@ func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, e
 	return cfg
 }
 
-func (s BootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) config.EnvironmentLocalPorts {
+func (s BootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) model.EnvironmentLocalPorts {
 	portStore, ok := s.Store.(config.EnvironmentPortStore)
 	if !ok {
-		return config.EnvironmentLocalPorts{}
+		return model.EnvironmentLocalPorts{}
 	}
 	resolved, err := config.ResolveEnvironmentLocalPorts(portStore, tenant, envName)
 	if err != nil {
-		return config.EnvironmentLocalPorts{}
+		return model.EnvironmentLocalPorts{}
 	}
 	return resolved
 }
@@ -183,7 +184,7 @@ func (s BootstrapRunner) ensureRemoteRuntime(target config.OpenResult, req confi
 		return err
 	}
 	// Carry the MCP-auth key so the desktop need not redeploy right after init.
-	if err := deploy.ApplyMCPAuthToRuntimeSpec(s.Context, deploy.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
+	if err := deploy.ApplyMCPAuthToRuntimeSpec(s.Context, model.DeployTarget{Tenant: target.Tenant, MCPAuthPublicKeyPath: mcpAuthPublicKeyPath}, &spec); err != nil {
 		return err
 	}
 	if err := deploy.RunDeploySpec(s.Context, spec, s.DeployHelmChart); err != nil {
@@ -201,8 +202,8 @@ func (s BootstrapRunner) resolveRemoteRepositoryURL(params open.BootstrapInitPar
 	if params.RemoteRepositoryURL != "" {
 		return params.RemoteRepositoryURL, nil
 	}
-	interaction := BootstrapInitInteraction{
-		Type:  BootstrapInitInteractionRemoteRepository,
+	interaction := model.BootstrapInitInteraction{
+		Type:  model.BootstrapInitInteractionRemoteRepository,
 		Label: remoteRepositoryLabel(tenant, envName),
 	}
 	if s.PromptRemoteRepositoryURL == nil {
@@ -228,8 +229,8 @@ func (s BootstrapRunner) resolveRemoteRepositoryCredentials(params open.Bootstra
 	if keyID == "" {
 		s.Context.Info(details)
 		if s.PromptCodeCommitSSHKeyID == nil {
-			return remoteinit.RemoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-				Type:    BootstrapInitInteractionCodeCommitSSHKeyID,
+			return remoteinit.RemoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+				Type:    model.BootstrapInitInteractionCodeCommitSSHKeyID,
 				Label:   remoteinit.CodeCommitSSHKeyIDLabel(tenant, envName),
 				Details: details,
 			}}
@@ -241,8 +242,8 @@ func (s BootstrapRunner) resolveRemoteRepositoryCredentials(params open.Bootstra
 		keyID = strings.TrimSpace(prompted)
 	}
 	if keyID == "" {
-		return remoteinit.RemoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-			Type:    BootstrapInitInteractionCodeCommitSSHKeyID,
+		return remoteinit.RemoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+			Type:    model.BootstrapInitInteractionCodeCommitSSHKeyID,
 			Label:   remoteinit.CodeCommitSSHKeyIDLabel(tenant, envName),
 			Details: details,
 		}}
@@ -269,8 +270,8 @@ func (s BootstrapRunner) resolveExistingRemoteHostConfig(params open.BootstrapIn
 		repository.UseHostConfig = true
 		return repository, true, nil
 	}
-	confirmed, err := s.confirm(BootstrapInitInteraction{
-		Type:    BootstrapInitInteractionConfirmRemoteHost,
+	confirmed, err := s.confirm(model.BootstrapInitInteraction{
+		Type:    model.BootstrapInitInteractionConfirmRemoteHost,
 		Label:   remoteHostConfigLabel(tenant, envName),
 		Details: repository.URL,
 	})
@@ -299,8 +300,8 @@ func (s BootstrapRunner) waitForRemoteKeyImport(params open.BootstrapInitParams,
 			return fmt.Errorf("remote SSH key import cancelled")
 		}
 	} else if s.Confirm == nil {
-		return BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-			Type:    BootstrapInitInteractionConfirmRemoteKey,
+		return BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+			Type:    model.BootstrapInitInteractionConfirmRemoteKey,
 			Label:   remoteKeyImportLabel(tenant, envName),
 			Details: publicKey,
 		}}

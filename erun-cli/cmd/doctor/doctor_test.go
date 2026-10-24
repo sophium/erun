@@ -11,6 +11,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
@@ -71,7 +72,7 @@ func TestDoctorTreatsPromptEOFAsSkippedNotFailed(t *testing.T) {
 	if len(actions) != 0 {
 		t.Fatalf("EOF selected %v, want nothing selected", actions)
 	}
-	if !strings.Contains(out.String(), "skipped: "+string(doctor.DoctorActionPruneImages)) {
+	if !strings.Contains(out.String(), "skipped: "+string(model.DoctorActionPruneImages)) {
 		t.Errorf("EOF was not reported as a skipped optional step:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), doctorPromptsStdinClosed) {

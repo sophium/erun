@@ -6,17 +6,17 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type (
 	RuntimeContainerCommandRunnerFunc func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error)
 )
 
-func ResolveDoctorTarget(store config.OpenStore, params shared.OpenParams) (config.OpenResult, error) {
+func ResolveDoctorTarget(store config.OpenStore, params model.OpenParams) (config.OpenResult, error) {
 	return open.ResolveOpen(store, params)
 }
 

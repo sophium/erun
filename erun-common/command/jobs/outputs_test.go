@@ -5,13 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A never-created directory must marshal Entries as "[]", not "null".
 func TestResolveLocalOutputsEmptyDirectorySerializesAsEmptyArray(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "never-created")
 
-	result, err := ResolveLocalOutputs(RuntimeOutputsParams{Dir: dir})
+	result, err := ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolve local outputs for missing dir: %v", err)
 	}
@@ -40,7 +42,7 @@ func TestResolveLocalOutputsNonEmptySerializesAsArray(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	result, err := ResolveLocalOutputs(RuntimeOutputsParams{Dir: dir})
+	result, err := ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 	if err != nil {
 		t.Fatalf("resolve local outputs: %v", err)
 	}
@@ -48,7 +50,7 @@ func TestResolveLocalOutputsNonEmptySerializesAsArray(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
 	}
-	var roundTripped RuntimeOutputsListResult
+	var roundTripped model.RuntimeOutputsListResult
 	if err := json.Unmarshal(data, &roundTripped); err != nil {
 		t.Fatalf("unmarshal result: %v", err)
 	}

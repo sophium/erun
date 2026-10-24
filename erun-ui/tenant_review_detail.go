@@ -95,7 +95,7 @@ func tenantDashboardEnrolledReviewerChoices(ctx context.Context, client *platfor
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return nil
 	}
-	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		return nil
 	}
@@ -135,11 +135,11 @@ func loadReviewDetailBuilds(ctx context.Context, client *platformclient.Platform
 
 // loadReviewDetailQueuePosition reports 0 on denial or failure: the position is
 // supplemental.
-func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review platformclient.PlatformReview, reviewID string) int {
+func loadReviewDetailQueuePosition(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, review model.PlatformReview, reviewID string) int {
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadMergeQueue) != "" {
 		return 0
 	}
-	queue, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{
+	queue, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{
 		Repository: review.Repository, TargetBranch: review.TargetBranch,
 	})
 	if err != nil {
@@ -191,7 +191,7 @@ func (a *App) CreateReviewReply(input uiCreateReviewReplyInput) (uiReviewComment
 	return tenantDashboardComment(comment), nil
 }
 
-func tenantDashboardBuildsForReview(builds []platformclient.PlatformBuild, reviewName string) []uiTenantDashboardBuild {
+func tenantDashboardBuildsForReview(builds []model.PlatformBuild, reviewName string) []uiTenantDashboardBuild {
 	converted := make([]uiTenantDashboardBuild, 0, len(builds))
 	for _, build := range builds {
 		converted = append(converted, uiTenantDashboardBuild{
@@ -210,7 +210,7 @@ func tenantDashboardBuildsForReview(builds []platformclient.PlatformBuild, revie
 	return converted
 }
 
-func tenantDashboardComments(comments []platformclient.PlatformComment, usernames map[string]string) []uiReviewComment {
+func tenantDashboardComments(comments []model.PlatformComment, usernames map[string]string) []uiReviewComment {
 	converted := make([]uiReviewComment, 0, len(comments))
 	for _, comment := range comments {
 		converted = append(converted, tenantDashboardCommentWithUsername(comment, usernames))
@@ -218,13 +218,13 @@ func tenantDashboardComments(comments []platformclient.PlatformComment, username
 	return converted
 }
 
-func tenantDashboardCommentWithUsername(comment platformclient.PlatformComment, usernames map[string]string) uiReviewComment {
+func tenantDashboardCommentWithUsername(comment model.PlatformComment, usernames map[string]string) uiReviewComment {
 	converted := tenantDashboardComment(comment)
 	converted.CreatorUsername = usernames[comment.CreatorUserID]
 	return converted
 }
 
-func tenantDashboardComment(comment platformclient.PlatformComment) uiReviewComment {
+func tenantDashboardComment(comment model.PlatformComment) uiReviewComment {
 	return uiReviewComment{
 		CommentID:       comment.CommentID,
 		CreatorUserID:   comment.CreatorUserID,
@@ -239,7 +239,7 @@ func tenantDashboardComment(comment platformclient.PlatformComment) uiReviewComm
 }
 
 // reviewQueuePosition returns the 1-based position, or 0 when not queued.
-func reviewQueuePosition(queue []platformclient.PlatformReview, reviewID string) int {
+func reviewQueuePosition(queue []model.PlatformReview, reviewID string) int {
 	for i, review := range queue {
 		if review.ReviewID == reviewID {
 			return i + 1

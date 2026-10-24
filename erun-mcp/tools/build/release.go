@@ -7,10 +7,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/release"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -23,7 +23,7 @@ type ReleaseInput struct {
 func ReleaseTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ReleaseInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ReleaseInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (sharedpkg.CommandOutput, error) {
-			var spec shared.ReleaseSpec
+			var spec model.ReleaseSpec
 			output, err := sharedpkg.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				// Release only stamps, tags and pushes; it never builds or publishes.
 				execution, err := resolveRuntimeBuildExecution(runCtx, runtime, workDir, "", "", true, false, nil)

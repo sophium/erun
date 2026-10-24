@@ -12,6 +12,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/testpg"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -113,7 +114,7 @@ func TestReportedCapabilitiesMatchWhatTheAPIActuallyPermits(t *testing.T) {
 	if whoami.Capabilities.Allows(http.MethodPost, "/v1/reviews") {
 		t.Fatal("expected the write surface to be omitted for a read-only role")
 	}
-	_, err = client.CreateReview(context.Background(), platformclient.PlatformCreateReviewParams{
+	_, err = client.CreateReview(context.Background(), model.PlatformCreateReviewParams{
 		Name: "capability probe", TargetBranch: "main", SourceBranch: "feature/capability-probe",
 	})
 	if !errors.Is(err, platformclient.ErrPlatformForbidden) {

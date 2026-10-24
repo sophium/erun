@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // arm64 macOS SIGKILLs an unsigned Mach-O before main; codesign exists only on
@@ -40,33 +41,11 @@ const LocalCodesignKeychainFile = "erun-local-signing.keychain-db"
 // LocalCodesignKeychainPassword is not a secret; the keychain authenticates nothing.
 const LocalCodesignKeychainPassword = "erun-local-signing"
 
-// HostArtifactSigning is the signing outcome for one artifact; Identity is empty for ad-hoc.
-type HostArtifactSigning struct {
-	Path     string `json:"path"`
-	Signed   bool   `json:"signed"`
-	Identity string `json:"identity,omitempty"`
-	Note     string `json:"note,omitempty"`
-}
-
-// Describe returns the operator-facing line, or "" when nothing is worth reporting.
-func (s HostArtifactSigning) Describe() string {
-	if s.Note != "" {
-		return s.Note
-	}
-	if !s.Signed {
-		return ""
-	}
-	if s.Identity != "" {
-		return "Signed " + s.Path + " as " + s.Identity + " so macOS will run it and its privacy grants survive a rebuild"
-	}
-	return "Ad-hoc signed " + s.Path + " so macOS will run it"
-}
-
 // SignHostArtifact signs an unsigned Mach-O on a darwin host and makes it executable;
 // anything else is a no-op. Failures go in Note because the file is on disk either way.
-func SignHostArtifact(path string) HostArtifactSigning {
-	signing := HostArtifactSigning{Path: path}
-	if core.DetectHost().OS != core.HostOSDarwin {
+func SignHostArtifact(path string) model.HostArtifactSigning {
+	signing := model.HostArtifactSigning{Path: path}
+	if core.DetectHost().OS != model.HostOSDarwin {
 		return signing
 	}
 	isMachO, err := fileIsMachO(path)

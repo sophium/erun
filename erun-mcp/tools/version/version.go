@@ -5,6 +5,7 @@ import (
 	"context"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -32,7 +33,7 @@ func VersionTool(info model.BuildInfo) func(context.Context, *mcp.CallToolReques
 }
 
 func BuildVersionOutput(info model.BuildInfo) VersionOutput {
-	info = model.NormalizeBuildInfo(info)
+	info = core.NormalizeBuildInfo(info)
 	return VersionOutput{
 		Version: info.Version,
 		Commit:  info.Commit,

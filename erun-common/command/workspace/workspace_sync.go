@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Workspace sync mirrors a pod worktree onto the host, one way. It lives here so every
@@ -25,13 +26,6 @@ type WorkspaceSyncParams struct {
 	LocalPath  string
 }
 
-// WorkspaceSyncResult is what one pass changed.
-type WorkspaceSyncResult struct {
-	FilesCopied     int
-	FilesDeleted    int
-	ArtifactsCopied int
-}
-
 func validateWorkspaceSyncParams(params *WorkspaceSyncParams) error {
 	params.HostAlias = strings.TrimSpace(params.HostAlias)
 	params.RemotePath = strings.TrimSpace(params.RemotePath)
@@ -42,24 +36,24 @@ func validateWorkspaceSyncParams(params *WorkspaceSyncParams) error {
 	return nil
 }
 
-func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (WorkspaceSyncResult, error) {
+func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 	if err := validateWorkspaceSyncParams(&params); err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	pass := workspaceSyncPassLog{params: params}
 	defer func() { workspaceSyncPasses.record(&pass) }()
 
 	if err := EnsureLocalWorkspaceSyncTarget(params.LocalPath); err != nil {
 		pass.failure = err
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	resolved, err := resolveWorkspaceSyncPaths(ctx, params)
 	pass.recordResolved(resolved, err)
 	if err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	if resolved.notGitRepo {
-		return WorkspaceSyncResult{}, nil
+		return model.WorkspaceSyncResult{}, nil
 	}
 	// Fetch only files whose size or mtime differs; tar preserves mtime.
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
@@ -75,16 +69,16 @@ func SyncWorkspaceOnce(ctx context.Context, params WorkspaceSyncParams) (Workspa
 	pass.deleted = deleted
 	if err != nil {
 		pass.deleteErr = err
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	artifacts, signing, err := syncOutputsArtifacts(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir, filepath.Join(params.LocalPath, WorkspaceSyncArtifactsSubdir))
 	pass.signed = signing.Signed
 	pass.signNote = signing.Note
 	if err != nil {
 		pass.failure = err
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
-	result := WorkspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}
+	result := model.WorkspaceSyncResult{FilesCopied: len(toFetch), FilesDeleted: deleted, ArtifactsCopied: artifacts}
 	if fetchErr != nil {
 		return result, fetchErr
 	}

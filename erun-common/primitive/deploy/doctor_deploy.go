@@ -6,22 +6,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// DeployDiagnosisResult holds the deploy-failure diagnosis. A caller recommending
-// a mutating recovery must check HelmReadError first: it is set when the read
-// itself could not be trusted, unlike a confirmed "no release" or "failed".
-type DeployDiagnosisResult struct {
-	HelmStatus    string
-	HelmReadError string
-	Pods          string
-	// ClusterUnreachable lets later doctor sections skip re-probing an unreachable
-	// API server and its multi-minute timeout.
-	ClusterUnreachable bool
-	// AgentCredentials reports whether the pod template carries the model-provider
-	// wiring, which helm status and readiness cannot show.
-	AgentCredentials RuntimeAgentCredentialStatus
-}
 
 func helmStatusArgs(req config.ShellLaunchParams) []string {
 	args := []string{"status", config.RuntimeReleaseName(req.Tenant)}
@@ -41,14 +27,14 @@ func deployDiagnosisPodArgs(req config.ShellLaunchParams) []string {
 
 // RunDeployDiagnosis probes why a deploy may have failed. It is read-only, so it
 // also runs under --dry-run.
-func RunDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) DeployDiagnosisResult {
+func RunDeployDiagnosis(ctx core.Context, req config.ShellLaunchParams) model.DeployDiagnosisResult {
 	helmArgs := helmStatusArgs(req)
 	ctx.TraceCommand("", "helm", helmArgs...)
 	podArgs := deployDiagnosisPodArgs(req)
 	ctx.TraceCommand("", "kubectl", podArgs...)
 	helmStatus, helmErr := runDoctorDiagnosisCommand("helm", helmArgs)
 	// Resolve applicability first so every return distinguishes "not applicable" from "could not run".
-	result := DeployDiagnosisResult{
+	result := model.DeployDiagnosisResult{
 		HelmStatus:       helmStatus,
 		AgentCredentials: runtimeAgentCredentialApplicability(req),
 	}
@@ -82,19 +68,10 @@ func runDoctorDiagnosisCommand(name string, args []string) (string, error) {
 	return strings.TrimSpace(out.String()), err
 }
 
-// DeployRecoveryAction is a mutating recovery `erun doctor` can run; callers gate it.
-type DeployRecoveryAction string
-
-const (
-	DeployRecoveryClearPendingHelm DeployRecoveryAction = "clear_pending_helm"
-	// DeployRecoveryRollback rolls back to the last successfully deployed revision.
-	DeployRecoveryRollback DeployRecoveryAction = "rollback"
-)
-
 // RecommendedDeployRecovery picks one recovery: clearing pending and rolling back
 // are alternatives, and running both would step back a further revision. It never
 // recommends rollback when HelmReadError says the read is untrusted.
-func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryAction, bool) {
+func RecommendedDeployRecovery(diagnosis model.DeployDiagnosisResult) (model.DeployRecoveryAction, bool) {
 	if strings.TrimSpace(diagnosis.HelmReadError) != "" {
 		return "", false
 	}
@@ -107,10 +84,10 @@ func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryA
 	case strings.Contains(status, "pending-install"),
 		strings.Contains(status, "pending-upgrade"),
 		strings.Contains(status, "pending-rollback"):
-		return DeployRecoveryClearPendingHelm, true
+		return model.DeployRecoveryClearPendingHelm, true
 	case strings.Contains(status, "status: deployed"):
 		return "", false
 	default:
-		return DeployRecoveryRollback, true
+		return model.DeployRecoveryRollback, true
 	}
 }

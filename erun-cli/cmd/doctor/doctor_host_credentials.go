@@ -6,13 +6,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // reportHostCredentials reports whether the env's injected, temporary AWS credentials
 // are still usable. Degrades on an unreachable pod.
-func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
+func reportHostCredentials(ctx core.Context, store config.ConfigStore, result config.OpenResult, diagnosis model.DeployDiagnosisResult) error {
 	if !result.EnvConfig.HasAWSCloudAlias() {
 		return nil
 	}
@@ -36,14 +36,14 @@ func reportHostCredentials(ctx core.Context, store config.ConfigStore, result co
 	return nil
 }
 
-func hostCredentialsRegionLine(status cloud.HostCredentialsStatus) string {
+func hostCredentialsRegionLine(status model.HostCredentialsStatus) string {
 	if status.Region == "" {
 		return "none resolved — AWS calls in this environment have no default region until the alias carries an SSO region or the environment names an ECR registry"
 	}
 	return status.Region
 }
 
-func hostCredentialsStatusLine(status cloud.HostCredentialsStatus, result config.OpenResult) string {
+func hostCredentialsStatusLine(status model.HostCredentialsStatus, result config.OpenResult) string {
 	refresh := fmt.Sprintf("run `erun cloud refresh %s %s`", result.Tenant, result.Environment)
 	switch {
 	case !status.Present:

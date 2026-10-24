@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // TestGateMergeOneSourceNamesACommitFailureReportedOnStdout uses the RunGit seam, since no real
@@ -32,7 +33,7 @@ func TestGateMergeOneSourceNamesACommitFailureReportedOnStdout(t *testing.T) {
 		},
 	}
 
-	_, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Add widget"}, "origin", "refs/erun/gate-merge/main", deps)
+	_, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), model.GateMergeSource{Branch: "feature", Message: "Add widget"}, "origin", "refs/erun/gate-merge/main", deps)
 	if err == nil {
 		t.Fatal("expected the failed commit to be reported as an error")
 	}

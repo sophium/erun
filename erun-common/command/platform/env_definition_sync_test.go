@@ -11,6 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -102,7 +103,7 @@ func TestPlanPullLocalPortRangeStartIgnoresTheEnvironmentItself(t *testing.T) {
 }
 
 func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
-	_, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeHost)}, "", 0)
+	_, err := NewPullAsNewEnvironment(model.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeHost)}, "", 0)
 	if err == nil {
 		t.Fatal("a host row was accepted as hostable")
 	}
@@ -113,14 +114,14 @@ func TestNewPullAsNewEnvironmentRefusesAHostType(t *testing.T) {
 
 func TestNewPullAsNewEnvironmentRequiresAUsableRepoPath(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, "", 0); err == nil {
+	if _, err := NewPullAsNewEnvironment(model.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, "", 0); err == nil {
 		t.Fatal("a local-agent pull-as-new was accepted with no repo path")
 	}
-	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, dir, configpkg.LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(model.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeLocalAgent)}, dir, configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a real directory was refused: %v", err)
 	}
 	// A runtime env needs no host path.
-	if _, err := NewPullAsNewEnvironment(platformclient.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeRuntime)}, "", configpkg.LowerServicePort); err != nil {
+	if _, err := NewPullAsNewEnvironment(model.PlatformEnvironment{Name: "dev", Type: string(configpkg.EnvironmentTypeRuntime)}, "", configpkg.LowerServicePort); err != nil {
 		t.Fatalf("a runtime pull-as-new was refused for want of a host path: %v", err)
 	}
 }
@@ -139,7 +140,7 @@ func TestIsHostableEnvironmentType(t *testing.T) {
 // Without a tenant config the planner skips the tenant and sees every range as free.
 func seedTenantConfigForPortPlanning(t *testing.T) {
 	t.Helper()
-	if err := configpkg.SaveTenantConfig(configpkg.TenantConfig{Name: "team"}); err != nil {
+	if err := configpkg.SaveTenantConfig(model.TenantConfig{Name: "team"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 }
@@ -157,7 +158,7 @@ func TestPullAsNewRefusesAPortCollisionBeforeWriting(t *testing.T) {
 			{Name: "taken", Type: configpkg.EnvironmentTypeRuntime, LocalPortRangeStart: configpkg.LowerServicePort},
 		},
 	}
-	client := &stubDefinitionClient{row: platformclient.PlatformEnvironment{
+	client := &stubDefinitionClient{row: model.PlatformEnvironment{
 		EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeRuntime),
 	}}
 	_, err := PullEnvironmentDefinition(context.Background(), store, client, EnvDefinitionPullParams{
@@ -183,7 +184,7 @@ func TestPullAsNewCreatesTheEnvironmentFromThePlatformRow(t *testing.T) {
 	version := "1.2.3"
 	hostile := "localrepopath-placeholder"
 	client := &stubDefinitionClient{
-		row: platformclient.PlatformEnvironment{
+		row: model.PlatformEnvironment{
 			EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh",
 			Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context",
 		},
@@ -231,7 +232,7 @@ func hostedDefinitionFixture(name string) configpkg.EnvConfig {
 }
 
 func hostedDefinitionClient(config configpkg.EnvConfig) *stubDefinitionClient {
-	return &stubDefinitionClient{row: platformclient.PlatformEnvironment{
+	return &stubDefinitionClient{row: model.PlatformEnvironment{
 		EnvironmentID:     config.Hosted.EnvironmentID,
 		TenantID:          config.Hosted.TenantID,
 		Name:              config.Name,
@@ -243,7 +244,7 @@ func hostedDefinitionClient(config configpkg.EnvConfig) *stubDefinitionClient {
 func pushOnce(t *testing.T, config configpkg.EnvConfig) configpkg.EnvConfig {
 	t.Helper()
 	store := &recordingDefinitionStore{envs: []configpkg.EnvConfig{config}}
-	if _, err := PushEnvironmentDefinition(context.Background(), store, hostedDefinitionClient(config), EnvDefinitionPushParams{
+	if _, err := PushEnvironmentDefinition(context.Background(), store, hostedDefinitionClient(config), model.EnvDefinitionPushParams{
 		Tenant: "team", Environment: config.Name,
 	}); err != nil {
 		t.Fatalf("push: %v", err)
@@ -323,7 +324,7 @@ func TestPullStampsTheDigestToo(t *testing.T) {
 		},
 	}}}
 	client := &stubDefinitionClient{
-		row:        platformclient.PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
+		row:        model.PlatformEnvironment{EnvironmentID: "env-1", TenantID: "tenant-1", Name: "fresh", Type: string(configpkg.EnvironmentTypeLocalAgent), KubernetesContext: "test-context"},
 		definition: configpkg.PlatformEnvDefinition{RuntimeVersion: &version},
 	}
 
@@ -379,8 +380,8 @@ func (s *recordingDefinitionStore) SaveEnvConfig(_ string, config configpkg.EnvC
 	return nil
 }
 
-func (s *recordingDefinitionStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
-	return []configpkg.TenantConfig{{Name: "team"}}, nil
+func (s *recordingDefinitionStore) ListTenantConfigs() ([]model.TenantConfig, error) {
+	return []model.TenantConfig{{Name: "team"}}, nil
 }
 
 func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig, error) {
@@ -388,7 +389,7 @@ func (s *recordingDefinitionStore) ListEnvConfigs(string) ([]configpkg.EnvConfig
 }
 
 type stubDefinitionClient struct {
-	row             platformclient.PlatformEnvironment
+	row             model.PlatformEnvironment
 	definition      configpkg.PlatformEnvDefinition
 	rawDefinition   []byte
 	definitionReads int
@@ -396,7 +397,7 @@ type stubDefinitionClient struct {
 
 func (c *stubDefinitionClient) APIHost() string { return "https://api.example.test" }
 
-func (c *stubDefinitionClient) GetEnvironment(context.Context, string) (platformclient.PlatformEnvironment, error) {
+func (c *stubDefinitionClient) GetEnvironment(context.Context, string) (model.PlatformEnvironment, error) {
 	return c.row, nil
 }
 

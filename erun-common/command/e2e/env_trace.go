@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // envTraceLogMaxBytes caps each trace file so the rotated pair stays under ~2× this.
@@ -23,7 +22,7 @@ func EnvTraceLogPath(tenant, environment string) (string, error) {
 	}
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := model.ErrMissingTenantOrEnvironment("resolve env trace log path", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve env trace log path", tenant, environment); err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".erun", tenant, environment, "trace.log"), nil

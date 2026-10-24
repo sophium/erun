@@ -7,11 +7,12 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func InitCloudContext(ctx core.Context, store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (configpkg.CloudContextStatus, error) {
+func InitCloudContext(ctx core.Context, store CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")
+		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
 	ctx.Trace(fmt.Sprintf("cloud-context init: alias=%s region=%s instance-type=%s disk=%dGB/%s",
@@ -23,16 +24,16 @@ func InitCloudContext(ctx core.Context, store CloudContextStore, params InitClou
 	provider, config, err := initCloudContextConfig(store, params, deps)
 	if err != nil {
 		ctx.Trace("cloud-context init: configuration resolution failed: " + err.Error())
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	ctx.Trace(fmt.Sprintf("cloud-context init: resolved name=%s kube-context=%s", config.Name, config.KubernetesContext))
 	if err := prepareInitCloudContextResources(ctx, deps, provider, params, &config); err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 
 	instanceID, err := runInitCloudContextInstance(ctx, deps, provider, params, &config)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	config.InstanceID = strings.TrimSpace(instanceID)
 	if config.InstanceID == "" {
@@ -40,36 +41,36 @@ func InitCloudContext(ctx core.Context, store CloudContextStore, params InitClou
 	}
 
 	if err := finalizeInitCloudContext(ctx, deps, provider, &config); err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	status := CloudContextStatusRunning
 	if ctx.DryRun {
-		return configpkg.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
+		return model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
 	}
 	if err := saveCloudContextConfig(store, config); err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
-	return configpkg.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
+	return model.CloudContextStatus{CloudContextConfig: configpkg.NormalizeCloudContextConfig(config), Status: status}, nil
 }
 
-func initCloudContextConfig(store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (configpkg.CloudProviderConfig, configpkg.CloudContextConfig, error) {
+func initCloudContextConfig(store CloudContextStore, params model.InitCloudContextParams, deps CloudContextDependencies) (model.CloudProviderConfig, model.CloudContextConfig, error) {
 	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, configpkg.CloudContextConfig{}, err
+		return model.CloudProviderConfig{}, model.CloudContextConfig{}, err
 	}
 	if provider.Provider != configpkg.CloudProviderAWS {
-		return configpkg.CloudProviderConfig{}, configpkg.CloudContextConfig{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+		return model.CloudProviderConfig{}, model.CloudContextConfig{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 	existingContexts, err := configpkg.ListCloudContexts(store)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, configpkg.CloudContextConfig{}, err
+		return model.CloudProviderConfig{}, model.CloudContextConfig{}, err
 	}
 	config, err := resolveInitCloudContextConfig(provider, params, deps.Now(), existingContexts)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, configpkg.CloudContextConfig{}, err
+		return model.CloudProviderConfig{}, model.CloudContextConfig{}, err
 	}
 	if err := ensureInitCloudContextDoesNotExist(store, config.Name); err != nil {
-		return configpkg.CloudProviderConfig{}, configpkg.CloudContextConfig{}, err
+		return model.CloudProviderConfig{}, model.CloudContextConfig{}, err
 	}
 	return provider, config, nil
 }
@@ -85,7 +86,7 @@ func ensureInitCloudContextDoesNotExist(store CloudContextStore, name string) er
 	return nil
 }
 
-func prepareInitCloudContextResources(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, params InitCloudContextParams, config *configpkg.CloudContextConfig) error {
+func prepareInitCloudContextResources(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, params model.InitCloudContextParams, config *model.CloudContextConfig) error {
 	securityGroupID, err := initCloudContextSecurityGroup(ctx, deps, provider, params, *config)
 	if err != nil {
 		return err
@@ -101,7 +102,7 @@ func prepareInitCloudContextResources(ctx core.Context, deps CloudContextDepende
 	return nil
 }
 
-func initCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, params InitCloudContextParams, config configpkg.CloudContextConfig) (string, error) {
+func initCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, params model.InitCloudContextParams, config model.CloudContextConfig) (string, error) {
 	securityGroupID := strings.TrimSpace(params.SecurityGroupID)
 	if securityGroupID != "" {
 		return securityGroupID, nil
@@ -109,7 +110,7 @@ func initCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependenci
 	return createCloudContextSecurityGroup(ctx, deps, provider, config.Region, config.Name)
 }
 
-func runInitCloudContextInstance(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, params InitCloudContextParams, config *configpkg.CloudContextConfig) (string, error) {
+func runInitCloudContextInstance(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, params model.InitCloudContextParams, config *model.CloudContextConfig) (string, error) {
 	// Reuse an instance already tagged for this context so a re-run does not launch a duplicate;
 	// a deterministically derived admin token still matches the reused instance's baked one.
 	existingID, err := findRunningCloudContextInstance(ctx, deps, provider, config.Region, config.Name)
@@ -134,7 +135,7 @@ func runInitCloudContextInstance(ctx core.Context, deps CloudContextDependencies
 	return runAWSWithIAMConsistencyRetry(ctx, deps, provider, config.Region, args)
 }
 
-func findRunningCloudContextInstance(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, name string) (string, error) {
+func findRunningCloudContextInstance(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, name string) (string, error) {
 	out, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-instances",
 		"--filters",
@@ -167,7 +168,7 @@ var iamConsistencyBackoff = []time.Duration{
 	10 * time.Second,
 }
 
-func runAWSWithIAMConsistencyRetry(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region string, args []string) (string, error) {
+func runAWSWithIAMConsistencyRetry(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region string, args []string) (string, error) {
 	var (
 		out string
 		err error
@@ -195,7 +196,7 @@ func isIAMInstanceProfileConsistencyError(err error) bool {
 		strings.Contains(message, "Invalid IAM Instance Profile ARN")
 }
 
-func initCloudContextAMI(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region string) (string, error) {
+func initCloudContextAMI(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region string) (string, error) {
 	ami, err := deps.RunAWS(ctx, provider, region, []string{
 		"ssm", "get-parameter",
 		"--name", "/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id",
@@ -211,7 +212,7 @@ func initCloudContextAMI(ctx core.Context, deps CloudContextDependencies, provid
 	return "ami-<latest-ubuntu-arm64>", nil
 }
 
-func initCloudContextRunArgs(ami, userDataPath string, params InitCloudContextParams, config configpkg.CloudContextConfig) []string {
+func initCloudContextRunArgs(ami, userDataPath string, params model.InitCloudContextParams, config model.CloudContextConfig) []string {
 	runArgs := []string{
 		"ec2", "run-instances",
 		"--image-id", ami,
@@ -237,7 +238,7 @@ func appendOptionalCloudContextRunArg(args []string, name, value string) []strin
 	return args
 }
 
-func appendCloudContextProfileRunArg(args []string, config configpkg.CloudContextConfig) []string {
+func appendCloudContextProfileRunArg(args []string, config model.CloudContextConfig) []string {
 	if config.InstanceProfileName != "" {
 		return append(args, "--iam-instance-profile", "Name="+config.InstanceProfileName)
 	}
@@ -247,7 +248,7 @@ func appendCloudContextProfileRunArg(args []string, config configpkg.CloudContex
 	return args
 }
 
-func finalizeInitCloudContext(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, config *configpkg.CloudContextConfig) error {
+func finalizeInitCloudContext(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, config *model.CloudContextConfig) error {
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", "wait", "instance-running", "--instance-ids", config.InstanceID}); err != nil {
 		return err
 	}
@@ -263,8 +264,8 @@ func finalizeInitCloudContext(ctx core.Context, deps CloudContextDependencies, p
 	return nil
 }
 
-func resolveInitCloudContextConfig(provider configpkg.CloudProviderConfig, params InitCloudContextParams, now time.Time, existingContexts []configpkg.CloudContextConfig) (configpkg.CloudContextConfig, error) {
-	config := configpkg.CloudContextConfig{
+func resolveInitCloudContextConfig(provider model.CloudProviderConfig, params model.InitCloudContextParams, now time.Time, existingContexts []model.CloudContextConfig) (model.CloudContextConfig, error) {
+	config := model.CloudContextConfig{
 		Name:               strings.TrimSpace(params.Name),
 		Provider:           configpkg.CloudProviderAWS,
 		CloudProviderAlias: provider.Alias,
@@ -283,27 +284,27 @@ func resolveInitCloudContextConfig(provider configpkg.CloudProviderConfig, param
 	}
 	config = configpkg.NormalizeCloudContextConfig(config)
 	if config.CloudProviderAlias == "" {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("cloud provider alias is required")
+		return model.CloudContextConfig{}, fmt.Errorf("cloud provider alias is required")
 	}
 	if config.Region == "" {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("cloud context region is required")
+		return model.CloudContextConfig{}, fmt.Errorf("cloud context region is required")
 	}
 	if !validCloudContextRegion(config.Region) {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("unsupported cloud context region %q", config.Region)
+		return model.CloudContextConfig{}, fmt.Errorf("unsupported cloud context region %q", config.Region)
 	}
 	if !validCloudContextInstanceType(config.InstanceType) {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("unsupported cloud context instance type %q", config.InstanceType)
+		return model.CloudContextConfig{}, fmt.Errorf("unsupported cloud context instance type %q", config.InstanceType)
 	}
 	if !validCloudContextDiskSize(config.DiskSizeGB) {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("unsupported cloud context disk size %d", config.DiskSizeGB)
+		return model.CloudContextConfig{}, fmt.Errorf("unsupported cloud context disk size %d", config.DiskSizeGB)
 	}
 	if config.DiskType != configpkg.DefaultCloudContextDiskType {
-		return configpkg.CloudContextConfig{}, fmt.Errorf("unsupported cloud context disk type %q", config.DiskType)
+		return model.CloudContextConfig{}, fmt.Errorf("unsupported cloud context disk type %q", config.DiskType)
 	}
 	return config, nil
 }
 
-func createCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, name string) (string, error) {
+func createCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, name string) (string, error) {
 	groupName := name + "-k3s"
 	groupID, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "create-security-group",
@@ -342,7 +343,7 @@ func createCloudContextSecurityGroup(ctx core.Context, deps CloudContextDependen
 	return groupID, nil
 }
 
-func describeCloudContextSecurityGroupID(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, groupName string) (string, error) {
+func describeCloudContextSecurityGroupID(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, groupName string) (string, error) {
 	return deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-security-groups",
 		"--group-names", groupName,

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type BootstrapInitParams struct {
@@ -22,9 +23,9 @@ type BootstrapInitParams struct {
 	// from when the deploy registry holds only app images.
 	RuntimeRegistry  string
 	ImagePullSecrets []string
-	RuntimePod       configpkg.RuntimePodResources
+	RuntimePod       model.RuntimePodResources
 	// RuntimeDindPod sizes the erun-dind sidecar, independently of RuntimePod.
-	RuntimeDindPod    configpkg.RuntimePodResources
+	RuntimeDindPod    model.RuntimePodResources
 	NoGit             bool
 	KubernetesContext string
 	ContainerRegistry string

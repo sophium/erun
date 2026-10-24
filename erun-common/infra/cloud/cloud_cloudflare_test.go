@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
@@ -198,11 +199,11 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 }
 
 func TestResolveTenantCloudProviderIssuersSkipsCloudflare(t *testing.T) {
-	store := stubCloudContextStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+	store := stubCloudContextStore{config: config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		{Alias: "alice+123456789012@aws", Provider: config.CloudProviderAWS, OIDCIssuerURL: "https://issuer.example.com"},
-		{Alias: "ci+cf-acct-1@cloudflare", Provider: config.CloudProviderCloudflare, Cloudflare: &config.CloudflareProviderConfig{AccountID: "cf-acct-1", TokenRef: "cloudflare/ci+cf-acct-1@cloudflare"}},
+		{Alias: "ci+cf-acct-1@cloudflare", Provider: config.CloudProviderCloudflare, Cloudflare: &model.CloudflareProviderConfig{AccountID: "cf-acct-1", TokenRef: "cloudflare/ci+cf-acct-1@cloudflare"}},
 	}}}
-	tenant := config.TenantConfig{CloudProviderAliases: []string{"alice+123456789012@aws", "ci+cf-acct-1@cloudflare"}}
+	tenant := model.TenantConfig{CloudProviderAliases: []string{"alice+123456789012@aws", "ci+cf-acct-1@cloudflare"}}
 
 	issuers, err := ResolveTenantCloudProviderIssuers(store, tenant)
 	if err != nil {

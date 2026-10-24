@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // inPodTestContext can trace, avoiding a nil-logger panic.
@@ -178,7 +179,7 @@ func ghcrPrivateRegistryServer(t *testing.T, version string) *httptest.Server {
 	return server
 }
 
-func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (RuntimeRegistryVersions, error) {
+func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (model.RuntimeRegistryVersions, error) {
 	t.Helper()
 	server := ghcrPrivateRegistryServer(t, version)
 	return ResolveConfiguredRuntimeRegistryVersions(context.Background(), config.RuntimeRegistryConfig{

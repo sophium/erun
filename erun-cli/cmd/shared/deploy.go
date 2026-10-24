@@ -1,17 +1,16 @@
 package shared
 
 import (
-	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func ResolveDeployTargetArgs(command string, args []string, target deploy.DeployTarget) (deploy.DeployTarget, error) {
-	params, err := ResolveOpenParams(command, args, shared.OpenParams{
+func ResolveDeployTargetArgs(command string, args []string, target model.DeployTarget) (model.DeployTarget, error) {
+	params, err := ResolveOpenParams(command, args, model.OpenParams{
 		Tenant:      target.Tenant,
 		Environment: target.Environment,
 	})
 	if err != nil {
-		return deploy.DeployTarget{}, err
+		return model.DeployTarget{}, err
 	}
 	target.Tenant = params.Tenant
 	target.Environment = params.Environment

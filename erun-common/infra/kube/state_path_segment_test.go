@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // displayShapedStateNames are tenant/environment pairs as rendered for humans.
@@ -82,7 +83,7 @@ func assertStatePathBuildersRefuse(t *testing.T, name string) {
 	}{
 		{"SaveEnvConfig tenant", config.SaveEnvConfig(name, config.EnvConfig{Name: "local"})},
 		{"SaveEnvConfig environment", config.SaveEnvConfig("frs", config.EnvConfig{Name: name})},
-		{"SaveTenantConfig", config.SaveTenantConfig(config.TenantConfig{Name: name})},
+		{"SaveTenantConfig", config.SaveTenantConfig(model.TenantConfig{Name: name})},
 		{"DeleteEnvConfig tenant", config.DeleteEnvConfig(name, "local")},
 		{"DeleteEnvConfig environment", config.DeleteEnvConfig("frs", name)},
 		{"DeleteTenantConfig", config.DeleteTenantConfig(name)},
@@ -105,7 +106,7 @@ func TestStatePathsAcceptAnOrdinaryTenantAndEnvironment(t *testing.T) {
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
 
-	if err := config.SaveTenantConfig(config.TenantConfig{Name: "frs"}); err != nil {
+	if err := config.SaveTenantConfig(model.TenantConfig{Name: "frs"}); err != nil {
 		t.Fatalf("SaveTenantConfig(frs): %v", err)
 	}
 	if err := config.SaveEnvConfig("frs", config.EnvConfig{Name: "local"}); err != nil {
@@ -151,7 +152,7 @@ func TestSaveTenantConfigNormalizesWhitespaceAroundANameThatIsOtherwiseUsable(t 
 	redirectConfigHomeForTest(t)
 	root := configHomeForTest(t)
 
-	if err := config.SaveTenantConfig(config.TenantConfig{Name: " frs "}); err != nil {
+	if err := config.SaveTenantConfig(model.TenantConfig{Name: " frs "}); err != nil {
 		t.Fatalf("SaveTenantConfig: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "erun", "frs", "config.yaml")); err != nil {

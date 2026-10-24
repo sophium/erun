@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Deterministic names make a re-applied deploy update the same objects.
@@ -16,7 +17,7 @@ const (
 
 // The LimitRange defaults unsized pods so the quota does not reject them. defaultRequest
 // is a small fixed value: a request equal to the cap would make the cap a minimum node size.
-func namespaceResourceQuotaManifest(namespace string, quota config.NamespaceResourceQuota) string {
+func namespaceResourceQuotaManifest(namespace string, quota model.NamespaceResourceQuota) string {
 	return fmt.Sprintf(`apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -52,7 +53,7 @@ spec:
 }
 
 // TraceApplyKubernetesResourceQuota traces the namespace cap; a zero quota traces nothing.
-func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace string, quota config.NamespaceResourceQuota) {
+func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace string, quota model.NamespaceResourceQuota) {
 	if quota.IsZero() || strings.TrimSpace(namespace) == "" {
 		return
 	}
@@ -65,7 +66,7 @@ func TraceApplyKubernetesResourceQuota(ctx core.Context, contextName, namespace 
 }
 
 // EnsureKubernetesResourceQuota applies the namespace's ResourceQuota and LimitRange; a zero quota is a no-op.
-func EnsureKubernetesResourceQuota(contextName, namespace string, quota config.NamespaceResourceQuota) error {
+func EnsureKubernetesResourceQuota(contextName, namespace string, quota model.NamespaceResourceQuota) error {
 	if quota.IsZero() {
 		return nil
 	}

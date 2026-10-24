@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
 // Legacy GATE rows stay insertable because MERGED reviews still reference them.
@@ -106,10 +106,10 @@ func TestBuildProfileRoundTripsThroughCreateAndGet(t *testing.T) {
 
 	review := openReview(t, reviews, ctx, "build profile review", "feature/build-profile")
 
-	profile := &core.BuildProfileSummary{
+	profile := &modelpkg.BuildProfileSummary{
 		DurationSeconds: 42.5,
 		TotalStepCount:  2,
-		TopSteps: []core.BuildProfileStepSummary{
+		TopSteps: []modelpkg.BuildProfileStepSummary{
 			{Name: "erun-devops", DurationSeconds: 40},
 			{Name: "erun-devops > linux/amd64", DurationSeconds: 39},
 		},

@@ -9,28 +9,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
-
-// The queue pushes raw commits, so a pull_request-rule bypass is unavoidable;
-// this checks each bypassed push in GitHub's rule-suites ledger against the
-// platform's successful builds (erun-backend-api/AGENTS.md).
-
-// ReconcileBypassParams is the `erun exec reconcile-bypass` input.
-type ReconcileBypassParams struct {
-	RemoteURL string
-	// RulesetID is required so another ruleset's bypasses are never folded in.
-	RulesetID    int64
-	TargetBranch string
-	// Since is a rule-suites time_period (hour, day, week, month); empty keeps
-	// GitHub's default.
-	Since string
-	// ExpectedActors may hold the bypass grant; empty accepts any actor.
-	ExpectedActors []string
-}
 
 // Bypassed-push verdicts.
 const (
@@ -42,35 +26,6 @@ const (
 	BypassVerdictUnexpectedActor = "UNEXPECTED_ACTOR"
 	BypassVerdictUnreconciled    = "UNRECONCILED"
 )
-
-// BypassedPush is one push that bypassed a rule RulesetID enforces.
-type BypassedPush struct {
-	RuleSuiteID int64  `json:"ruleSuiteId"`
-	Actor       string `json:"actor"`
-	Commit      string `json:"commit"`
-	// BeforeCommit bounds the pushed range with Commit; a batched merge or
-	// release carries more than one commit.
-	BeforeCommit string `json:"beforeCommit"`
-	PushedAt     string `json:"pushedAt"`
-	BypassedRule string `json:"bypassedRule"`
-	Verdict      string `json:"verdict"`
-	Reason       string `json:"reason,omitempty"`
-	BuildID      string `json:"buildId,omitempty"`
-	ReleaseTag   string `json:"releaseTag,omitempty"`
-}
-
-// ReconcileBypassResult is the full reconciliation report.
-type ReconcileBypassResult struct {
-	Owner        string         `json:"owner"`
-	Repo         string         `json:"repo"`
-	RulesetID    int64          `json:"rulesetId"`
-	TargetBranch string         `json:"targetBranch"`
-	Pushes       []BypassedPush `json:"pushes"`
-	Unreconciled int            `json:"unreconciled"`
-	// UnexpectedActors is separate from Unreconciled: wrong identity, not
-	// unbuilt content.
-	UnexpectedActors int `json:"unexpectedActors"`
-}
 
 // ReconcileBypassDependencies are the GitHub HTTP and gh token seams.
 type ReconcileBypassDependencies struct {
@@ -97,7 +52,7 @@ type reconcileBypassInputs struct {
 	expectedActors                   []string
 }
 
-func resolveReconcileBypassInputs(ctx core.Context, params ReconcileBypassParams) (reconcileBypassInputs, error) {
+func resolveReconcileBypassInputs(ctx core.Context, params model.ReconcileBypassParams) (reconcileBypassInputs, error) {
 	ctx.Trace("reconcile-bypass: resolving inputs")
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
@@ -157,20 +112,20 @@ func trimmedNonEmpty(values []string) []string {
 
 // ReconcileBypass reports every push that bypassed the ruleset and whether a
 // successful build of a commit it landed covers it.
-func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string, params ReconcileBypassParams, cloudDeps cloud.CloudDependencies, deps ReconcileBypassDependencies) (ReconcileBypassResult, error) {
+func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string, params model.ReconcileBypassParams, cloudDeps cloud.CloudDependencies, deps ReconcileBypassDependencies) (model.ReconcileBypassResult, error) {
 	inputs, err := resolveReconcileBypassInputs(ctx, params)
 	if err != nil {
-		return ReconcileBypassResult{}, err
+		return model.ReconcileBypassResult{}, err
 	}
 	deps = normalizeReconcileBypassDependencies(deps)
-	result := ReconcileBypassResult{Owner: inputs.owner, Repo: inputs.repo, RulesetID: inputs.rulesetID, TargetBranch: inputs.targetBranch}
+	result := model.ReconcileBypassResult{Owner: inputs.owner, Repo: inputs.repo, RulesetID: inputs.rulesetID, TargetBranch: inputs.targetBranch}
 
 	listURL := githubRuleSuitesURL(inputs.owner, inputs.repo, inputs.targetBranch, inputs.since)
 	ctx.Trace("github: GET " + listURL)
 
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, alias, cloudDeps)
 	if err != nil {
-		return ReconcileBypassResult{}, err
+		return model.ReconcileBypassResult{}, err
 	}
 	traceReconcileBypassFollowUpCalls(ctx, provider, inputs)
 	if ctx.DryRun {
@@ -181,7 +136,7 @@ func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string
 	token, ok := deps.ResolveToken(inputs.owner)
 	if !ok {
 		ctx.Trace("reconcile-bypass: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set")
-		return ReconcileBypassResult{}, fmt.Errorf(
+		return model.ReconcileBypassResult{}, fmt.Errorf(
 			"no GitHub token available to read rule suites; run 'gh auth login' or set GITHUB_TOKEN")
 	}
 	return finishReconcileBypass(ctx, client, deps.Client, token, listURL, inputs, result)
@@ -189,7 +144,7 @@ func ReconcileBypass(ctx core.Context, store config.CloudReadStore, alias string
 
 // traceReconcileBypassFollowUpCalls makes a dry run show the conditional reads
 // too.
-func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudProviderConfig, inputs reconcileBypassInputs) {
+func traceReconcileBypassFollowUpCalls(ctx core.Context, provider model.CloudProviderConfig, inputs reconcileBypassInputs) {
 	ctx.Trace(fmt.Sprintf("github: GET %srepos/%s/%s/rulesets/rule-suites/{ruleSuiteId} per bypassed suite, to confirm ruleset %d's own rule was the bypassed one",
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, inputs.rulesetID))
 	cloud.TracePlatformCall(ctx, provider, "GET", "/v1/builds", "commit={sha}", "successful=true", "per landed commit, tip first")
@@ -199,24 +154,24 @@ func traceReconcileBypassFollowUpCalls(ctx core.Context, provider config.CloudPr
 		registry.GithubAPIBaseURL, inputs.owner, inputs.repo, maxReleaseTagPages))
 }
 
-func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result ReconcileBypassResult) (ReconcileBypassResult, error) {
+func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClient, httpClient *http.Client, token, listURL string, inputs reconcileBypassInputs, result model.ReconcileBypassResult) (model.ReconcileBypassResult, error) {
 	suites, truncated, err := listBypassedRuleSuites(context.Background(), httpClient, token, listURL)
 	if err != nil {
-		return ReconcileBypassResult{}, err
+		return model.ReconcileBypassResult{}, err
 	}
 	if truncated {
 		ctx.Info(fmt.Sprintf("reconcile-bypass: stopped after %d pages of rule suites; narrow --since to see the rest", maxRuleSuitePages))
 	}
 	pushes, err := resolveBypassedPushesForRuleset(context.Background(), httpClient, token, inputs.owner, inputs.repo, inputs.rulesetID, suites)
 	if err != nil {
-		return ReconcileBypassResult{}, err
+		return model.ReconcileBypassResult{}, err
 	}
 
 	builds := newSuccessfulBuildIndex(context.Background(), client)
 	result.Unreconciled, result.UnexpectedActors, err = accountForBypassedPushes(
 		context.Background(), httpClient, token, inputs, pushes, builds)
 	if err != nil {
-		return ReconcileBypassResult{}, err
+		return model.ReconcileBypassResult{}, err
 	}
 	result.Pushes = pushes
 	return result, nil
@@ -224,7 +179,7 @@ func finishReconcileBypass(ctx core.Context, client *platformclient.PlatformClie
 
 // A release lands three commits and its tip was never built, so checking only
 // tips would flag every release.
-func accountForBypassedPushes(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, pushes []BypassedPush, builds *successfulBuildIndex) (unreconciled, unexpectedActors int, err error) {
+func accountForBypassedPushes(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, pushes []model.BypassedPush, builds *successfulBuildIndex) (unreconciled, unexpectedActors int, err error) {
 	tags := newReleaseTagIndex(ctx, client, token, inputs.owner, inputs.repo)
 	for i := range pushes {
 		push := &pushes[i]
@@ -242,7 +197,7 @@ func accountForBypassedPushes(ctx context.Context, client *http.Client, token st
 }
 
 // An unexpected actor overrides even a built verdict.
-func accountForOneBypassedPush(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) error {
+func accountForOneBypassedPush(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *model.BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) error {
 	verdict, reason, err := resolveBypassedPushEvidence(ctx, client, token, inputs, push, builds, tags)
 	if err != nil {
 		return err
@@ -265,7 +220,7 @@ func accountForOneBypassedPush(ctx context.Context, client *http.Client, token s
 
 // resolveBypassedPushEvidence errors only on an unreadable build history,
 // which must not be blamed on every push.
-func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) (verdict, reason string, err error) {
+func resolveBypassedPushEvidence(ctx context.Context, client *http.Client, token string, inputs reconcileBypassInputs, push *model.BypassedPush, builds *successfulBuildIndex, tags *releaseTagIndex) (verdict, reason string, err error) {
 	buildID, err := builds.buildOf(push.Commit)
 	if err != nil {
 		return "", "", err

@@ -13,6 +13,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
@@ -101,11 +102,11 @@ func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	ctx.Trace(fmt.Sprintf("app restart: resolving the running desktop app from %s", markerPath))
 	outcome := core.RestartDesktopApp(context.Background(), core.DefaultDesktopRestartDeps(), id, ctx.DryRun)
 	ctx.Trace(fmt.Sprintf("app restart: status=%s pid=%d controlPort=%d", outcome.Status, outcome.PID, outcome.ControlPort))
-	if outcome.Status == core.DesktopRestartRefused || outcome.Status == core.DesktopRestartFailed {
+	if outcome.Status == model.DesktopRestartRefused || outcome.Status == model.DesktopRestartFailed {
 		_ = ctx.WriteResult(outcome)
 		return fmt.Errorf("restart %s: %s", outcome.Status, outcome.Reason)
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if ctx.DryRun {
 			appRestartDryRunReport(ctx, outcome)
 		} else {
@@ -115,13 +116,13 @@ func runAppRestartCommand(ctx core.Context, orchestratorID string) error {
 	return ctx.WriteResult(outcome)
 }
 
-func appRestartSummary(outcome core.DesktopRestartOutcome) string {
+func appRestartSummary(outcome model.DesktopRestartOutcome) string {
 	return fmt.Sprintf("restarted the running desktop app (pid %d)", outcome.PID)
 }
 
 // appRestartDryRunReport reports orchestrators the next launch would refuse to reopen.
 // An unreadable plan is reported as such, never rendered as an empty one.
-func appRestartDryRunReport(ctx core.Context, outcome core.DesktopRestartOutcome) {
+func appRestartDryRunReport(ctx core.Context, outcome model.DesktopRestartOutcome) {
 	if ctx.Stdout == nil {
 		return
 	}
@@ -134,7 +135,7 @@ func appRestartDryRunReport(ctx core.Context, outcome core.DesktopRestartOutcome
 		_, _ = fmt.Fprintln(ctx.Stdout, "it has no orchestrator to reopen")
 		return
 	}
-	refused := make([]core.DesktopRestartReopen, 0, len(outcome.Preview))
+	refused := make([]model.DesktopRestartReopen, 0, len(outcome.Preview))
 	for _, reopen := range outcome.Preview {
 		if reopen.Notice != "" {
 			refused = append(refused, reopen)
@@ -194,7 +195,7 @@ func newAppProcessCommand(goos string, executable string, args []string) *exec.C
 func resolveAppExecutable() (string, string) {
 	hostOS := core.DetectHost().OS
 	executableName := core.DesktopAppName
-	if hostOS == core.HostOSWindows {
+	if hostOS == model.HostOSWindows {
 		executableName += ".exe"
 	}
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -39,7 +39,7 @@ func testExecDiffJsonEmitsStructuredResult(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -71,7 +71,7 @@ func testExecDiffIncludesUntrackedFiles(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -105,7 +105,7 @@ func testExecDiffFilesMatchTreeOrder(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -139,7 +139,7 @@ func testExecDiffScopeAllTracesReviewBase(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -169,7 +169,7 @@ func testExecDiffScopeCurrentCommittedChangeStillReportsReviewCommits(t *testing
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -194,7 +194,7 @@ func testExecDiffScopeCurrentDefaultIncludesStagedChanges(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -213,7 +213,7 @@ func testExecDiffScopeCurrentExplicitMatchesDefaultForStagedChanges(t *testing.T
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -234,7 +234,7 @@ func testExecDiffScopeCurrentNoCommitsYetStillDiffsStagedChanges(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -254,7 +254,7 @@ func testExecDiffScopeCommitUsesSelectedCommitParent(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -288,16 +288,16 @@ func testExecDiffParsesDeletedAndBinaryFiles(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
 	assertDeletedAndBinaryDiffFiles(t, parsed.Files)
 }
 
-func assertDeletedAndBinaryDiffFiles(t *testing.T, files []lifecycle.DiffFile) {
+func assertDeletedAndBinaryDiffFiles(t *testing.T, files []model.DiffFile) {
 	t.Helper()
-	statuses := map[string]lifecycle.DiffFile{}
+	statuses := map[string]model.DiffFile{}
 	for _, f := range files {
 		statuses[f.Path] = f
 	}
@@ -321,7 +321,7 @@ func testExecDiffScopeAllResolvesOriginHeadAndRenames(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}
@@ -397,7 +397,7 @@ func testExecDiffScopeCommitResolvesAbbreviatedCommit(t *testing.T) {
 	if result.ExitCode != 0 {
 		t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 	}
-	var parsed lifecycle.DiffResult
+	var parsed model.DiffResult
 	if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
 		t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
 	}

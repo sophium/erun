@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
@@ -122,11 +123,11 @@ func latestEnvironmentAgentActivity(tenant, environment string) time.Time {
 
 // RunLocalEnvironmentWhip is the "whip" MCP tool's local pass. Only explicit calls exist
 // today, so LastActiveAt never gates a decision.
-func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, environment string, cfg WhipConfig, explicit, dryRun bool) (WhipResult, error) {
+func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, environment string, cfg WhipConfig, explicit, dryRun bool) (model.WhipResult, error) {
 	id := tenant + "/" + environment
 	alive, err := environmentWhipSessionAlive(runner, tenant, environment)
 	if err != nil {
-		return WhipResult{}, err
+		return model.WhipResult{}, err
 	}
 
 	state, _ := loadWhipEnvironmentState(tenant, environment)
@@ -136,8 +137,8 @@ func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, en
 		state.Capped = false
 	}
 
-	candidate := WhipCandidate{
-		Kind:         WhipTargetEnvironment,
+	candidate := model.WhipCandidate{
+		Kind:         model.WhipTargetEnvironment,
 		ID:           id,
 		Name:         id,
 		Reachable:    true,
@@ -147,13 +148,13 @@ func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, en
 		Capped:       state.Capped,
 	}
 	decision, reason := DecideWhip(candidate, now, cfg, explicit)
-	result := WhipResult{Candidate: candidate, Decision: decision, Reason: reason}
+	result := model.WhipResult{Candidate: candidate, Decision: decision, Reason: reason}
 	if dryRun {
 		return result, nil
 	}
 
 	switch decision {
-	case WhipDecisionNudge:
+	case model.WhipDecisionNudge:
 		if err := pushEnvironmentWhipNudge(runner, tenant, environment, cfg.Message, orchestratorPacingNudgeSettleDuration); err != nil {
 			result.Error = err.Error()
 		} else {
@@ -162,10 +163,10 @@ func RunLocalEnvironmentWhip(now time.Time, runner WhipCommandRunner, tenant, en
 			state.LastNudgeAtUnix = now.Unix()
 			_ = saveWhipEnvironmentState(tenant, environment, state)
 		}
-	case WhipDecisionCap:
+	case model.WhipDecisionCap:
 		state.Capped = true
 		_ = saveWhipEnvironmentState(tenant, environment, state)
-	case WhipDecisionNone:
+	case model.WhipDecisionNone:
 	}
 	return result, nil
 }

@@ -4,102 +4,39 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// RootConfigStatus gates doctor: non-OK means restore before alias repair.
-type RootConfigStatus string
-
-const (
-	RootConfigStatusOK        RootConfigStatus = "ok"
-	RootConfigStatusMissing   RootConfigStatus = "missing"
-	RootConfigStatusCorrupted RootConfigStatus = "corrupted"
-)
-
-// OrphanedAliasContextRef is a cloud context referencing a missing provider alias;
-// Region seeds provider re-init.
-type OrphanedAliasContextRef struct {
-	Name   string `json:"name"`
-	Region string `json:"region"`
-}
-
-// OrphanedAlias collects every reference to a missing alias.
-type OrphanedAlias struct {
-	Alias                     string                    `json:"alias"`
-	Username                  string                    `json:"username,omitempty"`
-	AccountID                 string                    `json:"accountId,omitempty"`
-	Provider                  string                    `json:"provider,omitempty"`
-	Parsed                    bool                      `json:"parsed"`
-	ReferencedByTenants       []string                  `json:"referencedByTenants,omitempty"`
-	ReferencedByCloudContexts []OrphanedAliasContextRef `json:"referencedByCloudContexts,omitempty"`
-}
-
-// RootConfigInspection is the read-only root-config view shared by CLI and MCP doctors.
-type RootConfigInspection struct {
-	ConfigPath       string                 `json:"configPath"`
-	ConfigStatus     RootConfigStatus       `json:"configStatus"`
-	ConfigError      string                 `json:"configError,omitempty"`
-	OrphanedAliases  []OrphanedAlias        `json:"orphanedAliases,omitempty"`
-	OrphanedContexts []OrphanedCloudContext `json:"orphanedCloudContexts,omitempty"`
-	Backups          []ConfigBackup         `json:"backups,omitempty"`
-	ConfiguredCount  int                    `json:"configuredProviderCount"`
-	CloudContextHits int                    `json:"cloudContextCount"`
-	TenantHits       int                    `json:"tenantCount"`
-}
-
-// OrphanedCloudContextEnvRef is an env referencing a missing cloud context.
-type OrphanedCloudContextEnvRef struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-}
-
-// OrphanedCloudContext aggregates env references to a missing cloud context.
-type OrphanedCloudContext struct {
-	KubernetesContext  string                       `json:"kubernetesContext"`
-	AccountID          string                       `json:"accountId,omitempty"`
-	Region             string                       `json:"region,omitempty"`
-	CloudProviderAlias string                       `json:"cloudProviderAlias,omitempty"`
-	ReferencedByEnvs   []OrphanedCloudContextEnvRef `json:"referencedByEnvs,omitempty"`
-}
-
-func (r RootConfigInspection) Complete() bool {
-	if r.ConfigStatus != RootConfigStatusOK {
-		return false
-	}
-	if len(r.OrphanedAliases) != 0 {
-		return false
-	}
-	return len(r.OrphanedContexts) == 0
-}
 
 // RootConfigInspectionStore stays narrow so inspection works when the root
 // config is unloadable.
 type RootConfigInspectionStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
-	ListTenantConfigs() ([]TenantConfig, error)
+	ListTenantConfigs() ([]model.TenantConfig, error)
 	ListEnvConfigs(tenant string) ([]EnvConfig, error)
 }
 
 // InspectRootConfig reports dangling cloud-provider-alias references and backups
 // without mutating anything.
-func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, error) {
+func InspectRootConfig(store RootConfigInspectionStore) (model.RootConfigInspection, error) {
 	if store == nil {
-		return RootConfigInspection{}, errors.New("store is required")
+		return model.RootConfigInspection{}, errors.New("store is required")
 	}
 	config, configPath, err := store.LoadERunConfig()
-	inspection := RootConfigInspection{
+	inspection := model.RootConfigInspection{
 		ConfigPath: configPath,
 	}
 	switch {
 	case err == nil:
-		inspection.ConfigStatus = RootConfigStatusOK
+		inspection.ConfigStatus = model.RootConfigStatusOK
 	case errors.Is(err, ErrNotInitialized):
-		inspection.ConfigStatus = RootConfigStatusMissing
+		inspection.ConfigStatus = model.RootConfigStatusMissing
 		inspection.ConfigError = err.Error()
 	case errors.Is(err, ErrConfigCorrupted):
-		inspection.ConfigStatus = RootConfigStatusCorrupted
+		inspection.ConfigStatus = model.RootConfigStatusCorrupted
 		inspection.ConfigError = err.Error()
 	default:
-		return RootConfigInspection{}, err
+		return model.RootConfigInspection{}, err
 	}
 
 	if backups, listErr := ListRootConfigBackups(configPath); listErr == nil {
@@ -107,7 +44,7 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 	}
 
 	// Without a loaded root every alias looks orphaned; restore is the fix.
-	if inspection.ConfigStatus != RootConfigStatusOK {
+	if inspection.ConfigStatus != model.RootConfigStatusOK {
 		return inspection, nil
 	}
 
@@ -116,7 +53,7 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
-		return RootConfigInspection{}, err
+		return model.RootConfigInspection{}, err
 	}
 	inspection.TenantHits = len(tenants)
 	inspection.CloudContextHits = len(config.CloudContexts)
@@ -125,14 +62,14 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 
 	contextOrphans, err := collectOrphanedCloudContexts(store, config.CloudContexts, tenants)
 	if err != nil {
-		return RootConfigInspection{}, err
+		return model.RootConfigInspection{}, err
 	}
 	inspection.OrphanedContexts = contextOrphans
 
 	return inspection, nil
 }
 
-func configuredAliasSet(providers []CloudProviderConfig) map[string]struct{} {
+func configuredAliasSet(providers []model.CloudProviderConfig) map[string]struct{} {
 	configured := make(map[string]struct{}, len(providers))
 	for _, provider := range providers {
 		alias := strings.TrimSpace(provider.Alias)
@@ -144,8 +81,8 @@ func configuredAliasSet(providers []CloudProviderConfig) map[string]struct{} {
 	return configured
 }
 
-func detectOrphanedAliases(configured map[string]struct{}, tenants []TenantConfig, cloudContexts []CloudContextConfig) []OrphanedAlias {
-	orphans := make(map[string]*OrphanedAlias)
+func detectOrphanedAliases(configured map[string]struct{}, tenants []model.TenantConfig, cloudContexts []model.CloudContextConfig) []model.OrphanedAlias {
+	orphans := make(map[string]*model.OrphanedAlias)
 	for _, tenant := range tenants {
 		aliases := append([]string{}, tenant.CloudProviderAliases...)
 		if primary := strings.TrimSpace(tenant.PrimaryCloudProviderAlias); primary != "" {
@@ -175,7 +112,7 @@ func detectOrphanedAliases(configured map[string]struct{}, tenants []TenantConfi
 	return sortedOrphanedAliases(orphans)
 }
 
-func addOrphanTenantRef(orphans map[string]*OrphanedAlias, alias, tenant string) {
+func addOrphanTenantRef(orphans map[string]*model.OrphanedAlias, alias, tenant string) {
 	alias = strings.TrimSpace(alias)
 	tenant = strings.TrimSpace(tenant)
 	if alias == "" || tenant == "" {
@@ -191,7 +128,7 @@ func addOrphanTenantRef(orphans map[string]*OrphanedAlias, alias, tenant string)
 	}
 }
 
-func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, region string) {
+func addOrphanContextRef(orphans map[string]*model.OrphanedAlias, alias, contextName, region string) {
 	alias = strings.TrimSpace(alias)
 	contextName = strings.TrimSpace(contextName)
 	if alias == "" || contextName == "" {
@@ -202,7 +139,7 @@ func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, 
 		entry = newOrphanedAlias(alias)
 		orphans[alias] = entry
 	}
-	ref := OrphanedAliasContextRef{Name: contextName, Region: strings.TrimSpace(region)}
+	ref := model.OrphanedAliasContextRef{Name: contextName, Region: strings.TrimSpace(region)}
 	for _, existing := range entry.ReferencedByCloudContexts {
 		if existing.Name == ref.Name {
 			return
@@ -211,7 +148,7 @@ func addOrphanContextRef(orphans map[string]*OrphanedAlias, alias, contextName, 
 	entry.ReferencedByCloudContexts = append(entry.ReferencedByCloudContexts, ref)
 }
 
-func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
+func sortedOrphanedAliases(orphans map[string]*model.OrphanedAlias) []model.OrphanedAlias {
 	if len(orphans) == 0 {
 		return nil
 	}
@@ -220,7 +157,7 @@ func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
 		aliases = append(aliases, alias)
 	}
 	sort.Strings(aliases)
-	result := make([]OrphanedAlias, 0, len(aliases))
+	result := make([]model.OrphanedAlias, 0, len(aliases))
 	for _, alias := range aliases {
 		entry := orphans[alias]
 		sort.Strings(entry.ReferencedByTenants)
@@ -232,9 +169,9 @@ func sortedOrphanedAliases(orphans map[string]*OrphanedAlias) []OrphanedAlias {
 	return result
 }
 
-func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []CloudContextConfig, tenants []TenantConfig) ([]OrphanedCloudContext, error) {
+func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []model.CloudContextConfig, tenants []model.TenantConfig) ([]model.OrphanedCloudContext, error) {
 	known := indexCloudContextsByKubernetesName(existing)
-	orphans := make(map[string]*OrphanedCloudContext)
+	orphans := make(map[string]*model.OrphanedCloudContext)
 	for _, tenant := range tenants {
 		envs, err := store.ListEnvConfigs(tenant.Name)
 		if err != nil {
@@ -252,7 +189,7 @@ func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []Cl
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	result := make([]OrphanedCloudContext, 0, len(names))
+	result := make([]model.OrphanedCloudContext, 0, len(names))
 	for _, name := range names {
 		entry := orphans[name]
 		sort.Slice(entry.ReferencedByEnvs, func(i, j int) bool {
@@ -266,7 +203,7 @@ func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []Cl
 	return result, nil
 }
 
-func indexCloudContextsByKubernetesName(contexts []CloudContextConfig) map[string]struct{} {
+func indexCloudContextsByKubernetesName(contexts []model.CloudContextConfig) map[string]struct{} {
 	known := make(map[string]struct{}, 2*len(contexts))
 	for _, c := range contexts {
 		if name := strings.TrimSpace(c.Name); name != "" {
@@ -279,7 +216,7 @@ func indexCloudContextsByKubernetesName(contexts []CloudContextConfig) map[strin
 	return known
 }
 
-func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known map[string]struct{}, tenantName string, env EnvConfig) {
+func recordOrphanedCloudContext(orphans map[string]*model.OrphanedCloudContext, known map[string]struct{}, tenantName string, env EnvConfig) {
 	if !envExpectsCloudContext(env) {
 		return
 	}
@@ -293,7 +230,7 @@ func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known 
 	entry := orphans[kubeContext]
 	if entry == nil {
 		account, region := parseErunCloudContextName(kubeContext)
-		entry = &OrphanedCloudContext{
+		entry = &model.OrphanedCloudContext{
 			KubernetesContext:  kubeContext,
 			AccountID:          account,
 			Region:             region,
@@ -301,7 +238,7 @@ func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known 
 		}
 		orphans[kubeContext] = entry
 	}
-	ref := OrphanedCloudContextEnvRef{
+	ref := model.OrphanedCloudContextEnvRef{
 		Tenant:      strings.TrimSpace(tenantName),
 		Environment: strings.TrimSpace(env.Name),
 	}
@@ -346,8 +283,8 @@ func parseErunCloudContextName(name string) (string, string) {
 	return accountID, region
 }
 
-func newOrphanedAlias(alias string) *OrphanedAlias {
-	entry := &OrphanedAlias{Alias: alias}
+func newOrphanedAlias(alias string) *model.OrphanedAlias {
+	entry := &model.OrphanedAlias{Alias: alias}
 	if username, accountID, provider, ok := ParseCloudProviderAlias(alias); ok {
 		entry.Username = username
 		entry.AccountID = accountID

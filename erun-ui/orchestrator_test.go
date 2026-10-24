@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
@@ -17,7 +18,7 @@ import (
 func newOrchestratorStubStore(laptopRepoPath string) stubUIStore {
 	return stubUIStore{
 		config: &configpkg.ERunConfig{},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -89,7 +90,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 	defer app.shutdown(context.Background())
 
 	info, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
-		{Tenant: "frs", Environment: "runtime", Role: configpkg.OrchestratorEnvRoleRuntime},
+		{Tenant: "frs", Environment: "runtime", Role: model.OrchestratorEnvRoleRuntime},
 	}, nil, "", orchestratorLaunchInput{})
 	if err != nil {
 		t.Fatalf("CreateOrchestrator failed: %v", err)
@@ -98,7 +99,7 @@ func TestCreateOrchestratorLinksARuntimeEnvWithTheRuntimeRole(t *testing.T) {
 		t.Fatalf("expected one linked environment, got %+v", info.Environments)
 	}
 	linked := info.Environments[0]
-	if linked.Role != configpkg.OrchestratorEnvRoleRuntime {
+	if linked.Role != model.OrchestratorEnvRoleRuntime {
 		t.Fatalf("expected the runtime role to persist, got %+v", linked)
 	}
 	if linked.Directory != "" {
@@ -110,7 +111,7 @@ func TestCreateOrchestratorRejectsARuntimeEnvWithoutTheRuntimeRole(t *testing.T)
 	app, _ := orchestratorTestAppWithLocalRepo(t)
 	defer app.shutdown(context.Background())
 
-	for _, role := range []configpkg.OrchestratorEnvRole{configpkg.OrchestratorEnvRoleCode, configpkg.OrchestratorEnvRoleBuild, ""} {
+	for _, role := range []model.OrchestratorEnvRole{model.OrchestratorEnvRoleCode, model.OrchestratorEnvRoleBuild, ""} {
 		_, err := app.CreateOrchestrator("runtime operator", []orchestratorEnvInput{
 			{Tenant: "frs", Environment: "runtime", Role: role},
 		}, nil, "", orchestratorLaunchInput{})

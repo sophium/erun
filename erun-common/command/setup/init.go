@@ -11,8 +11,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	"github.com/sophium/erun/erun-common/infra/remoteinit"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -29,16 +29,16 @@ var (
 type BootstrapStore interface {
 	LoadERunConfig() (configpkg.ERunConfig, string, error)
 	SaveERunConfig(configpkg.ERunConfig) error
-	ListTenantConfigs() ([]configpkg.TenantConfig, error)
-	LoadTenantConfig(string) (configpkg.TenantConfig, string, error)
-	SaveTenantConfig(configpkg.TenantConfig) error
+	ListTenantConfigs() ([]model.TenantConfig, error)
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
+	SaveTenantConfig(model.TenantConfig) error
 	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
 	SaveEnvConfig(string, configpkg.EnvConfig) error
 }
 
 type (
 	WorkDirFunc            func() (string, error)
-	SelectTenantFunc       func([]configpkg.TenantConfig) (TenantSelectionResult, error)
+	SelectTenantFunc       func([]model.TenantConfig) (model.TenantSelectionResult, error)
 	PromptValueFunc        func(string) (string, error)
 	ProjectConfigSaverFunc func(string, configpkg.ProjectConfig) error
 	RemoteRuntimeWaitFunc  func(configpkg.ShellLaunchParams) error
@@ -48,47 +48,25 @@ type (
 	ConfirmFunc func(label string) (bool, error)
 )
 
-type BootstrapInitInteractionType string
-
-const (
-	BootstrapInitInteractionSelectTenant       BootstrapInitInteractionType = "select_tenant"
-	BootstrapInitInteractionConfirmTenant      BootstrapInitInteractionType = "confirm_tenant"
-	BootstrapInitInteractionConfirmEnvironment BootstrapInitInteractionType = "confirm_environment"
-	BootstrapInitInteractionKubernetesContext  BootstrapInitInteractionType = "input_kubernetes_context"
-	BootstrapInitInteractionContainerRegistry  BootstrapInitInteractionType = "input_container_registry"
-	BootstrapInitInteractionRemoteRepository   BootstrapInitInteractionType = "input_remote_repository"
-	BootstrapInitInteractionCodeCommitSSHKeyID BootstrapInitInteractionType = "input_codecommit_ssh_key_id"
-	BootstrapInitInteractionConfirmRemoteHost  BootstrapInitInteractionType = "confirm_remote_host_config"
-	BootstrapInitInteractionConfirmRemoteKey   BootstrapInitInteractionType = "confirm_remote_key"
-)
-
-type BootstrapInitInteraction struct {
-	Type         BootstrapInitInteractionType `json:"type"`
-	Label        string                       `json:"label"`
-	Options      []string                     `json:"options,omitempty"`
-	DefaultValue string                       `json:"defaultValue,omitempty"`
-	Details      string                       `json:"details,omitempty"`
-}
-
 type BootstrapInitInteractionError struct {
-	Interaction BootstrapInitInteraction
+	Interaction model.BootstrapInitInteraction
 }
 
 func (e BootstrapInitInteractionError) Error() string {
 	return "bootstrap init interaction required: " + string(e.Interaction.Type)
 }
 
-func AsBootstrapInitInteraction(err error) (BootstrapInitInteraction, bool) {
+func AsBootstrapInitInteraction(err error) (model.BootstrapInitInteraction, bool) {
 	var interactionErr BootstrapInitInteractionError
 	if !errors.As(err, &interactionErr) {
-		return BootstrapInitInteraction{}, false
+		return model.BootstrapInitInteraction{}, false
 	}
 	return interactionErr.Interaction, true
 }
 
 type BootstrapInitResult struct {
 	ERunConfig          configpkg.ERunConfig
-	TenantConfig        configpkg.TenantConfig
+	TenantConfig        model.TenantConfig
 	EnvConfig           configpkg.EnvConfig
 	CreatedERunConfig   bool
 	CreatedTenantConfig bool
@@ -133,14 +111,14 @@ type bootstrapRunState struct {
 	params                open.BootstrapInitParams
 	result                BootstrapInitResult
 	detected              projectContext
-	tenants               []configpkg.TenantConfig
+	tenants               []model.TenantConfig
 	tenantsLoaded         bool
 	setDefaultTenant      bool
 	defaultTenantResolved bool
 	toolConfig            configpkg.ERunConfig
 	toolConfigMissing     bool
 	tenant                string
-	tenantConfig          configpkg.TenantConfig
+	tenantConfig          model.TenantConfig
 	tenantConfigChanged   bool
 	envName               string
 	envConfig             configpkg.EnvConfig
@@ -313,7 +291,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 	if s.params.Bootstrap {
 		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + configpkg.DevopsComponentName + " chart")
 	}
-	return s.runner.writeRemoteInitMarker(req, remoteinit.RemoteInitMarker{
+	return s.runner.writeRemoteInitMarker(req, model.RemoteInitMarker{
 		Tenant:             s.tenant,
 		Environment:        s.envName,
 		ProjectRoot:        projectRoot,
@@ -396,8 +374,8 @@ func normalizeBootstrapParams(params open.BootstrapInitParams) open.BootstrapIni
 	params.RuntimeRegistry = strings.TrimSpace(params.RuntimeRegistry)
 	// Trimmed, not normalized: reconcile must tell an omitted flag from a supplied
 	// default.
-	params.RuntimePod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
-	params.RuntimeDindPod = configpkg.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
+	params.RuntimePod = model.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimePod.CPU), Memory: strings.TrimSpace(params.RuntimePod.Memory)}
+	params.RuntimeDindPod = model.RuntimePodResources{CPU: strings.TrimSpace(params.RuntimeDindPod.CPU), Memory: strings.TrimSpace(params.RuntimeDindPod.Memory)}
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)
@@ -460,8 +438,8 @@ func (s BootstrapRunner) confirmTenant(params open.BootstrapInitParams, tenant, 
 	if params.ConfirmTenant != nil {
 		return *params.ConfirmTenant, nil
 	}
-	return s.confirm(BootstrapInitInteraction{
-		Type:  BootstrapInitInteractionConfirmTenant,
+	return s.confirm(model.BootstrapInitInteraction{
+		Type:  model.BootstrapInitInteractionConfirmTenant,
 		Label: tenantConfirmationLabel(tenant, projectRoot),
 	})
 }
@@ -476,8 +454,8 @@ func (s BootstrapRunner) confirmEnvironment(params open.BootstrapInitParams, ten
 		}
 		return ErrEnvironmentInitializationCancelled
 	}
-	confirmed, err := s.confirm(BootstrapInitInteraction{
-		Type:  BootstrapInitInteractionConfirmEnvironment,
+	confirmed, err := s.confirm(model.BootstrapInitInteraction{
+		Type:  model.BootstrapInitInteractionConfirmEnvironment,
 		Label: environmentConfirmationLabel(tenant, envName),
 	})
 	if err != nil {
@@ -489,7 +467,7 @@ func (s BootstrapRunner) confirmEnvironment(params open.BootstrapInitParams, ten
 	return nil
 }
 
-func (s BootstrapRunner) confirm(interaction BootstrapInitInteraction) (bool, error) {
+func (s BootstrapRunner) confirm(interaction model.BootstrapInitInteraction) (bool, error) {
 	if s.Confirm == nil {
 		return false, BootstrapInitInteractionError{Interaction: interaction}
 	}

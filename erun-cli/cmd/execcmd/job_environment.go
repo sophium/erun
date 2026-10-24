@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -114,7 +115,7 @@ func startCommandJobInEnvironment(ctx context.Context, commandCtx core.Context, 
 	return *status.Job, resolved, nil
 }
 
-func attachJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
+func attachJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if err := jobs.ValidateEnvironmentJobAttach(params); err != nil {
 		return sharedpkg.EnvironmentJob{}, false, err
 	}
@@ -134,7 +135,7 @@ func jobStatusFromEnvironment(ctx context.Context, commandCtx core.Context, reso
 	return shared.CallEnvironmentTool[environmentJobStatusResult](ctx, commandCtx, resolveOpen, tenant, environment, "exec_job_status", arguments, true)
 }
 
-func awaitJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.AwaitEnvironmentJobParams) (jobs.AwaitEnvironmentJobResult, bool, error) {
+func awaitJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AwaitEnvironmentJobParams) (jobs.AwaitEnvironmentJobResult, bool, error) {
 	if err := jobs.ValidateEnvironmentJobAwaitTimeout(params.Timeout); err != nil {
 		return jobs.AwaitEnvironmentJobResult{}, false, err
 	}
@@ -144,7 +145,7 @@ func awaitJobInEnvironment(ctx context.Context, commandCtx core.Context, resolve
 	return shared.CallEnvironmentTool[jobs.AwaitEnvironmentJobResult](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_job_await", arguments, true)
 }
 
-func jobOutputFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, bool, error) {
+func jobOutputFromEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, bool, error) {
 	arguments := map[string]any{}
 	shared.PutEnvironmentToolArgument(arguments, "id", params.ID)
 	shared.PutEnvironmentToolArgument(arguments, "offset", params.Offset)
@@ -152,7 +153,7 @@ func jobOutputFromEnvironment(ctx context.Context, commandCtx core.Context, reso
 	return shared.CallEnvironmentTool[jobs.EnvironmentJobOutput](ctx, commandCtx, resolveOpen, params.Tenant, params.Environment, "exec_job_output", arguments, true)
 }
 
-func cancelJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, bool, error) {
+func cancelJobInEnvironment(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, bool, error) {
 	arguments := map[string]any{}
 	shared.PutEnvironmentToolArgument(arguments, "id", params.ID)
 	shared.PutEnvironmentToolArgument(arguments, "signal", params.Signal)

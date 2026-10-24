@@ -18,30 +18,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-// E2ETarget scopes an erun e2e run to a deployed environment.
-type E2ETarget struct {
-	Tenant            string
-	Environment       string
-	Namespace         string
-	KubernetesContext string
-}
-
-// E2EParams is one erun e2e run.
-type E2EParams struct {
-	Plan    E2EPlan
-	Target  E2ETarget
-	BaseURL string
-	Version string
-	// TargetNamed: only an explicitly named target is trusted to be what a
-	// --base-url serves, so only it supplies that URL's expected version.
-	TargetNamed bool
-}
 
 // E2ESuiteResult is how one suite's run ended.
 type E2ESuiteResult struct {
@@ -69,7 +51,7 @@ type E2EResult struct {
 type e2eDeps struct {
 	runBuild   func(dir string, args []string, output io.Writer) error
 	lookupHost func(host string) ([]string, error)
-	logPath    func(target E2ETarget, component string) (string, error)
+	logPath    func(target model.E2ETarget, component string) (string, error)
 }
 
 var defaultE2EDeps = e2eDeps{
@@ -79,7 +61,7 @@ var defaultE2EDeps = e2eDeps{
 }
 
 type e2eRun struct {
-	suite   E2ESuite
+	suite   model.E2ESuite
 	baseURL string
 	args    []string
 	logPath string
@@ -91,11 +73,11 @@ var hardcodedPlaywrightBaseURLPattern = regexp.MustCompile(`baseURL\s*:\s*['"]`)
 
 // RunE2E checks every precondition before any suite runs, then runs every
 // suite even after one fails. Failures are reported only: e2e is not a release gate.
-func RunE2E(ctx core.Context, params E2EParams) (*E2EResult, error) {
+func RunE2E(ctx core.Context, params model.E2EParams) (*E2EResult, error) {
 	return runE2E(ctx, params, defaultE2EDeps)
 }
 
-func runE2E(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResult, error) {
+func runE2E(ctx core.Context, params model.E2EParams, deps e2eDeps) (*E2EResult, error) {
 	result, runs, err := resolveE2ERuns(ctx, params, deps)
 	if err != nil {
 		return nil, err
@@ -114,7 +96,7 @@ func runE2E(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResult, error
 	return result, reportE2EOutcome(ctx, result)
 }
 
-func resolveE2ERuns(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResult, []e2eRun, error) {
+func resolveE2ERuns(ctx core.Context, params model.E2EParams, deps e2eDeps) (*E2EResult, []e2eRun, error) {
 	for _, suite := range params.Plan.Suites {
 		if err := lintPlaywrightSuite(suite.Dir); err != nil {
 			return nil, nil, err
@@ -154,7 +136,7 @@ func resolveE2ERuns(ctx core.Context, params E2EParams, deps e2eDeps) (*E2EResul
 	return newE2EResult(target, baseURLOverride, version, versionOverride != ""), runs, nil
 }
 
-func newE2EResult(target E2ETarget, baseURLOverride, version string, versionOverridden bool) *E2EResult {
+func newE2EResult(target model.E2ETarget, baseURLOverride, version string, versionOverridden bool) *E2EResult {
 	result := &E2EResult{Version: version, versionOverridden: versionOverridden}
 	if baseURLOverride != "" && versionOverridden {
 		result.BaseURL = baseURLOverride
@@ -173,7 +155,7 @@ func (r *E2EResult) describe() string {
 
 // refuseE2EBaseURLWithoutVersion: the current scope's deployed version need not
 // be what an arbitrary --base-url serves.
-func refuseE2EBaseURLWithoutVersion(params E2EParams, baseURLOverride, versionOverride string) error {
+func refuseE2EBaseURLWithoutVersion(params model.E2EParams, baseURLOverride, versionOverride string) error {
 	if baseURLOverride == "" || versionOverride != "" || params.TargetNamed {
 		return nil
 	}
@@ -189,7 +171,7 @@ func traceE2EVersion(ctx core.Context, version string, overridden bool) {
 	ctx.Trace(fmt.Sprintf("e2e: deployed version %s", version))
 }
 
-func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, baseURLOverride string, exposed []clusterread.ExposedService, secrets []config.DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
+func resolveE2ERun(ctx core.Context, suite model.E2ESuite, target model.E2ETarget, version, baseURLOverride string, exposed []clusterread.ExposedService, secrets []config.DockerBuildSecret, deps e2eDeps) (e2eRun, error) {
 	baseURL := baseURLOverride
 	ctx.Trace(fmt.Sprintf("e2e: suite %s: %s", suite.Component, suite.Dockerfile))
 	if baseURL != "" {
@@ -220,7 +202,7 @@ func resolveE2ERun(ctx core.Context, suite E2ESuite, target E2ETarget, version, 
 
 // e2eDockerBuildArgs never caches the `e2e` stage, so it re-runs every time,
 // and exports cache-only: an e2e run produces no image.
-func e2eDockerBuildArgs(suite E2ESuite, version, baseURL string, exposed []clusterread.ExposedService, secrets []config.DockerBuildSecret, cgroupParent string) []string {
+func e2eDockerBuildArgs(suite model.E2ESuite, version, baseURL string, exposed []clusterread.ExposedService, secrets []config.DockerBuildSecret, cgroupParent string) []string {
 	args := []string{
 		"build", "--progress=plain",
 		"--target", "e2e",
@@ -326,12 +308,12 @@ func e2eLogTail(path string, n int) string {
 
 // checkE2EPreconditions is read-only, so it runs even under --dry-run. With
 // both --base-url and --version the environment is not read at all.
-func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite, baseURLOverridden bool, versionOverride string) (string, []clusterread.ExposedService, error) {
+func checkE2EPreconditions(ctx core.Context, target model.E2ETarget, suites []model.E2ESuite, baseURLOverridden bool, versionOverride string) (string, []clusterread.ExposedService, error) {
 	if baseURLOverridden && versionOverride != "" {
 		ctx.Trace("e2e: --base-url and --version name the target; no environment is read (deployment, exposure and version checks skipped)")
 		return versionOverride, nil, nil
 	}
-	deployed, err := deploy.CheckKubernetesDeployment(ctx, deploy.KubernetesDeploymentCheckParams{
+	deployed, err := deploy.CheckKubernetesDeployment(ctx, model.KubernetesDeploymentCheckParams{
 		Name:              config.RuntimeReleaseName(target.Tenant),
 		Namespace:         target.Namespace,
 		KubernetesContext: target.KubernetesContext,
@@ -365,7 +347,7 @@ func checkE2EPreconditions(ctx core.Context, target E2ETarget, suites []E2ESuite
 	return strings.TrimSpace(version), exposed, nil
 }
 
-func checkE2EExposures(target E2ETarget, suites []E2ESuite) ([]clusterread.ExposedService, error) {
+func checkE2EExposures(target model.E2ETarget, suites []model.E2ESuite) ([]clusterread.ExposedService, error) {
 	exposed, err := clusterread.ListExposedServices(config.ShellLaunchParams{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
@@ -489,7 +471,7 @@ func validateE2ESecret(index int, secret config.DockerBuildSecret) error {
 	return nil
 }
 
-func e2eLogPath(target E2ETarget, component string) (string, error) {
+func e2eLogPath(target model.E2ETarget, component string) (string, error) {
 	if strings.TrimSpace(target.Tenant) == "" && strings.TrimSpace(target.Environment) == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {

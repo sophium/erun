@@ -3,6 +3,7 @@ package execute
 import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
@@ -107,9 +108,9 @@ func runResolvedBuildExecution(ctx core.Context, execution shared.BuildExecution
 }
 
 // BuildExecutionReleaseSpec returns the release a build execution carries.
-func BuildExecutionReleaseSpec(execution shared.BuildExecutionSpec) (shared.ReleaseSpec, bool) {
+func BuildExecutionReleaseSpec(execution shared.BuildExecutionSpec) (model.ReleaseSpec, bool) {
 	if execution.Release == nil {
-		return shared.ReleaseSpec{}, false
+		return model.ReleaseSpec{}, false
 	}
 	return *execution.Release, true
 }

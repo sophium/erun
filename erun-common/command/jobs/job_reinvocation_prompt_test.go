@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -74,7 +75,7 @@ func zzRunLaneWithFailedProbe(t *testing.T, task string) (shared.EnvironmentJob,
 		t.Fatalf("AgentJobCommand: %v", err)
 	}
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          laneID,

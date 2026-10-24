@@ -14,6 +14,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
@@ -48,8 +49,8 @@ type AttachControlMessage struct {
 // AttachOutcomeMessage is sent once before close so the client learns why the
 // stream ended; an unknown outcome is sent as unknown, never as ended.
 type AttachOutcomeMessage struct {
-	Type    string                      `json:"type"`
-	Outcome open.AISessionAttachOutcome `json:"outcome"`
+	Type    string                       `json:"type"`
+	Outcome model.AISessionAttachOutcome `json:"outcome"`
 }
 
 // RegisterAttachHandler serves the WebSocket attach edge at path behind bearer
@@ -112,7 +113,7 @@ func runAttachSession(conn *websocket.Conn, runtime shared.RuntimeConfig, sessio
 	// fresh pod's first attach.
 	if err := os.MkdirAll(filepath.Dir(socket), 0o700); err != nil {
 		log.Printf("erun-mcp attach: creating session directory for %q: %v", session, err)
-		sendAttachOutcome(conn, open.AISessionAttachOutcomeUnknown)
+		sendAttachOutcome(conn, model.AISessionAttachOutcomeUnknown)
 		return
 	}
 	script := strings.Join(open.RemoteAppSessionAttachLines(socket, attachRedraw, attachDefaultLaunchCommand), "\n")
@@ -121,7 +122,7 @@ func runAttachSession(conn *websocket.Conn, runtime shared.RuntimeConfig, sessio
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cols), Rows: uint16(rows)})
 	if err != nil {
 		log.Printf("erun-mcp attach: starting session %q: %v", session, err)
-		sendAttachOutcome(conn, open.AISessionAttachOutcomeUnknown)
+		sendAttachOutcome(conn, model.AISessionAttachOutcomeUnknown)
 		return
 	}
 	defer func() { _ = ptmx.Close() }()
@@ -184,7 +185,7 @@ func applyAttachControlMessage(ptmx *os.File, raw []byte) {
 	_ = pty.Setsize(ptmx, &pty.Winsize{Cols: uint16(msg.Cols), Rows: uint16(msg.Rows)})
 }
 
-func sendAttachOutcome(conn *websocket.Conn, outcome open.AISessionAttachOutcome) {
+func sendAttachOutcome(conn *websocket.Conn, outcome model.AISessionAttachOutcome) {
 	payload, err := json.Marshal(AttachOutcomeMessage{Type: "outcome", Outcome: outcome})
 	if err != nil {
 		return

@@ -7,10 +7,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -28,26 +28,26 @@ type ObserveInput struct {
 }
 
 // ObserveTool only runs `kubectl get`, so it needs erun:read, not erun:admin.
-func ObserveTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, observe.ObserveResult, error) {
+func ObserveTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ObserveInput) (*mcp.CallToolResult, model.ObserveResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ObserveInput) (*mcp.CallToolResult, model.ObserveResult, error) {
 		target, err := resolveObserveOpenResult(runtime, input)
 		if err != nil {
-			return nil, observe.ObserveResult{}, err
+			return nil, model.ObserveResult{}, err
 		}
 		req := cloud.ShellLaunchParamsFromResult(target)
 		runCtx := sharedpkg.RuntimeCallContext(input.Preview, input.Verbosity, nil, io.Discard, io.Discard)
-		result, err := observe.RunObservation(runCtx, req, observe.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
+		result, err := observe.RunObservation(runCtx, req, model.ObserveParams{Secrets: observeSecretChecksFromInput(input.Secrets)})
 		if err != nil {
-			return nil, observe.ObserveResult{}, err
+			return nil, model.ObserveResult{}, err
 		}
 		return nil, result, nil
 	}
 }
 
-func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []observe.ObserveSecretCheck {
-	checks := make([]observe.ObserveSecretCheck, 0, len(inputs))
+func observeSecretChecksFromInput(inputs []ObserveSecretCheckInput) []model.ObserveSecretCheck {
+	checks := make([]model.ObserveSecretCheck, 0, len(inputs))
 	for _, in := range inputs {
-		checks = append(checks, observe.ObserveSecretCheck{Name: strings.TrimSpace(in.Name), Key: strings.TrimSpace(in.Key)})
+		checks = append(checks, model.ObserveSecretCheck{Name: strings.TrimSpace(in.Name), Key: strings.TrimSpace(in.Key)})
 	}
 	return checks
 }
@@ -58,5 +58,5 @@ func resolveObserveOpenResult(runtime sharedpkg.RuntimeConfig, input ObserveInpu
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return open.ResolveOpen(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	return open.ResolveOpen(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 }

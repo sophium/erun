@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -97,21 +98,6 @@ type StopEnvironmentParams struct {
 	SaveEnvConfig func(string, config.EnvConfig) error
 }
 
-// StopEnvironmentResult is the outcome of `erun stop`.
-type StopEnvironmentResult struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment"`
-	Namespace         string `json:"namespace"`
-	Release           string `json:"release"`
-	KubernetesContext string `json:"kubernetesContext"`
-	Stopped           bool   `json:"stopped"`
-	AlreadyStopped    bool   `json:"alreadyStopped"`
-	// EndedSessions names the desktop terminal sessions the stop took down.
-	EndedSessions []string `json:"endedSessions,omitempty"`
-	// RemainingComponents names platform components the stop deliberately left running.
-	RemainingComponents []string `json:"remainingComponents,omitempty"`
-}
-
 // StopRemainingComponents names the env's deployed components other than the runtime, which a
 // stop leaves running since on a platform-hosting env they are the platform. Read from config to
 // avoid a second cluster query.
@@ -125,9 +111,9 @@ func StopRemainingComponents(result config.OpenResult) []string {
 }
 
 // RunStopEnvironment scales the runtime to zero and, only once the cluster confirms, records the stop intent.
-func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnvironmentResult, error) {
+func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 	target := RuntimeScaleTargetForResult(params.Result)
-	result := StopEnvironmentResult{
+	result := model.StopEnvironmentResult{
 		Tenant:            target.Tenant,
 		Environment:       target.Environment,
 		Namespace:         target.Namespace,
@@ -137,10 +123,10 @@ func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnv
 
 	state, err := ReadRuntimeRunState(ctx, target)
 	if err != nil {
-		return StopEnvironmentResult{}, err
+		return model.StopEnvironmentResult{}, err
 	}
 	if !state.Present {
-		return StopEnvironmentResult{}, fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); nothing to stop",
+		return model.StopEnvironmentResult{}, fmt.Errorf("runtime for %s/%s is not deployed (deployment %q not found in namespace %q); nothing to stop",
 			target.Tenant, target.Environment, target.ReleaseName, target.Namespace)
 	}
 
@@ -159,15 +145,15 @@ func RunStopEnvironment(ctx core.Context, params StopEnvironmentParams) (StopEnv
 		result.EndedSessions = traceAttachedAppSessions(ctx, target)
 		ctx.Trace(fmt.Sprintf("stop: scaling %s to 0 replicas to return its runtime and dind capacity to the node", target.ReleaseName))
 		if err := scaleRuntimeDeployment(ctx, target, 0); err != nil {
-			return StopEnvironmentResult{}, err
+			return model.StopEnvironmentResult{}, err
 		}
 		if err := confirmRuntimeStopped(ctx, target); err != nil {
-			return StopEnvironmentResult{}, err
+			return model.StopEnvironmentResult{}, err
 		}
 	}
 	if decision.PersistIntent {
 		if err := persistEnvironmentStopIntent(ctx, params.Result, params.SaveEnvConfig, true); err != nil {
-			return StopEnvironmentResult{}, err
+			return model.StopEnvironmentResult{}, err
 		}
 	}
 	ctx.Trace(fmt.Sprintf("==> Stopped %s/%s", target.Tenant, target.Environment))
@@ -371,7 +357,7 @@ func isKubernetesNotFoundMessage(output string) bool {
 func scaleRuntimeDeployment(ctx core.Context, target RuntimeScaleTarget, replicas int) error {
 	args := kubectlRuntimeTargetArgs(target)
 	args = append(args, "scale", "deployment/"+target.ReleaseName, "--replicas="+strconv.Itoa(replicas))
-	return core.RunRawCommand(ctx, core.RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
+	return core.RunRawCommand(ctx, model.RawCommandSpec{Args: append([]string{"kubectl"}, args...)}, nil)
 }
 
 // WaitRuntimeAvailable blocks until the runtime Deployment reports Available.

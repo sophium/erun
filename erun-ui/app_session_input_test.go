@@ -7,17 +7,17 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	projectRoot := t.TempDir()
 	rootConfig := &configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{
+		CloudProviders: []model.CloudProviderConfig{
 			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []configpkg.CloudContextConfig{
+		CloudContexts: []model.CloudContextConfig{
 			{
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
@@ -36,7 +36,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
 			config: rootConfig,
-			tenants: map[string]configpkg.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"frs": {Name: "frs", DefaultEnvironment: "prod"},
 			},
 			envs: map[string]configpkg.EnvConfig{
@@ -71,7 +71,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
@@ -128,7 +128,7 @@ func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
 func TestSendSessionInputRoutesPerSession(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -179,7 +179,7 @@ func TestSendSessionInputRoutesPerSession(t *testing.T) {
 func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
@@ -227,7 +227,7 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
@@ -243,7 +243,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	}
 
 	var recordMu sync.Mutex
-	var recorded []activity.EnvironmentActivityParams
+	var recorded []model.EnvironmentActivityParams
 	app := NewApp(erunUIDeps{
 		store:          store,
 		resolveCLIPath: func() string { return "/tmp/erun" },
@@ -251,7 +251,7 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 			// Silent: the 2s activity ticker fires on the first chunk and would race the assertion.
 			return newSilentStubTerminalSession(), nil
 		},
-		recordActivity: func(params activity.EnvironmentActivityParams) error {
+		recordActivity: func(params model.EnvironmentActivityParams) error {
 			recordMu.Lock()
 			defer recordMu.Unlock()
 			recorded = append(recorded, params)
@@ -284,7 +284,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 	// Input after a respawn must re-enable output-driven idle refreshes.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -297,7 +297,7 @@ func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			return newStubTerminalSession(), nil
 		},
-		recordActivity: func(activity.EnvironmentActivityParams) error { return nil },
+		recordActivity: func(model.EnvironmentActivityParams) error { return nil },
 	})
 	defer app.shutdown(context.Background())
 

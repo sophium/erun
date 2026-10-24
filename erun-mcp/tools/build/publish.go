@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/release"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -31,13 +32,13 @@ func PublishTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 			findProjectRoot := func() (string, string, error) {
 				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
 			}
-			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+			resolveBuildContext := func() (model.DockerBuildContext, error) {
 				return shared.DockerBuildContextAtDir(workDir)
 			}
-			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return deploy.KubernetesDeployContextAtDir(workDir), nil
 			}
-			target := deploy.DeployTarget{
+			target := model.DeployTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:        workDir,

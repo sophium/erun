@@ -8,86 +8,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
-
-type DiffResult struct {
-	WorkingDirectory string         `json:"workingDirectory,omitempty"`
-	RawDiff          string         `json:"rawDiff"`
-	Summary          DiffSummary    `json:"summary"`
-	Files            []DiffFile     `json:"files,omitempty"`
-	Tree             []DiffTreeNode `json:"tree,omitempty"`
-	ReviewBase       DiffReviewBase `json:"reviewBase,omitempty"`
-	ReviewCommits    []DiffCommit   `json:"reviewCommits,omitempty"`
-	Scope            string         `json:"scope,omitempty"`
-	SelectedCommit   string         `json:"selectedCommit,omitempty"`
-	IncludesWorktree bool           `json:"includesWorktree,omitempty"`
-}
-
-type DiffSummary struct {
-	FileCount int `json:"fileCount"`
-	Additions int `json:"additions"`
-	Deletions int `json:"deletions"`
-}
-
-type DiffFile struct {
-	Path      string     `json:"path"`
-	OldPath   string     `json:"oldPath,omitempty"`
-	NewPath   string     `json:"newPath,omitempty"`
-	Status    string     `json:"status"`
-	Additions int        `json:"additions"`
-	Deletions int        `json:"deletions"`
-	Binary    bool       `json:"binary,omitempty"`
-	Hunks     []DiffHunk `json:"hunks,omitempty"`
-}
-
-type DiffHunk struct {
-	Header   string     `json:"header"`
-	OldStart int        `json:"oldStart"`
-	OldLines int        `json:"oldLines"`
-	NewStart int        `json:"newStart"`
-	NewLines int        `json:"newLines"`
-	Lines    []DiffLine `json:"lines,omitempty"`
-}
-
-type DiffLine struct {
-	Kind    string `json:"kind"`
-	Content string `json:"content"`
-	OldLine int    `json:"oldLine,omitempty"`
-	NewLine int    `json:"newLine,omitempty"`
-}
-
-type DiffTreeNode struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	ParentPath string `json:"parentPath,omitempty"`
-	Type       string `json:"type"`
-	Depth      int    `json:"depth"`
-	Status     string `json:"status,omitempty"`
-	Additions  int    `json:"additions,omitempty"`
-	Deletions  int    `json:"deletions,omitempty"`
-}
-
-type DiffReviewBase struct {
-	Branch      string `json:"branch,omitempty"`
-	Commit      string `json:"commit,omitempty"`
-	ShortCommit string `json:"shortCommit,omitempty"`
-}
-
-type DiffCommit struct {
-	Hash      string `json:"hash"`
-	ShortHash string `json:"shortHash"`
-	Subject   string `json:"subject"`
-	Author    string `json:"author"`
-	Date      string `json:"date"`
-}
-
-type DiffOptions struct {
-	Scope          string `json:"scope,omitempty"`
-	SelectedCommit string `json:"selectedCommit,omitempty"`
-	// Target is "env" (default, the runtime working directory) or "erun" (the contribute-mode clone).
-	Target string `json:"target,omitempty"`
-}
 
 const (
 	DiffTargetEnv  = "env"
@@ -114,10 +37,10 @@ func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
 	}
 }
 
-func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffResult, error) {
+func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
-		return DiffResult{}, fmt.Errorf("project root is required")
+		return model.DiffResult{}, fmt.Errorf("project root is required")
 	}
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
@@ -126,10 +49,10 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffR
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, currentScopeGitDiffArgs(gitDiffHeadFound(projectRoot, runGit))...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
+		return model.DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	result := ParseGitDiff(stdout.String())
@@ -138,10 +61,10 @@ func ResolveGitDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffR
 	return result, nil
 }
 
-func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit gitx.GitCommandRunnerFunc) (DiffResult, error) {
+func ResolveGitDiffWithOptions(projectRoot string, options model.DiffOptions, runGit gitx.GitCommandRunnerFunc) (model.DiffResult, error) {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
-		return DiffResult{}, fmt.Errorf("project root is required")
+		return model.DiffResult{}, fmt.Errorf("project root is required")
 	}
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
@@ -150,31 +73,31 @@ func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit g
 	scope := normalizeDiffScope(options.Scope)
 	selectedCommit := strings.TrimSpace(options.SelectedCommit)
 	if err := rejectOptionShapedSelectedCommit(scope, selectedCommit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	base, baseFound, err := resolveGitDiffReviewBase(projectRoot, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	commits, err := resolveGitDiffReviewCommits(projectRoot, base, baseFound, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	selectedCommit, err = resolveDiffSelectedCommit(projectRoot, scope, selectedCommit, runGit)
 	if err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	stdout := new(bytes.Buffer)
 	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit, gitDiffHeadFound(projectRoot, runGit))
 	stderr := new(bytes.Buffer)
 	if err := runGit(projectRoot, stdout, stderr, diffArgs...); err != nil {
-		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
+		return model.DiffResult{}, fmt.Errorf("git diff: %w%s", err, core.FormatGitCommandStderr(stderr.String()))
 	}
 	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
-		return DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	result := ParseGitDiff(stdout.String())
@@ -255,8 +178,8 @@ func gitDiffHeadFound(projectRoot string, runGit gitx.GitCommandRunnerFunc) bool
 	return err == nil
 }
 
-func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFunc) (DiffReviewBase, bool, error) {
-	var selected DiffReviewBase
+func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFunc) (model.DiffReviewBase, bool, error) {
+	var selected model.DiffReviewBase
 	selectedDistance := -1
 	for _, branch := range []string{"origin/HEAD", "origin/main", "origin/develop", "main", "develop"} {
 		commit, err := gitOutput(projectRoot, runGit, "merge-base", "HEAD", branch)
@@ -275,13 +198,13 @@ func resolveGitDiffReviewBase(projectRoot string, runGit gitx.GitCommandRunnerFu
 		displayBranch := resolveGitDiffReviewBaseBranch(projectRoot, branch, runGit)
 		if selectedDistance < 0 || parsedDistance < selectedDistance {
 			selectedDistance = parsedDistance
-			selected = DiffReviewBase{Branch: displayBranch, Commit: commit, ShortCommit: shortCommit}
+			selected = model.DiffReviewBase{Branch: displayBranch, Commit: commit, ShortCommit: shortCommit}
 		}
 	}
 	if selected.Commit != "" {
 		return selected, true, nil
 	}
-	return DiffReviewBase{}, false, nil
+	return model.DiffReviewBase{}, false, nil
 }
 
 func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitCommandRunnerFunc) string {
@@ -295,7 +218,7 @@ func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit gitx.GitC
 	return resolved
 }
 
-func resolveGitDiffReviewCommits(projectRoot string, base DiffReviewBase, baseFound bool, runGit gitx.GitCommandRunnerFunc) ([]DiffCommit, error) {
+func resolveGitDiffReviewCommits(projectRoot string, base model.DiffReviewBase, baseFound bool, runGit gitx.GitCommandRunnerFunc) ([]model.DiffCommit, error) {
 	if !baseFound {
 		return nil, nil
 	}
@@ -315,19 +238,19 @@ func gitOutput(projectRoot string, runGit gitx.GitCommandRunnerFunc, args ...str
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-func parseGitDiffReviewCommits(output string) []DiffCommit {
+func parseGitDiffReviewCommits(output string) []model.DiffCommit {
 	output = strings.TrimSuffix(output, "\x1e")
 	if output == "" {
 		return nil
 	}
 	records := strings.Split(output, "\x1e")
-	commits := make([]DiffCommit, 0, len(records))
+	commits := make([]model.DiffCommit, 0, len(records))
 	for _, record := range records {
 		fields := strings.SplitN(strings.TrimSpace(record), "\x1f", 5)
 		if len(fields) != 5 {
 			continue
 		}
-		commits = append(commits, DiffCommit{
+		commits = append(commits, model.DiffCommit{
 			Hash:      fields[0],
 			ShortHash: fields[1],
 			Author:    fields[2],
@@ -381,7 +304,7 @@ func appendRawDiff(rawDiff *bytes.Buffer, diff string) {
 	}
 }
 
-func WriteRawDiff(stdout io.Writer, result DiffResult) error {
+func WriteRawDiff(stdout io.Writer, result model.DiffResult) error {
 	if result.RawDiff == "" {
 		return nil
 	}

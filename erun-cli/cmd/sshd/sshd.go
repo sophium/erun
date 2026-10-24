@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -16,10 +17,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, sharedpkg.OpenParams) error, findProjectRoot sharedpkg.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
+func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, findProjectRoot sharedpkg.ProjectFinderFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, runRemoteCommand kube.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
-	target := sharedpkg.OpenParams{}
+	target := model.OpenParams{}
 
 	initCmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -48,7 +49,7 @@ func NewSSHDCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	initCmd.Flags().StringVar(&publicKeyPath, "public-key", "", "Public key to authorize for remote SSH access")
 	initCmd.Flags().IntVar(&localPort, "local-port", 0, "Fixed local port to use for kubectl port-forward")
 
-	syncTarget := sharedpkg.OpenParams{}
+	syncTarget := model.OpenParams{}
 	syncCmd := &cobra.Command{
 		Use:          "sync [TENANT] [ENVIRONMENT]",
 		Short:        "Mirror a remote environment's workspace onto this host",

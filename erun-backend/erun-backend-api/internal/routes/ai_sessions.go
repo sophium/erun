@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -111,7 +112,7 @@ func (r AISessionRoutes) listAISessions(w http.ResponseWriter, req *http.Request
 // resolveAISessionStatus reuses erun-common's resolution so callers see the
 // same states as the desktop and MCP.
 func resolveAISessionStatus(event model.AISessionEvent) modelpkg.AISessionStatus {
-	return modelpkg.ResolveAISessionStatus(modelpkg.AISessionRecord{
+	return core.ResolveAISessionStatus(modelpkg.AISessionRecord{
 		SessionID:  event.SessionID,
 		Tool:       event.Tool,
 		Event:      modelpkg.AISessionEventKind(event.Event),

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -76,7 +77,7 @@ func ResolvePublishedDevopsDeploySpecWithReason(ctx core.Context, target config.
 	}
 	traceRuntimeRegistryMemo(ctx, target, registry, chart.registry)
 
-	deployContext := shared.KubernetesDeployContext{
+	deployContext := model.KubernetesDeployContext{
 		ComponentName: config.DevopsComponentName,
 		ChartPath:     chart.reference,
 	}
@@ -142,7 +143,7 @@ func resolvePublishedComponentDeploySpec(ctx core.Context, target config.OpenRes
 	chartReference := helm.PublishedDevopsChartOCIRepo(registry) + "/" + componentName
 	ctx.Trace("deploy: no local chart for " + componentName + "; using published chart " + chartReference + " version " + version)
 
-	deployContext := shared.KubernetesDeployContext{
+	deployContext := model.KubernetesDeployContext{
 		ComponentName: componentName,
 		ChartPath:     chartReference,
 	}

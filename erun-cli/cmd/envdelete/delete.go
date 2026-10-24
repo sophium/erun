@@ -8,6 +8,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/spf13/cobra"
 )
@@ -47,7 +48,7 @@ func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunne
 		}
 	}
 
-	result, err := lifecycle.RunDeleteEnvironment(ctx, lifecycle.DeleteEnvironmentParams{
+	result, err := lifecycle.RunDeleteEnvironment(ctx, model.DeleteEnvironmentParams{
 		Tenant:      tenant,
 		Environment: environment,
 	}, store, deleteNamespace)
@@ -55,7 +56,7 @@ func runDeleteCommand(ctx core.Context, store lifecycle.DeleteStore, promptRunne
 		return err
 	}
 
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if result.NamespaceDeleteError != "" {
 			_, _ = fmt.Fprintf(ctx.Stderr, "warning: failed to delete namespace %q in context %q: %s\n", result.Namespace, result.KubernetesContext, result.NamespaceDeleteError)
 		}

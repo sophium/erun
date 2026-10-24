@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The sampler records activity for uninstrumented work resident in the runtime container.
@@ -32,19 +34,6 @@ const (
 	residentActivitySampleFileName = "process-sample.json"
 )
 
-// ResidentActivitySample is keyed so a recycled pid is not mistaken for its predecessor.
-type ResidentActivitySample struct {
-	SampledAt time.Time        `json:"sampledAt"`
-	CPU       map[string]int64 `json:"cpu,omitempty"`
-}
-
-// ResidentActivityResult is one sampler tick's verdict.
-type ResidentActivityResult struct {
-	Busy      bool                   `json:"busy"`
-	Processes []string               `json:"processes,omitempty"`
-	Sample    ResidentActivitySample `json:"-"`
-}
-
 // Prefix match because the CPU-burning process may carry a suffix (`claude.exe`). erun's own
 // binaries are excluded so the observer cannot match itself.
 var residentActivityCommPrefixes = []string{
@@ -56,7 +45,7 @@ var residentActivityCommPrefixes = []string{
 
 // ScanResidentActivity counts a process as work when it is new since the previous sample or
 // clears the CPU rate floor. The first sample reports idle.
-func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivitySample, now time.Time) (ResidentActivityResult, error) {
+func ScanResidentActivity(procRoot string, selfPID int, previous model.ResidentActivitySample, now time.Time) (model.ResidentActivityResult, error) {
 	root := strings.TrimSpace(procRoot)
 	if root == "" {
 		root = DefaultProcRoot
@@ -67,13 +56,13 @@ func ScanResidentActivity(procRoot string, selfPID int, previous ResidentActivit
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ResidentActivityResult{Sample: ResidentActivitySample{SampledAt: now}}, nil
+			return model.ResidentActivityResult{Sample: model.ResidentActivitySample{SampledAt: now}}, nil
 		}
-		return ResidentActivityResult{}, err
+		return model.ResidentActivityResult{}, err
 	}
 
 	elapsed := now.Sub(previous.SampledAt)
-	result := ResidentActivityResult{Sample: ResidentActivitySample{SampledAt: now, CPU: map[string]int64{}}}
+	result := model.ResidentActivityResult{Sample: model.ResidentActivitySample{SampledAt: now, CPU: map[string]int64{}}}
 	first := len(previous.CPU) == 0
 	busy := map[string]struct{}{}
 	for _, entry := range entries {
@@ -262,27 +251,27 @@ func sortedKeys(set map[string]struct{}) []string {
 
 // LoadResidentActivitySample treats a missing or unreadable sample as the first sample, so
 // the monitor never fails on it.
-func LoadResidentActivitySample(tenant, environment string) (ResidentActivitySample, error) {
+func LoadResidentActivitySample(tenant, environment string) (model.ResidentActivitySample, error) {
 	path, err := residentActivitySamplePath(tenant, environment)
 	if err != nil {
-		return ResidentActivitySample{}, err
+		return model.ResidentActivitySample{}, err
 	}
 	return readResidentActivitySample(path), nil
 }
 
-func readResidentActivitySample(path string) ResidentActivitySample {
+func readResidentActivitySample(path string) model.ResidentActivitySample {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ResidentActivitySample{}
+		return model.ResidentActivitySample{}
 	}
-	var sample ResidentActivitySample
+	var sample model.ResidentActivitySample
 	if err := json.Unmarshal(data, &sample); err != nil {
-		return ResidentActivitySample{}
+		return model.ResidentActivitySample{}
 	}
 	return sample
 }
 
-func SaveResidentActivitySample(tenant, environment string, sample ResidentActivitySample) error {
+func SaveResidentActivitySample(tenant, environment string, sample model.ResidentActivitySample) error {
 	path, err := residentActivitySamplePath(tenant, environment)
 	if err != nil {
 		return err

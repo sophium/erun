@@ -13,6 +13,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // stsCallerIdentityFixture serves a fake STS via AWS_ENDPOINT_URL.
@@ -100,7 +101,7 @@ func TestAWSGetCallerIdentityArgsSharedByBothPaths(t *testing.T) {
 }
 
 func TestLibraryCheckAWSStatusNotConfiguredForMissingProfile(t *testing.T) {
-	provider := config.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws", Profile: "erun-cloud-aws-sdk-test-missing-profile"}
+	provider := model.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws", Profile: "erun-cloud-aws-sdk-test-missing-profile"}
 
 	status := libraryCheckAWSStatus(core.Context{}, provider)
 

@@ -9,11 +9,11 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/sophium/erun/erun-common/infra/kube"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -86,17 +86,17 @@ func addOutputsScopeFlags(cmd *cobra.Command, tenant, environment, dirPath *stri
 	cmd.Flags().StringVar(dirPath, "path", "", "Pod directory to operate on (default: $ERUN_OUTPUTS_DIR, /home/erun/.erun/outputs)")
 }
 
-func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
+func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, dirPath string, limit int, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	list, err := jobs.ResolveRuntimeOutputs(ctx, req, jobs.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
+	list, err := jobs.ResolveRuntimeOutputs(ctx, req, model.RuntimeOutputsParams{Dir: dirPath, Limit: limit}, run)
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(list)
 	}
 	if ctx.DryRun {
@@ -105,7 +105,7 @@ func runOutputsListCommand(ctx core.Context, resolveOpen shared.OpenResolver, pa
 	return writeOutputsListText(ctx, list)
 }
 
-func writeOutputsListText(ctx core.Context, list jobs.RuntimeOutputsListResult) error {
+func writeOutputsListText(ctx core.Context, list model.RuntimeOutputsListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Outputs in %s:\n", list.Dir); err != nil {
 		return err
 	}
@@ -138,16 +138,16 @@ type outputsDownloadCLIResult struct {
 	IsArchive     bool   `json:"isArchive"`
 	ArchiveFormat string `json:"archiveFormat,omitempty"`
 	// Signing is set only when host-side ad-hoc signing had something to report.
-	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
+	Signing *model.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
+func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, dirPath, name, dest string, force bool, run jobs.RuntimeOutputsRunner) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	out, err := jobs.DownloadRuntimeOutput(ctx, req, jobs.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
+	out, err := jobs.DownloadRuntimeOutput(ctx, req, model.RuntimeOutputDownloadParams{Dir: dirPath, Name: name}, run)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,7 @@ func runOutputsDownloadCommand(ctx core.Context, resolveOpen shared.OpenResolver
 	}
 	// A darwin binary gets signed here, where it becomes runnable; signing problems are reported, never fatal.
 	signing := codesign.SignHostArtifact(destPath)
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		result := outputsDownloadCLIResult{
 			Name:          out.Name,
 			Dest:          destPath,
@@ -195,7 +195,7 @@ func resolveOutputsDest(dest, name string) string {
 	return dest
 }
 
-func writeOutputDownloadToDisk(out jobs.RuntimeOutputResult, dest string, force bool) (string, error) {
+func writeOutputDownloadToDisk(out model.RuntimeOutputResult, dest string, force bool) (string, error) {
 	destPath := resolveOutputsDest(dest, out.Name)
 	if !force {
 		if _, err := os.Stat(destPath); err == nil {

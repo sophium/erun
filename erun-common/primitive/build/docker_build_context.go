@@ -7,21 +7,22 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func FindComponentDockerBuildContext(projectRoot, componentName string) (shared.DockerBuildContext, bool, error) {
+func FindComponentDockerBuildContext(projectRoot, componentName string) (model.DockerBuildContext, bool, error) {
 	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
 	componentName = strings.TrimSpace(componentName)
 	if projectRoot == "" || componentName == "" {
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
 
 	// A declared components: entry scopes the walk to its own docker root.
 	searchRoot := projectRoot
 	declared, ok, err := config.DeclaredComponentPaths(projectRoot, componentName)
 	if err != nil {
-		return shared.DockerBuildContext{}, false, err
+		return model.DockerBuildContext{}, false, err
 	}
 	if ok {
 		if dockerRoot := config.ResolveProjectPath(projectRoot, declared.Docker); dockerRoot != "" {
@@ -31,24 +32,24 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (shared.
 
 	matches, err := componentDockerBuildContextsUnderRoot(searchRoot, componentName)
 	if err != nil {
-		return shared.DockerBuildContext{}, false, err
+		return model.DockerBuildContext{}, false, err
 	}
 	if len(matches) == 0 {
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
 	if len(matches) > 1 {
-		return shared.DockerBuildContext{}, false, fmt.Errorf("multiple Docker build contexts found for component %q", componentName)
+		return model.DockerBuildContext{}, false, fmt.Errorf("multiple Docker build contexts found for component %q", componentName)
 	}
 	return matches[0], true, nil
 }
 
-func componentDockerBuildContextsUnderRoot(searchRoot, componentName string) ([]shared.DockerBuildContext, error) {
+func componentDockerBuildContextsUnderRoot(searchRoot, componentName string) ([]model.DockerBuildContext, error) {
 	ignored, err := LoadContextIgnoreSet(searchRoot, []string{"."})
 	if err != nil {
 		return nil, err
 	}
 
-	matches := make([]shared.DockerBuildContext, 0, 1)
+	matches := make([]model.DockerBuildContext, 0, 1)
 	err = filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		context, ok, walkErr := componentDockerBuildContextCandidate(searchRoot, ignored, path, d, componentName, err)
 		if ok {
@@ -65,31 +66,31 @@ func componentDockerBuildContextsUnderRoot(searchRoot, componentName string) ([]
 
 // componentDockerBuildContextCandidate reports whether path is the named component's Dockerfile.
 // It shares the fingerprint walk's ignore matcher so ignored copies never make a component ambiguous.
-func componentDockerBuildContextCandidate(searchRoot string, ignored *shared.IgnoreSet, path string, d os.DirEntry, componentName string, err error) (shared.DockerBuildContext, bool, error) {
+func componentDockerBuildContextCandidate(searchRoot string, ignored *shared.IgnoreSet, path string, d os.DirEntry, componentName string, err error) (model.DockerBuildContext, bool, error) {
 	if err != nil {
-		return shared.DockerBuildContext{}, false, err
+		return model.DockerBuildContext{}, false, err
 	}
 	if d.IsDir() {
 		if d.Name() == ".git" {
 			// git never lists .git in .gitignore, so the shared matcher cannot cover it.
-			return shared.DockerBuildContext{}, false, filepath.SkipDir
+			return model.DockerBuildContext{}, false, filepath.SkipDir
 		}
 		rel, relErr := filepath.Rel(searchRoot, path)
 		if relErr != nil {
-			return shared.DockerBuildContext{}, false, relErr
+			return model.DockerBuildContext{}, false, relErr
 		}
 		rel = filepath.ToSlash(rel)
 		if rel != "." && ignored.Matches(rel, true) {
-			return shared.DockerBuildContext{}, false, filepath.SkipDir
+			return model.DockerBuildContext{}, false, filepath.SkipDir
 		}
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
 	if d.Name() != "Dockerfile" {
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
 	dir := filepath.Dir(path)
 	if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "docker" {
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
-	return shared.DockerBuildContext{Dir: dir, DockerfilePath: path}, true, nil
+	return model.DockerBuildContext{Dir: dir, DockerfilePath: path}, true, nil
 }

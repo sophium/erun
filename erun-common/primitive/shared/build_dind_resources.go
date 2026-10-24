@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -63,8 +64,8 @@ func ApplyDindResourceBuildArgs(store DockerStore, projectRoot, environment stri
 // ResolveDockerBuildDindPodResources prefers the downward-API vars per field,
 // then the config store, then the normalized defaults — never the host node's
 // capacity.
-func ResolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) config.RuntimePodResources {
-	fallback := config.RuntimePodResources{}
+func ResolveDockerBuildDindPodResources(store DockerStore, projectRoot, environment string) model.RuntimePodResources {
+	fallback := model.RuntimePodResources{}
 	if envConfig := ResolveDockerBuildEnvConfigForProject(store, projectRoot, environment); envConfig != nil {
 		fallback = envConfig.RuntimeDindPod
 	}
@@ -72,7 +73,7 @@ func ResolveDockerBuildDindPodResources(store DockerStore, projectRoot, environm
 }
 
 // dindPodResourcesPreferEnv ignores malformed vars; the memory var is plain MiB.
-func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.RuntimePodResources {
+func dindPodResourcesPreferEnv(fallback model.RuntimePodResources) model.RuntimePodResources {
 	resources := fallback
 	if cpu := strings.TrimSpace(os.Getenv(DindCPULimitEnvVar)); cpu != "" {
 		if _, err := config.ParseKubernetesCPUToMilli(cpu); err == nil {
@@ -90,7 +91,7 @@ func dindPodResourcesPreferEnv(fallback config.RuntimePodResources) config.Runti
 
 // dindResourceBuildArgValues floors CPU to whole cores (min 1) because the
 // Dockerfile uses shell integer arithmetic.
-func dindResourceBuildArgValues(resources config.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
+func dindResourceBuildArgValues(resources model.RuntimePodResources) (cpuLimit, memoryLimitMiB string) {
 	if milli, err := config.ParseKubernetesCPUToMilli(resources.CPU); err == nil {
 		cores := milli / 1000
 		if cores < 1 {

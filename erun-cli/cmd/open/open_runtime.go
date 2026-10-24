@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -57,7 +58,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq config.ShellLaunchPara
 	if r.checkKubernetesDeployment == nil {
 		return false, nil
 	}
-	deployed, err := r.checkKubernetesDeployment(r.ctx, deploy.KubernetesDeploymentCheckParams{
+	deployed, err := r.checkKubernetesDeployment(r.ctx, model.KubernetesDeploymentCheckParams{
 		Name:               config.RuntimeReleaseName(r.result.Tenant),
 		Namespace:          config.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
@@ -117,7 +118,7 @@ func (r *resolvedOpenRunner) ensureRuntimeDeployed() error {
 	if r.checkKubernetesDeployment == nil {
 		return nil
 	}
-	present, err := r.checkKubernetesDeployment(r.ctx, deploy.KubernetesDeploymentCheckParams{
+	present, err := r.checkKubernetesDeployment(r.ctx, model.KubernetesDeploymentCheckParams{
 		Name:              release,
 		Namespace:         namespace,
 		KubernetesContext: r.result.EnvConfig.KubernetesContext,

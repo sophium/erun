@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestRuntimeImageRegistry(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRuntimeImageRegistry(t *testing.T) {
 // must not follow a differing runtime image.
 func TestPublishedDevopsChartRegistry(t *testing.T) {
 	clusterRegistries := config.ContainerRegistries{
-		{Cluster: &config.ClusterRegistry{}, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
+		{Cluster: &config.ClusterRegistry{}, Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy}},
 	}
 
 	t.Run("cluster-registry env resolves the chart from the runtime image registry", func(t *testing.T) {
@@ -60,7 +61,7 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 			ClusterPullRegistry: "10.43.0.100:5000",
 			EnvConfig: config.EnvConfig{
 				RuntimeRegistry:     "ghcr.io/sophium",
-				ContainerRegistries: config.ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []config.RegistryRole{config.RegistryRoleDeploy}}},
+				ContainerRegistries: config.ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []model.RegistryRole{model.RegistryRoleDeploy}}},
 			},
 		}
 		if got := publishedTenantComponentChartRegistry(target); got != "10.43.0.100:5000" {
@@ -73,7 +74,7 @@ func TestPublishedTenantComponentChartRegistry(t *testing.T) {
 
 	t.Run("plain env resolves components from the same deploy registry as the platform chart", func(t *testing.T) {
 		target := config.OpenResult{EnvConfig: config.EnvConfig{
-			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}}},
+			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy}}},
 		}}
 		if got := publishedTenantComponentChartRegistry(target); got != "registry.example/test" {
 			t.Fatalf("component chart registry = %q, want registry.example/test", got)
@@ -115,23 +116,23 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 		{
 			name: "deploy role held by the tenant's own registry",
 			registries: config.ContainerRegistries{
-				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}},
+				{Registry: recordedRegistry, Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy}},
 			},
 			wantHonored: true,
 		},
 		{
 			name: "deploy role held by the tenant's own registry, build elsewhere",
 			registries: config.ContainerRegistries{
-				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
-				{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{config.RegistryRoleBuild}},
+				{Registry: recordedRegistry, Roles: []model.RegistryRole{model.RegistryRoleDeploy}},
+				{Registry: "ghcr.io/sophium", Roles: []model.RegistryRole{model.RegistryRoleBuild}},
 			},
 			wantHonored: true,
 		},
 		{
 			name: "deploy role held by erun's own registry",
 			registries: config.ContainerRegistries{
-				{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{config.RegistryRoleDeploy}},
-				{Registry: recordedRegistry, Roles: []config.RegistryRole{config.RegistryRoleBuild}},
+				{Registry: "ghcr.io/sophium", Roles: []model.RegistryRole{model.RegistryRoleDeploy}},
+				{Registry: recordedRegistry, Roles: []model.RegistryRole{model.RegistryRoleBuild}},
 			},
 			wantHonored: true,
 		},

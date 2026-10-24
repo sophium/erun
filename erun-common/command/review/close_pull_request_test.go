@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -66,7 +67,7 @@ func TestClosePullRequestClosesAndCommentsWhenHeadMatches(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	result, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
+	result, err := ClosePullRequest(core.Context{}, model.ClosePullRequestParams{
 		RemoteURL:     "git@github.com:sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",
@@ -77,7 +78,7 @@ func TestClosePullRequestClosesAndCommentsWhenHeadMatches(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	wantResult := ClosePullRequestResult{Owner: "sophium", Repo: "erun", Branch: "feature/add-widget", Found: true, Number: 42, Closed: true}
+	wantResult := model.ClosePullRequestResult{Owner: "sophium", Repo: "erun", Branch: "feature/add-widget", Found: true, Number: 42, Closed: true}
 	if result != wantResult {
 		t.Fatalf("unexpected result: got %+v, want %+v", result, wantResult)
 	}
@@ -107,7 +108,7 @@ func TestClosePullRequestRefusesWhenHeadHasMoved(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	_, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
+	_, err := ClosePullRequest(core.Context{}, model.ClosePullRequestParams{
 		RemoteURL:     "https://github.com/sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",
@@ -142,7 +143,7 @@ func TestClosePullRequestSurfacesAGitHubFailureResponse(t *testing.T) {
 	deps := ClosePullRequestDependencies{
 		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
 	}
-	_, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
+	_, err := ClosePullRequest(core.Context{}, model.ClosePullRequestParams{
 		RemoteURL:     "https://github.com/sophium/erun.git",
 		Branch:        "feature/add-widget",
 		TargetBranch:  "main",

@@ -7,11 +7,12 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func InitAWSCloudProvider(ctx core.Context, store CloudStore, params InitAWSCloudProviderParams, deps CloudDependencies) (configpkg.CloudProviderConfig, error) {
+func InitAWSCloudProvider(ctx core.Context, store CloudStore, params model.InitAWSCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
-		return configpkg.CloudProviderConfig{}, fmt.Errorf("store is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	deps = NormalizeCloudDependencies(deps)
 	ctx.Trace(fmt.Sprintf("cloud init aws: profile=%s account-id=%s region=%s sso-region=%s sso-start-url=%s skip-login=%v",
@@ -21,7 +22,7 @@ func InitAWSCloudProvider(ctx core.Context, store CloudStore, params InitAWSClou
 	profile, err := initAWSProfile(ctx, params, deps)
 	if err != nil {
 		ctx.Trace("cloud init aws: profile setup failed: " + err.Error())
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	ctx.Trace("cloud init aws: profile = " + profile)
 
@@ -29,7 +30,7 @@ func InitAWSCloudProvider(ctx core.Context, store CloudStore, params InitAWSClou
 	identity, err := deps.ResolveAWSIdentity(ctx, profile)
 	if err != nil {
 		ctx.Trace("cloud init aws: identity resolution failed: " + err.Error())
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	ctx.Trace(fmt.Sprintf("cloud init aws: identity account=%s arn=%s", identity.Account, identity.Arn))
 	username := AWSUsernameFromARN(identity.Arn)
@@ -40,7 +41,7 @@ func InitAWSCloudProvider(ctx core.Context, store CloudStore, params InitAWSClou
 	if accountID == "" {
 		accountID = strings.TrimSpace(params.AccountID)
 	}
-	provider := NormalizeCloudProviderConfig(configpkg.CloudProviderConfig{
+	provider := NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Provider:      configpkg.CloudProviderAWS,
 		Username:      username,
 		AccountID:     accountID,
@@ -50,20 +51,20 @@ func InitAWSCloudProvider(ctx core.Context, store CloudStore, params InitAWSClou
 		OIDCIssuerURL: params.OIDCIssuerURL,
 	})
 	if provider.Alias == "" {
-		return configpkg.CloudProviderConfig{}, fmt.Errorf("cloud provider alias cannot be resolved")
+		return model.CloudProviderConfig{}, fmt.Errorf("cloud provider alias cannot be resolved")
 	}
 	saved, err := SaveCloudProviderConfig(store, provider)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
-	status, _, err := SetupCloudProviderOIDC(ctx, store, CloudBearerParams{Alias: saved.Alias}, deps)
+	status, _, err := SetupCloudProviderOIDC(ctx, store, model.CloudBearerParams{Alias: saved.Alias}, deps)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	return status.CloudProviderConfig, nil
 }
 
-func initAWSProfile(ctx core.Context, params InitAWSCloudProviderParams, deps CloudDependencies) (string, error) {
+func initAWSProfile(ctx core.Context, params model.InitAWSCloudProviderParams, deps CloudDependencies) (string, error) {
 	profile := strings.TrimSpace(params.Profile)
 	configureProfile := profile == "" || hasAWSProfileConfig(params)
 	if profile == "" {
@@ -82,7 +83,7 @@ func initAWSProfile(ctx core.Context, params InitAWSCloudProviderParams, deps Cl
 	return profile, nil
 }
 
-func awsProfileConfig(profile string, params InitAWSCloudProviderParams) AWSProfileConfig {
+func awsProfileConfig(profile string, params model.InitAWSCloudProviderParams) AWSProfileConfig {
 	return AWSProfileConfig{
 		Profile:     profile,
 		SSOStartURL: params.SSOStartURL,
@@ -93,7 +94,7 @@ func awsProfileConfig(profile string, params InitAWSCloudProviderParams) AWSProf
 	}
 }
 
-func hasAWSProfileConfig(params InitAWSCloudProviderParams) bool {
+func hasAWSProfileConfig(params model.InitAWSCloudProviderParams) bool {
 	return strings.TrimSpace(params.SSOStartURL) != "" ||
 		strings.TrimSpace(params.SSORegion) != "" ||
 		strings.TrimSpace(params.AccountID) != "" ||
@@ -101,16 +102,16 @@ func hasAWSProfileConfig(params InitAWSCloudProviderParams) bool {
 		strings.TrimSpace(params.Region) != ""
 }
 
-func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLoginParams, deps CloudDependencies) (CloudProviderStatus, error) {
+func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	ctx.Trace(fmt.Sprintf("cloud login: alias=%s force=%v flow=%s", strings.TrimSpace(params.Alias), params.Force, strings.TrimSpace(params.Flow)))
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
 		ctx.Trace("cloud login: provider lookup failed: " + err.Error())
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 	ctx.Trace("cloud login: resolved profile = " + provider.Profile)
 	deps = NormalizeCloudDependencies(deps)
-	status := CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown}
+	status := model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown}
 	if !params.Force {
 		status = CloudProviderTokenStatus(provider, deps)
 		if status.Status == configpkg.CloudTokenStatusActive {
@@ -133,13 +134,13 @@ func LoginCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLog
 	return CloudProviderTokenStatus(provider, deps), nil
 }
 
-func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLoginParams, deps CloudDependencies) (CloudProviderStatus, error) {
+func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params model.CloudLoginParams, deps CloudDependencies) (model.CloudProviderStatus, error) {
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
-		return CloudProviderStatus{}, err
+		return model.CloudProviderStatus{}, err
 	}
 	deps = NormalizeCloudDependencies(deps)
-	status := CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown}
+	status := model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown}
 	switch provider.Provider {
 	case configpkg.CloudProviderAWS:
 		if err := deps.RunAWSLogout(ctx, provider.Profile); err != nil {
@@ -160,34 +161,34 @@ func LogoutCloudProviderAlias(ctx core.Context, store CloudStore, params CloudLo
 	return CloudProviderTokenStatus(provider, deps), nil
 }
 
-func SetupCloudProviderOIDC(ctx core.Context, store CloudStore, params CloudBearerParams, deps CloudDependencies) (CloudProviderStatus, CloudBearerToken, error) {
+func SetupCloudProviderOIDC(ctx core.Context, store CloudStore, params model.CloudBearerParams, deps CloudDependencies) (model.CloudProviderStatus, CloudBearerToken, error) {
 	if store == nil {
-		return CloudProviderStatus{}, CloudBearerToken{}, fmt.Errorf("store is required")
+		return model.CloudProviderStatus{}, CloudBearerToken{}, fmt.Errorf("store is required")
 	}
 	ctx.Trace("cloud oidc: refresh issuer for alias=" + strings.TrimSpace(params.Alias))
 	token, err := CloudProviderBearerToken(ctx, store, params, deps)
 	if err != nil {
 		ctx.Trace("cloud oidc: bearer token retrieval failed: " + err.Error())
-		return CloudProviderStatus{}, CloudBearerToken{}, err
+		return model.CloudProviderStatus{}, CloudBearerToken{}, err
 	}
 	ctx.Trace("cloud oidc: derived issuer = " + token.Issuer)
 	provider, err := ResolveCloudProvider(store, token.Alias)
 	if err != nil {
-		return CloudProviderStatus{}, CloudBearerToken{}, err
+		return model.CloudProviderStatus{}, CloudBearerToken{}, err
 	}
 	provider.OIDCIssuerURL = token.Issuer
 	if ctx.DryRun {
 		ctx.Trace("write cloud provider OIDC issuer for " + provider.Alias)
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}, token, nil
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}, token, nil
 	}
 	provider, err = SaveCloudProviderConfig(store, provider)
 	if err != nil {
-		return CloudProviderStatus{}, CloudBearerToken{}, err
+		return model.CloudProviderStatus{}, CloudBearerToken{}, err
 	}
 	return CloudProviderTokenStatus(provider, deps), token, nil
 }
 
-func CloudProviderBearerToken(ctx core.Context, store configpkg.CloudReadStore, params CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
+func CloudProviderBearerToken(ctx core.Context, store configpkg.CloudReadStore, params model.CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
 	provider, err := ResolveCloudProvider(store, params.Alias)
 	if err != nil {
 		return CloudBearerToken{}, err
@@ -205,7 +206,7 @@ func CloudProviderBearerToken(ctx core.Context, store configpkg.CloudReadStore, 
 	}
 }
 
-func awsCloudProviderBearerToken(ctx core.Context, provider configpkg.CloudProviderConfig, params CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
+func awsCloudProviderBearerToken(ctx core.Context, provider model.CloudProviderConfig, params model.CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
 	status := CloudProviderTokenStatus(provider, deps)
 	if status.Status != configpkg.CloudTokenStatusActive {
 		if err := deps.RunAWSLogin(ctx, provider.Profile); err != nil {
@@ -236,7 +237,7 @@ func awsCloudProviderBearerToken(ctx core.Context, provider configpkg.CloudProvi
 	}, nil
 }
 
-func awsBearerTokenWithOIDCRetry(ctx core.Context, provider configpkg.CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
+func awsBearerTokenWithOIDCRetry(ctx core.Context, provider model.CloudProviderConfig, audience string, deps CloudDependencies) (string, error) {
 	rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
 	if err != nil && !isAWSOutboundWebIdentityFederationDisabled(err) {
 		return "", err
@@ -271,7 +272,7 @@ func ExportCloudProviderCredentials(ctx core.Context, store configpkg.CloudReadS
 	}
 }
 
-func SetEnvironmentCloudProviderAlias(ctx core.Context, store EnvironmentCloudAliasStore, params SetEnvironmentCloudAliasParams) (configpkg.EnvConfig, error) {
+func SetEnvironmentCloudProviderAlias(ctx core.Context, store EnvironmentCloudAliasStore, params model.SetEnvironmentCloudAliasParams) (configpkg.EnvConfig, error) {
 	if store == nil {
 		return configpkg.EnvConfig{}, fmt.Errorf("store is required")
 	}
@@ -308,7 +309,7 @@ func SetEnvironmentCloudProviderAlias(ctx core.Context, store EnvironmentCloudAl
 	return config, nil
 }
 
-func normalizeEnvironmentCloudProviderAliasParams(params SetEnvironmentCloudAliasParams) (string, string, string, error) {
+func normalizeEnvironmentCloudProviderAliasParams(params model.SetEnvironmentCloudAliasParams) (string, string, string, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	alias := strings.TrimSpace(params.Alias)

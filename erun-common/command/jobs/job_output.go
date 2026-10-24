@@ -7,17 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-// ReadEnvironmentJobOutputParams pages through a job's captured output.
-type ReadEnvironmentJobOutputParams struct {
-	Tenant      string
-	Environment string
-	ID          string
-	Offset      int64
-	MaxBytes    int64
-}
 
 // EnvironmentJobOutput is one page of a job's merged stdout and stderr.
 type EnvironmentJobOutput struct {
@@ -31,7 +23,7 @@ type EnvironmentJobOutput struct {
 }
 
 // ReadEnvironmentJobOutput returns one page of a job's output, readable while it runs.
-func ReadEnvironmentJobOutput(params ReadEnvironmentJobOutputParams) (EnvironmentJobOutput, error) {
+func ReadEnvironmentJobOutput(params model.ReadEnvironmentJobOutputParams) (EnvironmentJobOutput, error) {
 	job, err := LoadEnvironmentJob(params.Tenant, params.Environment, params.ID, time.Now())
 	if err != nil {
 		return EnvironmentJobOutput{}, err

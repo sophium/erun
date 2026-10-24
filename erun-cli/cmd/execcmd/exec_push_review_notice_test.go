@@ -12,9 +12,9 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -49,10 +49,10 @@ func (s execPushNoticeSecrets) DeleteCloudSecret(ref string) error {
 }
 
 func execPushNoticeStoreWithAlias(apiURL string) execPushNoticeStore {
-	return execPushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	return execPushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    execPushNoticeAlias,
 		Provider: configpkg.CloudProviderERun,
-		ERun:     &configpkg.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
+		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
 	}}}}
 }
 
@@ -85,7 +85,7 @@ func execPushNoticeFinder(projectRoot string) shared.ProjectFinderFunc {
 func execPushNoticeContext(out *bytes.Buffer) core.Context {
 	return core.Context{
 		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out),
-		Output: core.OutputText,
+		Output: model.OutputText,
 		Stdout: out,
 		Stderr: out,
 	}
@@ -93,7 +93,7 @@ func execPushNoticeContext(out *bytes.Buffer) core.Context {
 
 func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{})
 	}))
 	defer srv.Close()
 
@@ -117,7 +117,7 @@ func TestExecPushStillSucceedsAndWarnsWhenTheBranchHasNoReview(t *testing.T) {
 
 func TestExecPushStaysSilentWhenTheBranchHasAReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{
 			{ReviewID: "r1", SourceBranch: "feature/2204-queued", Status: "READY"},
 		})
 	}))

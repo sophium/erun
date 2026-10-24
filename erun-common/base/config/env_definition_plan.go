@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // EnvDefinitionConflict is one portable field that differs between local and platform.
@@ -15,24 +17,12 @@ type EnvDefinitionConflict struct {
 	Platform string `json:"platform"`
 }
 
-// EnvDefinitionRefusalError is a difference a pull cannot ask about: a
-// platform-owned field differing locally, or a host-owned field on the platform.
-type EnvDefinitionRefusalError struct {
-	Field  string              `json:"field"`
-	Class  EnvConfigFieldClass `json:"class"`
-	Reason string              `json:"reason"`
-}
-
-func (r EnvDefinitionRefusalError) Error() string {
-	return fmt.Sprintf("%s is %s and cannot be transferred: %s", r.Field, r.Class, r.Reason)
-}
-
 // EnvDefinitionPlan is what a pull would do, computed without writing.
 type EnvDefinitionPlan struct {
 	Changes []EnvDefinitionConflict `json:"changes,omitempty"`
 	// Conflicts are the Changes edited on both sides since the last sync.
-	Conflicts []EnvDefinitionConflict     `json:"conflicts,omitempty"`
-	Refusals  []EnvDefinitionRefusalError `json:"refusals,omitempty"`
+	Conflicts []EnvDefinitionConflict           `json:"conflicts,omitempty"`
+	Refusals  []model.EnvDefinitionRefusalError `json:"refusals,omitempty"`
 }
 
 func (p EnvDefinitionPlan) HasChanges() bool { return len(p.Changes) > 0 }
@@ -63,30 +53,30 @@ func BuildEnvDefinitionPlan(params EnvDefinitionPlanParams) EnvDefinitionPlan {
 }
 
 // PlatformOwnedMismatches reports platform-owned fields that disagree with the row.
-func PlatformOwnedMismatches(params EnvDefinitionPlanParams) []EnvDefinitionRefusalError {
-	var refusals []EnvDefinitionRefusalError
+func PlatformOwnedMismatches(params EnvDefinitionPlanParams) []model.EnvDefinitionRefusalError {
+	var refusals []model.EnvDefinitionRefusalError
 	name := strings.TrimSpace(params.PlatformName)
 	if local := strings.TrimSpace(params.Local.Name); name != "" && local != "" && local != name {
-		refusals = append(refusals, EnvDefinitionRefusalError{
+		refusals = append(refusals, model.EnvDefinitionRefusalError{
 			Field:  "Name",
-			Class:  EnvFieldPlatformOwned,
+			Class:  model.EnvFieldPlatformOwned,
 			Reason: fmt.Sprintf("the platform knows this environment as %q, and the local config path is derived from the name", name),
 		})
 	}
 	if platformType := strings.TrimSpace(params.PlatformType); platformType != "" {
 		if local := strings.TrimSpace(string(params.Local.Type)); local != "" && local != platformType {
-			refusals = append(refusals, EnvDefinitionRefusalError{
+			refusals = append(refusals, model.EnvDefinitionRefusalError{
 				Field:  "Type",
-				Class:  EnvFieldPlatformOwned,
+				Class:  model.EnvFieldPlatformOwned,
 				Reason: fmt.Sprintf("the platform registered it as %q", platformType),
 			})
 		}
 	}
 	if platformContext := strings.TrimSpace(params.PlatformKubernetesContext); platformContext != "" {
 		if local := strings.TrimSpace(params.Local.KubernetesContext); local != "" && local != platformContext {
-			refusals = append(refusals, EnvDefinitionRefusalError{
+			refusals = append(refusals, model.EnvDefinitionRefusalError{
 				Field:  "KubernetesContext",
-				Class:  EnvFieldPlatformOwned,
+				Class:  model.EnvFieldPlatformOwned,
 				Reason: fmt.Sprintf("the platform registered it against context %q", platformContext),
 			})
 		}
@@ -111,11 +101,11 @@ func portableDefinitionChanges(base EnvConfig, definition PlatformEnvDefinition)
 	return changes
 }
 
-func renderRuntimePodResources(resources RuntimePodResources) string {
+func renderRuntimePodResources(resources model.RuntimePodResources) string {
 	return fmt.Sprintf("cpu=%s memory=%s", valueOrUnset(resources.CPU), valueOrUnset(resources.Memory))
 }
 
-func renderNamespaceQuota(quota NamespaceResourceQuota) string {
+func renderNamespaceQuota(quota model.NamespaceResourceQuota) string {
 	if quota.IsZero() {
 		return "none"
 	}

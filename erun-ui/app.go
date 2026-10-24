@@ -13,10 +13,7 @@ import (
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-common/command/workspace"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -48,7 +45,7 @@ const (
 type erunUIStore interface {
 	lifecycle.ListStore
 	SaveERunConfig(config.ERunConfig) error
-	SaveTenantConfig(config.TenantConfig) error
+	SaveTenantConfig(model.TenantConfig) error
 	SaveEnvConfig(string, config.EnvConfig) error
 }
 
@@ -62,7 +59,7 @@ type erunUIDeps struct {
 	findProjectRoot        shared.ProjectFinderFunc
 	resolveCLIPath         func() string
 	resolveBuildInfo       func() model.BuildInfo
-	resolveImageRegistry   func(context.Context, string, string) (registry.RuntimeRegistryVersions, error)
+	resolveImageRegistry   func(context.Context, string, string) (model.RuntimeRegistryVersions, error)
 	cloudDeps              cloud.CloudDependencies
 	cloudContextDeps       cloud.CloudContextDependencies
 	deleteNamespace        lifecycle.NamespaceDeleterFunc
@@ -71,7 +68,7 @@ type erunUIDeps struct {
 	loadClusterRegistry    func(context.Context, uiRuntimeResourceInput) (uiClusterRegistryStatus, error)
 	loadHostedRegistry     func(context.Context) uiHostedRegistryStatus
 	checkRuntimeDeployed   func(context.Context, string, string, string) (bool, error)
-	stopEnvironmentRuntime func(core.Context, lifecycle.StopEnvironmentParams) (lifecycle.StopEnvironmentResult, error)
+	stopEnvironmentRuntime func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error)
 	readRuntimeRunState    func(core.Context, lifecycle.RuntimeScaleTarget) (lifecycle.RuntimeRunState, error)
 	ensureMCP              func(context.Context, config.OpenResult) error
 	reconnectMCP           func(context.Context, config.OpenResult, func(string)) error
@@ -88,27 +85,27 @@ type erunUIDeps struct {
 	claudeAgents              claudeAgentCLI
 	resolveGatewayCredential  func(*config.OpenRouterConfig) (string, error)
 	savePastedFile            func(pastedFileSaveParams) (string, error)
-	listAgentOutputs          func(config.OpenResult, jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error)
-	downloadAgentOutput       func(config.OpenResult, jobs.RuntimeOutputDownloadParams) (jobs.RuntimeOutputResult, error)
-	loadDiff                  func(context.Context, string, string, uiDiffOptions) (lifecycle.DiffResult, error)
-	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (gitx.CommitWorkingTreeResult, error)
-	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (gitx.PushWorkingTreeBranchResult, error)
-	loadIdleStatus            func(context.Context, string, string) (activity.EnvironmentIdleStatus, error)
+	listAgentOutputs          func(config.OpenResult, model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error)
+	downloadAgentOutput       func(config.OpenResult, model.RuntimeOutputDownloadParams) (model.RuntimeOutputResult, error)
+	loadDiff                  func(context.Context, string, string, uiDiffOptions) (model.DiffResult, error)
+	execCommit                func(ctx context.Context, endpoint, bearer, branch, message string) (model.CommitWorkingTreeResult, error)
+	execPush                  func(ctx context.Context, endpoint, bearer, branch, remote string) (model.PushWorkingTreeBranchResult, error)
+	loadIdleStatus            func(context.Context, string, string) (model.EnvironmentIdleStatus, error)
 	loadEnvironmentJobs       func(context.Context, string, string) ([]shared.EnvironmentJob, error)
-	readEnvironmentJobOutput  func(context.Context, string, string, jobs.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
-	cancelEnvironmentJob      func(context.Context, string, string, jobs.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
-	whipEnvironment           func(context.Context, string, string, string, string) (orchestrator.WhipResult, error)
+	readEnvironmentJobOutput  func(context.Context, string, string, model.ReadEnvironmentJobOutputParams) (jobs.EnvironmentJobOutput, error)
+	cancelEnvironmentJob      func(context.Context, string, string, model.CancelEnvironmentJobParams) (jobs.CancelEnvironmentJobResult, error)
+	whipEnvironment           func(context.Context, string, string, string, string) (model.WhipResult, error)
 	loadAPILog                func(context.Context, uiTenantDashboardInput) (string, error)
 	workspaceSyncReady        func(context.Context, string) error
-	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error)
+	syncWorkspace             func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error)
 	workspaceSyncInterval     time.Duration
-	recordActivity            func(activity.EnvironmentActivityParams) error
+	recordActivity            func(model.EnvironmentActivityParams) error
 	runWorkingIssueCommand    workingIssueCommandRunner
 	loadPodBranch             func(context.Context, string, string) (string, error)
 	runPodRaw                 func(context.Context, string, string, []string) (string, error)
 	execRuntimePod            func(context.Context, uiSelection, string) (string, error)
 	loadRuntimeUsage          func(context.Context, uiSelection) (uiRuntimeUsage, error)
-	stopCloudContext          func(context.Context, string) (config.CloudContextStatus, error)
+	stopCloudContext          func(context.Context, string) (model.CloudContextStatus, error)
 	windowStatePath           string
 	windowMaximised           func(context.Context) bool
 	// skipLoginShellEnv is set for --headless, whose caller supplies its environment deliberately.

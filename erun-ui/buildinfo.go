@@ -15,7 +15,7 @@ var (
 )
 
 func currentBuildInfo() model.BuildInfo {
-	return model.NormalizeBuildInfo(model.BuildInfo{
+	return core.NormalizeBuildInfo(model.BuildInfo{
 		Version: buildVersion,
 		Commit:  buildCommit,
 		Date:    buildDate,
@@ -44,7 +44,7 @@ func resolveCurrentBuildInfo(resolveCLIPath func() string) model.BuildInfo {
 	if !ok {
 		return fallback
 	}
-	return model.NormalizeBuildInfo(info)
+	return core.NormalizeBuildInfo(info)
 }
 
 func parseVersionOutput(output string) (model.BuildInfo, bool) {

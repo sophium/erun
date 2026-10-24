@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
@@ -99,7 +100,7 @@ func (a *App) UnexposeEnvironment(selection uiSelection) (uiUnexposeResult, erro
 	if !expose.ProjectHasExposablePlatform(projectRoot) {
 		return uiUnexposeResult{}, fmt.Errorf("this environment's project has no platform block configured")
 	}
-	result, err := expose.RunUnexposeService(core.Context{}, expose.UnexposeParams{
+	result, err := expose.RunUnexposeService(core.Context{}, model.UnexposeParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		ProjectRoot: projectRoot,
@@ -158,7 +159,7 @@ func toUIExposedServices(services []clusterread.ExposedService) []uiExposedServi
 	return result
 }
 
-func toUIEnvironmentServices(services []expose.EnvironmentService) []uiEnvironmentService {
+func toUIEnvironmentServices(services []model.EnvironmentService) []uiEnvironmentService {
 	result := make([]uiEnvironmentService, 0, len(services))
 	for _, service := range services {
 		entry := uiEnvironmentService{Name: service.Name, Type: service.Type}

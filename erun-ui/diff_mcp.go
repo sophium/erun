@@ -8,8 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 )
 
@@ -60,11 +59,11 @@ func mcpClientTransport(endpoint, bearer string, idleProbe bool) *mcp.Streamable
 	}
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (lifecycle.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDiffOptions) (model.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -79,16 +78,16 @@ func loadDiffFromMCP(ctx context.Context, endpoint, bearer string, options uiDif
 		},
 	})
 	if err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
-	var diff lifecycle.DiffResult
+	var diff model.DiffResult
 	if err := json.Unmarshal(data, &diff); err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	return diff, nil
 }
@@ -170,11 +169,11 @@ func loadPodBranchFromMCP(ctx context.Context, endpoint, bearer string) (string,
 	return strings.TrimSpace(out), nil
 }
 
-func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (activity.EnvironmentIdleStatus, error) {
+func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (model.EnvironmentIdleStatus, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, mcpClientTransport(endpoint, bearer, true), nil)
 	if err != nil {
-		return activity.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	defer func() {
 		_ = session.Close()
@@ -182,16 +181,16 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint, bearer string) (activi
 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "idle"})
 	if err != nil {
-		return activity.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 
 	data, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		return activity.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
-	var status activity.EnvironmentIdleStatus
+	var status model.EnvironmentIdleStatus
 	if err := json.Unmarshal(data, &status); err != nil {
-		return activity.EnvironmentIdleStatus{}, err
+		return model.EnvironmentIdleStatus{}, err
 	}
 	return status, nil
 }

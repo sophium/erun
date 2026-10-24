@@ -12,6 +12,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -127,7 +128,7 @@ func (p *Provisioner) bootstrapAndCustody(c context.Context, input ProvisionInpu
 		Stdout: io.Discard,
 		Stderr: io.Discard,
 	}
-	params := cloud.InitCloudContextParams{
+	params := model.InitCloudContextParams{
 		Name:               input.Name,
 		CloudProviderAlias: input.CloudProviderAlias,
 		Region:             input.Region,
@@ -178,7 +179,7 @@ type aliasStore struct {
 
 func (s aliasStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	return config.ERunConfig{
-		CloudProviders: []config.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
+		CloudProviders: []model.CloudProviderConfig{{Alias: s.alias, Provider: s.provider}},
 	}, "", nil
 }
 

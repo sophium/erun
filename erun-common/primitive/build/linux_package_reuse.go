@@ -19,7 +19,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A package has no image to promote, so a plain build's passing check stage is recorded locally
@@ -94,7 +94,7 @@ func ReadDockerDaemonPlatform() (string, error) {
 
 // ApplyLinuxPackageReuse marks packages with a recorded pass on the daemon's platform for reuse.
 // A package that cannot be fingerprinted runs, records nothing, and says why.
-func ApplyLinuxPackageReuse(packages []shared.LinuxPackageSpec) []shared.LinuxPackageSpec {
+func ApplyLinuxPackageReuse(packages []model.LinuxPackageSpec) []model.LinuxPackageSpec {
 	out := slices.Clone(packages)
 	daemonPlatform := sync.OnceValues(LinuxPackageDaemonPlatform)
 	for i := range out {
@@ -121,7 +121,7 @@ func ApplyLinuxPackageReuse(packages []shared.LinuxPackageSpec) []shared.LinuxPa
 
 // linuxPackageCheckFingerprint hashes the Dockerfile and context COPY sources of the check stage
 // and its ancestors. No build args are hashed; the version reaches only later stages.
-func linuxPackageCheckFingerprint(pkg shared.LinuxPackageSpec, target string) (string, error) {
+func linuxPackageCheckFingerprint(pkg model.LinuxPackageSpec, target string) (string, error) {
 	data, err := os.ReadFile(pkg.DockerfilePath)
 	if err != nil {
 		return "", err

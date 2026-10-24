@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const dindTestPod = "erun-devops-7d9f-abcde"
@@ -50,7 +51,7 @@ func (r *dindRun) host() dindEntrypointHost {
 func (r *dindRun) run(t *testing.T, dryRun bool, args ...string) {
 	t.Helper()
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &r.output, &r.output), DryRun: dryRun}
-	if err := runDindEntrypoint(ctx, DindEntrypointParams{DockerdArgs: args}, r.host()); err != nil {
+	if err := runDindEntrypoint(ctx, model.DindEntrypointParams{DockerdArgs: args}, r.host()); err != nil {
 		t.Fatalf("the entrypoint failed: %v\n%s", err, r.output.String())
 	}
 }
@@ -290,7 +291,7 @@ func TestDindEntrypointRequiresTheStockEntrypointOnPath(t *testing.T) {
 	host := run.host()
 	host.lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &run.output, &run.output)}
-	err := runDindEntrypoint(ctx, DindEntrypointParams{}, host)
+	err := runDindEntrypoint(ctx, model.DindEntrypointParams{}, host)
 	if err == nil || !strings.Contains(err.Error(), "dockerd-entrypoint.sh is not on PATH") {
 		t.Fatalf("expected a missing stock entrypoint to be named, got %v", err)
 	}

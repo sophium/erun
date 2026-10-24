@@ -8,15 +8,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
 
 // dindDockerdEntrypoint prepends dockerd when its first argument starts with '-'.
 const dindDockerdEntrypoint = "dockerd-entrypoint.sh"
-
-type DindEntrypointParams struct {
-	DockerdArgs []string
-}
 
 type dindEntrypointHost struct {
 	procRoot string
@@ -29,8 +26,8 @@ type dindEntrypointHost struct {
 
 // RunDindEntrypoint sets dockerd's bridge MTU to what the pod network carries and caps
 // build container CPU, then execs the stock entrypoint. Neither step is fatal.
-func RunDindEntrypoint(ctx core.Context, params DindEntrypointParams) error {
-	if hostOS := core.ResolveDetectedHostOS(); hostOS != core.HostOSLinux {
+func RunDindEntrypoint(ctx core.Context, params model.DindEntrypointParams) error {
+	if hostOS := core.ResolveDetectedHostOS(); hostOS != model.HostOSLinux {
 		return dindEntrypointUnsupportedError(string(hostOS))
 	}
 	host, err := defaultDindEntrypointHost()
@@ -44,7 +41,7 @@ func dindEntrypointUnsupportedError(goos string) error {
 	return fmt.Errorf("erun dind-entrypoint runs only inside the erun-dind sidecar, which is Linux; this host is %s", goos)
 }
 
-func runDindEntrypoint(ctx core.Context, params DindEntrypointParams, host dindEntrypointHost) error {
+func runDindEntrypoint(ctx core.Context, params model.DindEntrypointParams, host dindEntrypointHost) error {
 	args := params.DockerdArgs
 	// The dind image has no iproute2, so read procfs/sysfs.
 	if mtu, _, ok := build.EgressMTUUnder(host.procRoot, host.sysRoot); ok {

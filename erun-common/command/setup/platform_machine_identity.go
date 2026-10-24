@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -24,7 +25,7 @@ func machineIdentityClientSecretRef(alias string) string {
 }
 
 type provisionedMachineIdentity struct {
-	provider     config.CloudProviderConfig
+	provider     model.CloudProviderConfig
 	clientSecret string
 	subject      string
 }
@@ -83,22 +84,22 @@ func resolveMachineIdentity(ctx core.Context, store config.CloudReadStore, envir
 
 // machineIdentityPlatformClient authenticates as this host's alias; nothing
 // about it reaches the environment.
-func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies) (*platformclient.PlatformClient, config.CloudProviderConfig, bool, error) {
+func machineIdentityPlatformClient(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies) (*platformclient.PlatformClient, model.CloudProviderConfig, bool, error) {
 	provider, _, ok, err := deploy.ResolveHostPlatformAlias(store, deps, ctx.PlatformAlias)
 	if err != nil && !deploy.HostAliasSelected(ctx.PlatformAlias) && deploy.IsPlatformAliasAmbiguity(err) {
 		// Ambiguous aliases: fall back; the delegated path reports the ambiguity.
-		return nil, config.CloudProviderConfig{}, false, nil
+		return nil, model.CloudProviderConfig{}, false, nil
 	}
 	if err != nil {
-		return nil, config.CloudProviderConfig{}, false, err
+		return nil, model.CloudProviderConfig{}, false, err
 	}
 	if !ok {
 		// Silent, like the delegated path: its fallback already reports this.
-		return nil, config.CloudProviderConfig{}, false, nil
+		return nil, model.CloudProviderConfig{}, false, nil
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, store, provider.Alias, deps)
 	if err != nil {
-		return nil, config.CloudProviderConfig{}, false, err
+		return nil, model.CloudProviderConfig{}, false, err
 	}
 	return client, provider, true, nil
 }
@@ -123,10 +124,10 @@ func fetchMachineIdentity(ctx core.Context, client *platformclient.PlatformClien
 
 // machineIdentityProviderConfig keeps the host alias's name and API URL, so the
 // pod still holds exactly one erun alias, but uses the identity's own issuer.
-func machineIdentityProviderConfig(host config.CloudProviderConfig, identity platformclient.PlatformMachineIdentity) config.CloudProviderConfig {
+func machineIdentityProviderConfig(host model.CloudProviderConfig, identity platformclient.PlatformMachineIdentity) model.CloudProviderConfig {
 	provider := host
 	provider.OIDCIssuerURL = strings.TrimSpace(identity.Issuer)
-	provider.ERun = &config.ERunProviderConfig{
+	provider.ERun = &model.ERunProviderConfig{
 		APIURL:          host.ERun.APIURL,
 		ClientID:        strings.TrimSpace(identity.ClientID),
 		ClientSecretRef: machineIdentityClientSecretRef(host.Alias),

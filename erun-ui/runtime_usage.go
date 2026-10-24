@@ -11,12 +11,12 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const runtimeUsageTimeout = 10 * time.Second
@@ -43,7 +43,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	if store == nil {
 		return uiRuntimeUsage{}, fmt.Errorf("configuration store is unavailable")
 	}
-	result, err := open.ResolveOpen(store, shared.OpenParams{
+	result, err := open.ResolveOpen(store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -55,7 +55,7 @@ func loadRuntimeUsageViaKubectl(parent context.Context, store erunUIStore, selec
 	ctx, cancel := context.WithTimeout(parent, runtimeUsageTimeout)
 	defer cancel()
 
-	reading, err := podruntime.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, podruntime.RuntimeUsageParams{})
+	reading, err := podruntime.RunRuntimeUsage(quietOutputsContext(), runtimeUsageRunner(ctx), runtimePodRequestsRunner(ctx), req, model.RuntimeUsageParams{})
 	if err != nil {
 		return uiRuntimeUsage{}, errors.New(runtimeProbeFailureMessage(ctx, runtimeUsageTimeout, err, func(e error) string { return e.Error() }))
 	}
@@ -99,7 +99,7 @@ func runtimePodRequestsRunner(ctx context.Context) podruntime.RuntimePodRequests
 }
 
 // Every field keeps its own unavailability rather than collapsing to zero.
-func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
+func uiRuntimeUsageFromReading(reading model.RuntimeUsage) uiRuntimeUsage {
 	usage := uiRuntimeUsage{
 		Tenant:         reading.Tenant,
 		Environment:    reading.Environment,
@@ -124,7 +124,7 @@ func uiRuntimeUsageFromReading(reading config.RuntimeUsage) uiRuntimeUsage {
 	return usage
 }
 
-func uiRuntimeCPUUsageFromReading(cpu config.RuntimeCPUUsage) uiRuntimeCPUUsage {
+func uiRuntimeCPUUsageFromReading(cpu model.RuntimeCPUUsage) uiRuntimeCPUUsage {
 	// UsageUsec is read before the quota, so it is set even without a ceiling.
 	if cpu.Unavailable != "" {
 		return uiRuntimeCPUUsage{Unavailable: cpu.Unavailable, UsageUsec: cpu.UsageUsec}
@@ -139,7 +139,7 @@ func uiRuntimeCPUUsageFromReading(cpu config.RuntimeCPUUsage) uiRuntimeCPUUsage 
 	}
 }
 
-func uiRuntimeMemoryUsageFromReading(memory config.RuntimeMemoryUsage) uiRuntimeMemoryUsage {
+func uiRuntimeMemoryUsageFromReading(memory model.RuntimeMemoryUsage) uiRuntimeMemoryUsage {
 	if memory.Unavailable != "" {
 		return uiRuntimeMemoryUsage{Unavailable: memory.Unavailable}
 	}
@@ -161,7 +161,7 @@ func uiRuntimeMemoryUsageFromReading(memory config.RuntimeMemoryUsage) uiRuntime
 }
 
 // nil means never read; an unreadable pod spec arrives as unavailable with its reason.
-func uiRuntimeUsageRequestsFromReading(requests *config.RuntimeUsageRequests) *uiRuntimeUsageRequests {
+func uiRuntimeUsageRequestsFromReading(requests *model.RuntimeUsageRequests) *uiRuntimeUsageRequests {
 	if requests == nil {
 		return nil
 	}
@@ -172,7 +172,7 @@ func uiRuntimeUsageRequestsFromReading(requests *config.RuntimeUsageRequests) *u
 }
 
 // CPU/memory strings are formatted once here so every view spells them the same.
-func uiRuntimeContainerRequestsFromReading(requests config.KubernetesRequests) uiRuntimeContainerRequests {
+func uiRuntimeContainerRequestsFromReading(requests model.KubernetesRequests) uiRuntimeContainerRequests {
 	rendered := uiRuntimeContainerRequests{
 		CPUMilli:    requests.CPUMilli,
 		MemoryBytes: requests.MemoryBytes,
@@ -186,7 +186,7 @@ func uiRuntimeContainerRequestsFromReading(requests config.KubernetesRequests) u
 	return rendered
 }
 
-func uiRuntimeDiskUsageFromReading(disk config.RuntimeDiskUsage) uiRuntimeDiskUsage {
+func uiRuntimeDiskUsageFromReading(disk model.RuntimeDiskUsage) uiRuntimeDiskUsage {
 	if disk.Unavailable != "" {
 		return uiRuntimeDiskUsage{Mount: disk.Mount, Unavailable: disk.Unavailable}
 	}

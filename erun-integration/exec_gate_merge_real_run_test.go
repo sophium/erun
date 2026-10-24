@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/command/mergequeue"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-integration/internal/env"
 	"github.com/sophium/erun/erun-integration/internal/erun"
 	"github.com/sophium/erun/erun-integration/internal/fixture"
@@ -44,16 +44,16 @@ func captureAtlasValidate(t testing.TB, dir string) (string, bool) {
 	return string(out), err == nil
 }
 
-func decodeGateMergeResult(t *testing.T, stdout string) mergequeue.GateMergeWorkingTreeResult {
+func decodeGateMergeResult(t *testing.T, stdout string) model.GateMergeWorkingTreeResult {
 	t.Helper()
-	var parsed mergequeue.GateMergeWorkingTreeResult
+	var parsed model.GateMergeWorkingTreeResult
 	if err := json.Unmarshal([]byte(stdout), &parsed); err != nil {
 		t.Fatalf("decode --output json: %v\n%s", err, stdout)
 	}
 	return parsed
 }
 
-func assertSingleSourceLandedOnMain(t *testing.T, parsed mergequeue.GateMergeWorkingTreeResult) {
+func assertSingleSourceLandedOnMain(t *testing.T, parsed model.GateMergeWorkingTreeResult) {
 	t.Helper()
 	if parsed.TargetBranch != "main" || parsed.Remote != "origin" || parsed.Commit == "" || len(parsed.Skipped) != 0 {
 		t.Fatalf("unexpected result: %+v", parsed)
@@ -63,7 +63,7 @@ func assertSingleSourceLandedOnMain(t *testing.T, parsed mergequeue.GateMergeWor
 	}
 }
 
-func assertNoOpSourceSkipped(t *testing.T, skipped []mergequeue.GateMergeSkippedSource) {
+func assertNoOpSourceSkipped(t *testing.T, skipped []model.GateMergeSkippedSource) {
 	t.Helper()
 	if len(skipped) != 1 || skipped[0].SourceBranch != "already" {
 		t.Fatalf("expected already to be skipped, got: %+v", skipped)
@@ -76,7 +76,7 @@ func assertNoOpSourceSkipped(t *testing.T, skipped []mergequeue.GateMergeSkipped
 	}
 }
 
-func assertConflictingMiddleSourceSkipped(t *testing.T, parsed mergequeue.GateMergeWorkingTreeResult) {
+func assertConflictingMiddleSourceSkipped(t *testing.T, parsed model.GateMergeWorkingTreeResult) {
 	t.Helper()
 	if len(parsed.Landed) != 2 || parsed.Landed[0].SourceBranch != "a" || parsed.Landed[1].SourceBranch != "c" {
 		t.Fatalf("expected a and c to land, got: %+v", parsed.Landed)

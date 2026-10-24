@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Selection and result rows share the Kind/ID identity.
@@ -70,7 +70,7 @@ type uiWhipReport struct {
 	Results []uiWhipResult `json:"results"`
 }
 
-func whipReportToUI(results []orchestrator.WhipResult) uiWhipReport {
+func whipReportToUI(results []model.WhipResult) uiWhipReport {
 	out := make([]uiWhipResult, 0, len(results))
 	for _, result := range results {
 		out = append(out, whipResultToUI(result))
@@ -78,9 +78,9 @@ func whipReportToUI(results []orchestrator.WhipResult) uiWhipReport {
 	return uiWhipReport{Results: out}
 }
 
-func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
+func whipResultToUI(result model.WhipResult) uiWhipResult {
 	kind := uiWhipTargetKindEnvironment
-	if result.Candidate.Kind == orchestrator.WhipTargetOrchestrator {
+	if result.Candidate.Kind == model.WhipTargetOrchestrator {
 		kind = uiWhipTargetKindOrchestrator
 	}
 	name := strings.TrimSpace(result.Candidate.Name)
@@ -89,7 +89,7 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 	}
 	ui := uiWhipResult{Kind: kind, ID: result.Candidate.ID, Name: name}
 	switch result.Decision {
-	case orchestrator.WhipDecisionNudge:
+	case model.WhipDecisionNudge:
 		if result.Pushed {
 			ui.Outcome = "pushed"
 			return ui
@@ -99,14 +99,14 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 		ui.Reason = "push failed"
 		ui.Error = result.Error
 		return ui
-	case orchestrator.WhipDecisionCap:
+	case model.WhipDecisionCap:
 		ui.Outcome = "capped"
 		ui.Reason = "stopped nudging after repeated silence — reply in its pane or restart it"
 		return ui
-	case orchestrator.WhipDecisionNone:
+	case model.WhipDecisionNone:
 		fallthrough
 	default:
-		if result.Reason == orchestrator.WhipReasonCallFailed {
+		if result.Reason == model.WhipReasonCallFailed {
 			ui.Outcome = "failed"
 			ui.Reason = "call failed"
 			ui.Error = result.Error
@@ -120,17 +120,17 @@ func whipResultToUI(result orchestrator.WhipResult) uiWhipResult {
 }
 
 // whipSkipReasonText matches erun-cli's whipResultValue wording.
-func whipSkipReasonText(reason orchestrator.WhipReason) string {
+func whipSkipReasonText(reason model.WhipReason) string {
 	switch reason {
-	case orchestrator.WhipReasonNotAlive:
+	case model.WhipReasonNotAlive:
 		return "not alive — no live session to push"
-	case orchestrator.WhipReasonUnreachable:
+	case model.WhipReasonUnreachable:
 		return "unreachable from this transport"
-	case orchestrator.WhipReasonAlreadyCapped:
+	case model.WhipReasonAlreadyCapped:
 		return "already capped — reply in its pane or restart it"
-	case orchestrator.WhipReasonFresh:
+	case model.WhipReasonFresh:
 		return "moved recently"
-	case orchestrator.WhipReasonCapCrossed, orchestrator.WhipReasonNudge, orchestrator.WhipReasonCallFailed, orchestrator.WhipReasonChannelDown:
+	case model.WhipReasonCapCrossed, model.WhipReasonNudge, model.WhipReasonCallFailed, model.WhipReasonChannelDown:
 		fallthrough
 	default:
 		return string(reason)

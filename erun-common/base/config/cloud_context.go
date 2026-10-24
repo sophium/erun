@@ -5,28 +5,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-)
 
-// CloudContextConfig is the persisted cloud context; runtime state belongs on CloudContextStatus.
-type CloudContextConfig struct {
-	Name                string `json:"name" yaml:"name"`
-	Provider            string `json:"provider" yaml:"provider"`
-	CloudProviderAlias  string `json:"cloudProviderAlias" yaml:"cloudprovideralias"`
-	Region              string `json:"region" yaml:"region"`
-	InstanceID          string `json:"instanceId,omitempty" yaml:"instanceid,omitempty"`
-	PublicIP            string `json:"publicIp,omitempty" yaml:"publicip,omitempty"`
-	InstanceType        string `json:"instanceType" yaml:"instancetype"`
-	DiskType            string `json:"diskType" yaml:"disktype"`
-	DiskSizeGB          int    `json:"diskSizeGb" yaml:"disksizegb"`
-	KubernetesContext   string `json:"kubernetesContext" yaml:"kubernetescontext"`
-	SecurityGroupID     string `json:"securityGroupId,omitempty" yaml:"securitygroupid,omitempty"`
-	InstanceProfileName string `json:"instanceProfileName,omitempty" yaml:"instanceprofilename,omitempty"`
-	InstanceProfileARN  string `json:"instanceProfileArn,omitempty" yaml:"instanceprofilearn,omitempty"`
-	InstanceRoleName    string `json:"instanceRoleName,omitempty" yaml:"instancerolename,omitempty"`
-	AdminToken          string `json:"-" yaml:"admintoken,omitempty"`
-	CreatedAt           string `json:"createdAt,omitempty" yaml:"createdat,omitempty"`
-	UpdatedAt           string `json:"updatedAt,omitempty" yaml:"updatedat,omitempty"`
-}
+	"github.com/sophium/erun/erun-common/base/model"
+)
 
 const (
 	DefaultCloudContextInstanceType = "c8gd.2xlarge"
@@ -34,17 +15,7 @@ const (
 	DefaultCloudContextDiskSizeGB   = 100
 )
 
-// CloudContextStatus pairs the config with live Status that is never persisted. StopProtection
-// is filled only on stop-protection paths to keep bulk refresh to one AWS call per group.
-type CloudContextStatus struct {
-	CloudContextConfig  `json:",inline" yaml:",inline"`
-	Status              string `json:"status,omitempty" yaml:"status,omitempty"`
-	Message             string `json:"message,omitempty" yaml:"message,omitempty"`
-	StopProtection      bool   `json:"stopProtection,omitempty" yaml:"stopprotection,omitempty"`
-	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
-}
-
-func NormalizeCloudContextConfig(config CloudContextConfig) CloudContextConfig {
+func NormalizeCloudContextConfig(config model.CloudContextConfig) model.CloudContextConfig {
 	config.Name = strings.TrimSpace(config.Name)
 	config.Provider = strings.ToLower(strings.TrimSpace(config.Provider))
 	config.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
@@ -79,7 +50,7 @@ func NormalizeCloudContextConfig(config CloudContextConfig) CloudContextConfig {
 	return config
 }
 
-func ListCloudContexts(store CloudReadStore) ([]CloudContextConfig, error) {
+func ListCloudContexts(store CloudReadStore) ([]model.CloudContextConfig, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -93,26 +64,26 @@ func ListCloudContexts(store CloudReadStore) ([]CloudContextConfig, error) {
 	return normalizedCloudContexts(config.CloudContexts), nil
 }
 
-func FindCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (CloudContextStatus, bool, error) {
+func FindCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (model.CloudContextStatus, bool, error) {
 	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
-		return CloudContextStatus{}, false, nil
+		return model.CloudContextStatus{}, false, nil
 	}
 	contexts, err := ListCloudContexts(store)
 	if err != nil {
-		return CloudContextStatus{}, false, err
+		return model.CloudContextStatus{}, false, err
 	}
 	for _, context := range contexts {
 		context = NormalizeCloudContextConfig(context)
 		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
-			return CloudContextStatus{CloudContextConfig: context}, true, nil
+			return model.CloudContextStatus{CloudContextConfig: context}, true, nil
 		}
 	}
-	return CloudContextStatus{}, false, nil
+	return model.CloudContextStatus{}, false, nil
 }
 
-func normalizedCloudContexts(contexts []CloudContextConfig) []CloudContextConfig {
-	result := make([]CloudContextConfig, 0, len(contexts))
+func normalizedCloudContexts(contexts []model.CloudContextConfig) []model.CloudContextConfig {
+	result := make([]model.CloudContextConfig, 0, len(contexts))
 	for _, context := range contexts {
 		context = NormalizeCloudContextConfig(context)
 		if context.Name == "" {

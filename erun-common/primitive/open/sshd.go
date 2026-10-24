@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -19,18 +20,9 @@ const (
 	SSHHostAliasPrefix = SSHHostAliasRoot + "-"
 )
 
-type SSHConnectionInfo struct {
-	User           string
-	Host           string
-	Port           int
-	WorkspacePath  string
-	HostAlias      string
-	PrivateKeyPath string
-}
-
-func SSHConnectionInfoForResult(result config.OpenResult) SSHConnectionInfo {
+func SSHConnectionInfoForResult(result config.OpenResult) model.SSHConnectionInfo {
 	req := cloud.ShellLaunchParamsFromResult(result)
-	return SSHConnectionInfo{
+	return model.SSHConnectionInfo{
 		User:           DefaultSSHUser,
 		Host:           "127.0.0.1",
 		Port:           config.SSHLocalPortForResult(result),

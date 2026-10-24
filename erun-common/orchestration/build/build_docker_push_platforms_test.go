@@ -7,10 +7,11 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext shared.DockerBuildContext) {
+func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext model.DockerBuildContext) {
 	t.Helper()
 
 	projectRoot = writeDockerPlatformsProjectConfig(t, `docker:
@@ -31,12 +32,12 @@ func writePushableProjectConfig(t *testing.T) (projectRoot string, buildContext 
 		t.Fatalf("writing the test Dockerfile failed: %v", err)
 	}
 
-	return projectRoot, shared.DockerBuildContext{Dir: contextDir, DockerfilePath: dockerfilePath}
+	return projectRoot, model.DockerBuildContext{Dir: contextDir, DockerfilePath: dockerfilePath}
 }
 
-func pushResolversForTest(projectRoot string, buildContext shared.DockerBuildContext) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
+func pushResolversForTest(projectRoot string, buildContext model.DockerBuildContext) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return projectRoot, "", nil }
-	resolveBuildContext := func() (shared.DockerBuildContext, error) { return buildContext, nil }
+	resolveBuildContext := func() (model.DockerBuildContext, error) { return buildContext, nil }
 	return findProjectRoot, resolveBuildContext
 }
 
@@ -45,7 +46,7 @@ func TestPublishPathResolvesEveryPlatformDespiteTheProjectPin(t *testing.T) {
 	projectRoot, buildContext := writePushableProjectConfig(t)
 	findProjectRoot, resolveBuildContext := pushResolversForTest(projectRoot, buildContext)
 
-	target := shared.DockerCommandTarget{
+	target := model.DockerCommandTarget{
 		Environment:     "code1",
 		ProjectRoot:     projectRoot,
 		VersionOverride: "1.0.291",

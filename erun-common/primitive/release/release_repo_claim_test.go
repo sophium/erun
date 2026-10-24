@@ -5,21 +5,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func TestReleaseClaimHolderDescriptionRendersSensiblyWithMissingFields(t *testing.T) {
 	cases := []struct {
 		name        string
-		holder      activity.EnvironmentActivityLeaseHolder
+		holder      model.EnvironmentActivityLeaseHolder
 		environment string
 		want        string
 	}{
-		{"holder and environment", activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "build", "tenant erun, environment build"},
-		{"environment only, holder unnamed", activity.EnvironmentActivityLeaseHolder{}, "build", "environment build"},
-		{"holder only, no environment", activity.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "", "tenant erun"},
-		{"neither", activity.EnvironmentActivityLeaseHolder{}, "", "an unnamed holder"},
+		{"holder and environment", model.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "build", "tenant erun, environment build"},
+		{"environment only, holder unnamed", model.EnvironmentActivityLeaseHolder{}, "build", "environment build"},
+		{"holder only, no environment", model.EnvironmentActivityLeaseHolder{Tenant: "erun"}, "", "tenant erun"},
+		{"neither", model.EnvironmentActivityLeaseHolder{}, "", "an unnamed holder"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestReleaseRepoClaimRefusalNamesTheDeliberateRemedy(t *testing.T) {
 	start := time.Date(2026, 9, 21, 9, 0, 0, 0, time.UTC)
 	err := (&shared.ReleaseRepoClaimConflictError{
 		Version:     "1.0.289",
-		Holder:      activity.EnvironmentActivityLeaseHolder{Tenant: "erun"},
+		Holder:      model.EnvironmentActivityLeaseHolder{Tenant: "erun"},
 		Environment: "build",
 		StartedAt:   start,
 		ExpiresAt:   start.Add(shared.ReleaseVersionClaimTTL),

@@ -13,20 +13,16 @@ import (
 	"github.com/sophium/erun/cmd/kubecontext"
 	"github.com/sophium/erun/cmd/list"
 	orchestratorpkg "github.com/sophium/erun/cmd/orchestrator"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/command/orchestrator"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
 
 // Every command with a structured form must emit it for --output json, not just for its own --json alias.
 func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	leases := []activity.EnvironmentActivityLease{{
+	leases := []model.EnvironmentActivityLease{{
 		ID:        "build",
 		Name:      "build",
 		StartedAt: now,
@@ -38,19 +34,19 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 		render func(core.Context) error
 	}{
 		{"idle", func(ctx core.Context) error {
-			return idle.WriteIdleResult(ctx, activity.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
+			return idle.WriteIdleResult(ctx, model.EnvironmentIdleStatus{StopEligible: true, SecondsUntilStop: 300}, false)
 		}},
 		{"whip", func(ctx core.Context) error {
-			return orchestratorpkg.WriteWhipReport(ctx, orchestrator.WhipReport{
+			return orchestratorpkg.WriteWhipReport(ctx, model.WhipReport{
 				DryRun:  true,
-				Results: []orchestrator.WhipResult{{Reason: "no candidate"}},
+				Results: []model.WhipResult{{Reason: "no candidate"}},
 			}, false)
 		}},
 		{"activity lease list", func(ctx core.Context) error {
 			return activitypkg.WriteActivityLeases(ctx, leases, now, false)
 		}},
 		{"activity sample", func(ctx core.Context) error {
-			return activitypkg.WriteActivitySampleResult(ctx, activity.ResidentActivityResult{Busy: true}, false)
+			return activitypkg.WriteActivitySampleResult(ctx, model.ResidentActivityResult{Busy: true}, false)
 		}},
 		{"activity ai-session status", func(ctx core.Context) error {
 			return activitypkg.WriteAISessionStatuses(commandCarryingOutput(ctx), []model.AISessionStatus{{SessionID: "s1"}}, false)
@@ -59,14 +55,14 @@ func TestOutputJSONEmitsStructuredResult(t *testing.T) {
 			return list.WriteListResult(ctx, lifecycle.ListResult{ConfigDirectory: "/tmp/erun"})
 		}},
 		{"context list", func(ctx core.Context) error {
-			return kubecontext.WriteCloudContextList(ctx, cloud.CloudContextListResult{CloudContexts: []config.CloudContextStatus{{Status: "running"}}})
+			return kubecontext.WriteCloudContextList(ctx, model.CloudContextListResult{CloudContexts: []model.CloudContextStatus{{Status: "running"}}})
 		}},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			ctx := core.Context{Output: core.OutputJSON, Stdout: &buf, Stderr: &buf}
+			ctx := core.Context{Output: model.OutputJSON, Stdout: &buf, Stderr: &buf}
 			if err := tc.render(ctx); err != nil {
 				t.Fatalf("render: %v", err)
 			}

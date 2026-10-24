@@ -7,10 +7,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // WhipNow whips an explicit target list; an empty list is refused rather than
@@ -75,12 +74,12 @@ func (a *App) listWhipEnvironmentTargets() ([]whipEnvironmentTarget, error) {
 }
 
 // whipEnvironmentsNow silently drops requested ids that no longer resolve.
-func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]orchestrator.WhipResult, error) {
+func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{}) ([]model.WhipResult, error) {
 	targets, err := a.listWhipEnvironmentTargets()
 	if err != nil {
 		return nil, err
 	}
-	results := make([]orchestrator.WhipResult, 0, len(want))
+	results := make([]model.WhipResult, 0, len(want))
 	for _, target := range targets {
 		id := target.tenant + "/" + target.environment
 		if _, ok := want[id]; !ok {
@@ -93,46 +92,46 @@ func (a *App) whipEnvironmentsNow(ctx context.Context, want map[string]struct{})
 
 // whipOneEnvironmentNow reuses the pod's own whip decision. A stale forward is
 // unreachable, not not-alive: a session may still run behind it.
-func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) orchestrator.WhipResult {
+func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment string) model.WhipResult {
 	id := tenant + "/" + environment
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{Tenant: tenant, Environment: environment})
 	if err != nil {
-		return orchestrator.WhipResult{
-			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  orchestrator.WhipDecisionNone,
-			Reason:    orchestrator.WhipReasonNotAlive,
+		return model.WhipResult{
+			Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  model.WhipDecisionNone,
+			Reason:    model.WhipReasonNotAlive,
 			Error:     err.Error(),
 		}
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if !a.deps.canReachMCPEndpoint(mcpPort) {
 		if a.classifyMCPUnreachable(mcpPort) == mcp.LocalMCPStaleForward {
-			return orchestrator.WhipResult{
-				Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
-				Decision:  orchestrator.WhipDecisionNone,
-				Reason:    orchestrator.WhipReasonUnreachable,
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: false},
+				Decision:  model.WhipDecisionNone,
+				Reason:    model.WhipReasonUnreachable,
 				Error:     mcp.DescribeLocalMCPUnreachable(tenant, environment, mcpPort),
 			}
 		}
-		return orchestrator.WhipResult{
-			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  orchestrator.WhipDecisionNone,
-			Reason:    orchestrator.WhipReasonNotAlive,
+		return model.WhipResult{
+			Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  model.WhipDecisionNone,
+			Reason:    model.WhipReasonNotAlive,
 		}
 	}
 
 	decoded, err := a.deps.whipEnvironment(ctx, tenant, environment, mcpEndpointForOpenResult(result), a.mcpBearer(tenant, environment))
 	if err != nil {
 		// A dead session is a successful result, so an error is a call failure.
-		return orchestrator.WhipResult{
-			Candidate: orchestrator.WhipCandidate{Kind: orchestrator.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
-			Decision:  orchestrator.WhipDecisionNone,
-			Reason:    orchestrator.WhipReasonCallFailed,
+		return model.WhipResult{
+			Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: id, Name: id, Reachable: true, Alive: false},
+			Decision:  model.WhipDecisionNone,
+			Reason:    model.WhipReasonCallFailed,
 			Error:     err.Error(),
 		}
 	}
 	// Host-side identity never depends on what the pod echoes back.
-	decoded.Candidate.Kind = orchestrator.WhipTargetEnvironment
+	decoded.Candidate.Kind = model.WhipTargetEnvironment
 	decoded.Candidate.ID = id
 	decoded.Candidate.Name = id
 	return decoded
@@ -140,15 +139,15 @@ func (a *App) whipOneEnvironmentNow(ctx context.Context, tenant, environment str
 
 // orchestratorWhipOutcomeToResult reports a decided nudge as pushed: the
 // reconciler does not surface write failures.
-func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) orchestrator.WhipResult {
+func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) model.WhipResult {
 	name := strings.TrimSpace(outcome.name)
 	if name == "" {
 		name = outcome.id
 	}
 	decision := whipDecisionFromOrchestratorPacing(outcome.decision)
-	return orchestrator.WhipResult{
-		Candidate: orchestrator.WhipCandidate{
-			Kind:      orchestrator.WhipTargetOrchestrator,
+	return model.WhipResult{
+		Candidate: model.WhipCandidate{
+			Kind:      model.WhipTargetOrchestrator,
 			ID:        outcome.id,
 			Name:      name,
 			Reachable: true,
@@ -156,6 +155,6 @@ func orchestratorWhipOutcomeToResult(outcome orchestratorWhipOutcome) orchestrat
 		},
 		Decision: decision,
 		Reason:   whipReasonFromOrchestratorPacing(outcome.reason),
-		Pushed:   decision == orchestrator.WhipDecisionNudge,
+		Pushed:   decision == model.WhipDecisionNudge,
 	}
 }

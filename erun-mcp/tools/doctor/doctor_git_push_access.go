@@ -5,13 +5,13 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // writeDoctorGitPushAccess checks push credentials for a pod-backed worktree,
 // since public repos fetch anonymously and the gap only shows at push time.
-func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis deploy.DeployDiagnosisResult) error {
+func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, diagnosis model.DeployDiagnosisResult) error {
 	if !target.EnvConfig.RemoteWorktree() {
 		return nil
 	}
@@ -27,14 +27,14 @@ func writeDoctorGitPushAccess(runCtx core.Context, target config.OpenResult, req
 	return err
 }
 
-func mcpGitFetchStatusLine(status gitx.GitPushAccessStatus) string {
+func mcpGitFetchStatusLine(status model.GitPushAccessStatus) string {
 	if status.FetchOK {
 		return "ok"
 	}
 	return "FAILED — this environment cannot even read the remote"
 }
 
-func mcpGitPushStatusLine(target config.OpenResult, status gitx.GitPushAccessStatus) string {
+func mcpGitPushStatusLine(target config.OpenResult, status model.GitPushAccessStatus) string {
 	if status.PushCredential {
 		return "credential configured (gh session, GH_TOKEN/GITHUB_TOKEN, or an SSH key the remote accepts)"
 	}

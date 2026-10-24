@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // gitPushAccessTestRepo points origin at a closed local port so ls-remote fails fast.
@@ -46,7 +48,7 @@ func gitPushAccessStubBin(t *testing.T) string {
 	return bin
 }
 
-func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string) GitPushAccessStatus {
+func runGitPushAccessScript(t *testing.T, repoPath string, env map[string]string) model.GitPushAccessStatus {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", gitPushAccessScript(repoPath))
 	cmd.Env = append(os.Environ(), "PATH="+env["PATH"]+":"+os.Getenv("PATH"))

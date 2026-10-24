@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -15,45 +16,33 @@ const RemoteInitMarkerBaseDir = ".erun"
 
 const RemoteInitMarkerFilename = "bootstrap.yaml"
 
-// RemoteInitMarker records the intent of `erun init --remote` so doctor can finish it.
-type RemoteInitMarker struct {
-	Tenant             string `yaml:"tenant"`
-	Environment        string `yaml:"environment"`
-	ProjectRoot        string `yaml:"project_root"`
-	RepositoryURL      string `yaml:"repository_url,omitempty"`
-	CodeCommitHost     string `yaml:"codecommit_host,omitempty"`
-	CodeCommitSSHKeyID string `yaml:"codecommit_ssh_key_id,omitempty"`
-	NoGit              bool   `yaml:"no_git,omitempty"`
-	BootstrapComplete  bool   `yaml:"bootstrap_complete"`
-}
-
 func RemoteInitMarkerPath(homeDir, tenant, environment string) string {
 	return filepath.Join(homeDir, RemoteInitMarkerBaseDir, tenant, environment, RemoteInitMarkerFilename)
 }
 
 // LoadRemoteInitMarker reads the marker; found is false only when it is absent.
-func LoadRemoteInitMarker(homeDir, tenant, environment string) (RemoteInitMarker, bool, error) {
+func LoadRemoteInitMarker(homeDir, tenant, environment string) (model.RemoteInitMarker, bool, error) {
 	path := RemoteInitMarkerPath(homeDir, tenant, environment)
 	return readRemoteInitMarker(path)
 }
 
-func readRemoteInitMarker(path string) (RemoteInitMarker, bool, error) {
+func readRemoteInitMarker(path string) (model.RemoteInitMarker, bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return RemoteInitMarker{}, false, nil
+			return model.RemoteInitMarker{}, false, nil
 		}
-		return RemoteInitMarker{}, false, err
+		return model.RemoteInitMarker{}, false, err
 	}
-	var marker RemoteInitMarker
+	var marker model.RemoteInitMarker
 	if err := yaml.Unmarshal(data, &marker); err != nil {
-		return RemoteInitMarker{}, false, fmt.Errorf("parse %s: %w", path, err)
+		return model.RemoteInitMarker{}, false, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return marker, true, nil
 }
 
 // SaveRemoteInitMarker writes the marker locally; Tenant and Environment must be set.
-func SaveRemoteInitMarker(homeDir string, marker RemoteInitMarker) error {
+func SaveRemoteInitMarker(homeDir string, marker model.RemoteInitMarker) error {
 	if marker.Tenant == "" || marker.Environment == "" {
 		return fmt.Errorf("save remote init marker: tenant and environment are required")
 	}

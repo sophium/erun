@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -17,25 +17,14 @@ type SSHEnvironmentAlias struct {
 	LocalPort int
 }
 
-// SSHOrphanedAlias is an erun Host block in ~/.ssh/config that no configured environment claims.
-type SSHOrphanedAlias struct {
-	Alias string `json:"alias"`
-	// Port is zero when the block declares none.
-	Port int `json:"port,omitempty"`
-	// ReachesTenant/ReachesEnvironment name the environment that now owns Port, so ssh to this
-	// alias silently lands there. Empty means the block simply fails to resolve.
-	ReachesTenant      string `json:"reachesTenant,omitempty"`
-	ReachesEnvironment string `json:"reachesEnvironment,omitempty"`
-}
-
 // FindOrphanedSSHAliases returns erun-derived Host blocks no configured environment claims;
 // operator-written aliases are left alone.
-func FindOrphanedSSHAliases(entries []config.SSHHostEntry, environments []SSHEnvironmentAlias) []SSHOrphanedAlias {
+func FindOrphanedSSHAliases(entries []model.SSHHostEntry, environments []SSHEnvironmentAlias) []model.SSHOrphanedAlias {
 	if len(entries) == 0 {
 		return nil
 	}
 	claims := newSSHAliasClaims(environments)
-	orphans := make([]SSHOrphanedAlias, 0, 2)
+	orphans := make([]model.SSHOrphanedAlias, 0, 2)
 	seen := make(map[string]bool, len(entries))
 	for _, entry := range entries {
 		alias := strings.TrimSpace(entry.Alias)
@@ -82,8 +71,8 @@ func (c sshAliasClaims) isOrphan(alias string) bool {
 	return !c.claimed[alias]
 }
 
-func (c sshAliasClaims) orphan(alias string, port int) SSHOrphanedAlias {
-	orphan := SSHOrphanedAlias{Alias: alias, Port: port}
+func (c sshAliasClaims) orphan(alias string, port int) model.SSHOrphanedAlias {
+	orphan := model.SSHOrphanedAlias{Alias: alias, Port: port}
 	if owner, ok := c.portOwners[port]; ok {
 		orphan.ReachesTenant = owner.Tenant
 		orphan.ReachesEnvironment = owner.Environment

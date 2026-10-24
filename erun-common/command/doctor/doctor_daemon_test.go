@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
@@ -22,7 +23,7 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 	cases := []struct {
 		name          string
 		envType       config.EnvironmentType
-		wantKind      DoctorDockerDaemonKind
+		wantKind      model.DoctorDockerDaemonKind
 		wantContainer string
 		wantLabel     string
 		wantReason    string
@@ -30,14 +31,14 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 		{
 			name:          "a remote-agent environment builds in the dind sidecar",
 			envType:       config.EnvironmentTypeRemoteAgent,
-			wantKind:      DoctorDockerDaemonDindSidecar,
+			wantKind:      model.DoctorDockerDaemonDindSidecar,
 			wantContainer: build.RuntimeDindContainerName,
 			wantLabel:     "the erun-dind sidecar",
 		},
 		{
 			name:       "an unresolved type names what to fix instead of guessing",
 			envType:    "",
-			wantKind:   DoctorDockerDaemonNone,
+			wantKind:   model.DoctorDockerDaemonNone,
 			wantLabel:  "no known build daemon",
 			wantReason: "Set the environment's type",
 		},
@@ -51,7 +52,7 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 	}
 }
 
-func assertDoctorDaemonDecision(t *testing.T, daemon DoctorDockerDaemon, wantKind DoctorDockerDaemonKind, wantContainer, wantLabel, wantReason string) {
+func assertDoctorDaemonDecision(t *testing.T, daemon model.DoctorDockerDaemon, wantKind model.DoctorDockerDaemonKind, wantContainer, wantLabel, wantReason string) {
 	t.Helper()
 	if daemon.Kind != wantKind {
 		t.Fatalf("kind = %q, want %q (daemon %+v)", daemon.Kind, wantKind, daemon)
@@ -66,16 +67,16 @@ func assertDoctorDaemonDecision(t *testing.T, daemon DoctorDockerDaemon, wantKin
 		t.Fatalf("every decision must say where the daemon is, or why there is none")
 	}
 	assertDoctorDaemonReason(t, daemon, wantReason)
-	if daemon.Unavailable() != (wantKind == DoctorDockerDaemonNone) {
+	if daemon.Unavailable() != (wantKind == model.DoctorDockerDaemonNone) {
 		t.Fatalf("Unavailable() = %v for kind %q", daemon.Unavailable(), daemon.Kind)
 	}
 	// A resolved daemon needs a transport: a container or this machine.
-	if daemon.Container == "" && !daemon.Unavailable() && daemon.Kind != DoctorDockerDaemonHost {
+	if daemon.Container == "" && !daemon.Unavailable() && daemon.Kind != model.DoctorDockerDaemonHost {
 		t.Fatalf("a pod-hosted daemon needs its container named: %+v", daemon)
 	}
 }
 
-func assertDoctorDaemonReason(t *testing.T, daemon DoctorDockerDaemon, wantReason string) {
+func assertDoctorDaemonReason(t *testing.T, daemon model.DoctorDockerDaemon, wantReason string) {
 	t.Helper()
 	if wantReason == "" {
 		return
@@ -98,14 +99,14 @@ func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) 
 			req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: envType}
 			ctx := doctorTestContext()
 
-			_, err := RunDoctorAction(ctx, runner, req, DoctorActionPruneImages)
-			if !errors.As(err, &DoctorDockerDaemonUnavailableError{}) {
+			_, err := RunDoctorAction(ctx, runner, req, model.DoctorActionPruneImages)
+			if !errors.As(err, &model.DoctorDockerDaemonUnavailableError{}) {
 				t.Fatalf("prune error = %v, want DoctorDockerDaemonUnavailableError", err)
 			}
 			if !strings.Contains(err.Error(), "build images") {
 				t.Fatalf("the refusal must say why it cannot prune, got: %v", err)
 			}
-			if _, err := RunDoctorInspection(ctx, runner, req); !errors.As(err, &DoctorDockerDaemonUnavailableError{}) {
+			if _, err := RunDoctorInspection(ctx, runner, req); !errors.As(err, &model.DoctorDockerDaemonUnavailableError{}) {
 				t.Fatalf("inspection error = %v, want DoctorDockerDaemonUnavailableError", err)
 			}
 			if runnerCalls != 0 {
@@ -166,7 +167,7 @@ func writeDockerStub(t *testing.T, dir, script string) {
 // docker's "Total reclaimed space" cannot show a no-op prune, so the summary
 // compares before and after.
 func TestDoctorPruneSummaryTellsAPruneThatFreedNothingFromOneThatReclaimed(t *testing.T) {
-	sidecar := DoctorDockerDaemon{Kind: DoctorDockerDaemonDindSidecar, Label: "the erun-dind sidecar"}
+	sidecar := model.DoctorDockerDaemon{Kind: model.DoctorDockerDaemonDindSidecar, Label: "the erun-dind sidecar"}
 	readings := map[string]DoctorDockerStore{
 		"before": {},
 		"after":  {},

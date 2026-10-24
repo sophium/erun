@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // PreviewAdoptOrConflict mirrors in dry-run the live adopt/replace/refuse decision for a
@@ -210,7 +211,7 @@ func PreviewSweepDeadPortForwardsMatching(ctx core.Context, kind string, expecte
 // undetermined (no lsof/ps, or Windows), not free. The OS comes from DetectHost, not build
 // tags, so ERUN_HOST_OS_OVERRIDE can exercise the unix path anywhere.
 func FindLocalPortHolder(port int) (int, []string, bool) {
-	if port <= 0 || core.DetectHost().OS == core.HostOSWindows {
+	if port <= 0 || core.DetectHost().OS == model.HostOSWindows {
 		return 0, nil, false
 	}
 	out, err := core.Command("lsof", "-nP", "-iTCP:"+strconv.Itoa(port), "-sTCP:LISTEN", "-t").Output()

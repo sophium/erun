@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,11 +50,11 @@ func LoadRuntimeRootConfigForSync(configHome string) (ERunConfig, bool, error) {
 	return config, true, nil
 }
 
-func FindCloudProvider(providers []CloudProviderConfig, alias string) (CloudProviderConfig, bool) {
+func FindCloudProvider(providers []model.CloudProviderConfig, alias string) (model.CloudProviderConfig, bool) {
 	for _, provider := range providers {
 		if provider.Alias == alias {
 			return provider, true
 		}
 	}
-	return CloudProviderConfig{}, false
+	return model.CloudProviderConfig{}, false
 }

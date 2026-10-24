@@ -6,11 +6,10 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func WriteUsageResult(ctx core.Context, report podruntime.RuntimeUsageReport) error {
+func WriteUsageResult(ctx core.Context, report model.RuntimeUsageReport) error {
 	usage := report.RuntimeUsage
 	if err := writeUsageCPU(ctx, "", usage.CPU); err != nil {
 		return err
@@ -35,7 +34,7 @@ func WriteUsageResult(ctx core.Context, report podruntime.RuntimeUsageReport) er
 
 // writeUsageDindReading prints the dind sidecar's reading, where builds actually run,
 // or names the gap when it could not be read.
-func writeUsageDindReading(ctx core.Context, usage config.RuntimeUsage) error {
+func writeUsageDindReading(ctx core.Context, usage model.RuntimeUsage) error {
 	if !usage.ExcludesBuilds {
 		return nil
 	}
@@ -53,7 +52,7 @@ func writeUsageDindReading(ctx core.Context, usage config.RuntimeUsage) error {
 	return writeUsageMemory(ctx, "  ", usage.Dind.Memory)
 }
 
-func writeUsageCPU(ctx core.Context, prefix string, cpu config.RuntimeCPUUsage) error {
+func writeUsageCPU(ctx core.Context, prefix string, cpu model.RuntimeCPUUsage) error {
 	if cpu.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sCPU: unavailable (%s)\n", prefix, cpu.Unavailable)
 		return err
@@ -64,7 +63,7 @@ func writeUsageCPU(ctx core.Context, prefix string, cpu config.RuntimeCPUUsage) 
 }
 
 // writeUsageMemory labels the denominator as a limit: a cgroup ceiling reserves nothing.
-func writeUsageMemory(ctx core.Context, prefix string, memory config.RuntimeMemoryUsage) error {
+func writeUsageMemory(ctx core.Context, prefix string, memory model.RuntimeMemoryUsage) error {
 	if memory.Unavailable != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "%sMemory: unavailable (%s)\n", prefix, memory.Unavailable)
 		return err
@@ -84,7 +83,7 @@ func writeUsageMemory(ctx core.Context, prefix string, memory config.RuntimeMemo
 
 // writeUsageRequests prints the scheduler reservation per container and for the pod,
 // since limits alone read as provisioned capacity.
-func writeUsageRequests(ctx core.Context, requests *config.RuntimeUsageRequests) error {
+func writeUsageRequests(ctx core.Context, requests *model.RuntimeUsageRequests) error {
 	if requests == nil {
 		return nil
 	}
@@ -103,7 +102,7 @@ func writeUsageRequests(ctx core.Context, requests *config.RuntimeUsageRequests)
 	return nil
 }
 
-func sortedUsageRequestContainers(containers map[string]config.KubernetesRequests) []string {
+func sortedUsageRequestContainers(containers map[string]model.KubernetesRequests) []string {
 	names := make([]string, 0, len(containers))
 	for name := range containers {
 		names = append(names, name)
@@ -113,7 +112,7 @@ func sortedUsageRequestContainers(containers map[string]config.KubernetesRequest
 }
 
 // formatUsageRequests renders an undeclared request as "none", not 0.
-func formatUsageRequests(requests config.KubernetesRequests) string {
+func formatUsageRequests(requests model.KubernetesRequests) string {
 	cpu := "none"
 	if requests.CPUMilli > 0 {
 		cpu = config.FormatKubernetesCPUFromMilli(requests.CPUMilli) + " CPU"
@@ -126,14 +125,14 @@ func formatUsageRequests(requests config.KubernetesRequests) string {
 }
 
 // formatUsagePeak reports "unavailable" rather than zero when the counter was not read.
-func formatUsagePeak(memory config.RuntimeMemoryUsage) string {
+func formatUsagePeak(memory model.RuntimeMemoryUsage) string {
 	if !memory.PeakObserved {
 		return "unavailable"
 	}
 	return formatUsageBytes(memory.PeakBytes)
 }
 
-func formatUsageOOMKills(memory config.RuntimeMemoryUsage) string {
+func formatUsageOOMKills(memory model.RuntimeMemoryUsage) string {
 	if !memory.OOMKillsObserved {
 		return "unavailable"
 	}
@@ -141,7 +140,7 @@ func formatUsageOOMKills(memory config.RuntimeMemoryUsage) string {
 }
 
 // writeUsageDisk labels mount figures "(node, shared)"; the own-usage line is this environment's alone.
-func writeUsageDisk(ctx core.Context, disks []config.RuntimeDiskUsage) error {
+func writeUsageDisk(ctx core.Context, disks []model.RuntimeDiskUsage) error {
 	for _, disk := range disks {
 		if disk.Unavailable != "" {
 			if _, err := fmt.Fprintf(ctx.Stdout, "Disk (node, shared) %s: unavailable (%s)\n", disk.Mount, disk.Unavailable); err != nil {
@@ -158,7 +157,7 @@ func writeUsageDisk(ctx core.Context, disks []config.RuntimeDiskUsage) error {
 	return nil
 }
 
-func formatUsageDiskOwn(disk config.RuntimeDiskUsage) string {
+func formatUsageDiskOwn(disk model.RuntimeDiskUsage) string {
 	if !disk.OwnUsageObserved {
 		return "unavailable"
 	}
@@ -181,7 +180,7 @@ func writeUsageWarnings(ctx core.Context, warnings []string) error {
 }
 
 // writeUsageSizing prints the recommendation beside the warnings using the same renderer as `erun list`.
-func writeUsageSizing(ctx core.Context, sizing *deploy.RuntimeSizingRecommendation) error {
+func writeUsageSizing(ctx core.Context, sizing *model.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}

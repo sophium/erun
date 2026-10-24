@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // applyContainerRegistries stores local-agent and host lists in project config
@@ -64,10 +65,10 @@ func containerRegistriesToUI(list configpkg.ContainerRegistries) []uiContainerRe
 func uiToContainerRegistries(entries []uiContainerRegistryEntry) (configpkg.ContainerRegistries, error) {
 	list := make(configpkg.ContainerRegistries, 0, len(entries))
 	for _, entry := range entries {
-		roles := make([]configpkg.RegistryRole, 0, len(entry.Roles))
+		roles := make([]model.RegistryRole, 0, len(entry.Roles))
 		for _, role := range entry.Roles {
 			if trimmed := strings.TrimSpace(role); trimmed != "" {
-				roles = append(roles, configpkg.RegistryRole(trimmed))
+				roles = append(roles, model.RegistryRole(trimmed))
 			}
 		}
 		// Preserve a cluster entry so a context-resolved registry is not dropped.

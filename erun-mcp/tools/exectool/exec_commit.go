@@ -6,6 +6,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -24,9 +25,9 @@ type CommitInput struct {
 func CommitTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CommitInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CommitInput) (*mcp.CallToolResult, shared.JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (shared.CommandOutput, error) {
-			var committed *gitx.CommitWorkingTreeResult
+			var committed *model.CommitWorkingTreeResult
 			output, err := shared.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
-				result, err := gitx.CommitWorkingTree(runCtx, workDir, gitx.CommitWorkingTreeParams{
+				result, err := gitx.CommitWorkingTree(runCtx, workDir, model.CommitWorkingTreeParams{
 					Branch:  input.Branch,
 					Message: input.Message,
 					Paths:   input.Paths,

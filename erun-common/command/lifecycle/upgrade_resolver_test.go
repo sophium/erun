@@ -8,7 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // White-box because the registry lookup needs network the dry-run harness cannot reach.
@@ -17,9 +17,9 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 
 	t.Run("queries the provenance registry and the canonical image", func(t *testing.T) {
 		var queries []string
-		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			queries = append(queries, namespace+"/"+repository)
-			return registry.RuntimeRegistryVersions{LatestStable: "1.0.85", LatestSnapshot: "1.0.86-snapshot-1"}, nil
+			return model.RuntimeRegistryVersions{LatestStable: "1.0.85", LatestSnapshot: "1.0.86-snapshot-1"}, nil
 		})
 		sourced := resolveOrFatal(t, resolver, "petios", petiosEnv, "resolver: %v")
 		want := []string{"ghcr.io/petios/petios-devops", config.DefaultContainerRegistry + "/" + config.DefaultRuntimeImageName}
@@ -31,11 +31,11 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 
 	t.Run("a tenant lookup failure still resolves via the canonical image (#501)", func(t *testing.T) {
 		// ghcr 403s private and missing repos alike, so a tenant listing failure must not block.
-		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return registry.RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
+				return model.RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
 			}
-			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return model.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		})
 		sourced := resolveOrFatal(t, resolver, "petios", petiosEnv, "a failed tenant listing must not block, got %v")
 		assertCanonicalSourceCarriedThrough(t, sourced)
@@ -43,8 +43,8 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 
 	t.Run("all lookups failing is an error with the first failure (#497)", func(t *testing.T) {
 		firstErr := errors.New("ghcr token request failed: 403 Forbidden")
-		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, _, _ string) (registry.RuntimeRegistryVersions, error) {
-			return registry.RuntimeRegistryVersions{}, firstErr
+		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, _, _ string) (model.RuntimeRegistryVersions, error) {
+			return model.RuntimeRegistryVersions{}, firstErr
 		})
 		if _, err := resolver(core.Context{}, "petios", petiosEnv); err == nil {
 			t.Fatal("expected an error when no registry resolves")
@@ -53,9 +53,9 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 
 	t.Run("no provenance falls back to the default registry namespace", func(t *testing.T) {
 		var namespaces []string
-		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, namespace, _ string) (registry.RuntimeRegistryVersions, error) {
+		resolver := UpgradeVersionsResolverForStore(nil, func(_ context.Context, namespace, _ string) (model.RuntimeRegistryVersions, error) {
 			namespaces = append(namespaces, namespace)
-			return registry.RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
+			return model.RuntimeRegistryVersions{LatestStable: "1.0.85"}, nil
 		})
 		resolveOrFatal(t, resolver, "fresh", config.EnvConfig{Name: "dev"}, "resolver: %v")
 		if len(namespaces) != 2 || namespaces[0] != config.DefaultContainerRegistry {
@@ -95,8 +95,8 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	t.Run("registries agreeing yield one target", func(t *testing.T) {
 		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
 			return []SourcedRuntimeVersions{
-				{Registry: "ghcr.io/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
-				{Registry: "registry.internal/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
+				{Registry: "ghcr.io/acme", Versions: model.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
+				{Registry: "registry.internal/acme", Versions: model.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
 			}, nil
 		}
 		item := resolveEnvUpgradeItem("team", env, "", resolver, noTrace)
@@ -106,8 +106,8 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 	t.Run("registries disagreeing yield multiple candidates and no auto-target", func(t *testing.T) {
 		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
 			return []SourcedRuntimeVersions{
-				{Registry: "ghcr.io/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
-				{Registry: "registry.internal/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "1.9.0"}},
+				{Registry: "ghcr.io/acme", Versions: model.RuntimeRegistryVersions{LatestStable: "2.0.0"}},
+				{Registry: "registry.internal/acme", Versions: model.RuntimeRegistryVersions{LatestStable: "1.9.0"}},
 			}, nil
 		}
 		item := resolveEnvUpgradeItem("team", env, "", resolver, noTrace)
@@ -123,7 +123,7 @@ func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
 	t.Run("a snapshot-channel env already at the stable release is up to date (#928)", func(t *testing.T) {
 		snapshotEnv := config.EnvConfig{Name: "ux", RuntimeVersion: "1.0.173", UpgradeChannel: config.UpgradeChannelSnapshot}
 		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-			return []SourcedRuntimeVersions{{Registry: config.DefaultContainerRegistry, Versions: registry.RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
+			return []SourcedRuntimeVersions{{Registry: config.DefaultContainerRegistry, Versions: model.RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
 		}
 		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
 		if item.Lagging || item.Target != "1.0.173" || item.UnresolvedReason != "" {
@@ -132,7 +132,7 @@ func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
 	})
 }
 
-func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, failMsg string) {
+func assertLaggingSingleTarget(t *testing.T, item model.UpgradePlanItem, wantTarget, failMsg string) {
 	t.Helper()
 	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {
 		t.Fatalf(failMsg, item)

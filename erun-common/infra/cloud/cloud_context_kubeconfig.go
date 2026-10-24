@@ -7,11 +7,12 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func describeCloudContextPublicIP(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID string) (string, error) {
+func describeCloudContextPublicIP(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
 	publicIP, err := deps.RunAWS(ctx, provider, region, []string{
 		"ec2", "describe-instances",
 		"--instance-ids", instanceID,
@@ -36,7 +37,7 @@ func describeCloudContextPublicIP(ctx core.Context, deps CloudContextDependencie
 const kubectlContextConfigureExecutionOperation = "kubectl-context-configure"
 
 // cloudContextKubeconfigCommands is the single source for both the redacted trace and subprocess execution.
-func cloudContextKubeconfigCommands(config configpkg.CloudContextConfig) [][]string {
+func cloudContextKubeconfigCommands(config model.CloudContextConfig) [][]string {
 	return [][]string{
 		{"config", "set-cluster", config.KubernetesContext, "--server", "https://" + config.PublicIP + ":6443", "--insecure-skip-tls-verify=true"},
 		{"config", "set-credentials", config.KubernetesContext, "--token", config.AdminToken},
@@ -44,7 +45,7 @@ func cloudContextKubeconfigCommands(config configpkg.CloudContextConfig) [][]str
 	}
 }
 
-func configureCloudKubeContext(ctx core.Context, deps CloudContextDependencies, config configpkg.CloudContextConfig) error {
+func configureCloudKubeContext(ctx core.Context, deps CloudContextDependencies, config model.CloudContextConfig) error {
 	config = configpkg.NormalizeCloudContextConfig(config)
 	if config.PublicIP == "" {
 		return fmt.Errorf("cloud context public IP is required")
@@ -75,7 +76,7 @@ func configureCloudKubeContext(ctx core.Context, deps CloudContextDependencies, 
 
 // libraryConfigureCloudKubeContext writes the same fields as the three `kubectl config set-*`
 // calls via clientcmd.ModifyConfig, which kubectl itself uses.
-func libraryConfigureCloudKubeContext(config configpkg.CloudContextConfig) error {
+func libraryConfigureCloudKubeContext(config model.CloudContextConfig) error {
 	name := strings.TrimSpace(config.KubernetesContext)
 	pathOptions := clientcmd.NewDefaultPathOptions()
 	startingConfig, err := pathOptions.GetStartingConfig()

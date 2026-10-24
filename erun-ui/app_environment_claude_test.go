@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
@@ -11,7 +12,7 @@ func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	useBedrock := false
 	maxTokens := 8192
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -72,7 +73,7 @@ func assertClaudeDefaults(t *testing.T, defaults uiClaudeDefaults) {
 func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -80,7 +81,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 				Name:              "local",
 				LocalRepoPath:     projectRoot,
 				KubernetesContext: "cluster-local",
-				RuntimePod: configpkg.RuntimePodResources{
+				RuntimePod: model.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
@@ -134,7 +135,7 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -185,7 +186,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	// AutoStart modes map to *bool: ask=nil, always=true, never=false.
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs"},
 		},
 		envs: map[string]configpkg.EnvConfig{

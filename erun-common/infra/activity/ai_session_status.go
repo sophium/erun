@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -17,13 +18,13 @@ func RecordAISessionEvent(params model.AISessionEventParams) error {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 	sessionID := strings.TrimSpace(params.SessionID)
-	if err := model.ErrMissingTenantOrEnvironment("record AI session event", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("record AI session event", tenant, environment); err != nil {
 		return err
 	}
-	if err := model.ValidateAISessionID(sessionID); err != nil {
+	if err := core.ValidateAISessionID(sessionID); err != nil {
 		return err
 	}
-	if !model.ValidAISessionEventKind(params.Event) {
+	if !core.ValidAISessionEventKind(params.Event) {
 		return fmt.Errorf("unsupported AI session event %q", params.Event)
 	}
 	now := params.Now
@@ -74,10 +75,10 @@ func LoadAISessionStatus(tenant, environment, sessionID string) (model.AISession
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	sessionID = strings.TrimSpace(sessionID)
-	if err := model.ErrMissingTenantOrEnvironment("resolve AI session status", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve AI session status", tenant, environment); err != nil {
 		return model.AISessionStatus{}, err
 	}
-	if err := model.ValidateAISessionID(sessionID); err != nil {
+	if err := core.ValidateAISessionID(sessionID); err != nil {
 		return model.AISessionStatus{}, err
 	}
 	record, ok, err := loadAISessionRecord(tenant, environment, sessionID)
@@ -87,14 +88,14 @@ func LoadAISessionStatus(tenant, environment, sessionID string) (model.AISession
 	if !ok {
 		return model.AISessionStatus{SessionID: sessionID, State: model.AISessionStateIdle, Reason: "no AI session activity recorded for this id"}, nil
 	}
-	return model.ResolveAISessionStatus(record), nil
+	return core.ResolveAISessionStatus(record), nil
 }
 
 // LoadAISessionStatuses returns every session sorted by id.
 func LoadAISessionStatuses(tenant, environment string) ([]model.AISessionStatus, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := model.ErrMissingTenantOrEnvironment("list AI session statuses", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("list AI session statuses", tenant, environment); err != nil {
 		return nil, err
 	}
 	dir, err := aiSessionDir(tenant, environment)
@@ -115,7 +116,7 @@ func LoadAISessionStatuses(tenant, environment string) ([]model.AISessionStatus,
 		if !ok {
 			continue
 		}
-		statuses = append(statuses, model.ResolveAISessionStatus(record))
+		statuses = append(statuses, core.ResolveAISessionStatus(record))
 	}
 	sort.Slice(statuses, func(i, j int) bool { return statuses[i].SessionID < statuses[j].SessionID })
 	return statuses, nil

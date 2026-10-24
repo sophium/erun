@@ -7,6 +7,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
@@ -23,9 +24,9 @@ func TestStartWorkspaceSyncForSelectionRequiresRemoteSSHDWorkspaceSync(t *testin
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -56,9 +57,9 @@ func TestStartWorkspaceSyncForSelectionSkipsWhenSSHDWorkspaceSyncDisabled(t *tes
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -90,9 +91,9 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 2}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 2}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -131,9 +132,9 @@ func TestSaveEnvironmentConfigPersistsWorkspaceSyncLocalPath(t *testing.T) {
 		workspaceSyncReady: func(context.Context, string) error {
 			return nil
 		},
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			started <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 		workspaceSyncInterval: time.Hour,
 	})
@@ -218,9 +219,9 @@ func TestStartWorkspaceSyncForConfiguredEnvsStartsEnabledEnvs(t *testing.T) {
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{FilesCopied: 1}, nil
+			return model.WorkspaceSyncResult{FilesCopied: 1}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -246,12 +247,12 @@ func TestReconcileWorkspaceSyncForConfiguredEnvsStopsAnUnlinkedEnv(t *testing.T)
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Millisecond,
-		syncWorkspace: func(context.Context, workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(context.Context, workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			select {
 			case passed <- struct{}{}:
 			default:
 			}
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -282,9 +283,9 @@ func TestStartWorkspaceSyncForConfiguredEnvsSkipsDisabledEnvs(t *testing.T) {
 		canReachMCPEndpoint:   func(int) bool { return true },
 		workspaceSyncReady:    func(context.Context, string) error { return nil },
 		workspaceSyncInterval: time.Hour,
-		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (workspace.WorkspaceSyncResult, error) {
+		syncWorkspace: func(_ context.Context, params workspace.WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 			called <- params
-			return workspace.WorkspaceSyncResult{}, nil
+			return model.WorkspaceSyncResult{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -367,7 +368,7 @@ func TestSetWorkspaceSyncErrorEmitsClassifiedError(t *testing.T) {
 
 func workspaceSyncStore(enabled bool) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -378,7 +379,7 @@ func workspaceSyncStore(enabled bool) stubUIStore {
 				Type:              configpkg.EnvironmentTypeRuntime,
 				SSHD: configpkg.SSHDConfig{
 					Enabled: true,
-					WorkspaceSync: configpkg.SSHDWorkspaceSyncConfig{
+					WorkspaceSync: model.SSHDWorkspaceSyncConfig{
 						Enabled:   enabled,
 						LocalPath: "/tmp/frs-local",
 					},

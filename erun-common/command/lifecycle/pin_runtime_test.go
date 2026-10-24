@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The last confirmed running image wins over a stale persisted stock runtimeimage.
@@ -22,7 +23,7 @@ func TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenItsPodRanItsOwnImage(t
 		t.Fatalf("resolve: %v", err)
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteRuntimeVersion {
+		if site.Kind == model.PinSiteRuntimeVersion {
 			t.Fatalf("runtimeversion must follow the image the pod actually ran, not the stale pin: %+v", site)
 		}
 	}
@@ -69,7 +70,7 @@ func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
 				t.Fatal("expected the repo's drifted erun references to move")
 			}
 			for _, site := range plan.Sites {
-				if site.Kind == PinSiteRuntimeVersion {
+				if site.Kind == model.PinSiteRuntimeVersion {
 					if site.Target != "1.0.175" {
 						t.Fatalf("runtimeversion site = %+v", site)
 					}
@@ -82,7 +83,7 @@ func TestResolvePinPlanStillPinsAStockEnvsRuntimeVersion(t *testing.T) {
 }
 
 // skipNoteNaming returns the one skipped note containing every fragment.
-func skipNoteNaming(t *testing.T, plan PinPlan, fragments ...string) string {
+func skipNoteNaming(t *testing.T, plan model.PinPlan, fragments ...string) string {
 	t.Helper()
 	matched := ""
 	for _, note := range plan.Skipped {
@@ -116,7 +117,7 @@ func TestResolvePinPlanFindsNoSiteForAFloatingStockRuntimeChart(t *testing.T) {
 		t.Fatalf("resolve: %v", err)
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteRuntimeChart {
+		if site.Kind == model.PinSiteRuntimeChart {
 			t.Fatalf("a floating stock runtimechart must not be a pin site: %+v", site)
 		}
 	}
@@ -137,7 +138,7 @@ func TestResolvePinPlanLeavesAnUnreadableRuntimeChartAloneAndSaysSo(t *testing.T
 		t.Fatalf("resolve: %v", err)
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteRuntimeChart {
+		if site.Kind == model.PinSiteRuntimeChart {
 			t.Fatalf("an unreadable runtimechart must not be a pin site: %+v", site)
 		}
 	}
@@ -167,10 +168,10 @@ func TestResolvePinPlanReportsASplitImageChartPairingWithoutMutating(t *testing.
 		t.Fatalf("resolve: %v", err)
 	}
 	changes := plan.Changes()
-	var chartChange PinSite
+	var chartChange model.PinSite
 	found := false
 	for _, site := range changes {
-		if site.Kind == PinSiteRuntimeChart {
+		if site.Kind == model.PinSiteRuntimeChart {
 			chartChange = site
 			found = true
 		}

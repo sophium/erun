@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
@@ -32,7 +33,7 @@ func resolveMCPAuthPublicKey(path string) (string, bool, error) {
 // ApplyMCPAuthToRuntimeSpec applies MCP auth to the runtime release only, which
 // serves the edge. Auth is sticky and disabling it is explicit, so a version bump
 // cannot quietly downgrade a public edge.
-func ApplyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *DeploySpec) error {
+func ApplyMCPAuthToRuntimeSpec(ctx core.Context, target model.DeployTarget, spec *DeploySpec) error {
 	if spec == nil || spec.Deploy.ReleaseName != config.RuntimeReleaseName(target.Tenant) {
 		return nil
 	}
@@ -48,7 +49,7 @@ func ApplyMCPAuthToRuntimeSpec(ctx core.Context, target DeployTarget, spec *Depl
 }
 
 // Rethreading the recorded path is what makes auth survive a plain version bump.
-func resolveMCPAuthKeyPathForDeploy(ctx core.Context, target DeployTarget, envConfig config.EnvConfig) string {
+func resolveMCPAuthKeyPathForDeploy(ctx core.Context, target model.DeployTarget, envConfig config.EnvConfig) string {
 	if target.DisableMCPAuth {
 		ctx.Trace("deploy: mcp auth disabled by request; the env's MCP edge will accept loopback traffic only")
 		return ""
@@ -96,7 +97,7 @@ func recordMCPAuthKeyOnEnv(ctx core.Context, deployInput HelmDeploySpec) error {
 // guardMCPAuthDowngrade refuses stripping auth from a live authenticated edge,
 // which executes arbitrary commands in the pod. It reads the live release only on
 // the risky path; `erun open`'s heal-redeploy is exempt.
-func guardMCPAuthDowngrade(ctx core.Context, target DeployTarget, deployInput HelmDeploySpec) error {
+func guardMCPAuthDowngrade(ctx core.Context, target model.DeployTarget, deployInput HelmDeploySpec) error {
 	if target.DisableMCPAuth || deployInput.MCPAuthEnabled {
 		return nil
 	}

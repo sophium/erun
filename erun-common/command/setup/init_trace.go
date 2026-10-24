@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
@@ -81,7 +82,7 @@ func (s tracedBootstrapStore) SaveERunConfig(config configpkg.ERunConfig) error 
 	return s.BootstrapStore.SaveERunConfig(config)
 }
 
-func (s tracedBootstrapStore) SaveTenantConfig(config configpkg.TenantConfig) error {
+func (s tracedBootstrapStore) SaveTenantConfig(config model.TenantConfig) error {
 	// Validate exactly as the real save does, so a dry run never traces a write the
 	// real run refuses.
 	config = configpkg.NormalizeTenantConfig(config)

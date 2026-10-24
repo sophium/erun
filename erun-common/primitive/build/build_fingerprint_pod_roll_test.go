@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -30,7 +30,7 @@ func TestBuildFingerprintSurvivesAPodRoll(t *testing.T) {
 		return shared.DockerBuildSpec{
 			ContextDir:     root,
 			DockerfilePath: dockerfile,
-			Image: helm.DockerImageReference{
+			Image: model.DockerImageReference{
 				Registry:  "ghcr.io/sophium",
 				ImageName: "comp",
 				Version:   "1.0.291-snapshot-20260921T193239Z",

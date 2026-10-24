@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func inClusterPreflightTestContext() core.Context {
@@ -13,8 +14,8 @@ func inClusterPreflightTestContext() core.Context {
 }
 
 // countingRunAWS counts AWS calls; an in-cluster context must make none.
-func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, _ []string) (string, error) {
+func countingRunAWS(calls *int) func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, _ string, _ []string) (string, error) {
 		*calls++
 		return "", nil
 	}
@@ -22,8 +23,8 @@ func countingRunAWS(calls *int) func(core.Context, configpkg.CloudProviderConfig
 
 func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) {
 	store := stubCloudContextStore{config: configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS}},
-		CloudContexts: []configpkg.CloudContextConfig{{
+		CloudProviders: []model.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS}},
+		CloudContexts: []model.CloudContextConfig{{
 			Name:               "prod-platform",
 			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
@@ -43,8 +44,8 @@ func TestCloudContextPreflightInClusterMatchedByKubernetesContext(t *testing.T) 
 
 func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing.T) {
 	store := stubCloudContextStore{config: configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
-		CloudContexts: []configpkg.CloudContextConfig{{
+		CloudProviders: []model.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
+		CloudContexts: []model.CloudContextConfig{{
 			Name:               "petios-ctx",
 			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
@@ -70,14 +71,14 @@ func TestCloudContextPreflightPowerManagedWithoutInstanceIDStillFails(t *testing
 func TestIsInClusterCloudContextDistinguishesPowerManagedContexts(t *testing.T) {
 	cases := []struct {
 		name   string
-		config configpkg.CloudContextConfig
+		config model.CloudContextConfig
 		want   bool
 	}{
-		{"pod-injected context", configpkg.CloudContextConfig{Name: InClusterKubernetesContext, KubernetesContext: InClusterKubernetesContext}, true},
-		{"kube context only", configpkg.CloudContextConfig{Name: "prod-platform", KubernetesContext: InClusterKubernetesContext}, true},
-		{"power-managed without an instance", configpkg.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx"}, false},
-		{"power-managed with an instance", configpkg.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx", InstanceID: "i-0abc123"}, false},
-		{"blank", configpkg.CloudContextConfig{}, false},
+		{"pod-injected context", model.CloudContextConfig{Name: InClusterKubernetesContext, KubernetesContext: InClusterKubernetesContext}, true},
+		{"kube context only", model.CloudContextConfig{Name: "prod-platform", KubernetesContext: InClusterKubernetesContext}, true},
+		{"power-managed without an instance", model.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx"}, false},
+		{"power-managed with an instance", model.CloudContextConfig{Name: "petios-ctx", KubernetesContext: "petios-ctx", InstanceID: "i-0abc123"}, false},
+		{"blank", model.CloudContextConfig{}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

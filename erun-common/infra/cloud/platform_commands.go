@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -71,23 +72,23 @@ func unresolvedPlatformAliasError(selection platformAliasSelection) error {
 }
 
 // ResolveERunPlatformAlias resolves the erun platform alias, naming selection in errors.
-func ResolveERunPlatformAlias(store configpkg.CloudReadStore, alias string, selection platformAliasSelection) (configpkg.CloudProviderConfig, error) {
+func ResolveERunPlatformAlias(store configpkg.CloudReadStore, alias string, selection platformAliasSelection) (model.CloudProviderConfig, error) {
 	alias = strings.TrimSpace(alias)
 	if alias != "" {
 		provider, err := ResolveCloudProvider(store, alias)
 		if err != nil {
-			return configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(err)
+			return model.CloudProviderConfig{}, markPlatformAliasUnusable(err)
 		}
 		if provider.Provider != configpkg.CloudProviderERun {
-			return configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider))
+			return model.CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider))
 		}
 		return provider, nil
 	}
 	providers, err := ListCloudProviders(store)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(err)
+		return model.CloudProviderConfig{}, markPlatformAliasUnusable(err)
 	}
-	erunProviders := make([]configpkg.CloudProviderConfig, 0, len(providers))
+	erunProviders := make([]model.CloudProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		if provider.Provider == configpkg.CloudProviderERun {
 			erunProviders = append(erunProviders, provider)
@@ -95,28 +96,28 @@ func ResolveERunPlatformAlias(store configpkg.CloudReadStore, alias string, sele
 	}
 	switch len(erunProviders) {
 	case 0:
-		return configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(unresolvedPlatformAliasError(selection))
+		return model.CloudProviderConfig{}, markPlatformAliasUnusable(unresolvedPlatformAliasError(selection))
 	case 1:
 		return erunProviders[0], nil
 	default:
-		return configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(platformAliasAmbiguity(
+		return model.CloudProviderConfig{}, markPlatformAliasUnusable(platformAliasAmbiguity(
 			fmt.Errorf("multiple erun platform cloud provider aliases are configured; pass %s to choose one", selection)))
 	}
 }
 
 // NewPlatformClientForAlias builds a PlatformClient that mints a bearer token per call from the alias.
-func NewPlatformClientForAlias(ctx core.Context, store configpkg.CloudReadStore, alias string, deps CloudDependencies) (*platformclient.PlatformClient, configpkg.CloudProviderConfig, error) {
+func NewPlatformClientForAlias(ctx core.Context, store configpkg.CloudReadStore, alias string, deps CloudDependencies) (*platformclient.PlatformClient, model.CloudProviderConfig, error) {
 	provider, err := ResolveERunPlatformAlias(store, alias, platformAliasSelectionFor(ctx))
 	if err != nil {
-		return nil, configpkg.CloudProviderConfig{}, err
+		return nil, model.CloudProviderConfig{}, err
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.APIURL) == "" {
 		// Provider is set but the ERun block is missing: init writes both, so this is a
 		// truncated config; point at re-login, not `cloud init`.
-		return nil, configpkg.CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias))
+		return nil, model.CloudProviderConfig{}, markPlatformAliasUnusable(fmt.Errorf("erun platform alias %q is incomplete (its erun api configuration is missing, likely dropped by a config write from an older erun component); run `erun cloud login %s` to restore it", provider.Alias, provider.Alias))
 	}
 	client := platformclient.NewPlatformClient(provider.ERun.APIURL, func() (string, error) {
-		token, err := CloudProviderBearerToken(ctx, store, CloudBearerParams{Alias: provider.Alias}, deps)
+		token, err := CloudProviderBearerToken(ctx, store, model.CloudBearerParams{Alias: provider.Alias}, deps)
 		if err != nil {
 			return "", err
 		}
@@ -130,7 +131,7 @@ func NewPlatformClientForAlias(ctx core.Context, store configpkg.CloudReadStore,
 
 // TracePlatformCall is the audit line traced before a platform HTTP call; callers skip
 // the call under ctx.DryRun.
-func TracePlatformCall(ctx core.Context, provider configpkg.CloudProviderConfig, method, path string, details ...string) {
+func TracePlatformCall(ctx core.Context, provider model.CloudProviderConfig, method, path string, details ...string) {
 	line := fmt.Sprintf("platform: %s %s%s", method, provider.ERun.APIURL, path)
 	if len(details) > 0 {
 		line += " (" + strings.Join(details, ", ") + ")"

@@ -6,7 +6,7 @@ import (
 
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // forceStdinSeams pins both halves of the "can this run ask?" question.
@@ -51,7 +51,7 @@ func TestSelectTenantPromptStillPromptsOnATerminal(t *testing.T) {
 		return 1, "frs", nil
 	}
 
-	result, err := SelectTenantPrompt(run, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
+	result, err := SelectTenantPrompt(run, []model.TenantConfig{{Name: "erun"}, {Name: "frs"}})
 	if err != nil {
 		t.Fatalf("selectTenantPrompt: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSelectTenantPromptSoleTenantStillPromptsOnATerminal(t *testing.T) {
 		return 0, "erun", nil
 	}
 
-	if _, err := SelectTenantPrompt(run, []config.TenantConfig{{Name: "erun"}}); err != nil {
+	if _, err := SelectTenantPrompt(run, []model.TenantConfig{{Name: "erun"}}); err != nil {
 		t.Fatalf("selectTenantPrompt: %v", err)
 	}
 	if !called {

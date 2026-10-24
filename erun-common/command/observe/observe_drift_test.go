@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
@@ -16,7 +16,7 @@ func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
 
 func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing(t *testing.T) {
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
+	release := &model.ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
 
 	got := computeObserveDrift(req, release, nil)
 	if len(got) != 0 {
@@ -31,14 +31,14 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvailable(t *testing.T) {
 	// An unreadable release carrying ImageOverrides cannot occur today, but drift must not assume that.
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{
+	release := &model.ObservedHelmRelease{
 		Name:           "team-devops",
 		Error:          "observe: not authorized to read helm release",
 		ImageOverrides: map[string]string{"erun-devops": "registry.example/erun-devops:1.0.0"},
 	}
-	pods := []ObservedPod{{
+	pods := []model.ObservedPod{{
 		Name: "team-devops-abc123",
-		Containers: []ObservedContainer{{
+		Containers: []model.ObservedContainer{{
 			Name:  "erun-devops",
 			Image: "registry.example/erun-devops:1.0.1-hotfix",
 		}},
@@ -58,11 +58,11 @@ func TestComputeObserveDriftEvaluatesImageDriftWhenReleaseUnreadableButPodsAvail
 }
 
 func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodAvailable(t *testing.T) {
-	req := config.ShellLaunchParams{Namespace: "team-dev", RuntimePod: config.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
-	release := &clusterread.ObservedHelmRelease{
+	req := config.ShellLaunchParams{Namespace: "team-dev", RuntimePod: model.RuntimePodResources{CPU: "4", Memory: "8916Mi"}}
+	release := &model.ObservedHelmRelease{
 		Name:       "team-devops",
 		Error:      "observe: not authorized to read helm release",
-		RuntimePod: config.RuntimePodResources{CPU: "2", Memory: "4096Mi"},
+		RuntimePod: model.RuntimePodResources{CPU: "2", Memory: "4096Mi"},
 	}
 
 	got := computeObserveDrift(req, release, nil)
@@ -80,7 +80,7 @@ func TestComputeObserveDriftEvaluatesPodDriftWhenReleaseUnreadableButRuntimePodA
 
 func TestComputeObserveDriftFoundReleaseKeepsExistingChecks(t *testing.T) {
 	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", RuntimeImage: "registry.example/erun-devops:1.0.0", Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{
+	release := &model.ObservedHelmRelease{
 		Name:           "team-devops",
 		Found:          true,
 		AppVersion:     "1.0.1",

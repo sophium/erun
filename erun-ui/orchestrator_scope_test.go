@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Host, local-agent, and remote-agent envs are eligible without a role.
@@ -25,7 +26,7 @@ func TestOrchestratableEnvCoversHost(t *testing.T) {
 		if got := orchestratableEnv(env, ""); got != tc.want {
 			t.Errorf("orchestratableEnv(type=%q, role=undeclared) = %v, want %v", tc.envType, got, tc.want)
 		}
-		if got := orchestratableEnv(env, configpkg.OrchestratorEnvRoleCode); got != tc.want {
+		if got := orchestratableEnv(env, model.OrchestratorEnvRoleCode); got != tc.want {
 			t.Errorf("orchestratableEnv(type=%q, role=code) = %v, want %v", tc.envType, got, tc.want)
 		}
 	}
@@ -34,12 +35,12 @@ func TestOrchestratableEnvCoversHost(t *testing.T) {
 func TestOrchestratableEnvGatesRuntimeOnTheRuntimeRole(t *testing.T) {
 	env := configpkg.EnvConfig{Type: configpkg.EnvironmentTypeRuntime}
 	cases := []struct {
-		role configpkg.OrchestratorEnvRole
+		role model.OrchestratorEnvRole
 		want bool
 	}{
-		{configpkg.OrchestratorEnvRoleRuntime, true},
-		{configpkg.OrchestratorEnvRoleCode, false},
-		{configpkg.OrchestratorEnvRoleBuild, false},
+		{model.OrchestratorEnvRoleRuntime, true},
+		{model.OrchestratorEnvRoleCode, false},
+		{model.OrchestratorEnvRoleBuild, false},
 		{"", false},
 	}
 	for _, tc := range cases {
@@ -114,7 +115,7 @@ func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *test
 	if rt.DefaultDirectory != "" || rt.Mirrored {
 		t.Fatalf("expected the runtime env to carry no review directory, got %+v", rt)
 	}
-	if rt.RequiredRole != configpkg.OrchestratorEnvRoleRuntime {
+	if rt.RequiredRole != model.OrchestratorEnvRoleRuntime {
 		t.Fatalf("expected the runtime env to require the runtime role, got %+v", rt)
 	}
 	if rt.IneligibleReason != "" {
@@ -125,15 +126,15 @@ func TestListOrchestratorEnvCandidatesOffersARuntimeEnvForTheRuntimeRole(t *test
 func TestOrchestratorIneligibilityReasonExplainsEachRejectedType(t *testing.T) {
 	cases := []struct {
 		envType    configpkg.EnvironmentType
-		role       configpkg.OrchestratorEnvRole
+		role       model.OrchestratorEnvRole
 		wantEmpty  bool
 		wantSubstr string
 	}{
 		{configpkg.EnvironmentTypeLocalAgent, "", true, ""},
 		{configpkg.EnvironmentTypeRemoteAgent, "", true, ""},
 		{configpkg.EnvironmentTypeHost, "", true, ""},
-		{configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleRuntime, true, ""},
-		{configpkg.EnvironmentTypeRuntime, configpkg.OrchestratorEnvRoleCode, false, "no worktree"},
+		{configpkg.EnvironmentTypeRuntime, model.OrchestratorEnvRoleRuntime, true, ""},
+		{configpkg.EnvironmentTypeRuntime, model.OrchestratorEnvRoleCode, false, "no worktree"},
 		{configpkg.EnvironmentTypeRuntime, "", false, "runtime role"},
 		{"", "", false, "type"},
 	}

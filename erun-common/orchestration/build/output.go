@@ -4,13 +4,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // NewBuildResult extracts the structured result from a resolved build execution.
-func NewBuildResult(execution shared.BuildExecutionSpec) core.BuildResult {
-	result := core.BuildResult{}
+func NewBuildResult(execution shared.BuildExecutionSpec) model.BuildResult {
+	result := model.BuildResult{}
 	if execution.Release != nil {
 		result.Version = strings.TrimSpace(execution.Release.Version)
 	}
@@ -19,13 +19,13 @@ func NewBuildResult(execution shared.BuildExecutionSpec) core.BuildResult {
 			result.Version = strings.TrimSpace(build.Image.Version)
 			result.BaseVersion = strings.TrimSpace(build.Image.BaseVersion)
 		}
-		result.Images = append(result.Images, core.BuildResultImage{
+		result.Images = append(result.Images, model.BuildResultImage{
 			Name: strings.TrimSpace(build.Image.ImageName),
 			Tag:  strings.TrimSpace(build.Image.Tag),
 		})
 	}
 	for _, chart := range execution.ComponentCharts {
-		result.Charts = append(result.Charts, core.BuildResultChart{
+		result.Charts = append(result.Charts, model.BuildResultChart{
 			Name:    strings.TrimSpace(chart.ChartName),
 			Version: strings.TrimSpace(chart.Version),
 		})

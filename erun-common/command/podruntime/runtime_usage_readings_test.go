@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestParseRuntimeUsageReadings(t *testing.T) {
@@ -34,9 +35,9 @@ func TestParseRuntimeUsageReadings(t *testing.T) {
 type runtimeUsageReadingCase struct {
 	name       string
 	output     string
-	wantCPU    config.RuntimeCPUUsage
-	wantMemory config.RuntimeMemoryUsage
-	wantDisk   config.RuntimeDiskUsage
+	wantCPU    model.RuntimeCPUUsage
+	wantMemory model.RuntimeMemoryUsage
+	wantDisk   model.RuntimeDiskUsage
 }
 
 func runtimeUsageReadingCases() []runtimeUsageReadingCase {
@@ -65,13 +66,13 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"disk_own_used_kb=54000000",
 			}, "\n"),
 			// 100000 usec over 1 second against a 1-core quota.
-			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
-			wantMemory: config.RuntimeMemoryUsage{
+			wantCPU: model.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 10, IntervalSeconds: 1},
+			wantMemory: model.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true, CeilingHits: 21292, CeilingHitsObserved: true,
 			},
-			wantDisk: config.RuntimeDiskUsage{
+			wantDisk: model.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				TotalBytes: 198234112 * 1024, UsedBytes: 99117056 * 1024, PercentUsed: 100 * float64(99117056) / float64(198234112),
 				OwnUsedBytes: 54000000 * 1024, OwnUsageObserved: true,
@@ -92,11 +93,11 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"cpu_time_after_ns=2000000000",
 				"disk_workspace=",
 			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
+			wantCPU: model.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "an unlimited cpu.max quota should report unavailable"},
+			wantMemory: model.RuntimeMemoryUsage{
 				CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true, Unlimited: true, OOMKillsObserved: true,
 			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
+			wantDisk: model.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
 			name: "memory.current missing reports unavailable without a fabricated zero",
@@ -105,17 +106,17 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 				"memory_current=",
 				"memory_max=2147483648",
 			}, "\n"),
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
-			wantDisk:   config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantCPU:    model.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: model.RuntimeMemoryUsage{Unavailable: "memory.current missing should report unavailable"},
+			wantDisk:   model.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			// A long filesystem name wraps df's data row, dropping the Filesystem column.
 			name:       "wrapped filesystem name still parses by column, not fixed index",
 			output:     "disk_workspace=1000 500 500 50% /home/erun\ndisk_own_used_kb=300",
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
-			wantDisk: config.RuntimeDiskUsage{
+			wantCPU:    model.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "no cgroup_type key should report unavailable"},
+			wantMemory: model.RuntimeMemoryUsage{Unavailable: "no cgroup_type key should report unavailable"},
+			wantDisk: model.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				TotalBytes: 1000 * 1024, UsedBytes: 500 * 1024, PercentUsed: 50,
 				OwnUsedBytes: 300 * 1024, OwnUsageObserved: true,
@@ -142,12 +143,12 @@ func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
 				"disk_workspace=",
 				"disk_own_used_kb=12345",
 			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
-			wantMemory: config.RuntimeMemoryUsage{
+			wantCPU: model.RuntimeCPUUsage{QuotaCores: 1, UtilizationPercent: 0, IntervalSeconds: 1},
+			wantMemory: model.RuntimeMemoryUsage{
 				CurrentBytes: 1048576, PeakBytes: 1048576, PeakObserved: true,
 				LimitBytes: 2097152, PercentOfLimit: 50, OOMKillsObserved: true,
 			},
-			wantDisk: config.RuntimeDiskUsage{
+			wantDisk: model.RuntimeDiskUsage{
 				Mount: runtimeUsageWatchedMount, NodeShared: true,
 				Unavailable:      "an empty df line should report unavailable even though own usage was read",
 				OwnUsedBytes:     12345 * 1024,
@@ -168,12 +169,12 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				"memory_peak=1027301376",
 				"memory_oom_kill=",
 			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
+			wantCPU: model.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: model.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantDisk: model.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 		{
 			name: "memory.events max (ceiling hits) missing reports unobserved, not a fabricated zero",
@@ -185,19 +186,19 @@ func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 				"memory_oom_kill=0",
 				"memory_ceiling_hits=",
 			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
+			wantCPU: model.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
+			wantMemory: model.RuntimeMemoryUsage{
 				CurrentBytes: 413589504, PeakBytes: 1027301376, PeakObserved: true,
 				LimitBytes: 2147483648, PercentOfLimit: 100 * float64(413589504) / float64(2147483648),
 				OOMKillsObserved: true,
 			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
+			wantDisk: model.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
 		},
 	}
 }
 
 // Only want.Unavailable's presence is compared, not its text.
-func assertRuntimeCPU(t *testing.T, got, want config.RuntimeCPUUsage) {
+func assertRuntimeCPU(t *testing.T, got, want model.RuntimeCPUUsage) {
 	t.Helper()
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("CPU.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
@@ -214,7 +215,7 @@ func assertRuntimeCPU(t *testing.T, got, want config.RuntimeCPUUsage) {
 	}
 }
 
-func assertRuntimeMemory(t *testing.T, got, want config.RuntimeMemoryUsage) {
+func assertRuntimeMemory(t *testing.T, got, want model.RuntimeMemoryUsage) {
 	t.Helper()
 	if (got.Unavailable == "") != (want.Unavailable == "") {
 		t.Errorf("Memory.Unavailable = %q, want unavailable=%t", got.Unavailable, want.Unavailable != "")
@@ -235,7 +236,7 @@ func assertRuntimeMemory(t *testing.T, got, want config.RuntimeMemoryUsage) {
 	}
 }
 
-func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want config.RuntimeMemoryUsage) {
+func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want model.RuntimeMemoryUsage) {
 	t.Helper()
 	if got.CurrentBytes != want.CurrentBytes {
 		t.Errorf("Memory.CurrentBytes = %d, want %d", got.CurrentBytes, want.CurrentBytes)
@@ -257,7 +258,7 @@ func assertRuntimeMemoryPeakAndOOM(t *testing.T, got, want config.RuntimeMemoryU
 	}
 }
 
-func assertRuntimeDisk(t *testing.T, got, want config.RuntimeDiskUsage) {
+func assertRuntimeDisk(t *testing.T, got, want model.RuntimeDiskUsage) {
 	t.Helper()
 	if got.Mount != want.Mount {
 		t.Errorf("Disk.Mount = %q, want %q", got.Mount, want.Mount)
@@ -285,7 +286,7 @@ func assertRuntimeDisk(t *testing.T, got, want config.RuntimeDiskUsage) {
 	}
 }
 
-func assertRuntimeDiskOwnUsage(t *testing.T, got, want config.RuntimeDiskUsage) {
+func assertRuntimeDiskOwnUsage(t *testing.T, got, want model.RuntimeDiskUsage) {
 	t.Helper()
 	if got.OwnUsageObserved != want.OwnUsageObserved {
 		t.Errorf("Disk.OwnUsageObserved = %t, want %t", got.OwnUsageObserved, want.OwnUsageObserved)

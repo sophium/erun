@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // gateMergeTrailerSeam fakes one squash's git calls and records the committed message.
@@ -38,7 +39,7 @@ func TestGateMergeOneSourceCarriesTheSourceBranchesTrailers(t *testing.T) {
 	var committed string
 	deps := gateMergeTrailerSeam(branchBody, &committed)
 
-	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Assemble the widget in declared order"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), model.GateMergeSource{Branch: "feature", Message: "Assemble the widget in declared order"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
 		t.Fatalf("gate-merge one source: %v", err)
 	}
 
@@ -196,7 +197,7 @@ func TestGateMergeOneSourceDoesNotRepeatTrailersTheCallerAlreadyPassed(t *testin
 	var committed string
 	deps := gateMergeTrailerSeam("Fix the widget\n\nCloses #2601\n", &committed)
 
-	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Fix the widget\n\nCloses #2601"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), model.GateMergeSource{Branch: "feature", Message: "Fix the widget\n\nCloses #2601"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
 		t.Fatalf("gate-merge one source: %v", err)
 	}
 	if got := strings.Count(committed, "Closes #2601"); got != 1 {
@@ -208,7 +209,7 @@ func TestGateMergeOneSourceIgnoresTrailersThatAreNotLoadBearing(t *testing.T) {
 	var committed string
 	deps := gateMergeTrailerSeam("Fix the widget\n\nCloses #2601\nNote: this is a workaround for a quirk\n", &committed)
 
-	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "feature", Message: "Fix the widget"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
+	if _, _, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), model.GateMergeSource{Branch: "feature", Message: "Fix the widget"}, "origin", "refs/erun/gate-merge/main", deps); err != nil {
 		t.Fatalf("gate-merge one source: %v", err)
 	}
 	if !strings.Contains(committed, "Closes #2601") {
@@ -229,7 +230,7 @@ func TestGateMergeOneSourceSkipsADefectFixThatNamesNoReproduction(t *testing.T) 
 		return runGit(root, stdout, stderr, args...)
 	}
 
-	landed, skipped, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), GateMergeSource{Branch: "bug/2601-widget", Message: "Fix the widget"}, "origin", "refs/erun/gate-merge/main", deps)
+	landed, skipped, err := gateMergeOneSource(testTraceContext(false), t.TempDir(), model.GateMergeSource{Branch: "bug/2601-widget", Message: "Fix the widget"}, "origin", "refs/erun/gate-merge/main", deps)
 	if err != nil {
 		t.Fatalf("a policy refusal must be a skip, not a batch failure: %v", err)
 	}

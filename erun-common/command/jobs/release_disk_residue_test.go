@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -53,13 +54,13 @@ func TestReleaseDiskPreflightRunsBeforeTheReleaseStageIsEntered(t *testing.T) {
 	refuseReleaseDiskHeadroom(t, t.TempDir())
 
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
-	spec := shared.ReleaseSpec{
+	spec := model.ReleaseSpec{
 		ProjectRoot: repo,
 		Branch:      "main",
 		Version:     "1.0.301",
-		Mode:        shared.ReleaseModeStable,
-		Stages: []shared.ReleaseStage{
-			shared.NewReleaseStage(repo, nil, "1.0.301", shared.ReleaseModeStable),
+		Mode:        model.ReleaseModeStable,
+		Stages: []model.ReleaseStage{
+			shared.NewReleaseStage(repo, nil, "1.0.301", model.ReleaseModeStable),
 		},
 	}
 

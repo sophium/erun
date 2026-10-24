@@ -7,9 +7,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -31,8 +31,8 @@ type ListInput struct {
 // ListToolResult embeds ListResult so its fields stay top-level.
 type ListToolResult struct {
 	lifecycle.ListResult
-	VersionDrift             *lifecycle.TenantVersionDrift       `json:"versionDrift,omitempty"`
-	ControlPlaneVersionDrift *lifecycle.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
+	VersionDrift             *model.TenantVersionDrift       `json:"versionDrift,omitempty"`
+	ControlPlaneVersionDrift *model.ControlPlaneVersionDrift `json:"controlPlaneVersionDrift,omitempty"`
 }
 
 func ListTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ListInput) (*mcp.CallToolResult, ListToolResult, error) {
@@ -96,18 +96,18 @@ func buildListToolResult(ctx core.Context, result lifecycle.ListResult, controlP
 	return nil, toolResult, nil
 }
 
-func runtimeOpenParams(runtime sharedpkg.RuntimeContext) shared.OpenParams {
+func runtimeOpenParams(runtime sharedpkg.RuntimeContext) model.OpenParams {
 	tenant := strings.TrimSpace(runtime.Tenant)
 	environment := strings.TrimSpace(runtime.Environment)
 
 	switch {
 	case tenant != "" && environment != "":
-		return shared.OpenParams{Tenant: tenant, Environment: environment}
+		return model.OpenParams{Tenant: tenant, Environment: environment}
 	case tenant != "":
-		return shared.OpenParams{Tenant: tenant, UseDefaultEnvironment: true}
+		return model.OpenParams{Tenant: tenant, UseDefaultEnvironment: true}
 	case environment != "":
-		return shared.OpenParams{Environment: environment, UseDefaultTenant: true}
+		return model.OpenParams{Environment: environment, UseDefaultTenant: true}
 	default:
-		return shared.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true}
+		return model.OpenParams{UseDefaultTenant: true, UseDefaultEnvironment: true}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/zitadel"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -224,11 +225,11 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	mustNoErr(t, secrets.SaveCloudSecret(secretRef, f.identity.ClientSecret), "save the provisioned client secret")
 
-	store := staticCloudReadStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	store := staticCloudReadStore{config: configpkg.ERunConfig{CloudProviders: []modelpkg.CloudProviderConfig{{
 		Alias:         machineIdentityTokenAlias,
 		Provider:      configpkg.CloudProviderERun,
 		OIDCIssuerURL: issuer.issuer(),
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &modelpkg.ERunProviderConfig{
 			APIURL:          "http://platform.invalid",
 			ClientID:        f.identity.ClientID,
 			ClientSecretRef: secretRef,
@@ -237,7 +238,7 @@ func (f *machineIdentityTokenFixture) mintToken(t *testing.T, issuer *machineIde
 	token, err := cloud.CloudProviderBearerToken(
 		core.Context{},
 		store,
-		cloud.CloudBearerParams{Alias: machineIdentityTokenAlias},
+		modelpkg.CloudBearerParams{Alias: machineIdentityTokenAlias},
 		cloud.CloudDependencies{CloudSecretStore: secrets},
 	)
 	mustNoErr(t, err, "mint the machine identity's token through the client_credentials grant")

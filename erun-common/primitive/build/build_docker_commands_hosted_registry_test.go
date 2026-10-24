@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -44,7 +45,7 @@ func TestHostedRegistryDockerLoginUsesBearerTokenAsPassword(t *testing.T) {
 	writeDockerLoginCaptureStub(t, argsPath, stdinPath)
 
 	provider := erunTestProvider()
-	store := erunTestCloudStore{config: config.ERunConfig{CloudProviders: []config.CloudProviderConfig{provider}}}
+	store := erunTestCloudStore{config: config.ERunConfig{CloudProviders: []model.CloudProviderConfig{provider}}}
 	secretStore := cloud.NewFileCloudSecretStore(t.TempDir())
 	if err := cloud.SaveCachedERunAccessToken(secretStore, provider.Alias, cloud.ERunTokens{AccessToken: "test-bearer-token", ExpiresIn: time.Hour}); err != nil {
 		t.Fatalf("seed cached access token: %v", err)

@@ -6,23 +6,23 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 // PlatformJobResult is a platform job, unlike the in-pod JobResult.
 type PlatformJobResult struct {
-	Preview bool                       `json:"preview"`
-	Job     platformclient.PlatformJob `json:"job,omitempty"`
-	Trace   []string                   `json:"trace,omitempty"`
+	Preview bool              `json:"preview"`
+	Job     model.PlatformJob `json:"job,omitempty"`
+	Trace   []string          `json:"trace,omitempty"`
 }
 
 // PlatformJobListResult is a platform job listing's tool result.
 type PlatformJobListResult struct {
-	Preview bool                         `json:"preview"`
-	Jobs    []platformclient.PlatformJob `json:"jobs,omitempty"`
-	Trace   []string                     `json:"trace,omitempty"`
+	Preview bool                `json:"preview"`
+	Jobs    []model.PlatformJob `json:"jobs,omitempty"`
+	Trace   []string            `json:"trace,omitempty"`
 }
 
 type JobsListInput struct {
@@ -39,7 +39,7 @@ func JobsListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_list"
-		jobs, err := jobspkg.RunJobList(ctx, runtime.Store, input.Alias, jobspkg.JobListParams{
+		jobs, err := jobspkg.RunJobList(ctx, runtime.Store, input.Alias, model.JobListParams{
 			Status:        input.Status,
 			EnvironmentID: input.EnvironmentID,
 			IssueRef:      input.IssueRef,
@@ -97,7 +97,7 @@ func JobsStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_start"
-		job, err := jobspkg.RunJobClaim(ctx, runtime.Store, input.Alias, jobspkg.JobClaimParams{
+		job, err := jobspkg.RunJobClaim(ctx, runtime.Store, input.Alias, model.JobClaimParams{
 			Environment: input.Environment,
 			JobType:     input.JobType,
 			IssueRef:    input.IssueRef,
@@ -131,7 +131,7 @@ func JobsFinishTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Cal
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "jobs_finish"
-		job, err := jobspkg.RunJobUpdate(ctx, runtime.Store, input.Alias, jobspkg.JobUpdateParams{
+		job, err := jobspkg.RunJobUpdate(ctx, runtime.Store, input.Alias, model.JobUpdateParams{
 			JobID:      input.JobID,
 			Status:     input.Status,
 			Summary:    input.Summary,

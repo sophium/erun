@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
@@ -193,7 +194,7 @@ func sampleIdleMetrics(runtime shared.RuntimeConfig, recorder *shared.MetricsRec
 // terminalInputActivityKinds are the kinds counted as last_terminal_input (idle-policy.md).
 var terminalInputActivityKinds = []string{config.ActivityKindSSH, config.ActivityKindCLI, config.ActivityKindMCP}
 
-func secondsSinceLastTerminalInput(status activitypkg.EnvironmentIdleStatus, now time.Time) float64 {
+func secondsSinceLastTerminalInput(status model.EnvironmentIdleStatus, now time.Time) float64 {
 	var last time.Time
 	for _, kind := range terminalInputActivityKinds {
 		snapshot, ok := status.Activity[kind]

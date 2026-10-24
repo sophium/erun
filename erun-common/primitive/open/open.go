@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -36,32 +37,18 @@ const (
 // reconnect loop; the wording is a public contract.
 const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
 
-// AISessionAttachOutcome is why an attach to a persistent session ended.
-type AISessionAttachOutcome string
-
-const (
-	// AISessionAttachOutcomeTakenOver: another attach evicted this viewer; the
-	// session keeps running.
-	AISessionAttachOutcomeTakenOver AISessionAttachOutcome = "taken-over"
-	// AISessionAttachOutcomeDeployReattach: reattach once the new pod is ready.
-	AISessionAttachOutcomeDeployReattach AISessionAttachOutcome = "deploy-reattach"
-	AISessionAttachOutcomeEnded          AISessionAttachOutcome = "ended"
-	// AISessionAttachOutcomeUnknown: no exit status; never collapse it into a guess.
-	AISessionAttachOutcomeUnknown AISessionAttachOutcome = "unknown"
-)
-
 // ResolveAISessionAttachOutcome classifies the attach script's exit status.
-func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) AISessionAttachOutcome {
+func ResolveAISessionAttachOutcome(exitCode int, exitCodeKnown bool) model.AISessionAttachOutcome {
 	if !exitCodeKnown {
-		return AISessionAttachOutcomeUnknown
+		return model.AISessionAttachOutcomeUnknown
 	}
 	switch exitCode {
 	case RemoteShellTakenOverExitCode:
-		return AISessionAttachOutcomeTakenOver
+		return model.AISessionAttachOutcomeTakenOver
 	case RemoteShellReattachDeployExitCode:
-		return AISessionAttachOutcomeDeployReattach
+		return model.AISessionAttachOutcomeDeployReattach
 	default:
-		return AISessionAttachOutcomeEnded
+		return model.AISessionAttachOutcomeEnded
 	}
 }
 
@@ -91,25 +78,25 @@ type ShellLaunchPreview struct {
 
 type ShellLauncherFunc func(configpkg.ShellLaunchParams) error
 
-func OpenParamsForArgs(args []string) (shared.OpenParams, error) {
+func OpenParamsForArgs(args []string) (model.OpenParams, error) {
 	switch len(args) {
 	case 0:
-		return shared.OpenParams{
+		return model.OpenParams{
 			UseDefaultTenant:      true,
 			UseDefaultEnvironment: true,
 		}, nil
 	case 1:
-		return shared.OpenParams{
+		return model.OpenParams{
 			Environment:      args[0],
 			UseDefaultTenant: true,
 		}, nil
 	case 2:
-		return shared.OpenParams{
+		return model.OpenParams{
 			Tenant:      args[0],
 			Environment: args[1],
 		}, nil
 	default:
-		return shared.OpenParams{}, fmt.Errorf("accepts 0 to 2 arg(s), received %d", len(args))
+		return model.OpenParams{}, fmt.Errorf("accepts 0 to 2 arg(s), received %d", len(args))
 	}
 }
 
@@ -135,7 +122,7 @@ func InitParamsForOpenArgs(store configpkg.OpenStore, args []string) (BootstrapI
 	return InitParamsForOpenTarget(store, params)
 }
 
-func InitParamsForOpenTarget(store configpkg.OpenStore, params shared.OpenParams) (BootstrapInitParams, error) {
+func InitParamsForOpenTarget(store configpkg.OpenStore, params model.OpenParams) (BootstrapInitParams, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
 
@@ -182,7 +169,7 @@ func initParamsForOpenDefaults(store configpkg.OpenStore) (BootstrapInitParams, 
 	return BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
 }
 
-func ResolveOpen(store configpkg.OpenStore, params shared.OpenParams) (configpkg.OpenResult, error) {
+func ResolveOpen(store configpkg.OpenStore, params model.OpenParams) (configpkg.OpenResult, error) {
 	return shared.ResolveOpenWithFinder(store, configpkg.FindProjectRoot, params)
 }
 
@@ -342,7 +329,7 @@ type remoteShellConfig struct {
 func remoteShellConfigForRequest(req configpkg.ShellLaunchParams) (remoteShellConfig, error) {
 	remoteWorkdir := remoteWorktreePath(req)
 
-	tenantConfig, err := yaml.Marshal(configpkg.TenantConfig{
+	tenantConfig, err := yaml.Marshal(model.TenantConfig{
 		Name:               req.Tenant,
 		DefaultEnvironment: req.Environment,
 	})

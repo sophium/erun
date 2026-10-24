@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -73,7 +73,7 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 		return nil
 	}
 
-	byName := make(map[string]helm.DockerImageReference, len(execution.DockerPushes))
+	byName := make(map[string]model.DockerImageReference, len(execution.DockerPushes))
 	for _, pushInput := range execution.DockerPushes {
 		byName[pushInput.Image.ImageName] = pushInput.Image
 	}
@@ -90,7 +90,7 @@ func verifyModuleReferencedImagesAnonymouslyPullable(ctx core.Context, projectRo
 	return nil
 }
 
-func verifyImageAnonymouslyPullable(ctx core.Context, name string, image helm.DockerImageReference, probe shared.AnonymousPullProbeFunc) error {
+func verifyImageAnonymouslyPullable(ctx core.Context, name string, image model.DockerImageReference, probe shared.AnonymousPullProbeFunc) error {
 	tag := strings.TrimSpace(image.Tag)
 	if !registry.IsGHCRRegistry(registry.DockerRegistryFromImageTag(tag)) {
 		return nil

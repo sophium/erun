@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/codesign"
@@ -31,7 +32,7 @@ func hostWorkspacePath(result config.OpenResult, findProjectRoot shared.ProjectF
 }
 
 func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, string, error) {
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -47,19 +48,19 @@ func (a *App) resolveHostWorkspace(selection uiSelection) (config.OpenResult, st
 
 // LoadDirectoryDiff diffs a directory that belongs to no environment, with no
 // env resolution or MCP. The path is validated here so errors name it.
-func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecycle.DiffResult, error) {
+func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (model.DiffResult, error) {
 	path := strings.TrimSpace(directory)
 	if path == "" {
-		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
+		return model.DiffResult{}, fmt.Errorf("load directory diff: no directory given")
 	}
 	info, err := os.Stat(path)
 	if err != nil {
-		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff %s: %w", path, err)
+		return model.DiffResult{}, fmt.Errorf("load directory diff %s: %w", path, err)
 	}
 	if !info.IsDir() {
-		return lifecycle.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
+		return model.DiffResult{}, fmt.Errorf("load directory diff %s: not a directory", path)
 	}
-	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(path, model.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
 		Target:         lifecycle.DiffTargetEnv,
@@ -68,16 +69,16 @@ func (a *App) LoadDirectoryDiff(directory string, options uiDiffOptions) (lifecy
 
 // LoadHostDiff diffs the env's host workspace with host git, never dialing the
 // in-pod MCP, so it works while the pod is stopped.
-func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (lifecycle.DiffResult, error) {
+func (a *App) LoadHostDiff(selection uiSelection, options uiDiffOptions) (model.DiffResult, error) {
 	selection = normalizeSelection(selection)
 	if err := errMissingTenantOrEnvironment("load host diff", selection.Tenant, selection.Environment); err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	_, path, err := a.resolveHostWorkspace(selection)
 	if err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
-	return lifecycle.ResolveGitDiffWithOptions(path, lifecycle.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(path, model.DiffOptions{
 		Scope:          strings.TrimSpace(options.Scope),
 		SelectedCommit: strings.TrimSpace(options.SelectedCommit),
 		Target:         lifecycle.DiffTargetEnv,

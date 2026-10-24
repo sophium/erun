@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
@@ -32,7 +33,7 @@ var errPushVersionRequired = fmt.Errorf("push requires a version: pass --version
 var errPushBuildVersionConflict = fmt.Errorf("push --build builds and pushes the version it mints; do not also pass --version")
 
 func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
-	target := sharedpkg.DockerCommandTarget{}
+	target := model.DockerCommandTarget{}
 	var jobs int
 	cmd := &cobra.Command{
 		Use:   "build",
@@ -78,7 +79,7 @@ func NewBuildCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectF
 	return cmd
 }
 
-func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target sharedpkg.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
@@ -111,7 +112,7 @@ func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectR
 	return ctx.WriteResult(buildrun.NewBuildResult(execution))
 }
 
-func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target sharedpkg.DockerCommandTarget, execution sharedpkg.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, target model.DockerCommandTarget, execution sharedpkg.BuildExecutionSpec, runBuildScript buildpkg.BuildScriptRunnerFunc, buildWithRetry buildpkg.DockerImageBuilderFunc, push buildpkg.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	if buildrun.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
 	}
@@ -130,7 +131,7 @@ func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjec
 }
 
 func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc) *cobra.Command {
-	target := sharedpkg.DockerCommandTarget{}
+	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "push",
@@ -184,7 +185,7 @@ func pushBuildWithRetry(ctx core.Context, buildDockerImage buildpkg.DockerImageB
 
 // NewRootPushCmd keeps --build orchestration here so push stays a pure primitive.
 func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) *cobra.Command {
-	target := sharedpkg.DockerCommandTarget{}
+	target := model.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "push",
@@ -248,7 +249,7 @@ func NewRootPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.Proje
 	return cmd
 }
 
-func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, target *sharedpkg.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
+func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, target *model.DockerCommandTarget, runBuildScript buildpkg.BuildScriptRunnerFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc, cloudStore config.CloudReadStore, cloudDeps cloud.CloudDependencies) error {
 	execution, err := buildrun.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, *target)
 	if err != nil {
 		return err
@@ -271,7 +272,7 @@ func RunDockerPushWithRetry(ctx core.Context, pushInput sharedpkg.DockerPushSpec
 		return nil
 	}
 
-	var authErr sharedpkg.DockerRegistryAuthError
+	var authErr model.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return err
 	}
@@ -306,7 +307,7 @@ func runDockerBuildWithRetry(ctx core.Context, buildInput sharedpkg.DockerBuildS
 		return nil
 	}
 
-	var authErr sharedpkg.DockerRegistryAuthError
+	var authErr model.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return err
 	}
@@ -335,7 +336,7 @@ func runDockerBuildWithRetry(ctx core.Context, buildInput sharedpkg.DockerBuildS
 	return build(buildInput, stdout, stderr)
 }
 
-func addBuildCommandTargetFlags(cmd *cobra.Command, target *sharedpkg.DockerCommandTarget) {
+func addBuildCommandTargetFlags(cmd *cobra.Command, target *model.DockerCommandTarget) {
 	addPushCommandTargetFlags(cmd, target)
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the version build would mint")
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
@@ -345,7 +346,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *sharedpkg.DockerComm
 	cmd.Flags().StringSliceVar(&target.Platforms, "platform", nil, "Build only these docker platforms (e.g. linux/amd64), repeatable; overrides the project's configured docker.platforms (project-wide or per-environment). Mutually exclusive with --release, which always publishes every platform erun supports")
 }
 
-func addPushCommandTargetFlags(cmd *cobra.Command, target *sharedpkg.DockerCommandTarget) {
+func addPushCommandTargetFlags(cmd *cobra.Command, target *model.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.Component, "component", "", "Select a monorepo component declared under .erun/config.yaml components.<name> (auto-selects the lone entry if only one is declared; unused when the project declares none)")
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
@@ -355,7 +356,7 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *sharedpkg.DockerComma
 
 // handleNamespaceAuthError re-authenticates as the namespace owner, escalating to
 // `gh auth refresh`, which cannot complete headless (device code).
-func handleNamespaceAuthError(authErr sharedpkg.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
+func handleNamespaceAuthError(authErr model.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !sharedpkg.IsDockerCreatePackageDenied(authErr.Message) && !buildpkg.IsDockerScopeDenied(authErr.Message) {
 		return false, nil
 	}
@@ -376,7 +377,7 @@ func handleNamespaceAuthError(authErr sharedpkg.DockerRegistryAuthError, retry f
 	return true, finalErr
 }
 
-func retryAfterNamespaceLogin(authErr sharedpkg.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
+func retryAfterNamespaceLogin(authErr model.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
 	ok, _ := sharedpkg.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
 	if !ok {
 		return authErr
@@ -387,7 +388,7 @@ func retryAfterNamespaceLogin(authErr sharedpkg.DockerRegistryAuthError, retry f
 	return nil
 }
 
-func retryAfterScopeRefresh(authErr sharedpkg.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
+func retryAfterScopeRefresh(authErr model.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
 	ok, refreshErr := buildpkg.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
 	if refreshErr != nil {
 		return refreshErr
@@ -399,7 +400,7 @@ func retryAfterScopeRefresh(authErr sharedpkg.DockerRegistryAuthError, retry fun
 }
 
 func scopeStillDenied(err error) bool {
-	var authErr sharedpkg.DockerRegistryAuthError
+	var authErr model.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return false
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -253,7 +254,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, ve
 		_, _ = io.WriteString(stderr, message)
 	}
 	if push && shared.IsDockerPushAuthorizationError(message) {
-		return message, shared.DockerRegistryAuthError{
+		return message, model.DockerRegistryAuthError{
 			Tag:      authContextTag,
 			Registry: registrypkg.DockerRegistryFromImageTag(authContextTag),
 			Message:  strings.TrimSpace(message),
@@ -409,7 +410,7 @@ func hostedRegistryDockerLogin(store config.CloudReadStore, deps cloud.CloudDepe
 	if err != nil {
 		return fmt.Errorf("erun's hosted registry authenticates with the tenant's own erun-api bearer token, minted from a configured erun cloud provider alias: %w", err)
 	}
-	token, err := cloud.CloudProviderBearerToken(core.Context{}, store, cloud.CloudBearerParams{Alias: provider.Alias}, deps)
+	token, err := cloud.CloudProviderBearerToken(core.Context{}, store, model.CloudBearerParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		return fmt.Errorf("mint erun-api bearer token for hosted registry login: %w", err)
 	}

@@ -7,15 +7,14 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *testing.T) {
 	const fallbackSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -27,16 +26,16 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != config.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "petios-devops":
 				// A successful-but-empty lookup triggers the fallback; a failed one does not.
-				return registry.RuntimeRegistryVersions{}, nil
+				return model.RuntimeRegistryVersions{}, nil
 			case config.DefaultRuntimeImageName:
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.85", fallbackSnapshot},
 					LatestStable:   "1.0.85",
@@ -45,7 +44,7 @@ func TestResolveUpgradePlanFallsBackToDefaultRuntimeWhenTenantImageMissing(t *te
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{}, nil
+			return model.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -73,7 +72,7 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	const defaultSnapshot = "1.0.86-snapshot-20260606082157"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -108,30 +107,30 @@ func TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree(t *testing.T) 
 	assertCandidateVersions(t, item.Candidates, tenantSnapshot, defaultSnapshot)
 }
 
-func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
+func disagreeingSnapshotRegistry(t *testing.T, tenantSnapshot, defaultSnapshot string) func(context.Context, string, string) (model.RuntimeRegistryVersions, error) {
 	t.Helper()
 
-	return func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+	return func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 		switch repository {
 		case "petios-devops":
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{tenantSnapshot},
 				LatestSnapshot: tenantSnapshot,
 			}, nil
 		case config.DefaultRuntimeImageName:
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				LatestSnapshot: defaultSnapshot,
 			}, nil
 		default:
 			t.Fatalf("unexpected registry repository: %s", repository)
 		}
-		return registry.RuntimeRegistryVersions{}, nil
+		return model.RuntimeRegistryVersions{}, nil
 	}
 }
 
-func assertCandidateVersions(t *testing.T, candidates []lifecycle.UpgradeVersionCandidate, want ...string) {
+func assertCandidateVersions(t *testing.T, candidates []model.UpgradeVersionCandidate, want ...string) {
 	t.Helper()
 
 	versions := map[string]bool{}
@@ -149,7 +148,7 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 	const canonicalSnapshot = "1.0.86-snapshot-20260611061111"
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -161,14 +160,14 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					LatestStable:   "1.0.85",
 					LatestSnapshot: canonicalSnapshot,
 				}, nil
 			}
-			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return model.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 
@@ -188,7 +187,7 @@ func TestResolveUpgradePlanFallsBackToCanonicalOnFailedTenantLookup(t *testing.T
 func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"petios": {Name: "petios"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -200,11 +199,11 @@ func TestResolveUpgradePlanUnresolvedWhenCanonicalLookupAlsoFails(t *testing.T) 
 				},
 			},
 		},
-		resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == config.DefaultRuntimeImageName {
-				return registry.RuntimeRegistryVersions{}, errors.New("registry unreachable")
+				return model.RuntimeRegistryVersions{}, errors.New("registry unreachable")
 			}
-			return registry.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+			return model.RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		},
 	})
 

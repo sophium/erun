@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -57,10 +58,10 @@ func tenantDashboardAPIResponse(w http.ResponseWriter, req *http.Request, capabi
 // refresh_token grant path mints the token.
 func testERunPlatformAliasApp(t *testing.T, apiURL string) *App {
 	t.Helper()
-	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]config.TenantConfig{"frs": {Name: "frs"}})
+	return testERunPlatformAliasAppWithTenants(t, apiURL, map[string]model.TenantConfig{"frs": {Name: "frs"}})
 }
 
-func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]config.TenantConfig) *App {
+func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants map[string]model.TenantConfig) *App {
 	t.Helper()
 	secrets := cloud.NewFileCloudSecretStore(t.TempDir())
 	refreshRef := "erun/refresh/" + testERunAlias
@@ -68,11 +69,11 @@ func testERunPlatformAliasAppWithTenants(t *testing.T, apiURL string, tenants ma
 		t.Fatalf("seed refresh token: %v", err)
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    testERunAlias,
 		Provider: config.CloudProviderERun,
 		Username: "erun",
-		ERun:     &config.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}
 	return NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig, tenants: tenants},
@@ -97,15 +98,15 @@ const (
 func testAWSAliasApp(t *testing.T) *App {
 	t.Helper()
 	jwt := testUIJWT("https://sts.aws.example")
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team",
 	}}}
 	return NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})

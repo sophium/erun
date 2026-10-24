@@ -10,21 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-// UnexposeParams are the inputs to removing an env's wildcard DNS record; the
-// Ingress goes away with the env's namespace.
-type UnexposeParams struct {
-	Tenant      string
-	Environment string
-	ProjectRoot string
-	// SkipIfUnconfigured makes a missing platform block a no-op, for the delete Job.
-	SkipIfUnconfigured bool
-	// ServicesZone/PlatformNamespace replace ProjectRoot's platform block, for
-	// the sourceless delete Job.
-	ServicesZone      string
-	PlatformNamespace string
-	ErunAlias         string
-}
-
 // UnexposeResult is the resolved teardown plan.
 type UnexposeResult struct {
 	Tenant                     string `json:"tenant"`
@@ -38,7 +23,7 @@ type UnexposeResult struct {
 
 // RunUnexposeService removes the wildcard record expose created so a later env
 // reusing the name does not inherit it. Dry-run traces the full plan.
-func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
+func RunUnexposeService(ctx core.Context, params model.UnexposeParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, deleteDNSRecord DNSRecordDeleterFunc) (UnexposeResult, error) {
 	if store == nil {
 		store = config.ConfigStore{}
 	}
@@ -86,10 +71,10 @@ func RunUnexposeService(ctx core.Context, params UnexposeParams, store ExposeSto
 	return result, nil
 }
 
-func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (UnexposeResult, error) {
+func resolveUnexposeServicePlan(params model.UnexposeParams, store ExposeStore) (UnexposeResult, error) {
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if err := model.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve unexpose service plan", tenant, environment); err != nil {
 		return UnexposeResult{}, err
 	}
 	if err := config.ValidateTenantName(tenant); err != nil {
@@ -117,7 +102,7 @@ func resolveUnexposeServicePlan(params UnexposeParams, store ExposeStore) (Unexp
 	}, nil
 }
 
-func unexposePlatformConfigured(params UnexposeParams) bool {
+func unexposePlatformConfigured(params model.UnexposeParams) bool {
 	if strings.TrimSpace(params.ServicesZone) != "" && strings.TrimSpace(params.PlatformNamespace) != "" {
 		return true
 	}

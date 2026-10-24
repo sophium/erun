@@ -7,6 +7,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // An orchestrator is a host-side AI session that drives its linked environments.
@@ -61,10 +62,10 @@ type orchestratorSession struct {
 
 // orchestratorEnvInput is the frontend's env selection; empty Role means undeclared.
 type orchestratorEnvInput struct {
-	Tenant      string                        `json:"tenant"`
-	Environment string                        `json:"environment"`
-	Directory   string                        `json:"directory"`
-	Role        configpkg.OrchestratorEnvRole `json:"role"`
+	Tenant      string                    `json:"tenant"`
+	Environment string                    `json:"environment"`
+	Directory   string                    `json:"directory"`
+	Role        model.OrchestratorEnvRole `json:"role"`
 }
 
 // orchestratorLaunchInput: empty Model or Effort means the default.
@@ -88,14 +89,14 @@ type orchestratorLaunchChoices struct {
 // orchestratorEnvCandidate is an env the operator considered linking. A runtime
 // env has no directory and RequiredRole names the only role it allows.
 type orchestratorEnvCandidate struct {
-	Tenant           string                        `json:"tenant"`
-	Environment      string                        `json:"environment"`
-	EnvironmentType  configpkg.EnvironmentType     `json:"environmentType"`
-	Eligible         bool                          `json:"eligible"`
-	DefaultDirectory string                        `json:"defaultDirectory"`
-	Mirrored         bool                          `json:"mirrored"`
-	RequiredRole     configpkg.OrchestratorEnvRole `json:"requiredRole,omitempty"`
-	IneligibleReason string                        `json:"ineligibleReason"`
+	Tenant           string                    `json:"tenant"`
+	Environment      string                    `json:"environment"`
+	EnvironmentType  configpkg.EnvironmentType `json:"environmentType"`
+	Eligible         bool                      `json:"eligible"`
+	DefaultDirectory string                    `json:"defaultDirectory"`
+	Mirrored         bool                      `json:"mirrored"`
+	RequiredRole     model.OrchestratorEnvRole `json:"requiredRole,omitempty"`
+	IneligibleReason string                    `json:"ineligibleReason"`
 }
 
 // orchestratorEnvInfo is the JSON view of one linked environment; nil Activity
@@ -104,7 +105,7 @@ type orchestratorEnvInfo struct {
 	Tenant      string                         `json:"tenant"`
 	Environment string                         `json:"environment"`
 	Directory   string                         `json:"directory"`
-	Role        configpkg.OrchestratorEnvRole  `json:"role"`
+	Role        model.OrchestratorEnvRole      `json:"role"`
 	Activity    *uiEnvironmentActivitySnapshot `json:"activity,omitempty"`
 	Usage       *uiEnvironmentUsageSnapshot    `json:"usage,omitempty"`
 }
@@ -164,12 +165,12 @@ func orchestratorIDFromSessionKey(key string) (string, bool) {
 }
 
 // orchestratableEnv reports whether role may be linked against env.
-func orchestratableEnv(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRole) bool {
+func orchestratableEnv(env configpkg.EnvConfig, role model.OrchestratorEnvRole) bool {
 	return configpkg.OrchestratorEnvRoleAllowed(env.ResolvedType(), role)
 }
 
 // orchestratorIneligibilityReason returns "" when the link is allowed.
-func orchestratorIneligibilityReason(env configpkg.EnvConfig, role configpkg.OrchestratorEnvRole) string {
+func orchestratorIneligibilityReason(env configpkg.EnvConfig, role model.OrchestratorEnvRole) string {
 	return configpkg.OrchestratorEnvRoleIneligibilityReason(env.ResolvedType(), role)
 }
 

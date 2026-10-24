@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -48,9 +49,9 @@ type IdleStopHistoryInput struct {
 
 // IdleStopHistoryResult wraps entries (newest first) so the schema stays an object.
 type IdleStopHistoryResult struct {
-	Tenant      string                                 `json:"tenant"`
-	Environment string                                 `json:"environment"`
-	Entries     []activity.EnvironmentStopHistoryEntry `json:"entries"`
+	Tenant      string                              `json:"tenant"`
+	Environment string                              `json:"environment"`
+	Entries     []model.EnvironmentStopHistoryEntry `json:"entries"`
 }
 
 func idleStopHistoryTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
@@ -97,7 +98,7 @@ func idleStopRecordTool(runtime shared.RuntimeConfig) func(context.Context, *mcp
 			reason = "Manual stop"
 		}
 		now := time.Now().UTC()
-		entry := activity.EnvironmentStopHistoryEntry{
+		entry := model.EnvironmentStopHistoryEntry{
 			StoppedAt:        now,
 			Source:           activity.StopHistorySourceHostManual,
 			Reason:           reason,
@@ -131,8 +132,8 @@ func idleStopRecordTool(runtime shared.RuntimeConfig) func(context.Context, *mcp
 	}
 }
 
-func stopHistoryMarkerFromPending(marker activity.EnvironmentIdleMarker, since time.Time) activity.EnvironmentStopHistoryMarker {
-	out := activity.EnvironmentStopHistoryMarker{
+func stopHistoryMarkerFromPending(marker model.EnvironmentIdleMarker, since time.Time) model.EnvironmentStopHistoryMarker {
+	out := model.EnvironmentStopHistoryMarker{
 		Name:   marker.Name,
 		Idle:   marker.Idle,
 		Reason: marker.Reason,

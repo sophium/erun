@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable(t *testing.T) {
-	cpu := uiRuntimeCPUUsageFromReading(config.RuntimeCPUUsage{
+	cpu := uiRuntimeCPUUsageFromReading(model.RuntimeCPUUsage{
 		Unavailable: "cgroup v2 not detected under /sys/fs/cgroup; CPU usage needs cpu.max/cpu.stat",
 	})
 	if cpu.Available {
@@ -26,7 +27,7 @@ func TestRuntimeUsageCPUUnavailableRendersAsStatedUnavailable(t *testing.T) {
 }
 
 func TestRuntimeUsageMemoryUnlimitedRendersAsUnlimitedNotZeroPercent(t *testing.T) {
-	memory := uiRuntimeMemoryUsageFromReading(config.RuntimeMemoryUsage{
+	memory := uiRuntimeMemoryUsageFromReading(model.RuntimeMemoryUsage{
 		CurrentBytes: 512 * 1024 * 1024,
 		PeakBytes:    600 * 1024 * 1024,
 		Unlimited:    true,
@@ -46,7 +47,7 @@ func TestRuntimeUsageMemoryUnlimitedRendersAsUnlimitedNotZeroPercent(t *testing.
 }
 
 func TestRuntimeUsageMemoryUnavailableRendersAsStatedUnavailable(t *testing.T) {
-	memory := uiRuntimeMemoryUsageFromReading(config.RuntimeMemoryUsage{
+	memory := uiRuntimeMemoryUsageFromReading(model.RuntimeMemoryUsage{
 		Unavailable: "memory.current was not readable",
 	})
 	if memory.Available {
@@ -61,7 +62,7 @@ func TestRuntimeUsageMemoryUnavailableRendersAsStatedUnavailable(t *testing.T) {
 }
 
 func TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable(t *testing.T) {
-	disk := uiRuntimeDiskUsageFromReading(config.RuntimeDiskUsage{
+	disk := uiRuntimeDiskUsageFromReading(model.RuntimeDiskUsage{
 		Mount:       "/home/erun",
 		Unavailable: "df did not report usage for /home/erun",
 	})
@@ -80,17 +81,17 @@ func TestRuntimeUsageDiskUnavailableRendersAsStatedUnavailable(t *testing.T) {
 }
 
 func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
-	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	usage := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:      "petios",
 		Environment: "local",
-		CPU:         config.RuntimeCPUUsage{Unavailable: "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"},
-		Memory: config.RuntimeMemoryUsage{
+		CPU:         model.RuntimeCPUUsage{Unavailable: "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"},
+		Memory: model.RuntimeMemoryUsage{
 			CurrentBytes:   1024 * 1024 * 1024,
 			LimitBytes:     2048 * 1024 * 1024,
 			PercentOfLimit: 50,
 			OOMKills:       2,
 		},
-		Disk: []config.RuntimeDiskUsage{{
+		Disk: []model.RuntimeDiskUsage{{
 			Mount:       "/home/erun",
 			TotalBytes:  100 * 1024 * 1024 * 1024,
 			UsedBytes:   90 * 1024 * 1024 * 1024,
@@ -118,7 +119,7 @@ func TestRuntimeUsageFromReadingMixedAvailability(t *testing.T) {
 // Uses the real wiring: the expired parent ctx triggers the timeout before kubectl runs.
 func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"petios": {Name: "petios", DefaultEnvironment: "local"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -148,15 +149,15 @@ func TestLoadRuntimeUsageReportsOwnTimeoutNotSignalKilled(t *testing.T) {
 // Image builds run in the dind sidecar's cgroup, so the runtime container alone
 // reads idle during a build. Asserted on the JSON the popover receives.
 func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *testing.T) {
-	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	usage := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:         "erun",
 		Environment:    "build",
-		CPU:            config.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.2},
-		Memory:         config.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
+		CPU:            model.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.2},
+		Memory:         model.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
 		ExcludesBuilds: true,
-		Dind: &config.RuntimeDindUsage{
-			CPU:    config.RuntimeCPUUsage{QuotaCores: 8, UtilizationPercent: 91.5},
-			Memory: config.RuntimeMemoryUsage{CurrentBytes: 19 << 30, LimitBytes: 20 << 30, PercentOfLimit: 97},
+		Dind: &model.RuntimeDindUsage{
+			CPU:    model.RuntimeCPUUsage{QuotaCores: 8, UtilizationPercent: 91.5},
+			Memory: model.RuntimeMemoryUsage{CurrentBytes: 19 << 30, LimitBytes: 20 << 30, PercentOfLimit: 97},
 		},
 	})
 
@@ -190,15 +191,15 @@ func TestRuntimeUsageCarriesTheDindSidecarSoAnActiveBuildIsNotAnIdleReading(t *t
 
 func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 	const noQuota = "cpu.max reports no quota (unlimited or not readable); utilisation needs a quota to measure against"
-	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	usage := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:         "erun",
 		Environment:    "build",
-		CPU:            config.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
-		Memory:         config.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
+		CPU:            model.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
+		Memory:         model.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30, PercentOfLimit: 2},
 		ExcludesBuilds: true,
-		Dind: &config.RuntimeDindUsage{
-			CPU:    config.RuntimeCPUUsage{Unavailable: noQuota, UsageUsec: 385_919_164},
-			Memory: config.RuntimeMemoryUsage{CurrentBytes: 512 << 20, Unlimited: true},
+		Dind: &model.RuntimeDindUsage{
+			CPU:    model.RuntimeCPUUsage{Unavailable: noQuota, UsageUsec: 385_919_164},
+			Memory: model.RuntimeMemoryUsage{CurrentBytes: 512 << 20, Unlimited: true},
 		},
 	})
 
@@ -216,11 +217,11 @@ func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 	}
 
 	// No sidecar reading stays nil, not a zero reading.
-	withoutSidecar := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	withoutSidecar := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "remote",
-		CPU:         config.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
-		Memory:      config.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30},
+		CPU:         model.RuntimeCPUUsage{QuotaCores: 12, UtilizationPercent: 0.6},
+		Memory:      model.RuntimeMemoryUsage{CurrentBytes: 1 << 30, LimitBytes: 23 << 30},
 	})
 	if withoutSidecar.Dind != nil {
 		t.Fatalf("an environment with no sidecar reading must not carry one, got %+v", withoutSidecar.Dind)
@@ -228,15 +229,15 @@ func TestRuntimeUsageCarriesTheSidecarCumulativeCPUWithNoQuota(t *testing.T) {
 }
 
 func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
-	usage := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	usage := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "code1",
-		Requests: &config.RuntimeUsageRequests{
-			Containers: map[string]config.KubernetesRequests{
+		Requests: &model.RuntimeUsageRequests{
+			Containers: map[string]model.KubernetesRequests{
 				config.DevopsComponentName: {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
 				"erun-dind":                {CPUMilli: 250, MemoryBytes: 1024 * (1 << 20)},
 			},
-			Pod: config.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * (1 << 20)},
+			Pod: model.KubernetesRequests{CPUMilli: 500, MemoryBytes: 2048 * (1 << 20)},
 		},
 	})
 	if usage.Requests == nil {
@@ -251,14 +252,14 @@ func TestRuntimeUsageCarriesTheRuntimeContainersOwnRequest(t *testing.T) {
 }
 
 func TestRuntimeUsageDistinguishesAnUnreadReservationFromNone(t *testing.T) {
-	absent := uiRuntimeUsageFromReading(config.RuntimeUsage{Tenant: "erun", Environment: "code1"})
+	absent := uiRuntimeUsageFromReading(model.RuntimeUsage{Tenant: "erun", Environment: "code1"})
 	if absent.Requests != nil {
 		t.Fatalf("expected no Requests when the shared reading carries none, got %+v", absent.Requests)
 	}
-	unread := uiRuntimeUsageFromReading(config.RuntimeUsage{
+	unread := uiRuntimeUsageFromReading(model.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "code1",
-		Requests:    &config.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"},
+		Requests:    &model.RuntimeUsageRequests{Unavailable: "kubectl get pods: connection refused"},
 	})
 	if unread.Requests == nil || unread.Requests.Unavailable == "" {
 		t.Fatalf("expected the unread reservation to state its reason, got %+v", unread.Requests)

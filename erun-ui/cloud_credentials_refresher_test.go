@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, alias string) *App {
@@ -13,12 +14,12 @@ func credentialRefreshTargetApp(t *testing.T, envType config.EnvironmentType, al
 	return NewApp(erunUIDeps{
 		store: stubUIStore{
 			config: &config.ERunConfig{
-				CloudProviders: []config.CloudProviderConfig{
+				CloudProviders: []model.CloudProviderConfig{
 					{Alias: "op+123@aws", Provider: config.CloudProviderAWS, Username: "op", AccountID: "123", Profile: "op"},
 					{Alias: "op@cloudflare", Provider: config.CloudProviderCloudflare, Username: "op"},
 				},
 			},
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"team": {Name: "team", DefaultEnvironment: "dev"},
 			},
 			envs: map[string]config.EnvConfig{

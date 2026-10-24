@@ -5,43 +5,14 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
-// ObserveParams names the Secrets to check for key presence; everything else is always reported.
-type ObserveParams struct {
-	Secrets []ObserveSecretCheck
-}
-
-// ObserveSecretCheck names one Secret/key pair; the value is never read.
-type ObserveSecretCheck struct {
-	Name string
-	Key  string
-}
-
-// ObserveResult is a read-only snapshot of an environment's Kubernetes state.
-type ObserveResult struct {
-	Tenant         string                            `json:"tenant"`
-	Environment    string                            `json:"environment"`
-	Namespace      string                            `json:"namespace"`
-	Pods           []ObservedPod                     `json:"pods"`
-	ResourceQuotas []ObservedResourceQuota           `json:"resourceQuotas"`
-	LimitRanges    []ObservedLimitRange              `json:"limitRanges"`
-	Ingresses      []clusterread.ObservedIngress     `json:"ingresses"`
-	Services       []clusterread.ObservedService     `json:"services"`
-	Certificates   []clusterread.ObservedCertificate `json:"certificates"`
-	Secrets        []ObservedSecretCheck             `json:"secrets,omitempty"`
-	// HelmRelease is nil in dry-run.
-	HelmRelease *clusterread.ObservedHelmRelease `json:"helmRelease,omitempty"`
-	// Drift is not omitempty: [] means "compared, nothing disagreed"; a dry run's null means
-	// "not determined".
-	Drift []string `json:"drift"`
-}
-
 // RunObservation reads one namespace's state, walking a non-Ready Certificate's chain to its
 // failure reason. Read-only: every kubectl call is a literal `get`, the helm call a literal `status`.
-func RunObservation(ctx core.Context, req config.ShellLaunchParams, params ObserveParams) (ObserveResult, error) {
-	result := ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
+func RunObservation(ctx core.Context, req config.ShellLaunchParams, params model.ObserveParams) (model.ObserveResult, error) {
+	result := model.ObserveResult{Tenant: req.Tenant, Environment: req.Environment, Namespace: req.Namespace}
 
 	podArgs := clusterread.ObserveGetArgs(req, "pods")
 	quotaArgs := clusterread.ObserveGetArgs(req, "resourcequota")
@@ -75,23 +46,23 @@ func RunObservation(ctx core.Context, req config.ShellLaunchParams, params Obser
 
 	var err error
 	if result.Pods, err = fetchObservedPods(podArgs); err != nil {
-		return ObserveResult{}, err
+		return model.ObserveResult{}, err
 	}
 	if result.ResourceQuotas, err = fetchObservedResourceQuotas(quotaArgs); err != nil {
-		return ObserveResult{}, err
+		return model.ObserveResult{}, err
 	}
 	if result.LimitRanges, err = fetchObservedLimitRanges(limitArgs); err != nil {
-		return ObserveResult{}, err
+		return model.ObserveResult{}, err
 	}
 	// These fetchers are shared, so the "observe:" prefix is added here.
 	if result.Ingresses, err = clusterread.FetchObservedIngresses(ingressArgs); err != nil {
-		return ObserveResult{}, fmt.Errorf("observe: %w", err)
+		return model.ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
 	if result.Services, err = clusterread.FetchObservedServices(serviceArgs); err != nil {
-		return ObserveResult{}, fmt.Errorf("observe: %w", err)
+		return model.ObserveResult{}, fmt.Errorf("observe: %w", err)
 	}
 	if result.Certificates, err = clusterread.FetchObservedCertificates(ctx, req, certArgs); err != nil {
-		return ObserveResult{}, err
+		return model.ObserveResult{}, err
 	}
 	for i, check := range params.Secrets {
 		result.Secrets = append(result.Secrets, fetchObservedSecretCheck(secretArgs[i], check))

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-mcp/tools/pin"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -130,8 +130,8 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "frs", Environment: "prod", RepoPath: root},
 		Store:   store,
-		ResolveRuntimeRegistryVersions: func(context.Context) (registry.RuntimeRegistryVersions, error) {
-			return registry.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
+		ResolveRuntimeRegistryVersions: func(context.Context) (model.RuntimeRegistryVersions, error) {
+			return model.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
 		},
 	}
 	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Version: "1.0.228"})

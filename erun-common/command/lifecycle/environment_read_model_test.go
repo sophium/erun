@@ -4,9 +4,8 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // An unobserved power state must read as Unknown, never Stopped or Idle.
@@ -34,10 +33,10 @@ func TestResolveEnvironmentLifecycleStateUnknownIsNotAFalseNegative(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ResolveEnvironmentLifecycleState(tc.in)
-			if got != EnvironmentLifecycleUnknown {
+			if got != modelpkg.EnvironmentLifecycleUnknown {
 				t.Fatalf("want unknown, got %s", got)
 			}
-			if got == EnvironmentLifecycleStopped || got == EnvironmentLifecycleIdle {
+			if got == modelpkg.EnvironmentLifecycleStopped || got == modelpkg.EnvironmentLifecycleIdle {
 				t.Fatalf("an unobserved signal must never resolve to a real state; got %s", got)
 			}
 		})
@@ -48,14 +47,14 @@ func TestResolveEnvironmentLifecycleStateManagedCloudPowerState(t *testing.T) {
 	stopped := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
 		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusStopped,
 	})
-	if stopped != EnvironmentLifecycleStopped {
+	if stopped != modelpkg.EnvironmentLifecycleStopped {
 		t.Fatalf("want stopped, got %s", stopped)
 	}
 
 	running := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
 		ManagedCloud: true, CloudContextObserved: true, CloudContextStatus: cloud.CloudContextStatusRunning,
 	})
-	if running != EnvironmentLifecycleRunning {
+	if running != modelpkg.EnvironmentLifecycleRunning {
 		t.Fatalf("want running, got %s", running)
 	}
 }
@@ -66,7 +65,7 @@ func TestResolveEnvironmentLifecycleStateDeployFailedTakesPriorityOverIdle(t *te
 		DeployHealthObserved: true, DeployHealthy: false,
 		IdleStatusObserved: true, StopEligible: true,
 	})
-	if got != EnvironmentLifecycleDeployFailed {
+	if got != modelpkg.EnvironmentLifecycleDeployFailed {
 		t.Fatalf("want deploy-failed, got %s", got)
 	}
 }
@@ -75,14 +74,14 @@ func TestResolveEnvironmentLifecycleStateIdleAndRunning(t *testing.T) {
 	idle := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
 		IdleStatusObserved: true, StopEligible: true,
 	})
-	if idle != EnvironmentLifecycleIdle {
+	if idle != modelpkg.EnvironmentLifecycleIdle {
 		t.Fatalf("want idle, got %s", idle)
 	}
 
 	running := ResolveEnvironmentLifecycleState(EnvironmentLifecycleInputs{
 		IdleStatusObserved: true, StopEligible: false,
 	})
-	if running != EnvironmentLifecycleRunning {
+	if running != modelpkg.EnvironmentLifecycleRunning {
 		t.Fatalf("want running, got %s", running)
 	}
 }
@@ -94,7 +93,7 @@ func TestAssembleEnvironmentReadModelNilSignalsStayUnknown(t *testing.T) {
 	if model.Tenant != "acme" {
 		t.Fatalf("tenant not trimmed: got %q", model.Tenant)
 	}
-	if model.State != EnvironmentLifecycleUnknown {
+	if model.State != modelpkg.EnvironmentLifecycleUnknown {
 		t.Fatalf("with no cloud context, idle, or health observed, want unknown, got %s", model.State)
 	}
 	if model.CloudContext != nil || model.Idle != nil || model.Health != nil {
@@ -105,12 +104,12 @@ func TestAssembleEnvironmentReadModelNilSignalsStayUnknown(t *testing.T) {
 func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(t *testing.T) {
 	// Status is blank when loaded from config only, as the no-refresh read model produces.
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRuntime}
-	cloudContext := &config.CloudContextStatus{CloudContextConfig: config.CloudContextConfig{Name: "acme-dev"}}
-	idle := &activity.EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}
+	cloudContext := &modelpkg.CloudContextStatus{CloudContextConfig: modelpkg.CloudContextConfig{Name: "acme-dev"}}
+	idle := &modelpkg.EnvironmentIdleStatus{ManagedCloud: true, StopEligible: false}
 
 	model := AssembleEnvironmentReadModel("acme", entry, cloudContext, idle, nil)
 
-	if model.State != EnvironmentLifecycleUnknown {
+	if model.State != modelpkg.EnvironmentLifecycleUnknown {
 		t.Fatalf("a blank (unrefreshed) cloud-context status must read as unknown, got %s", model.State)
 	}
 	if model.CloudContext == nil {
@@ -120,16 +119,16 @@ func TestAssembleEnvironmentReadModelUnrefreshedCloudContextIsUnknownNotStopped(
 
 func TestAssembleEnvironmentReadModelDeployFailedFromHealth(t *testing.T) {
 	entry := ListEnvironmentResult{Name: "dev", Type: config.EnvironmentTypeRemoteAgent}
-	idle := &activity.EnvironmentIdleStatus{StopEligible: false}
-	resolvedHealth := ResolveEnvironmentHealth(config.RootConfigInspection{}, deploy.DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
+	idle := &modelpkg.EnvironmentIdleStatus{StopEligible: false}
+	resolvedHealth := ResolveEnvironmentHealth(modelpkg.RootConfigInspection{}, modelpkg.DeployDiagnosisResult{HelmStatus: "STATUS: pending-upgrade"})
 	health := &resolvedHealth
 
 	model := AssembleEnvironmentReadModel("acme", entry, nil, idle, health)
 
-	if model.State != EnvironmentLifecycleDeployFailed {
+	if model.State != modelpkg.EnvironmentLifecycleDeployFailed {
 		t.Fatalf("want deploy-failed, got %s", model.State)
 	}
-	if model.Health.RecommendedRecovery != deploy.DeployRecoveryClearPendingHelm {
+	if model.Health.RecommendedRecovery != modelpkg.DeployRecoveryClearPendingHelm {
 		t.Fatalf("want clear-pending-helm recommendation, got %s", model.Health.RecommendedRecovery)
 	}
 }

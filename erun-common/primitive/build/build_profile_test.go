@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Names the timing dir directly instead of moving HOME, so kubeconfig and cloud config still resolve.
@@ -19,7 +20,7 @@ func withTimingHome(t *testing.T) {
 
 func writeFakeTimingRecord(t *testing.T, dir, command string, startedAt time.Time, failed bool) string {
 	t.Helper()
-	record := core.TimingRecord{
+	record := model.TimingRecord{
 		Command:         command,
 		StartedAt:       startedAt,
 		DurationSeconds: 12.5,
@@ -222,14 +223,14 @@ func TestWriteTimingRecordPrunesOldestBeyondRetentionLimit(t *testing.T) {
 }
 
 func TestRenderTimingRecordRowsSortsByDurationAndShowsCgroup(t *testing.T) {
-	record := core.TimingRecord{
+	record := model.TimingRecord{
 		Command:  "build",
 		Duration: "10s",
-		Steps: []core.TimingStepJSON{
+		Steps: []model.TimingStepJSON{
 			{Name: "fast-image", Duration: "1s", DurationSeconds: 1},
 			{
 				Name: "slow-image", Duration: "9s", DurationSeconds: 9,
-				Cgroup: &core.BuildCgroupMetrics{Available: true, CPUSeconds: 8.5, ThrottledPeriods: 3, TotalPeriods: 10},
+				Cgroup: &model.BuildCgroupMetrics{Available: true, CPUSeconds: 8.5, ThrottledPeriods: 3, TotalPeriods: 10},
 			},
 		},
 	}

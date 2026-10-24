@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -15,7 +16,7 @@ import (
 
 // resolveInstallExistingVersionDeploySpec installs the image already published at
 // the pinned version, verifying it exists; it never builds.
-func resolveInstallExistingVersionDeploySpec(ctx core.Context, store DeployStore, target configpkg.OpenResult, deployContext shared.KubernetesDeployContext, version string, versionFromPersist bool) (DeploySpec, error) {
+func resolveInstallExistingVersionDeploySpec(ctx core.Context, store DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, version string, versionFromPersist bool) (DeploySpec, error) {
 	deployInput, err := newHelmDeploySpec(target, deployContext, version)
 	if err != nil {
 		return DeploySpec{}, err
@@ -152,7 +153,7 @@ func helmOIDCAllowedIssuersSetArgs(issuers string) []string {
 
 // resolveDeploySpecForCurrentDockerBuild references the image the build phase
 // already pushed; it never builds.
-func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.OpenResult, deployContext shared.KubernetesDeployContext, build shared.DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target configpkg.OpenResult, deployContext model.KubernetesDeployContext, build shared.DockerBuildSpec) (DeploySpec, error) {
 	deployInput, err := newHelmDeploySpec(target, deployContext, "")
 	if err != nil {
 		return DeploySpec{}, err
@@ -193,19 +194,19 @@ func resolveCurrentDockerComponentBuildForDeploy(ctx core.Context, store shared.
 	return &build, nil
 }
 
-func currentDockerComponentBuildContext(resolveDockerBuildContext shared.BuildContextResolverFunc) (shared.DockerBuildContext, bool, error) {
+func currentDockerComponentBuildContext(resolveDockerBuildContext shared.BuildContextResolverFunc) (model.DockerBuildContext, bool, error) {
 	if resolveDockerBuildContext == nil {
-		return shared.DockerBuildContext{}, false, nil
+		return model.DockerBuildContext{}, false, nil
 	}
 	buildContext, err := resolveDockerBuildContext()
 	if err != nil {
-		return shared.DockerBuildContext{}, false, err
+		return model.DockerBuildContext{}, false, err
 	}
 	ok := strings.TrimSpace(buildContext.DockerfilePath) != "" && filepath.Base(filepath.Dir(buildContext.Dir)) == "docker"
 	return buildContext, ok, nil
 }
 
-func deployContextOwnsRuntimeChart(deployContext shared.KubernetesDeployContext, tenant string) bool {
+func deployContextOwnsRuntimeChart(deployContext model.KubernetesDeployContext, tenant string) bool {
 	name := strings.TrimSpace(deployContext.ComponentName)
 	if name == "" {
 		return false
@@ -214,7 +215,7 @@ func deployContextOwnsRuntimeChart(deployContext shared.KubernetesDeployContext,
 	return slices.Contains(runtimeComponentNames(tenant), name)
 }
 
-func deployContextOwnsDockerBuild(deployContext shared.KubernetesDeployContext, build shared.DockerBuildSpec) bool {
+func deployContextOwnsDockerBuild(deployContext model.KubernetesDeployContext, build shared.DockerBuildSpec) bool {
 	chartPath := filepath.Clean(strings.TrimSpace(deployContext.ChartPath))
 	dockerfilePath := filepath.Clean(strings.TrimSpace(build.DockerfilePath))
 	if chartPath == "" || dockerfilePath == "" {
@@ -249,7 +250,7 @@ func ResolveOpenRuntimeDeploySpec(ctx core.Context, store DeployStore, findProje
 	}
 	// Rethread the recorded MCP-auth key, or a reopen would replace the pod with an
 	// unauthenticated edge.
-	if err := ApplyMCPAuthToRuntimeSpec(ctx, DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
+	if err := ApplyMCPAuthToRuntimeSpec(ctx, model.DeployTarget{Tenant: target.Tenant, Environment: target.Environment}, &spec); err != nil {
 		return DeploySpec{}, err
 	}
 	return spec, nil

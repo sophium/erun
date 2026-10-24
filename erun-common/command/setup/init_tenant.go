@@ -2,16 +2,16 @@ package setup
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
-func (s *bootstrapRunState) loadTenants() ([]configpkg.TenantConfig, error) {
+func (s *bootstrapRunState) loadTenants() ([]model.TenantConfig, error) {
 	if s.tenantsLoaded {
 		return s.tenants, nil
 	}
@@ -165,7 +165,7 @@ func (s *bootstrapRunState) resolveTenantFromDirectory() error {
 }
 
 // envsByTenant is best-effort: load failures yield no envs for that tenant.
-func (s *bootstrapRunState) envsByTenant(tenants []configpkg.TenantConfig) map[string][]configpkg.EnvConfig {
+func (s *bootstrapRunState) envsByTenant(tenants []model.TenantConfig) map[string][]configpkg.EnvConfig {
 	lister, ok := s.runner.Store.(interface {
 		ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 	})
@@ -232,7 +232,7 @@ func (s *bootstrapRunState) createTenantConfig() error {
 		return err
 	}
 	s.runner.Context.Trace("Adding new tenant")
-	s.tenantConfig = configpkg.TenantConfig{
+	s.tenantConfig = model.TenantConfig{
 		Name:               s.tenant,
 		DefaultEnvironment: defaultBootstrapEnvironment(s.params.Environment),
 	}
@@ -255,17 +255,7 @@ func (s *bootstrapRunState) tenantProjectRoot() (string, error) {
 	return project.root, nil
 }
 
-// TenantSelectionUnavailableError names the flag that resolves the choice, since
-// nobody can answer a prompt.
-type TenantSelectionUnavailableError struct {
-	Tenants []string
-}
-
-func (e TenantSelectionUnavailableError) Error() string {
-	return fmt.Sprintf("a tenant has to be chosen and this run has nobody to ask; pass --tenant with one of: %s", strings.Join(e.Tenants, ", "))
-}
-
-func tenantNameList(tenants []configpkg.TenantConfig) []string {
+func tenantNameList(tenants []model.TenantConfig) []string {
 	names := make([]string, 0, len(tenants))
 	for _, tenant := range tenants {
 		names = append(names, tenant.Name)
@@ -273,12 +263,12 @@ func tenantNameList(tenants []configpkg.TenantConfig) []string {
 	return names
 }
 
-func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants []configpkg.TenantConfig) (TenantSelectionResult, error) {
+func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
 	if params.InitializeCurrentProject {
-		return TenantSelectionResult{Initialize: true}, nil
+		return model.TenantSelectionResult{Initialize: true}, nil
 	}
 	if params.SelectedTenant != "" {
-		return TenantSelectionResult{Tenant: params.SelectedTenant}, nil
+		return model.TenantSelectionResult{Tenant: params.SelectedTenant}, nil
 	}
 	if s.SelectTenant == nil {
 		options := make([]string, 0, len(tenants)+1)
@@ -286,8 +276,8 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 			options = append(options, tenant.Name)
 		}
 		options = append(options, configpkg.InitializeCurrentProject)
-		return TenantSelectionResult{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
-			Type:    BootstrapInitInteractionSelectTenant,
+		return model.TenantSelectionResult{}, BootstrapInitInteractionError{Interaction: model.BootstrapInitInteraction{
+			Type:    model.BootstrapInitInteractionSelectTenant,
 			Label:   "Select tenant",
 			Options: options,
 		}}
@@ -295,26 +285,26 @@ func (s BootstrapRunner) selectTenant(params open.BootstrapInitParams, tenants [
 	if s.TenantSelectionUnavailable {
 		// A sole tenant is what an empty answer would pick anyway.
 		if len(tenants) == 1 {
-			return TenantSelectionResult{Tenant: tenants[0].Name}, nil
+			return model.TenantSelectionResult{Tenant: tenants[0].Name}, nil
 		}
-		return TenantSelectionResult{}, TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
+		return model.TenantSelectionResult{}, model.TenantSelectionUnavailableError{Tenants: tenantNameList(tenants)}
 	}
 	selection, err := s.SelectTenant(tenants)
 	if err != nil {
-		return TenantSelectionResult{}, err
+		return model.TenantSelectionResult{}, err
 	}
 	if selection.Initialize {
 		return selection, nil
 	}
 	if selection.Tenant == "" {
-		return TenantSelectionResult{}, ErrTenantSelectionCancelled
+		return model.TenantSelectionResult{}, ErrTenantSelectionCancelled
 	}
 	return selection, nil
 }
 
 // findTenantForDirectory picks the longest matching env repo path; ties across
 // tenants resolve to no match.
-func findTenantForDirectory(dir string, tenants []configpkg.TenantConfig, envsByTenant map[string][]configpkg.EnvConfig) (configpkg.TenantConfig, bool) {
+func findTenantForDirectory(dir string, tenants []model.TenantConfig, envsByTenant map[string][]configpkg.EnvConfig) (model.TenantConfig, bool) {
 	cleanDir := filepath.Clean(dir)
 	bestTenant := -1
 	bestLen := -1
@@ -339,7 +329,7 @@ func findTenantForDirectory(dir string, tenants []configpkg.TenantConfig, envsBy
 	}
 
 	if bestTenant == -1 || ambiguous {
-		return configpkg.TenantConfig{}, false
+		return model.TenantConfig{}, false
 	}
 	return tenants[bestTenant], true
 }
@@ -354,10 +344,3 @@ func isWithinDirectory(path, root string) bool {
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
-
-type (
-	TenantSelectionResult struct {
-		Tenant     string
-		Initialize bool
-	}
-)

@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const buildCgroupSysFSRoot = "/sys/fs/cgroup"
@@ -162,30 +164,15 @@ func CaptureBuildCgroupSnapshot() BuildCgroupSnapshot {
 	return BuildCgroupSnapshot{Applicable: true, Ok: ok, Counters: counters}
 }
 
-// BuildCgroupMetrics is one step's cgroup cost. It is nil when not applicable and
-// has Available false when the read failed.
-type BuildCgroupMetrics struct {
-	Available         bool    `json:"available"`
-	Unavailable       string  `json:"unavailable,omitempty"`
-	CPUSeconds        float64 `json:"cpuSeconds,omitempty"`
-	CPUPercentOfQuota float64 `json:"cpuPercentOfQuota,omitempty"`
-	ThrottledPeriods  int64   `json:"throttledPeriods,omitempty"`
-	TotalPeriods      int64   `json:"totalPeriods,omitempty"`
-	ThrottledSeconds  float64 `json:"throttledSeconds,omitempty"`
-	IOReadBytes       int64   `json:"ioReadBytes,omitempty"`
-	IOWriteBytes      int64   `json:"ioWriteBytes,omitempty"`
-	PeakMemoryBytes   int64   `json:"peakMemoryBytes,omitempty"`
-}
-
-func BuildCgroupMetricsFromSnapshots(before, after BuildCgroupSnapshot, elapsed time.Duration) *BuildCgroupMetrics {
+func BuildCgroupMetricsFromSnapshots(before, after BuildCgroupSnapshot, elapsed time.Duration) *model.BuildCgroupMetrics {
 	if !before.Applicable {
 		return nil
 	}
 	if !before.Ok || !after.Ok {
-		return &BuildCgroupMetrics{Unavailable: "build cgroup counters were not readable"}
+		return &model.BuildCgroupMetrics{Unavailable: "build cgroup counters were not readable"}
 	}
 	deltaUsage := nonNegativeDelta(before.Counters.UsageUsec, after.Counters.UsageUsec)
-	metrics := &BuildCgroupMetrics{
+	metrics := &model.BuildCgroupMetrics{
 		Available:        true,
 		CPUSeconds:       float64(deltaUsage) / 1e6,
 		ThrottledPeriods: nonNegativeDelta(before.Counters.ThrottledPeriods, after.Counters.ThrottledPeriods),
@@ -204,7 +191,7 @@ func BuildCgroupMetricsFromSnapshots(before, after BuildCgroupSnapshot, elapsed 
 }
 
 // BuildCgroupSummary renders a step row's cgroup detail, or "" when there is none.
-func BuildCgroupSummary(m *BuildCgroupMetrics) string {
+func BuildCgroupSummary(m *model.BuildCgroupMetrics) string {
 	if m == nil || !m.Available {
 		return ""
 	}

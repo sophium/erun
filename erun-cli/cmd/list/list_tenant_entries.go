@@ -7,8 +7,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func writeTenantEntry(ctx core.Context, tenant lifecycle.ListTenantResult) error {
@@ -108,7 +108,7 @@ func environmentDetailLines(tenantName string, env lifecycle.ListEnvironmentResu
 	return lines
 }
 
-func environmentSSHDetailLines(tenantName, environmentName string, ssh lifecycle.ListSSHResult, indent string) []string {
+func environmentSSHDetailLines(tenantName, environmentName string, ssh model.ListSSHResult, indent string) []string {
 	return []string{
 		indent + "sshd: on",
 		indent + "ssh-host: " + sshHostAliasLabel(tenantName, environmentName, ssh.HostAlias),
@@ -153,7 +153,7 @@ func runtimeVersionLabel(tenantName string, env lifecycle.ListEnvironmentResult)
 	return version + " (" + detail + ")"
 }
 
-func runtimePodLabel(pod config.RuntimePodResources) string {
+func runtimePodLabel(pod model.RuntimePodResources) string {
 	cpu := strings.TrimSpace(pod.CPU)
 	memory := strings.TrimSpace(pod.Memory)
 	if cpu == "" && memory == "" {
@@ -214,7 +214,7 @@ func statusMarkers(isDefault, isEffective bool) []string {
 	return markers
 }
 
-func writeCloudProviders(ctx core.Context, providers []cloud.CloudProviderStatus) error {
+func writeCloudProviders(ctx core.Context, providers []model.CloudProviderStatus) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Providers:"); err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func hostedEnvironmentLabel(hosted *config.HostedEnvironment) string {
 	return hosted.Describe()
 }
 
-func portRangeLabel(ports config.EnvironmentLocalPorts) string {
+func portRangeLabel(ports model.EnvironmentLocalPorts) string {
 	if ports.RangeStart <= 0 || ports.RangeEnd <= 0 {
 		return "none"
 	}

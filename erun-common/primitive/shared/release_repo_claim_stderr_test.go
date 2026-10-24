@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Callers must surface git's stderr, not a bare "exit status N".
@@ -14,7 +14,7 @@ func TestWriteReleaseRepoClaimBlobIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: could not write blob object", 128)
 	now := time.Now()
 	_, err := WriteReleaseRepoClaimBlob(testTraceContext(false), t.TempDir(), "prod",
-		activity.EnvironmentActivityLeaseHolder{Tenant: "acme"}, now, now)
+		model.EnvironmentActivityLeaseHolder{Tenant: "acme"}, now, now)
 	if err == nil {
 		t.Fatal("expected an error for a failing git invocation")
 	}

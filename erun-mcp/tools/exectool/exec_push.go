@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -19,9 +20,9 @@ type ExecPushInput struct {
 
 func ExecPushTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecPushInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecPushInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-		var pushed *gitx.PushWorkingTreeBranchResult
+		var pushed *model.PushWorkingTreeBranchResult
 		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
-			result, err := gitx.PushWorkingTreeBranch(runCtx, workDir, gitx.PushWorkingTreeBranchParams{
+			result, err := gitx.PushWorkingTreeBranch(runCtx, workDir, model.PushWorkingTreeBranchParams{
 				Branch: input.Branch,
 				Remote: input.Remote,
 			}, gitx.PushWorkingTreeBranchDependencies{})

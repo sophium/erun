@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const defaultWorkspaceSyncInterval = 2 * time.Second
@@ -32,7 +32,7 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 	if selection.Tenant == "" || selection.Environment == "" {
 		return
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -95,7 +95,7 @@ func (a *App) reconcileWorkspaceSyncForConfiguredEnvs() {
 
 // desiredWorkspaceSyncSelections reports completeness: an unreadable tenant
 // must not read as "not wanted".
-func (a *App) desiredWorkspaceSyncSelections(tenants []config.TenantConfig) (map[string]uiSelection, bool) {
+func (a *App) desiredWorkspaceSyncSelections(tenants []model.TenantConfig) (map[string]uiSelection, bool) {
 	desired := map[string]uiSelection{}
 	complete := true
 	for _, tenant := range tenants {

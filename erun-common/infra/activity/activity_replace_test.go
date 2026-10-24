@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A hard link keeps a reader's inode across a write: replacing leaves it whole,
@@ -35,9 +36,9 @@ func TestRecordEnvironmentActivityReplacesTheSnapshotRatherThanRewritingItInPlac
 	isolateActivityCache(t)
 	record := func(address string) {
 		t.Helper()
-		if err := RecordEnvironmentActivity(EnvironmentActivityParams{
+		if err := RecordEnvironmentActivity(model.EnvironmentActivityParams{
 			Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI,
-			ClientUpdates: []EnvironmentActivityClientUpdate{{Address: address, Bytes: 1}},
+			ClientUpdates: []model.EnvironmentActivityClientUpdate{{Address: address, Bytes: 1}},
 		}); err != nil {
 			t.Fatalf("record activity: %v", err)
 		}

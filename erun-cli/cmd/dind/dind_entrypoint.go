@@ -2,6 +2,7 @@ package dind
 
 import (
 	"github.com/sophium/erun/cmd/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ func NewDindEntrypointCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return podruntime.RunDindEntrypoint(shared.CommandContext(cmd), podruntime.DindEntrypointParams{DockerdArgs: args})
+			return podruntime.RunDindEntrypoint(shared.CommandContext(cmd), model.DindEntrypointParams{DockerdArgs: args})
 		},
 	}
 	shared.AddDryRunFlag(cmd)

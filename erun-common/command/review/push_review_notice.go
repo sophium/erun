@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
@@ -19,20 +20,10 @@ import (
 // pushReviewNoticeTimeout does not bound the token mint (see buildReportTimeout).
 const pushReviewNoticeTimeout = 15 * time.Second
 
-// PushedBranchReviewNoticeParams names the push that just landed.
-type PushedBranchReviewNoticeParams struct {
-	// ProjectRoot resolves the remote's default branch; empty falls back to the
-	// common default-branch names.
-	ProjectRoot string
-	Branch      string
-	// Remote defaults to "origin".
-	Remote string
-}
-
 // WarnPushedBranchWithoutReview warns on stderr when no non-closed review has
 // branch as its sourceBranch; it never fails the caller. Reviews are named
 // after the squash message, so only sourceBranch identifies the branch.
-func WarnPushedBranchWithoutReview(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params PushedBranchReviewNoticeParams) {
+func WarnPushedBranchWithoutReview(ctx core.Context, store config.CloudReadStore, deps cloud.CloudDependencies, params model.PushedBranchReviewNoticeParams) {
 	if !cloud.HasAnyErunPlatformAlias(store) {
 		return
 	}
@@ -78,7 +69,7 @@ func pushedBranchWithoutReviewWarning(branch string) string {
 
 // branchHasLiveReview re-checks the source branch in case the plane ignores the
 // filter.
-func branchHasLiveReview(reviews []platformclient.PlatformReview, branch string) bool {
+func branchHasLiveReview(reviews []model.PlatformReview, branch string) bool {
 	for _, review := range reviews {
 		if review.Status == "CLOSED" {
 			continue

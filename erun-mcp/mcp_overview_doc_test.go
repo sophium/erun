@@ -13,10 +13,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 func repoRootForOverviewDocTest(t *testing.T) string {
@@ -241,7 +240,7 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 	}
 
 	// Populate every field the example names, including omitempty ones.
-	policy := config.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
+	policy := model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute, WorkingHours: "09:00-19:00"}
 	fixture := lifecycle.EnvironmentReadModel{
 		Tenant: "myapp",
 		Environment: lifecycle.ListEnvironmentResult{
@@ -252,11 +251,11 @@ func TestMCPOverviewEnvironmentExampleMatchesTheResolvedJSON(t *testing.T) {
 			IsDefault:      true,
 			IsEffective:    true,
 		},
-		State: lifecycle.EnvironmentLifecycleRunning,
-		Idle:  &activity.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
-		Health: &lifecycle.EnvironmentHealth{
-			RootConfig: config.RootConfigInspection{ConfigStatus: config.RootConfigStatusOK},
-			Deploy:     deploy.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
+		State: model.EnvironmentLifecycleRunning,
+		Idle:  &model.EnvironmentIdleStatus{Policy: policy, StopEligible: true},
+		Health: &model.EnvironmentHealth{
+			RootConfig: model.RootConfigInspection{ConfigStatus: model.RootConfigStatusOK},
+			Deploy:     model.DeployDiagnosisResult{HelmStatus: "STATUS: deployed"},
 		},
 	}
 	encoded, err := json.Marshal(fixture)

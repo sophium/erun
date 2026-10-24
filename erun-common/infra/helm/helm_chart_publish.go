@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -251,7 +252,7 @@ func shippedComponentChartPath(projectRoot, imageName string) (string, bool) {
 
 // PublishComponentChart publishes the chart shipped with a component image. chartVersion
 // is separate from image.Version because version-pinned bases keep their upstream image tag.
-func PublishComponentChart(ctx core.Context, image DockerImageReference, chartVersion string) error {
+func PublishComponentChart(ctx core.Context, image model.DockerImageReference, chartVersion string) error {
 	imageName := strings.TrimSpace(image.ImageName)
 	projectRoot := strings.TrimSpace(image.ProjectRoot)
 	if imageName == "" || projectRoot == "" {

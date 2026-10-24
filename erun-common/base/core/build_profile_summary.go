@@ -2,40 +2,23 @@ package core
 
 import (
 	"sort"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // buildProfileTopStepCount bounds the profile a build reports to the platform,
 // however deep the step tree grows.
 const buildProfileTopStepCount = 10
 
-// BuildProfileStepSummary names a step by its full path so same-named steps under
-// different parents stay distinct.
-type BuildProfileStepSummary struct {
-	Name            string              `json:"name"`
-	DurationSeconds float64             `json:"durationSeconds"`
-	Cgroup          *BuildCgroupMetrics `json:"cgroup,omitempty"`
-}
-
-// BuildProfileSummary is the bounded profile a build reports with its outcome.
-// TotalStepCount tells whether steps were dropped.
-type BuildProfileSummary struct {
-	DurationSeconds    float64                   `json:"durationSeconds"`
-	Failed             bool                      `json:"failed,omitempty"`
-	Cgroup             *BuildCgroupMetrics       `json:"cgroup,omitempty"`
-	TopSteps           []BuildProfileStepSummary `json:"topSteps,omitempty"`
-	TotalStepCount     int                       `json:"totalStepCount,omitempty"`
-	TruncatedStepCount int                       `json:"truncatedStepCount,omitempty"`
-}
-
 // SummarizeTimingRecordForProfile keeps the buildProfileTopStepCount longest
 // steps from every depth of record's tree.
-func SummarizeTimingRecordForProfile(record TimingRecord) BuildProfileSummary {
+func SummarizeTimingRecordForProfile(record model.TimingRecord) model.BuildProfileSummary {
 	flattened := flattenTimingStepJSONForProfile(record.Steps, "")
 	sort.SliceStable(flattened, func(i, j int) bool {
 		return flattened[i].DurationSeconds > flattened[j].DurationSeconds
 	})
 
-	summary := BuildProfileSummary{
+	summary := model.BuildProfileSummary{
 		DurationSeconds: record.DurationSeconds,
 		Failed:          record.Failed,
 		Cgroup:          record.Cgroup,
@@ -50,14 +33,14 @@ func SummarizeTimingRecordForProfile(record TimingRecord) BuildProfileSummary {
 	return summary
 }
 
-func flattenTimingStepJSONForProfile(steps []TimingStepJSON, ancestryPath string) []BuildProfileStepSummary {
-	var flattened []BuildProfileStepSummary
+func flattenTimingStepJSONForProfile(steps []model.TimingStepJSON, ancestryPath string) []model.BuildProfileStepSummary {
+	var flattened []model.BuildProfileStepSummary
 	for _, step := range steps {
 		name := step.Name
 		if ancestryPath != "" {
 			name = ancestryPath + " > " + step.Name
 		}
-		flattened = append(flattened, BuildProfileStepSummary{
+		flattened = append(flattened, model.BuildProfileStepSummary{
 			Name:            name,
 			DurationSeconds: step.DurationSeconds,
 			Cgroup:          step.Cgroup,

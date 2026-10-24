@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -23,12 +24,12 @@ type ExecReportCommitStatusInput struct {
 
 func ExecReportCommitStatusTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecReportCommitStatusInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecReportCommitStatusInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-		var reported *review.ReportCommitStatusResult
+		var reported *model.ReportCommitStatusResult
 		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, _ string) error {
-			result, err := review.ReportCommitStatus(runCtx, review.ReportCommitStatusParams{
+			result, err := review.ReportCommitStatus(runCtx, model.ReportCommitStatusParams{
 				RemoteURL:   input.RemoteURL,
 				Commit:      input.Commit,
-				State:       review.ReportCommitStatusState(input.State),
+				State:       model.ReportCommitStatusState(input.State),
 				Context:     input.Context,
 				Description: input.Description,
 				TargetURL:   input.TargetURL,

@@ -7,12 +7,13 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name:               "frs",
 				DefaultEnvironment: "prod",
@@ -75,10 +76,10 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	projectRoot := t.TempDir()
 	rootConfig := &configpkg.ERunConfig{
 		DefaultTenant: "frs",
-		CloudProviders: []configpkg.CloudProviderConfig{
+		CloudProviders: []model.CloudProviderConfig{
 			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []configpkg.CloudContextConfig{
+		CloudContexts: []model.CloudContextConfig{
 			{
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
@@ -95,7 +96,7 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "prod"},
 		},
 		envs: map[string]configpkg.EnvConfig{

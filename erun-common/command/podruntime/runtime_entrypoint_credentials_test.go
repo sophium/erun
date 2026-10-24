@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
@@ -36,7 +37,7 @@ func TestSyncRuntimeRegistryCredentialAddsOnlyMissingHosts(t *testing.T) {
 	}
 }
 
-func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) configpkg.CloudProviderConfig {
+func writePlatformAliasSecret(t *testing.T, boot runtimeBoot) model.CloudProviderConfig {
 	t.Helper()
 	provider := testPlatformAliasProvider()
 	entry, err := deploy.RenderPlatformAliasEntry(provider)
@@ -92,7 +93,7 @@ func TestRuntimeBootKeepsAPlatformAliasAndTokenThePodAlreadyHolds(t *testing.T) 
 	writeAssetFile(t, token, "the pod's own newer token")
 	own := provider
 	own.Username = "pod-login"
-	if err := writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(boot.configHome()), configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []configpkg.CloudProviderConfig{own}}); err != nil {
+	if err := writeRuntimeBootYAML(configpkg.RuntimeRootConfigPath(boot.configHome()), configpkg.ERunConfig{DefaultTenant: "team", CloudProviders: []model.CloudProviderConfig{own}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := syncRuntimePlatformAlias(core.Context{}, boot, nil); err != nil {

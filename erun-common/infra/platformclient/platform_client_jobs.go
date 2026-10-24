@@ -7,31 +7,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
-)
 
-// PlatformJob mirrors model.Job's JSON shape.
-type PlatformJob struct {
-	JobID    string `json:"jobId"`
-	TenantID string `json:"tenantId,omitempty"`
-	// EnvironmentID is empty for host-side orchestrator work.
-	EnvironmentID string `json:"environmentId,omitempty"`
-	JobType       string `json:"jobType"`
-	// IssueRef is owner/repo#number.
-	IssueRef string `json:"issueRef,omitempty"`
-	// Summary must be prose; the API refuses a bare shell command.
-	Summary   string `json:"summary"`
-	Status    string `json:"status"`
-	ActorKind string `json:"actorKind"`
-	ActorID   string `json:"actorId"`
-	// Scope is what the job claims; empty never collides.
-	Scope      string     `json:"scope,omitempty"`
-	LocalJobID string     `json:"localJobId,omitempty"`
-	StartedAt  time.Time  `json:"startedAt"`
-	EndedAt    *time.Time `json:"endedAt,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-}
+	"github.com/sophium/erun/erun-common/base/model"
+)
 
 // PlatformClaimJobParams.Status defaults to RUNNING; a terminal status makes the
 // server stamp ended_at.
@@ -49,8 +27,8 @@ type PlatformClaimJobParams struct {
 
 // ClaimJob records a job starting. With Scope set, a 409 means another open job
 // holds it; see PlatformJobScopeHeldDetails.
-func (c *PlatformClient) ClaimJob(ctx context.Context, params PlatformClaimJobParams) (PlatformJob, error) {
-	var job PlatformJob
+func (c *PlatformClient) ClaimJob(ctx context.Context, params PlatformClaimJobParams) (model.PlatformJob, error) {
+	var job model.PlatformJob
 	err := c.do(ctx, http.MethodPost, "/v1/jobs", params, true, &job)
 	return job, err
 }
@@ -63,14 +41,14 @@ type PlatformUpdateJobParams struct {
 }
 
 // UpdateJob moves an existing job forward.
-func (c *PlatformClient) UpdateJob(ctx context.Context, jobID string, params PlatformUpdateJobParams) (PlatformJob, error) {
-	var job PlatformJob
+func (c *PlatformClient) UpdateJob(ctx context.Context, jobID string, params PlatformUpdateJobParams) (model.PlatformJob, error) {
+	var job model.PlatformJob
 	err := c.do(ctx, http.MethodPatch, "/v1/jobs/"+url.PathEscape(jobID), params, true, &job)
 	return job, err
 }
 
-func (c *PlatformClient) GetJob(ctx context.Context, jobID string) (PlatformJob, error) {
-	var job PlatformJob
+func (c *PlatformClient) GetJob(ctx context.Context, jobID string) (model.PlatformJob, error) {
+	var job model.PlatformJob
 	err := c.do(ctx, http.MethodGet, "/v1/jobs/"+url.PathEscape(jobID), nil, true, &job)
 	return job, err
 }
@@ -101,19 +79,19 @@ func (f PlatformJobFilter) queryString() string {
 }
 
 // ListJobs reads the tenant's queue: live work first, then recent history.
-func (c *PlatformClient) ListJobs(ctx context.Context, filter PlatformJobFilter) ([]PlatformJob, error) {
+func (c *PlatformClient) ListJobs(ctx context.Context, filter PlatformJobFilter) ([]model.PlatformJob, error) {
 	path := "/v1/jobs"
 	if query := filter.queryString(); query != "" {
 		path += "?" + query
 	}
-	var jobs []PlatformJob
+	var jobs []model.PlatformJob
 	err := c.do(ctx, http.MethodGet, path, nil, true, &jobs)
 	return jobs, err
 }
 
 // ListEnvironmentJobs reads one environment's queue.
-func (c *PlatformClient) ListEnvironmentJobs(ctx context.Context, environmentID string) ([]PlatformJob, error) {
-	var jobs []PlatformJob
+func (c *PlatformClient) ListEnvironmentJobs(ctx context.Context, environmentID string) ([]model.PlatformJob, error) {
+	var jobs []model.PlatformJob
 	err := c.do(ctx, http.MethodGet, "/v1/environments/"+url.PathEscape(environmentID)+"/jobs", nil, true, &jobs)
 	return jobs, err
 }

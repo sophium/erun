@@ -6,6 +6,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
@@ -36,8 +37,8 @@ func refreshOrchestratorWhipConfig() {
 
 // decideOrchestratorWhip lets an explicit whip ignore staleness but never the cap.
 func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explicit bool) (orchestratorPacingDecision, orchestratorPacingReason) {
-	candidate := orchestrator.WhipCandidate{
-		Kind: orchestrator.WhipTargetOrchestrator,
+	candidate := model.WhipCandidate{
+		Kind: model.WhipTargetOrchestrator,
 		// Only an unmanaged orchestrator has no pty here to write into.
 		Reachable:    !c.unmanaged,
 		Alive:        c.alive,
@@ -49,13 +50,13 @@ func decideOrchestratorWhip(c orchestratorPacingCandidate, now time.Time, explic
 	return orchestratorPacingDecisionFromWhip(decision), orchestratorPacingReasonFromWhip(reason)
 }
 
-func orchestratorPacingDecisionFromWhip(decision orchestrator.WhipDecision) orchestratorPacingDecision {
+func orchestratorPacingDecisionFromWhip(decision model.WhipDecision) orchestratorPacingDecision {
 	switch decision {
-	case orchestrator.WhipDecisionNudge:
+	case model.WhipDecisionNudge:
 		return orchestratorPacingNudge
-	case orchestrator.WhipDecisionCap:
+	case model.WhipDecisionCap:
 		return orchestratorPacingCap
-	case orchestrator.WhipDecisionNone:
+	case model.WhipDecisionNone:
 		fallthrough
 	default:
 		return orchestratorPacingNone
@@ -63,19 +64,19 @@ func orchestratorPacingDecisionFromWhip(decision orchestrator.WhipDecision) orch
 }
 
 // orchestratorPacingReasonFromWhip maps DecideWhip reasons; Unreachable means unmanaged.
-func orchestratorPacingReasonFromWhip(reason orchestrator.WhipReason) orchestratorPacingReason {
+func orchestratorPacingReasonFromWhip(reason model.WhipReason) orchestratorPacingReason {
 	switch reason {
-	case orchestrator.WhipReasonNotAlive:
+	case model.WhipReasonNotAlive:
 		return orchestratorPacingReasonNotAlive
-	case orchestrator.WhipReasonUnreachable:
+	case model.WhipReasonUnreachable:
 		return orchestratorPacingReasonUnreachable
-	case orchestrator.WhipReasonAlreadyCapped:
+	case model.WhipReasonAlreadyCapped:
 		return orchestratorPacingReasonAlreadyCapped
-	case orchestrator.WhipReasonCapCrossed:
+	case model.WhipReasonCapCrossed:
 		return orchestratorPacingReasonCapCrossed
-	case orchestrator.WhipReasonNudge:
+	case model.WhipReasonNudge:
 		return orchestratorPacingReasonNudge
-	case orchestrator.WhipReasonFresh, orchestrator.WhipReasonCallFailed, orchestrator.WhipReasonChannelDown:
+	case model.WhipReasonFresh, model.WhipReasonCallFailed, model.WhipReasonChannelDown:
 		fallthrough
 	default:
 		return orchestratorPacingReasonFresh
@@ -83,34 +84,34 @@ func orchestratorPacingReasonFromWhip(reason orchestrator.WhipReason) orchestrat
 }
 
 // whipDecisionFromOrchestratorPacing is orchestratorPacingDecisionFromWhip's inverse.
-func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) orchestrator.WhipDecision {
+func whipDecisionFromOrchestratorPacing(decision orchestratorPacingDecision) model.WhipDecision {
 	switch decision {
 	case orchestratorPacingNudge:
-		return orchestrator.WhipDecisionNudge
+		return model.WhipDecisionNudge
 	case orchestratorPacingCap:
-		return orchestrator.WhipDecisionCap
+		return model.WhipDecisionCap
 	case orchestratorPacingNone:
 		fallthrough
 	default:
-		return orchestrator.WhipDecisionNone
+		return model.WhipDecisionNone
 	}
 }
 
 // whipReasonFromOrchestratorPacing is orchestratorPacingReasonFromWhip's inverse.
-func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) orchestrator.WhipReason {
+func whipReasonFromOrchestratorPacing(reason orchestratorPacingReason) model.WhipReason {
 	switch reason {
 	case orchestratorPacingReasonNotAlive:
-		return orchestrator.WhipReasonNotAlive
+		return model.WhipReasonNotAlive
 	case orchestratorPacingReasonAlreadyCapped:
-		return orchestrator.WhipReasonAlreadyCapped
+		return model.WhipReasonAlreadyCapped
 	case orchestratorPacingReasonCapCrossed:
-		return orchestrator.WhipReasonCapCrossed
+		return model.WhipReasonCapCrossed
 	case orchestratorPacingReasonNudge:
-		return orchestrator.WhipReasonNudge
+		return model.WhipReasonNudge
 	case orchestratorPacingReasonFresh, orchestratorPacingReasonUnreachable, orchestratorPacingReasonEnvBusy:
 		fallthrough
 	default:
-		return orchestrator.WhipReasonFresh
+		return model.WhipReasonFresh
 	}
 }
 

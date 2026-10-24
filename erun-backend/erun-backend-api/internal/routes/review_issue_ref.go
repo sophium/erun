@@ -2,6 +2,7 @@ package routes
 
 import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
+	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -10,7 +11,7 @@ import (
 
 // resolveReviewIssueRef is the only writer of a returned review's IssueRef/IssueRefSource.
 func resolveReviewIssueRef(review model.Review) (modelpkg.IssueReference, bool) {
-	return modelpkg.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch)
+	return core.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch)
 }
 
 func withReviewIssueRef(review model.Review) model.Review {

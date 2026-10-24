@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -112,12 +113,12 @@ func planComponentNameList(plan config.ProjectK8sConfig) []string {
 }
 
 // An empty selection deploys the runtime alone (bootstrap/heal).
-func filterDeployContextsBySelection(contexts []shared.KubernetesDeployContext, selected []string, tenant string) ([]shared.KubernetesDeployContext, error) {
+func filterDeployContextsBySelection(contexts []model.KubernetesDeployContext, selected []string, tenant string) ([]model.KubernetesDeployContext, error) {
 	if err := validateSelectedDeployComponents(selected, contexts, tenant); err != nil {
 		return nil, err
 	}
 	runtimeSelected := deploySelectionIncludesRuntime(selected, tenant)
-	out := make([]shared.KubernetesDeployContext, 0, len(contexts))
+	out := make([]model.KubernetesDeployContext, 0, len(contexts))
 	for _, deployContext := range contexts {
 		if deployContextOwnsRuntimeChart(deployContext, tenant) {
 			if runtimeSelected {
@@ -144,7 +145,7 @@ func deploySelectionIncludesRuntime(selected []string, tenant string) bool {
 	return false
 }
 
-func containsRuntimeContext(contexts []shared.KubernetesDeployContext, tenant string) bool {
+func containsRuntimeContext(contexts []model.KubernetesDeployContext, tenant string) bool {
 	for _, deployContext := range contexts {
 		if deployContextOwnsRuntimeChart(deployContext, tenant) {
 			return true
@@ -154,7 +155,7 @@ func containsRuntimeContext(contexts []shared.KubernetesDeployContext, tenant st
 }
 
 // Runtime aliases stay valid without a local chart; they resolve to the published erun-devops.
-func validateSelectedDeployComponents(selected []string, contexts []shared.KubernetesDeployContext, tenant string) error {
+func validateSelectedDeployComponents(selected []string, contexts []model.KubernetesDeployContext, tenant string) error {
 	if len(selected) == 0 {
 		return nil
 	}
@@ -167,7 +168,7 @@ func validateSelectedDeployComponents(selected []string, contexts []shared.Kuber
 	return nil
 }
 
-func deployableComponentNameSet(contexts []shared.KubernetesDeployContext, tenant string) map[string]struct{} {
+func deployableComponentNameSet(contexts []model.KubernetesDeployContext, tenant string) map[string]struct{} {
 	valid := make(map[string]struct{}, len(contexts)+2)
 	for _, deployContext := range contexts {
 		if name := strings.TrimSpace(deployContext.ComponentName); name != "" {
@@ -220,7 +221,7 @@ func ResolvedRuntimeChartName(tenant string, tenantChartPublished bool) string {
 
 // ResolveDeployableComponents lists the published component charts plus the runtime for a deploy.
 // The version, not the env's source, decides which charts exist. It never builds or pushes.
-func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target DeployTarget) ([]DeployableComponent, error) {
+func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now shared.NowFunc, target model.DeployTarget) ([]DeployableComponent, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	now = freezeNow(now)
 
@@ -271,7 +272,7 @@ func ResolveDeployableComponents(store DeployStore, findProjectRoot shared.Proje
 }
 
 // The sort must stay stable so plan-less contexts keep their input order.
-func sortDeployContextsByDeployOrder(contexts []shared.KubernetesDeployContext, plan config.ProjectK8sConfig) {
+func sortDeployContextsByDeployOrder(contexts []model.KubernetesDeployContext, plan config.ProjectK8sConfig) {
 	rank := componentRankByPlan(plan)
 	sort.SliceStable(contexts, func(i, j int) bool {
 		return rank(contexts[i].ComponentName) < rank(contexts[j].ComponentName)

@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
@@ -61,7 +62,7 @@ func TestRuntimeBootConfigWritesTheEnvironmentAndKeepsUnknownKeys(t *testing.T) 
 	if !strings.Contains(string(data), "futurekey: keep") {
 		t.Fatalf("a key this binary does not know must survive the boot:\n%s", data)
 	}
-	var tenant configpkg.TenantConfig
+	var tenant model.TenantConfig
 	readTestYAML(t, filepath.Join(boot.configHome(), configpkg.ConfigRoot, "team", configpkg.ConfigFile), &tenant)
 	if tenant.Name != "team" || tenant.DefaultEnvironment != "dev" {
 		t.Fatalf("unexpected tenant config: %+v", tenant)

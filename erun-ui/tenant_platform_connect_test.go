@@ -6,8 +6,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 // erunTestPlatformAPIURL derives a stable alias, so a second Connect collides
@@ -20,23 +20,23 @@ const erunTestAlias = "erun+api.erunpaas.com@erun"
 func connectTestApp(t *testing.T, tenant string, attached []string) (*App, stubUIStore) {
 	t.Helper()
 	rootConfig := configpkg.ERunConfig{}
-	tenantConfig := configpkg.TenantConfig{Name: tenant}
+	tenantConfig := model.TenantConfig{Name: tenant}
 	if len(attached) > 0 {
 		tenantConfig.CloudProviderAliases = append([]string(nil), attached...)
 		tenantConfig.PrimaryCloudProviderAlias = attached[0]
 	}
 	store := stubUIStore{
 		config:  &rootConfig,
-		tenants: map[string]configpkg.TenantConfig{tenant: tenantConfig},
+		tenants: map[string]model.TenantConfig{tenant: tenantConfig},
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
 		cloudDeps: cloud.CloudDependencies{
-			FetchPlatformInfo: func(_ core.Context, apiURL string) (platformclient.PlatformInfo, error) {
+			FetchPlatformInfo: func(_ core.Context, apiURL string) (model.PlatformInfo, error) {
 				if apiURL != erunTestPlatformAPIURL {
 					t.Fatalf("platform discovery went to %q, want %q", apiURL, erunTestPlatformAPIURL)
 				}
-				return platformclient.PlatformInfo{
+				return model.PlatformInfo{
 					Issuer:      "https://auth.erunpaas.com",
 					APIURL:      apiURL,
 					CLIClientID: "cli-client-1",
@@ -59,7 +59,7 @@ func loadTenantDashboardFor(t *testing.T, app *App, tenant string) uiTenantDashb
 	return dashboard
 }
 
-func loadTenantConfigFor(t *testing.T, app *App, tenant string) configpkg.TenantConfig {
+func loadTenantConfigFor(t *testing.T, app *App, tenant string) model.TenantConfig {
 	t.Helper()
 	config, _, err := app.deps.store.LoadTenantConfig(tenant)
 	if err != nil {

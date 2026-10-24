@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const (
@@ -25,47 +26,14 @@ type CloudContextStore interface {
 	CloudStore
 }
 
-// CloudContextRefreshFailure is one failed batched status refresh, recorded
-// once per (alias, region) group rather than copied onto each context.
-type CloudContextRefreshFailure struct {
-	Alias   string `json:"alias" yaml:"alias"`
-	Region  string `json:"region" yaml:"region"`
-	Message string `json:"message" yaml:"message"`
-}
-
-// CloudContextListResult is the shared result shape of the CLI's --output json and the context_list MCP tool.
-// CloudContexts has no omitempty so an empty list serialises as []; RefreshFailures
-// keeps it because the refresh is never attempted when there are no contexts.
-type CloudContextListResult struct {
-	CloudContexts   []configpkg.CloudContextStatus `json:"cloudContexts"`
-	RefreshFailures []CloudContextRefreshFailure   `json:"refreshFailures,omitempty"`
-}
-
-type InitCloudContextParams struct {
-	Name               string
-	CloudProviderAlias string
-	Region             string
-	InstanceType       string
-	DiskType           string
-	DiskSizeGB         int
-	SubnetID           string
-	SecurityGroupID    string
-	KeyName            string
-}
-
-type CloudContextParams struct {
-	Name  string
-	Force bool
-}
-
 // CloudContextEnvLookup lets StartCloudContext enforce working hours; stores without it skip the gate.
 type CloudContextEnvLookup interface {
-	ListTenantConfigs() ([]configpkg.TenantConfig, error)
+	ListTenantConfigs() ([]model.TenantConfig, error)
 	ListEnvConfigs(string) ([]configpkg.EnvConfig, error)
 }
 
 type CloudContextDependencies struct {
-	RunAWS     func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error)
+	RunAWS     func(core.Context, model.CloudProviderConfig, string, []string) (string, error)
 	RunKubectl func(core.Context, []string) error
 	Now        func() time.Time
 	Sleep      func(time.Duration)
@@ -84,35 +52,35 @@ func CloudContextRegions() []string {
 	return []string{DefaultCloudContextRegion, AlternateCloudContextRegion}
 }
 
-func ListCloudContextStatuses(store configpkg.CloudReadStore) ([]configpkg.CloudContextStatus, error) {
+func ListCloudContextStatuses(store configpkg.CloudReadStore) ([]model.CloudContextStatus, error) {
 	contexts, err := configpkg.ListCloudContexts(store)
 	if err != nil {
 		return nil, err
 	}
-	statuses := make([]configpkg.CloudContextStatus, 0, len(contexts))
+	statuses := make([]model.CloudContextStatus, 0, len(contexts))
 	for _, context := range contexts {
-		statuses = append(statuses, configpkg.CloudContextStatus{CloudContextConfig: context})
+		statuses = append(statuses, model.CloudContextStatus{CloudContextConfig: context})
 	}
 	return statuses, nil
 }
 
 // RefreshCloudContextList returns contexts with live AWS status; a group whose
 // AWS call fails is marked Unknown rather than left stale.
-func RefreshCloudContextList(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) (CloudContextListResult, error) {
+func RefreshCloudContextList(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) (model.CloudContextListResult, error) {
 	statuses, err := ListCloudContextStatuses(store)
 	if err != nil {
-		return CloudContextListResult{}, err
+		return model.CloudContextListResult{}, err
 	}
 	if len(statuses) == 0 {
-		return CloudContextListResult{CloudContexts: statuses}, nil
+		return model.CloudContextListResult{CloudContexts: statuses}, nil
 	}
 	deps = normalizeCloudContextDependencies(deps)
 	failures := refreshCloudContextStatusesFromAWS(ctx, store, deps, statuses)
-	return CloudContextListResult{CloudContexts: statuses, RefreshFailures: failures}, nil
+	return model.CloudContextListResult{CloudContexts: statuses, RefreshFailures: failures}, nil
 }
 
 // RefreshCloudContextStatuses returns just the statuses of RefreshCloudContextList.
-func RefreshCloudContextStatuses(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) ([]configpkg.CloudContextStatus, error) {
+func RefreshCloudContextStatuses(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies) ([]model.CloudContextStatus, error) {
 	result, err := RefreshCloudContextList(ctx, store, deps)
 	if err != nil {
 		return nil, err
@@ -125,9 +93,9 @@ type cloudContextRefreshKey struct {
 	region string
 }
 
-func refreshCloudContextStatusesFromAWS(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies, statuses []configpkg.CloudContextStatus) []CloudContextRefreshFailure {
+func refreshCloudContextStatusesFromAWS(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies, statuses []model.CloudContextStatus) []model.CloudContextRefreshFailure {
 	groups := groupCloudContextRefreshIndices(statuses)
-	failures := make([]CloudContextRefreshFailure, 0, len(groups))
+	failures := make([]model.CloudContextRefreshFailure, 0, len(groups))
 	for key, indices := range groups {
 		if failure, failed := refreshCloudContextRefreshGroup(ctx, store, deps, statuses, key, indices); failed {
 			failures = append(failures, failure)
@@ -143,7 +111,7 @@ func refreshCloudContextStatusesFromAWS(ctx core.Context, store configpkg.CloudR
 	return failures
 }
 
-func groupCloudContextRefreshIndices(statuses []configpkg.CloudContextStatus) map[cloudContextRefreshKey][]int {
+func groupCloudContextRefreshIndices(statuses []model.CloudContextStatus) map[cloudContextRefreshKey][]int {
 	groups := make(map[cloudContextRefreshKey][]int)
 	for i, status := range statuses {
 		if strings.TrimSpace(status.InstanceID) == "" {
@@ -160,7 +128,7 @@ func groupCloudContextRefreshIndices(statuses []configpkg.CloudContextStatus) ma
 	return groups
 }
 
-func refreshCloudContextRefreshGroup(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies, statuses []configpkg.CloudContextStatus, key cloudContextRefreshKey, indices []int) (CloudContextRefreshFailure, bool) {
+func refreshCloudContextRefreshGroup(ctx core.Context, store configpkg.CloudReadStore, deps CloudContextDependencies, statuses []model.CloudContextStatus, key cloudContextRefreshKey, indices []int) (model.CloudContextRefreshFailure, bool) {
 	provider, err := ResolveCloudProvider(store, key.alias)
 	if err != nil {
 		markCloudContextsRefreshUnknown(statuses, indices)
@@ -178,10 +146,10 @@ func refreshCloudContextRefreshGroup(ctx core.Context, store configpkg.CloudRead
 	for _, i := range indices {
 		applyCloudContextRefreshState(&statuses[i], states)
 	}
-	return CloudContextRefreshFailure{}, false
+	return model.CloudContextRefreshFailure{}, false
 }
 
-func applyCloudContextRefreshState(status *configpkg.CloudContextStatus, states map[string]string) {
+func applyCloudContextRefreshState(status *model.CloudContextStatus, states map[string]string) {
 	awsState, ok := states[status.InstanceID]
 	if !ok {
 		status.Status = CloudContextStatusUnknown
@@ -198,22 +166,22 @@ func applyCloudContextRefreshState(status *configpkg.CloudContextStatus, states 
 
 // markCloudContextsRefreshUnknown keeps a stale "running" from looking authoritative;
 // the cause is reported once on the group's CloudContextRefreshFailure.
-func markCloudContextsRefreshUnknown(statuses []configpkg.CloudContextStatus, indices []int) {
+func markCloudContextsRefreshUnknown(statuses []model.CloudContextStatus, indices []int) {
 	for _, i := range indices {
 		statuses[i].Status = CloudContextStatusUnknown
 		statuses[i].Message = ""
 	}
 }
 
-func newCloudContextRefreshFailure(key cloudContextRefreshKey, err error) CloudContextRefreshFailure {
-	return CloudContextRefreshFailure{
+func newCloudContextRefreshFailure(key cloudContextRefreshKey, err error) model.CloudContextRefreshFailure {
+	return model.CloudContextRefreshFailure{
 		Alias:   key.alias,
 		Region:  key.region,
 		Message: err.Error(),
 	}
 }
 
-func describeCloudContextInstanceStates(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region string, instanceIDs []string) (map[string]string, error) {
+func describeCloudContextInstanceStates(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region string, instanceIDs []string) (map[string]string, error) {
 	args := []string{
 		"ec2", "describe-instances",
 		"--filters", "Name=instance-id,Values=" + strings.Join(instanceIDs, ","),

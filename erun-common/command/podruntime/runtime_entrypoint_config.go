@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
@@ -59,10 +60,10 @@ func writeRuntimeBootRootConfig(configHome string, injected shared.InjectedRunti
 
 func writeRuntimeBootTenantConfig(configHome string, injected shared.InjectedRuntimeConfig) error {
 	path := filepath.Join(configHome, configpkg.ConfigRoot, injected.Tenant, configpkg.ConfigFile)
-	tenant := configpkg.TenantConfig{}
+	tenant := model.TenantConfig{}
 	if data, err := os.ReadFile(path); err == nil {
 		if yaml.Unmarshal(data, &tenant) != nil {
-			tenant = configpkg.TenantConfig{}
+			tenant = model.TenantConfig{}
 		}
 	}
 	tenant.Name = injected.Tenant

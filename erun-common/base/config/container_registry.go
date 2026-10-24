@@ -5,26 +5,16 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
-)
-
-// RegistryRole marks a registry's part in build → copy → deploy; an entry may carry several.
-type RegistryRole string
-
-const (
-	RegistryRoleBuild RegistryRole = "build"
-	RegistryRoleFrom  RegistryRole = "from"
-	RegistryRoleTo    RegistryRole = "to"
-	// RegistryRoleDeploy marks the registry the cluster pulls from.
-	RegistryRoleDeploy RegistryRole = "deploy"
 )
 
 // ContainerRegistryEntry names a static Registry or a kube-context-resolved
 // Cluster; exactly one is set.
 type ContainerRegistryEntry struct {
-	Registry string           `yaml:"registry,omitempty" json:"registry,omitempty"`
-	Cluster  *ClusterRegistry `yaml:"cluster,omitempty" json:"cluster,omitempty"`
-	Roles    []RegistryRole   `yaml:"roles" json:"roles"`
+	Registry string               `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Cluster  *ClusterRegistry     `yaml:"cluster,omitempty" json:"cluster,omitempty"`
+	Roles    []model.RegistryRole `yaml:"roles" json:"roles"`
 	// Insecure is carried from Cluster.Insecure onto concretized entries; never persisted.
 	Insecure bool `yaml:"-" json:"-"`
 }
@@ -70,11 +60,11 @@ func (e ContainerRegistryEntry) identity() string {
 // ContainerRegistries is the marked registry list.
 type ContainerRegistries []ContainerRegistryEntry
 
-func normalizeRole(role RegistryRole) RegistryRole {
-	return RegistryRole(strings.ToLower(strings.TrimSpace(string(role))))
+func normalizeRole(role model.RegistryRole) model.RegistryRole {
+	return model.RegistryRole(strings.ToLower(strings.TrimSpace(string(role))))
 }
 
-func (e ContainerRegistryEntry) HasRole(role RegistryRole) bool {
+func (e ContainerRegistryEntry) HasRole(role model.RegistryRole) bool {
 	for _, candidate := range e.Roles {
 		if normalizeRole(candidate) == role {
 			return true
@@ -87,7 +77,7 @@ func (r ContainerRegistries) IsZero() bool {
 	return len(r) == 0
 }
 
-func (r ContainerRegistries) registryEntryWithRole(role RegistryRole) (ContainerRegistryEntry, bool) {
+func (r ContainerRegistries) registryEntryWithRole(role model.RegistryRole) (ContainerRegistryEntry, bool) {
 	for _, entry := range r {
 		if entry.HasRole(role) {
 			if registry := strings.TrimSpace(entry.Registry); registry != "" {
@@ -98,37 +88,37 @@ func (r ContainerRegistries) registryEntryWithRole(role RegistryRole) (Container
 	return ContainerRegistryEntry{}, false
 }
 
-func (r ContainerRegistries) registryWithRole(role RegistryRole) (string, bool) {
+func (r ContainerRegistries) registryWithRole(role model.RegistryRole) (string, bool) {
 	entry, ok := r.registryEntryWithRole(role)
 	return strings.TrimSpace(entry.Registry), ok
 }
 
 // BuildRegistry returns the BUILD-marked registry; !ok means the environment cannot build.
 func (r ContainerRegistries) BuildRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleBuild)
+	return r.registryWithRole(model.RegistryRoleBuild)
 }
 
 // BuildRegistryInsecure reports whether the BUILD registry is plain HTTP, which
 // `docker manifest` needs since it ignores the daemon's insecure-registry list.
 func (r ContainerRegistries) BuildRegistryInsecure() bool {
-	entry, ok := r.registryEntryWithRole(RegistryRoleBuild)
+	entry, ok := r.registryEntryWithRole(model.RegistryRoleBuild)
 	return ok && entry.Insecure
 }
 
 func (r ContainerRegistries) FromRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleFrom)
+	return r.registryWithRole(model.RegistryRoleFrom)
 }
 
 // DeployRegistry returns the first DEPLOY-marked registry.
 func (r ContainerRegistries) DeployRegistry() (string, bool) {
-	return r.registryWithRole(RegistryRoleDeploy)
+	return r.registryWithRole(model.RegistryRoleDeploy)
 }
 
 func (r ContainerRegistries) ToRegistries() []string {
 	out := make([]string, 0, len(r))
 	seen := make(map[string]struct{}, len(r))
 	for _, entry := range r {
-		if !entry.HasRole(RegistryRoleTo) {
+		if !entry.HasRole(model.RegistryRoleTo) {
 			continue
 		}
 		registry := strings.TrimSpace(entry.Registry)
@@ -154,8 +144,8 @@ type ClusterRegistryAddresses struct {
 // ClusterRegistryResolver is injected to keep kube-context queries out of config.
 type ClusterRegistryResolver func(ClusterRegistry) (ClusterRegistryAddresses, error)
 
-func isClusterPullRole(role RegistryRole) bool {
-	return normalizeRole(role) == RegistryRoleDeploy
+func isClusterPullRole(role model.RegistryRole) bool {
+	return normalizeRole(role) == model.RegistryRoleDeploy
 }
 
 // HasClusterEntry reports whether a resolver is needed before use.
@@ -206,7 +196,7 @@ func expandClusterEntry(entry ContainerRegistryEntry, resolve ClusterRegistryRes
 	if err != nil {
 		return nil, err
 	}
-	var pull, push []RegistryRole
+	var pull, push []model.RegistryRole
 	for _, role := range entry.Roles {
 		if isClusterPullRole(role) {
 			pull = append(pull, role)
@@ -279,17 +269,17 @@ func (r ContainerRegistries) tallyRoles() (registryRoleTally, error) {
 		if registry == "" {
 			return registryRoleTally{}, errors.New("registry list entry is missing a registry")
 		}
-		if entry.HasRole(RegistryRoleBuild) {
+		if entry.HasRole(model.RegistryRoleBuild) {
 			tally.build++
 		}
-		if entry.HasRole(RegistryRoleFrom) {
+		if entry.HasRole(model.RegistryRoleFrom) {
 			tally.from++
 			tally.fromRegistry = registry
 		}
-		if entry.HasRole(RegistryRoleTo) {
+		if entry.HasRole(model.RegistryRoleTo) {
 			tally.toRegistries[registry] = struct{}{}
 		}
-		if entry.HasRole(RegistryRoleDeploy) {
+		if entry.HasRole(model.RegistryRoleDeploy) {
 			tally.deploy++
 		}
 	}
@@ -330,7 +320,7 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 	}
 	out := make(ContainerRegistries, len(r))
 	for i, entry := range r {
-		out[i] = ContainerRegistryEntry{Registry: entry.Registry, Roles: append([]RegistryRole(nil), entry.Roles...)}
+		out[i] = ContainerRegistryEntry{Registry: entry.Registry, Roles: append([]model.RegistryRole(nil), entry.Roles...)}
 		if entry.Cluster != nil {
 			cluster := *entry.Cluster
 			out[i].Cluster = &cluster
@@ -343,7 +333,7 @@ func (r ContainerRegistries) Clone() ContainerRegistries {
 func DefaultContainerRegistries() ContainerRegistries {
 	return ContainerRegistries{{
 		Registry: DefaultContainerRegistry,
-		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 
@@ -355,7 +345,7 @@ func SingleContainerRegistries(registry string) ContainerRegistries {
 	}
 	return ContainerRegistries{{
 		Registry: registry,
-		Roles:    []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:    []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 
@@ -365,7 +355,7 @@ func ClusterContainerRegistries(cluster ClusterRegistry) ContainerRegistries {
 	c := cluster.WithDefaults()
 	return ContainerRegistries{{
 		Cluster: &c,
-		Roles:   []RegistryRole{RegistryRoleBuild, RegistryRoleDeploy},
+		Roles:   []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleDeploy},
 	}}
 }
 

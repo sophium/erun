@@ -8,6 +8,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -20,7 +21,7 @@ func newAIOccupancyTestApp(t *testing.T) (*App, *int) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{

@@ -7,16 +7,16 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated configpkg.EnvConfig) error {
 	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -148,19 +148,19 @@ func applyEnvironmentCloudAliasSlots(existing *configpkg.EnvConfig, config uiEnv
 
 // linkedCloudContext fills Status from the poller cache; "" means not yet
 // observed, not stopped.
-func (a *App) linkedCloudContext(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
+func (a *App) linkedCloudContext(config configpkg.EnvConfig) (model.CloudContextStatus, bool, error) {
 	return a.linkedCloudContextFor(config.CloudProviderAlias, config.KubernetesContext)
 }
 
-func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (configpkg.CloudContextStatus, bool, error) {
+func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string) (model.CloudContextStatus, bool, error) {
 	cloudProviderAlias = strings.TrimSpace(cloudProviderAlias)
 	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
-		return configpkg.CloudContextStatus{}, false, nil
+		return model.CloudContextStatus{}, false, nil
 	}
 	statuses, err := cloud.ListCloudContextStatuses(a.deps.store)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, false, err
+		return model.CloudContextStatus{}, false, err
 	}
 	for _, status := range statuses {
 		context := configpkg.NormalizeCloudContextConfig(status.CloudContextConfig)
@@ -173,10 +173,10 @@ func (a *App) linkedCloudContextFor(cloudProviderAlias, kubernetesContext string
 			return status, true, nil
 		}
 	}
-	return configpkg.CloudContextStatus{}, false, nil
+	return model.CloudContextStatus{}, false, nil
 }
 
-func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (configpkg.CloudContextStatus, bool, error) {
+func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (model.CloudContextStatus, bool, error) {
 	status, ok, err := a.linkedCloudContext(config)
 	if err != nil || !ok {
 		return status, ok, err
@@ -186,9 +186,9 @@ func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (confi
 		return status, true, nil
 	}
 	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)))
-	status, err = cloud.StartCloudContext(core.Context{}, a.deps.store, cloud.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
+	status, err = cloud.StartCloudContext(core.Context{}, a.deps.store, model.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, true, err
+		return model.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
 	a.setCloudContextStatusInCache(status.Name, status.Status)
@@ -196,7 +196,7 @@ func (a *App) ensureLinkedCloudContextRunning(config configpkg.EnvConfig) (confi
 	return status, true, nil
 }
 
-func (a *App) stopCloudContext(name string) (configpkg.CloudContextStatus, error) {
+func (a *App) stopCloudContext(name string) (model.CloudContextStatus, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()

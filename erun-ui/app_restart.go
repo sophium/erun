@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -228,12 +229,12 @@ func exitForStalledRestartQuit(reason string) {
 
 // orchestratorRestartPreview reports, without restarting, which orchestrators the
 // next launch would refuse to reopen.
-func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []core.DesktopRestartReopen {
+func (a *App) orchestratorRestartPreview(returnToOrchestratorID string) []model.DesktopRestartReopen {
 	entries := readOpenOrchestrators(a.deps.orchestratorOpenPath)
 	ids := restartPreviewOrchestratorIDs(entries, strings.TrimSpace(returnToOrchestratorID))
-	out := make([]core.DesktopRestartReopen, 0, len(ids))
+	out := make([]model.DesktopRestartReopen, 0, len(ids))
 	for _, id := range ids {
-		out = append(out, core.DesktopRestartReopen{
+		out = append(out, model.DesktopRestartReopen{
 			OrchestratorID: id,
 			Notice:         a.restartLaunchRefusal(id),
 		})

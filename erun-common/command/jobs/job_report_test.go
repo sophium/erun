@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -22,8 +23,8 @@ func (s jobReportStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 
 // erunAliasStore has an erun alias with no usable API URL.
 func erunAliasStore() jobReportStore {
-	return jobReportStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
-		{Alias: "erun", Provider: configpkg.CloudProviderERun, ERun: &configpkg.ERunProviderConfig{}},
+	return jobReportStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: "erun", Provider: configpkg.CloudProviderERun, ERun: &model.ERunProviderConfig{}},
 	}}}
 }
 

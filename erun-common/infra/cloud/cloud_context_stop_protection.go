@@ -6,19 +6,14 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// CloudContextStopProtectionParams identifies the context whose stop protection to set.
-type CloudContextStopProtectionParams struct {
-	Name    string
-	Enabled bool
-}
 
 // SetCloudContextStopProtection makes every stop be refused until cleared, to keep an
 // instance up while repairing it.
-func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, params CloudContextStopProtectionParams, deps CloudContextDependencies) (configpkg.CloudContextStatus, error) {
+func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, params model.CloudContextStopProtectionParams, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")
+		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
 	verb := "disable"
@@ -28,26 +23,26 @@ func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, pa
 	ctx.Trace(fmt.Sprintf("cloud-context stop-protection %s: %s", verb, strings.TrimSpace(params.Name)))
 	config, ok, err := findCloudContext(store, params.Name)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	if !ok {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(params.Name))
+		return model.CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(params.Name))
 	}
 	if config.InstanceID == "" {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
+		return model.CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
 	}
 	provider, err := ResolveCloudProvider(store, config.CloudProviderAlias)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	flag := "--disable-api-stop"
 	if !params.Enabled {
 		flag = "--no-disable-api-stop"
 	}
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", "modify-instance-attribute", "--instance-id", config.InstanceID, flag}); err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
-	return configpkg.CloudContextStatus{
+	return model.CloudContextStatus{
 		CloudContextConfig:  configpkg.NormalizeCloudContextConfig(config),
 		StopProtection:      params.Enabled,
 		StopProtectionKnown: true,
@@ -56,24 +51,24 @@ func SetCloudContextStopProtection(ctx core.Context, store CloudContextStore, pa
 
 // DescribeCloudContextStopProtection reads one context's live stop protection; it costs
 // one AWS call, so it is kept out of the bulk refresh.
-func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStore, name string, deps CloudContextDependencies) (configpkg.CloudContextStatus, error) {
+func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStore, name string, deps CloudContextDependencies) (model.CloudContextStatus, error) {
 	if store == nil {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("store is required")
+		return model.CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
 	config, ok, err := findCloudContext(store, name)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	if !ok {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(name))
+		return model.CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(name))
 	}
 	if config.InstanceID == "" {
-		return configpkg.CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
+		return model.CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
 	}
 	provider, err := ResolveCloudProvider(store, config.CloudProviderAlias)
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	out, err := deps.RunAWS(ctx, provider, config.Region, []string{
 		"ec2", "describe-instance-attribute",
@@ -83,10 +78,10 @@ func DescribeCloudContextStopProtection(ctx core.Context, store CloudContextStor
 		"--output", "text",
 	})
 	if err != nil {
-		return configpkg.CloudContextStatus{}, err
+		return model.CloudContextStatus{}, err
 	}
 	enabled := parseCloudContextStopProtectionOutput(out)
-	return configpkg.CloudContextStatus{
+	return model.CloudContextStatus{
 		CloudContextConfig:  configpkg.NormalizeCloudContextConfig(config),
 		StopProtection:      enabled,
 		StopProtectionKnown: true,
@@ -103,7 +98,7 @@ func parseCloudContextStopProtectionOutput(out string) bool {
 	}
 }
 
-func ensureCloudContextHostStopProfileAssociation(ctx core.Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) error {
+func ensureCloudContextHostStopProfileAssociation(ctx core.Context, store CloudContextStore, params model.CloudContextParams, deps CloudContextDependencies) error {
 	if store == nil {
 		return fmt.Errorf("store is required")
 	}
@@ -143,7 +138,7 @@ func ensureCloudContextHostStopProfileAssociation(ctx core.Context, store CloudC
 	return saveCloudContextConfig(store, config)
 }
 
-func ensureCloudContextInstanceProfileAssociation(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID, profileRef string) error {
+func ensureCloudContextInstanceProfileAssociation(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID, profileRef string) error {
 	deps = normalizeCloudContextDependencies(deps)
 	associationID, err := activeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, instanceID)
 	if err != nil {
@@ -181,28 +176,28 @@ func ensureCloudContextInstanceProfileAssociation(ctx core.Context, deps CloudCo
 	return nil
 }
 
-func activeCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID string) (string, error) {
+func activeCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
 	return describeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, []string{
 		"Name=instance-id,Values=" + instanceID,
 		"Name=state,Values=associated",
 	})
 }
 
-func activeCloudContextInstanceProfileAssociationARN(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID string) (string, error) {
+func activeCloudContextInstanceProfileAssociationARN(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
 	return describeCloudContextInstanceProfileAssociationARN(ctx, deps, provider, region, []string{
 		"Name=instance-id,Values=" + instanceID,
 		"Name=state,Values=associated",
 	})
 }
 
-func pendingCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID string) (string, error) {
+func pendingCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID string) (string, error) {
 	return describeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, []string{
 		"Name=instance-id,Values=" + instanceID,
 		"Name=state,Values=associating,disassociating",
 	})
 }
 
-func describeCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region string, filters []string) (string, error) {
+func describeCloudContextInstanceProfileAssociationID(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region string, filters []string) (string, error) {
 	args := []string{
 		"ec2", "describe-iam-instance-profile-associations",
 		"--filters",
@@ -223,7 +218,7 @@ func describeCloudContextInstanceProfileAssociationID(ctx core.Context, deps Clo
 	return associationID, nil
 }
 
-func describeCloudContextInstanceProfileAssociationARN(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region string, filters []string) (string, error) {
+func describeCloudContextInstanceProfileAssociationARN(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region string, filters []string) (string, error) {
 	args := []string{
 		"ec2", "describe-iam-instance-profile-associations",
 		"--filters",
@@ -250,7 +245,7 @@ func profileRefMatchesAssociation(profileRef, associationARN string) bool {
 	return associationARN != "" && strings.TrimPrefix(profileRef, "Arn=") == associationARN
 }
 
-func replaceCloudContextInstanceProfileAssociation(ctx core.Context, deps CloudContextDependencies, provider configpkg.CloudProviderConfig, region, instanceID, associationID, profileRef string) error {
+func replaceCloudContextInstanceProfileAssociation(ctx core.Context, deps CloudContextDependencies, provider model.CloudProviderConfig, region, instanceID, associationID, profileRef string) error {
 	associationID = strings.TrimSpace(associationID)
 	if associationID == "" {
 		return nil

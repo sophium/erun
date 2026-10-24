@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -89,7 +90,7 @@ func runPinToolCommand(runtime shared.RuntimeConfig, input PinInput, runCtx core
 
 // applyPinPlanUnlessPreviewing records the previous version first so a revert
 // works even after a partial rewrite.
-func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Context, plan lifecycle.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (shared.PinOutput, error) {
+func applyPinPlanUnlessPreviewing(runtime shared.RuntimeConfig, runCtx core.Context, plan model.PinPlan, workDir, tenant, environment string, envConfig config.EnvConfig) (shared.PinOutput, error) {
 	out := shared.PinOutput{Plan: plan, Changed: len(plan.Changes())}
 	if runCtx.DryRun || plan.Aligned() {
 		return out, nil

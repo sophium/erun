@@ -12,13 +12,13 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
 )
 
 const defaultAPIHost = "127.0.0.1"
 
-func NewAPICmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchAPI shared.APILauncher) *cobra.Command {
+func NewAPICmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error, launchAPI shared.APILauncher) *cobra.Command {
 	host := defaultAPIHost
 	port := config.APIServicePort
 	databaseURL := ""

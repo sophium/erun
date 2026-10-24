@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestGateMergeLandsTheSourceTreeEvenWhenAPreCommitHookRewritesIt(t *testing.T) {
@@ -22,8 +24,8 @@ func TestGateMergeLandsTheSourceTreeEvenWhenAPreCommitHookRewritesIt(t *testing.
 	}
 	runGitForTest(t, repo, "config", "core.hooksPath", hooks)
 
-	result, err := GateMergeWorkingTree(testTraceContext(false), repo, GateMergeWorkingTreeParams{
-		Sources:      []GateMergeSource{{Branch: "feature", Message: "Add the widget"}},
+	result, err := GateMergeWorkingTree(testTraceContext(false), repo, model.GateMergeWorkingTreeParams{
+		Sources:      []model.GateMergeSource{{Branch: "feature", Message: "Add the widget"}},
 		TargetBranch: "main",
 	}, GateMergeWorkingTreeDependencies{})
 	if err != nil {

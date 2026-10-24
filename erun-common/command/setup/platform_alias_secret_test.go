@@ -6,17 +6,18 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
-func testPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func testPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.erunpaas.com@erun",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "erun",
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
@@ -58,14 +59,14 @@ func (c *capturedManifest) read(t *testing.T) string {
 	return string(data)
 }
 
-func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func secondPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.acme.services.erunpaas.com@acme",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "acme",
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
@@ -81,7 +82,7 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
-	providers := []configpkg.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
+	providers := []model.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
 	for _, provider := range providers {
 		if err := secretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 			t.Fatalf("save refresh token for %s: %v", provider.Alias, err)

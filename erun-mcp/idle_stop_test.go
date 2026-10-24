@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -50,16 +50,16 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	pending := activity.EnvironmentStopPending{
+	pending := model.EnvironmentStopPending{
 		Since:            time.Now().Add(-5 * time.Minute).UTC(),
 		GraceSeconds:     600,
 		CloudContextName: "mock-cluster",
 		ReasonSummary:    "idle: terminal-stdin, ai",
-		Markers: []activity.EnvironmentIdleMarker{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: "terminal-stdin", Idle: true, Reason: "no input", LastActivity: time.Now().Add(-15 * time.Minute).UTC()},
 			{Name: "ai", Idle: true, Reason: "no Claude session", LastActivity: time.Now().Add(-12 * time.Minute).UTC()},
 		},
-		Policy: config.EnvironmentIdlePolicy{
+		Policy: model.EnvironmentIdlePolicy{
 			Timeout:      10 * time.Minute,
 			WorkingHours: "09:00-18:00",
 			Timezone:     "Europe/Riga",
@@ -119,7 +119,7 @@ func assertRecentStopTarget(t *testing.T, result IdleStopRecordResult, tenant, e
 	}
 }
 
-func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) activity.EnvironmentStopHistoryEntry {
+func loadSingleStopHistoryEntry(t *testing.T, tenant, env string) model.EnvironmentStopHistoryEntry {
 	t.Helper()
 	entries, err := activity.LoadEnvironmentStopHistory(tenant, env)
 	if err != nil {

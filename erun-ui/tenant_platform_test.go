@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -26,12 +27,12 @@ func TestLoadTenantDashboardRequiresATenant(t *testing.T) {
 
 // Several erun aliases are reported as choices with none preselected.
 func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T) {
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
-		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: "erun+a@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://a.example", ClientID: "client-a"}},
+		{Alias: "erun+b@erun", Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://b.example", ClientID: "client-b"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 	})
 
 	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{Tenant: "frs"})
@@ -58,11 +59,11 @@ func TestLoadTenantDashboardChoosesAliasWhenMoreThanOneIsConfigured(t *testing.T
 
 // An alias that never signed in fails before any network call.
 func TestLoadTenantDashboardReportsNotSignedInLocally(t *testing.T) {
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "client-1"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{"frs": {Name: "frs"}}},
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}}},
 		cloudDeps: cloud.CloudDependencies{
 			FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
 				t.Fatal("must not fetch discovery with no refresh token and no cache to check")
@@ -94,7 +95,7 @@ func TestLoadTenantDashboardIgnoresTenantAPIURLOverrideForThePlatformRead(t *tes
 	defer server.Close()
 
 	app := testERunPlatformAliasAppWithTenants(t, server.URL,
-		map[string]config.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
+		map[string]model.TenantConfig{"frs": {Name: "frs", APIURL: "https://this-must-not-be-used.example"}})
 
 	dashboard := loadTenantDashboardFrom(t, app)
 	if dashboard.PlatformURL != server.URL || dashboard.APIURL != server.URL {
@@ -116,18 +117,18 @@ func TestLoadTenantDashboardNeverUsesAnUnselectedERunAliasForTheTenant(t *testin
 	defer server.Close()
 
 	jwt := testUIJWT("https://sts.aws.example")
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		{Alias: "team-cloud", Provider: config.CloudProviderAWS, Profile: "team"},
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client"}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", CloudProviderAliases: []string{"team-cloud"}, PrimaryCloudProviderAlias: "team-cloud"},
 		}},
 		cloudDeps: cloud.CloudDependencies{
 			RunAWSBearerToken: func(core.Context, string, string) (string, error) { return jwt, nil },
-			CheckAWSStatus: func(_ core.Context, provider config.CloudProviderConfig) cloud.CloudProviderStatus {
-				return cloud.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+			CheckAWSStatus: func(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
+				return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 			},
 		},
 	})
@@ -161,12 +162,12 @@ func TestLoadTenantDashboardUsesTheTenantsOwnSelectedERunAlias(t *testing.T) {
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)
 	const otherERunAlias = "erun+api.other.example@erun"
-	rootConfig := config.ERunConfig{CloudProviders: []config.CloudProviderConfig{
-		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &config.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
-		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &config.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
+	rootConfig := config.ERunConfig{CloudProviders: []model.CloudProviderConfig{
+		{Alias: otherERunAlias, Provider: config.CloudProviderERun, ERun: &model.ERunProviderConfig{APIURL: "https://this-must-not-be-used.example", ClientID: "other-client"}},
+		{Alias: testERunAlias, Provider: config.CloudProviderERun, Username: "erun", ERun: &model.ERunProviderConfig{APIURL: server.URL, ClientID: "test-client", RefreshTokenRef: refreshRef}},
 	}}
 	app := NewApp(erunUIDeps{
-		store: stubUIStore{config: &rootConfig, tenants: map[string]config.TenantConfig{
+		store: stubUIStore{config: &rootConfig, tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", CloudProviderAliases: []string{otherERunAlias, testERunAlias}, PrimaryCloudProviderAlias: testERunAlias},
 		}},
 		cloudDeps: cloud.CloudDependencies{

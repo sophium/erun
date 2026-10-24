@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const (
@@ -26,24 +28,17 @@ type EnvironmentIdleConfig struct {
 	IdleTrafficBytes int64  `yaml:"idletrafficbytes,omitempty" json:"idleTrafficBytes,omitempty"`
 }
 
-type EnvironmentIdlePolicy struct {
-	Timeout          time.Duration `json:"timeout"`
-	WorkingHours     string        `json:"workingHours"`
-	Timezone         string        `json:"timezone,omitempty"`
-	IdleTrafficBytes int64         `json:"idleTrafficBytes"`
-}
-
-func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
+func (c EnvironmentIdleConfig) Resolve() (model.EnvironmentIdlePolicy, error) {
 	timeout := strings.TrimSpace(c.Timeout)
 	if timeout == "" {
 		timeout = DefaultEnvironmentIdleTimeout.String()
 	}
 	duration, err := time.ParseDuration(timeout)
 	if err != nil {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timeout %q", timeout)
+		return model.EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timeout %q", timeout)
 	}
 	if duration <= 0 {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("environment idle timeout must be greater than zero")
+		return model.EnvironmentIdlePolicy{}, fmt.Errorf("environment idle timeout must be greater than zero")
 	}
 
 	workingHours := strings.TrimSpace(c.WorkingHours)
@@ -51,22 +46,22 @@ func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
 		workingHours = DefaultEnvironmentWorkingHours
 	}
 	if err := validateWorkingHours(workingHours); err != nil {
-		return EnvironmentIdlePolicy{}, err
+		return model.EnvironmentIdlePolicy{}, err
 	}
 
 	timezone := strings.TrimSpace(c.Timezone)
 	if timezone != "" {
 		if _, err := time.LoadLocation(timezone); err != nil {
-			return EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
+			return model.EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
 		}
 	}
 
 	idleTrafficBytes := c.IdleTrafficBytes
 	if idleTrafficBytes < 0 {
-		return EnvironmentIdlePolicy{}, fmt.Errorf("environment idle traffic threshold must not be negative")
+		return model.EnvironmentIdlePolicy{}, fmt.Errorf("environment idle traffic threshold must not be negative")
 	}
 
-	return EnvironmentIdlePolicy{
+	return model.EnvironmentIdlePolicy{
 		Timeout:          duration,
 		WorkingHours:     workingHours,
 		Timezone:         timezone,

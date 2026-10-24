@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -59,7 +60,7 @@ const reusableLinuxPackageDockerfile = "" +
 	"FROM scratch AS dist\n" +
 	"COPY --from=package /deb/ /\n"
 
-func reusablePackageProject(t *testing.T) (string, shared.LinuxPackageSpec) {
+func reusablePackageProject(t *testing.T) (string, model.LinuxPackageSpec) {
 	t.Helper()
 	root := t.TempDir()
 	for rel, content := range map[string]string{
@@ -80,16 +81,16 @@ func reusablePackageProject(t *testing.T) (string, shared.LinuxPackageSpec) {
 	return root, packages[0]
 }
 
-func reuseDecision(t *testing.T, pkg shared.LinuxPackageSpec) shared.LinuxPackageSpec {
+func reuseDecision(t *testing.T, pkg model.LinuxPackageSpec) model.LinuxPackageSpec {
 	t.Helper()
-	decided := build.ApplyLinuxPackageReuse([]shared.LinuxPackageSpec{pkg})[0]
+	decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
 	if decided.Fingerprint == "" {
 		t.Fatalf("the package was not fingerprinted: %q", decided.NoReuseReason)
 	}
 	return decided
 }
 
-func runChecksLogging(t *testing.T, packages []shared.LinuxPackageSpec) (string, error) {
+func runChecksLogging(t *testing.T, packages []model.LinuxPackageSpec) (string, error) {
 	t.Helper()
 	var log bytes.Buffer
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
@@ -101,7 +102,7 @@ func TestLinuxPackageFailedCheckRecordsNoPass(t *testing.T) {
 	dir := useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
 	fakeDockerRecorder(t, "1")
-	if _, err := runChecksLogging(t, []shared.LinuxPackageSpec{reuseDecision(t, pkg)}); err == nil {
+	if _, err := runChecksLogging(t, []model.LinuxPackageSpec{reuseDecision(t, pkg)}); err == nil {
 		t.Fatal("expected the failed check to fail the build")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "app.json")); !errors.Is(err, os.ErrNotExist) {
@@ -111,7 +112,7 @@ func TestLinuxPackageFailedCheckRecordsNoPass(t *testing.T) {
 		t.Fatal("a failed check must not be reused")
 	}
 	fakeDockerRecorder(t, "0")
-	if _, err := runChecksLogging(t, []shared.LinuxPackageSpec{reuseDecision(t, pkg)}); err != nil {
+	if _, err := runChecksLogging(t, []model.LinuxPackageSpec{reuseDecision(t, pkg)}); err != nil {
 		t.Fatal(err)
 	}
 	if !reuseDecision(t, pkg).Reuse {
@@ -126,7 +127,7 @@ func TestLinuxPackageDryRunNeitherRunsNorRecords(t *testing.T) {
 	var log bytes.Buffer
 	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &log, &log)}
 	decided := reuseDecision(t, pkg)
-	if err := build.RunLinuxPackageChecks(ctx, []shared.LinuxPackageSpec{decided}); err != nil {
+	if err := build.RunLinuxPackageChecks(ctx, []model.LinuxPackageSpec{decided}); err != nil {
 		t.Fatal(err)
 	}
 	if calls := readLines(t, dockerLog); len(calls) != 0 {
@@ -203,7 +204,7 @@ func TestLinuxPackagePassIsKeyedByTheDaemonsPlatform(t *testing.T) {
 	dockerLog := filepath.Join(t.TempDir(), "docker.log")
 	t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, `echo "$*" >> '`+dockerLog+`'`+"\n"+`echo linux/amd64`))
 
-	decided := build.ApplyLinuxPackageReuse([]shared.LinuxPackageSpec{pkg, pkg})
+	decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg, pkg})
 	for _, got := range decided {
 		if got.Platform != "linux/amd64" {
 			t.Fatalf("an amd64 daemon on an arm64 host must key the pass as linux/amd64, got %q (%s)", got.Platform, got.NoReuseReason)
@@ -226,12 +227,12 @@ func TestLinuxPackageWithoutTheDaemonsPlatformNeitherReusesNorRecords(t *testing
 		t.Run(name, func(t *testing.T) {
 			useLinuxPackageDaemonPlatform(t, build.ReadDockerDaemonPlatform)
 			t.Setenv("ERUN_DOCKER_BIN", writeExecutableScript(t, script))
-			decided := build.ApplyLinuxPackageReuse([]shared.LinuxPackageSpec{pkg})[0]
+			decided := build.ApplyLinuxPackageReuse([]model.LinuxPackageSpec{pkg})[0]
 			if decided.Reuse || decided.Platform != "" || !strings.Contains(decided.NoReuseReason, "the docker daemon's platform could not be read") {
 				t.Fatalf("expected no reuse decision and a reason, got %+v (%q)", decided, decided.NoReuseReason)
 			}
 			dockerLog := fakeDockerRecorder(t, "0")
-			out, err := runChecksLogging(t, []shared.LinuxPackageSpec{decided})
+			out, err := runChecksLogging(t, []model.LinuxPackageSpec{decided})
 			if err != nil {
 				t.Fatal(err)
 			}

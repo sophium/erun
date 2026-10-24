@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -18,10 +19,10 @@ func environmentJobExclusiveLeaseID(id string) string {
 
 // heldEnvironmentExclusivityClaim reports the claim holding the whole environment.
 // The load also reclaims expired or orphaned claims.
-func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (activity.EnvironmentActivityLease, bool) {
+func heldEnvironmentExclusivityClaim(tenant, environment string, now time.Time) (model.EnvironmentActivityLease, bool) {
 	claims := shared.HeldEnvironmentExclusivityClaims(tenant, environment, now, environmentExclusivityHoldsWholeEnvironment)
 	if len(claims) == 0 {
-		return activity.EnvironmentActivityLease{}, false
+		return model.EnvironmentActivityLease{}, false
 	}
 	return claims[0], true
 }
@@ -76,7 +77,7 @@ func resolveEnvironmentJobExclusivity(ctx core.Context, dir string, params Start
 
 // takeEnvironmentJobExclusivityClaim claims at start so refusal is synchronous.
 // pid is 0 until the supervisor's first heartbeat; only the TTL bounds it until then.
-func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now time.Time) (activity.EnvironmentActivityLease, error) {
+func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now time.Time) (model.EnvironmentActivityLease, error) {
 	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      params.Tenant,
 		Environment: params.Environment,
@@ -92,8 +93,8 @@ func takeEnvironmentJobExclusivityClaim(params StartEnvironmentJobParams, now ti
 
 // environmentJobHolder names who a job's leases belong to. The orchestrator id
 // comes from the environment so a claim cannot name someone else as holder.
-func environmentJobHolder(tenant string) activity.EnvironmentActivityLeaseHolder {
-	return activity.EnvironmentActivityLeaseHolder{
+func environmentJobHolder(tenant string) model.EnvironmentActivityLeaseHolder {
+	return model.EnvironmentActivityLeaseHolder{
 		Orchestrator: strings.TrimSpace(os.Getenv(shared.OrchestratorIDEnvVar)),
 		Tenant:       tenant,
 	}

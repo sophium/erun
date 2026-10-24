@@ -8,11 +8,12 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // An issuer that rejects the org-claim scope must still let login through.
 func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
 	provider := erunTestProvider()
 
@@ -34,7 +35,7 @@ func TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope(t *testing
 		},
 	}
 
-	status, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps)
+	status, err := LoginCloudProviderAlias(core.Context{}, &store, model.CloudLoginParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		t.Fatalf("LoginCloudProviderAlias: %v", err)
 	}
@@ -66,7 +67,7 @@ func assertDegradedScopeAttempts(t *testing.T, gotScopes []string) {
 }
 
 func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
 	provider := erunTestProvider()
 
@@ -90,7 +91,7 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testi
 		},
 	}
 
-	if _, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps); err != nil {
+	if _, err := LoginCloudProviderAlias(core.Context{}, &store, model.CloudLoginParams{Alias: provider.Alias}, deps); err != nil {
 		t.Fatalf("LoginCloudProviderAlias: %v", err)
 	}
 	if !called {
@@ -100,7 +101,7 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWithoutDeviceEndpoint(t *testi
 
 func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 	store := erunTestCloudStore{}
-	provider := NormalizeCloudProviderConfig(configpkg.CloudProviderConfig{Alias: "erun+x@erun", Provider: configpkg.CloudProviderERun})
+	provider := NormalizeCloudProviderConfig(model.CloudProviderConfig{Alias: "erun+x@erun", Provider: configpkg.CloudProviderERun})
 	if _, err := erunCloudProviderLogin(core.Context{}, &store, provider, "", nil, CloudDependencies{}); err == nil {
 		t.Fatal("expected an error for a provider with no ERun config")
 	} else if !strings.Contains(err.Error(), "cloud init erun") {
@@ -109,7 +110,7 @@ func TestERunCloudProviderLoginRequiresInit(t *testing.T) {
 }
 
 func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	secrets := NewFileCloudSecretStore(t.TempDir())
 	provider := erunTestProvider()
 
@@ -132,7 +133,7 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing
 		},
 	}
 
-	status, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps)
+	status, err := LoginCloudProviderAlias(core.Context{}, &store, model.CloudLoginParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		t.Fatalf("LoginCloudProviderAlias: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestERunCloudProviderLoginFallsBackToAuthCodeWhenDeviceFlowFails(t *testing
 }
 
 func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
 
 	deps := CloudDependencies{
@@ -168,13 +169,13 @@ func TestERunCloudProviderLoginHonoursExplicitAuthCodeFlow(t *testing.T) {
 		},
 	}
 
-	if _, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowAuthCode}, deps); err != nil {
+	if _, err := LoginCloudProviderAlias(core.Context{}, &store, model.CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowAuthCode}, deps); err != nil {
 		t.Fatalf("LoginCloudProviderAlias: %v", err)
 	}
 }
 
 func TestERunCloudProviderLoginExplicitDeviceFlowWithoutEndpointErrors(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
 
 	deps := CloudDependencies{
@@ -188,7 +189,7 @@ func TestERunCloudProviderLoginExplicitDeviceFlowWithoutEndpointErrors(t *testin
 		},
 	}
 
-	_, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowDevice}, deps)
+	_, err := LoginCloudProviderAlias(core.Context{}, &store, model.CloudLoginParams{Alias: provider.Alias, Flow: ERunLoginFlowDevice}, deps)
 	if err == nil {
 		t.Fatal("expected an error for an explicit device flow with no device endpoint")
 	}
@@ -224,7 +225,7 @@ func TestNormalizeERunLoginFlow(t *testing.T) {
 
 // Reserved scopes are often missing from discovery, so --scope must still reach the request.
 func TestERunCloudProviderLoginRequestsExtraScopes(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
 
 	var gotScope string
@@ -239,7 +240,7 @@ func TestERunCloudProviderLoginRequestsExtraScopes(t *testing.T) {
 		},
 	}
 
-	params := CloudLoginParams{Alias: provider.Alias, Scopes: []string{"urn:zitadel:iam:user:resourceowner"}}
+	params := model.CloudLoginParams{Alias: provider.Alias, Scopes: []string{"urn:zitadel:iam:user:resourceowner"}}
 	if _, err := LoginCloudProviderAlias(core.Context{}, &store, params, deps); err != nil {
 		t.Fatalf("LoginCloudProviderAlias: %v", err)
 	}

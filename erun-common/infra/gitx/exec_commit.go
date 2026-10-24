@@ -9,27 +9,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// CommitWorkingTreeParams names the intended commit; Branch is verified before staging.
-type CommitWorkingTreeParams struct {
-	Branch string
-	// Message is recorded verbatim; nothing in it is interpreted.
-	Message string
-	// Paths, when set, scopes staging and refuses changes outside it so unrelated edits
-	// are never absorbed; a blank entry is refused rather than widening to `git add -A`.
-	Paths []string
-	// SkipHooks uses --no-verify, only for machine commits (checkpoints, gate-merge squash)
-	// where a hook rejection would destroy work of a run that already ended.
-	SkipHooks bool
-}
-
-// CommitWorkingTreeResult is what actually landed.
-type CommitWorkingTreeResult struct {
-	Branch string   `json:"branch"`
-	Commit string   `json:"commit"`
-	Files  []string `json:"files"`
-}
 
 // CommitWorkingTreeDependencies lets tests replace the git plumbing.
 type CommitWorkingTreeDependencies struct {
@@ -61,32 +42,32 @@ func normalizeCommitWorkingTreeDependencies(deps CommitWorkingTreeDependencies) 
 
 // CommitWorkingTree stages Paths (or everything) and commits Message, refusing a branch
 // mismatch or out-of-scope changes before staging.
-func CommitWorkingTree(ctx core.Context, root string, params CommitWorkingTreeParams, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+func CommitWorkingTree(ctx core.Context, root string, params model.CommitWorkingTreeParams, deps CommitWorkingTreeDependencies) (model.CommitWorkingTreeResult, error) {
 	branch := strings.TrimSpace(params.Branch)
 	if branch == "" {
-		return CommitWorkingTreeResult{}, fmt.Errorf("branch is required")
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("branch is required")
 	}
 	if strings.TrimSpace(params.Message) == "" {
-		return CommitWorkingTreeResult{}, fmt.Errorf("message is required")
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("message is required")
 	}
 	deps = normalizeCommitWorkingTreeDependencies(deps)
 
 	current, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("resolve current branch: %w", err)
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("resolve current branch: %w", err)
 	}
 	if current != branch {
-		return CommitWorkingTreeResult{}, fmt.Errorf("refusing to commit: working tree is on branch %q, not the declared %q", current, branch)
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("refusing to commit: working tree is on branch %q, not the declared %q", current, branch)
 	}
 
 	scopedPaths, err := normalizeCommitWorkingTreePaths(root, params.Paths)
 	if err != nil {
-		return CommitWorkingTreeResult{}, err
+		return model.CommitWorkingTreeResult{}, err
 	}
 
 	preview, err := resolveCommitPreview(ctx, root, scopedPaths, deps)
 	if err != nil {
-		return CommitWorkingTreeResult{}, err
+		return model.CommitWorkingTreeResult{}, err
 	}
 
 	addArgs := commitAddArgs(scopedPaths)
@@ -94,7 +75,7 @@ func CommitWorkingTree(ctx core.Context, root string, params CommitWorkingTreePa
 	ctx.TraceCommand(root, "git", CommitVerbArgs(params.SkipHooks, "<message>")...)
 	if ctx.DryRun {
 		traceCommitPreview(ctx, preview)
-		return CommitWorkingTreeResult{Branch: branch, Files: preview}, nil
+		return model.CommitWorkingTreeResult{Branch: branch, Files: preview}, nil
 	}
 
 	return stageAndCommitWorkingTree(ctx, root, params.Message, addArgs, params.SkipHooks, deps)
@@ -149,36 +130,36 @@ func traceCommitPreview(ctx core.Context, preview []string) {
 	ctx.Trace("commit: would commit " + strings.Join(preview, ", "))
 }
 
-func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (CommitWorkingTreeResult, error) {
+func stageAndCommitWorkingTree(ctx core.Context, root, message string, addArgs []string, skipHooks bool, deps CommitWorkingTreeDependencies) (model.CommitWorkingTreeResult, error) {
 	var addStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &addStderr, append([]string{"add"}, addArgs...)...); err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(addStderr.String()))
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("git add: %w: %s", err, strings.TrimSpace(addStderr.String()))
 	}
 
 	files, err := deps.StagedFiles(ctx, root)
 	if err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("resolve staged files: %w", err)
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("resolve staged files: %w", err)
 	}
 	if len(files) == 0 {
-		return CommitWorkingTreeResult{}, fmt.Errorf("nothing to commit: the working tree has no changes")
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("nothing to commit: the working tree has no changes")
 	}
 
 	var commitStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &commitStderr, CommitVerbArgs(skipHooks, message)...); err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("git commit: %w: %s", err, strings.TrimSpace(commitStderr.String()))
 	}
 
 	commit, err := deps.CurrentCommit(ctx, root)
 	if err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("resolve new commit: %w", err)
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("resolve new commit: %w", err)
 	}
 	// Report the branch git has now, not the declared one.
 	landedBranch, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return CommitWorkingTreeResult{}, fmt.Errorf("resolve committed branch: %w", err)
+		return model.CommitWorkingTreeResult{}, fmt.Errorf("resolve committed branch: %w", err)
 	}
 
-	return CommitWorkingTreeResult{Branch: landedBranch, Commit: commit, Files: files}, nil
+	return model.CommitWorkingTreeResult{Branch: landedBranch, Commit: commit, Files: files}, nil
 }
 
 // normalizeCommitWorkingTreePaths rejects paths escaping root and returns sorted,

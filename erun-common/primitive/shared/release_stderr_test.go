@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -66,7 +67,7 @@ func TestGitWorktreeCleanIncludesGitStderr(t *testing.T) {
 
 func TestSyncMarketplaceReleaseSHAIncludesGitStderr(t *testing.T) {
 	writeGitStub(t, "fatal: ambiguous argument 'v1.0.0^{}': unknown revision or path not in the working tree.", 128)
-	_, _, err := SyncMarketplaceReleaseSHA(testTraceContext(false), ReleasePackagingSyncSpec{
+	_, _, err := SyncMarketplaceReleaseSHA(testTraceContext(false), model.ReleasePackagingSyncSpec{
 		ProjectRoot:     t.TempDir(),
 		Version:         "1.0.0",
 		MarketplacePath: "marketplace.yaml",

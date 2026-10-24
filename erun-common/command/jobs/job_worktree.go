@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -151,7 +152,7 @@ func refuseAgentJobWorktreeCheckpoint(ctx core.Context, dir, branch string) (str
 
 // checkpointAgentJobWorktree commits and pushes, recording any failure in outcome.reason.
 func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome environmentJobWorktreeOutcome) environmentJobWorktreeOutcome {
-	commitResult, err := gitx.CommitWorkingTree(ctx, dir, gitx.CommitWorkingTreeParams{
+	commitResult, err := gitx.CommitWorkingTree(ctx, dir, model.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: agentJobWorktreeCommitMessage,
 		// A rejecting hook would discard the work, not veto the commit.
@@ -164,7 +165,7 @@ func checkpointAgentJobWorktree(ctx core.Context, dir, branch string, outcome en
 	}
 	outcome.commit = commitResult.Commit
 
-	pushResult, err := gitx.PushWorkingTreeBranch(ctx, dir, gitx.PushWorkingTreeBranchParams{Branch: branch}, gitx.PushWorkingTreeBranchDependencies{})
+	pushResult, err := gitx.PushWorkingTreeBranch(ctx, dir, model.PushWorkingTreeBranchParams{Branch: branch}, gitx.PushWorkingTreeBranchDependencies{})
 	if err != nil {
 		outcome.reason = fmt.Sprintf("the job made a checkpoint commit (%s) for its uncommitted changes but could "+
 			"not push it: %v; that commit is only as safe as this one working tree", commitResult.Commit, err)

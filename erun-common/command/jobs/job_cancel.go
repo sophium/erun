@@ -5,15 +5,9 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-type CancelEnvironmentJobParams struct {
-	Tenant      string
-	Environment string
-	ID          string
-	Signal      string
-}
 
 type CancelEnvironmentJobResult struct {
 	Job shared.EnvironmentJob `json:"job"`
@@ -43,7 +37,7 @@ func resolveEnvironmentJobCancelTarget(job shared.EnvironmentJob) (int, error) {
 
 // CancelEnvironmentJob signals the recorded pid, never a command-line pattern
 // that could match the caller's shell, and never the supervisor.
-func CancelEnvironmentJob(ctx core.Context, params CancelEnvironmentJobParams) (CancelEnvironmentJobResult, error) {
+func CancelEnvironmentJob(ctx core.Context, params model.CancelEnvironmentJobParams) (CancelEnvironmentJobResult, error) {
 	signal, err := core.NormalizeEnvironmentJobSignal(params.Signal)
 	if err != nil {
 		return CancelEnvironmentJobResult{}, err

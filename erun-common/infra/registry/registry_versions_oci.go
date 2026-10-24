@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // resolveOCIRuntimeRegistryVersionsAt lists a repository on any OCI registry
 // using docker's own credential. Basic auth goes first because ECR accepts it;
 // a bearer challenge gets a token exchange and retry.
-func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, host, prefix, repository, baseURL string) (RuntimeRegistryVersions, error) {
+func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, host, prefix, repository, baseURL string) (model.RuntimeRegistryVersions, error) {
 	host = strings.TrimSpace(host)
 	repository = strings.TrimSpace(repository)
 	if host == "" || repository == "" {
-		return RuntimeRegistryVersions{}, fmt.Errorf("registry host and repository are required")
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("registry host and repository are required")
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -34,7 +36,7 @@ func resolveOCIRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clien
 	auth, hasAuth := ResolveOCIRegistryBasicAuth(host)
 	tags, err := collectOCITags(ctx, client, base+"/v2/"+repoPath+"/tags/list", repoPath, auth, hasAuth)
 	if err != nil {
-		return RuntimeRegistryVersions{}, err
+		return model.RuntimeRegistryVersions{}, err
 	}
 
 	image := host

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -170,7 +171,7 @@ func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observatio
 		observation.state.checkFailed = true
 		return observation
 	}
-	var status activity.EnvironmentIdleStatus
+	var status model.EnvironmentIdleStatus
 	if err := json.Unmarshal([]byte(output), &status); err != nil {
 		observation.state.checkFailed = true
 		return observation
@@ -184,7 +185,7 @@ func (a *App) observeEnvironmentActivityViaPod(selection uiSelection, observatio
 
 // Leases without a named orchestrator holder contribute nothing, so they never
 // suppress an orchestrator's pacing nudge.
-func environmentLeaseHolderOrchestrators(leases []activity.EnvironmentActivityLease) string {
+func environmentLeaseHolderOrchestrators(leases []model.EnvironmentActivityLease) string {
 	seen := make(map[string]struct{})
 	for _, lease := range leases {
 		if id := strings.TrimSpace(lease.Holder.Orchestrator); id != "" {
@@ -203,7 +204,7 @@ func environmentLeaseHolderOrchestrators(leases []activity.EnvironmentActivityLe
 }
 
 // A held lease wins because it is the only signal that names the work.
-func environmentBusyFromIdleStatus(status activity.EnvironmentIdleStatus) (bool, string) {
+func environmentBusyFromIdleStatus(status model.EnvironmentIdleStatus) (bool, string) {
 	if len(status.Leases) > 0 {
 		names := make([]string, 0, len(status.Leases))
 		for _, lease := range status.Leases {

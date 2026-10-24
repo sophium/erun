@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/internal"
 )
 
 func TestBootstrapInitExitErrorKeepsTheOutcomesDistinct(t *testing.T) {
-	unavailable := setup.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
+	unavailable := model.TenantSelectionUnavailableError{Tenants: []string{"erun", "frs"}}
 	tagged := bootstrapInitExitError(unavailable)
 	if got := internal.ExitCodeFor(tagged); got != tenantSelectionUnavailableExitCode {
 		t.Fatalf("exit code %d, want %d", got, tenantSelectionUnavailableExitCode)

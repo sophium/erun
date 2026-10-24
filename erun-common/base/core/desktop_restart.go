@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A CLI restart cannot reimplement the desktop's RestartApp; it finds the running
@@ -59,46 +61,16 @@ func ReadDesktopControlMarker(path string) (DesktopControlMarker, error) {
 	return marker, nil
 }
 
-// DesktopRestartStatus keeps success, refusal, and failure distinct.
-type DesktopRestartStatus string
-
-const (
-	DesktopRestartWouldRestart DesktopRestartStatus = "would-restart"
-	DesktopRestartRestarted    DesktopRestartStatus = "restarted"
-	// DesktopRestartRefused means no live target was verified, so nothing was attempted.
-	DesktopRestartRefused DesktopRestartStatus = "refused"
-	// DesktopRestartFailed means the target was reached but reported the restart failed.
-	DesktopRestartFailed DesktopRestartStatus = "failed"
-)
-
-type DesktopRestartOutcome struct {
-	Status      DesktopRestartStatus `json:"status"`
-	Reason      string               `json:"reason,omitempty"`
-	PID         int                  `json:"pid,omitempty"`
-	ControlPort int                  `json:"controlPort,omitempty"`
-	// Preview is the dry run's answer: orchestrators the restart would reopen.
-	Preview []DesktopRestartReopen `json:"preview,omitempty"`
-	// PreviewUnavailable keeps an unreadable plan from reading as "nothing would be refused".
-	PreviewUnavailable string `json:"previewUnavailable,omitempty"`
-}
-
 // DesktopRestartRequest names the orchestrator being resumed; the path selects the question.
 type DesktopRestartRequest struct {
 	OrchestratorID string `json:"orchestratorId"`
 }
 
-// DesktopRestartReopen is one orchestrator a restart reopens; its background agent keeps running.
-type DesktopRestartReopen struct {
-	OrchestratorID string `json:"orchestratorId"`
-	// Notice is why the next launch would refuse to reopen this orchestrator.
-	Notice string `json:"notice,omitempty"`
-}
-
 // DesktopRestartResponse answers both the restart and the plan path.
 type DesktopRestartResponse struct {
-	OK      bool                   `json:"ok"`
-	Error   string                 `json:"error,omitempty"`
-	Preview []DesktopRestartReopen `json:"preview,omitempty"`
+	OK      bool                         `json:"ok"`
+	Error   string                       `json:"error,omitempty"`
+	Preview []model.DesktopRestartReopen `json:"preview,omitempty"`
 }
 
 // DesktopRestartDeps is RestartDesktopApp's test seam.
@@ -124,7 +96,7 @@ func DefaultDesktopRestartDeps() DesktopRestartDeps {
 // RestartDesktopApp asks the running desktop to restart itself after verifying it
 // is alive; it never spawns or signals a process itself. A dry run asks the plan
 // path instead and never falls back to a restart.
-func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestratorID string, dryRun bool) DesktopRestartOutcome {
+func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestratorID string, dryRun bool) model.DesktopRestartOutcome {
 	marker, err := deps.ReadMarker(deps.MarkerPath)
 	if err != nil {
 		reason := "no desktop app is currently running"
@@ -132,13 +104,13 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 			// An unreadable marker is a real problem, unlike a missing one.
 			reason = fmt.Sprintf("its restart control record could not be read (%v)", err)
 		}
-		return DesktopRestartOutcome{Status: DesktopRestartRefused, Reason: reason}
+		return model.DesktopRestartOutcome{Status: model.DesktopRestartRefused, Reason: reason}
 	}
 	if !deps.ProcessAlive(marker.PID) {
 		// A marker naming a dead pid identifies nothing to ask; reopening the desktop
 		// reclaims it, so the reason says that.
-		return DesktopRestartOutcome{
-			Status: DesktopRestartRefused,
+		return model.DesktopRestartOutcome{
+			Status: model.DesktopRestartRefused,
 			Reason: fmt.Sprintf(
 				"the desktop app recorded at pid %d is not running; the record is stale — quit and reopen the desktop app so it records a fresh one",
 				marker.PID),
@@ -149,7 +121,7 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 	if dryRun {
 		// Never fall through to the restart from a dry run.
 		response, err := deps.Plan(ctx, marker.ControlPort, orchestratorID)
-		outcome := DesktopRestartOutcome{Status: DesktopRestartWouldRestart, PID: marker.PID, ControlPort: marker.ControlPort}
+		outcome := model.DesktopRestartOutcome{Status: model.DesktopRestartWouldRestart, PID: marker.PID, ControlPort: marker.ControlPort}
 		switch {
 		case err != nil:
 			outcome.PreviewUnavailable = restartPlanUnavailable(err.Error())
@@ -162,17 +134,17 @@ func RestartDesktopApp(ctx context.Context, deps DesktopRestartDeps, orchestrato
 	}
 	response, err := deps.Post(ctx, marker.ControlPort, orchestratorID)
 	if err != nil {
-		return DesktopRestartOutcome{
-			Status:      DesktopRestartRefused,
+		return model.DesktopRestartOutcome{
+			Status:      model.DesktopRestartRefused,
 			Reason:      fmt.Sprintf("could not reach the running desktop app's restart control endpoint: %v", err),
 			PID:         marker.PID,
 			ControlPort: marker.ControlPort,
 		}
 	}
 	if !response.OK {
-		return DesktopRestartOutcome{Status: DesktopRestartFailed, Reason: response.Error, PID: marker.PID, ControlPort: marker.ControlPort}
+		return model.DesktopRestartOutcome{Status: model.DesktopRestartFailed, Reason: response.Error, PID: marker.PID, ControlPort: marker.ControlPort}
 	}
-	return DesktopRestartOutcome{Status: DesktopRestartRestarted, PID: marker.PID, ControlPort: marker.ControlPort}
+	return model.DesktopRestartOutcome{Status: model.DesktopRestartRestarted, PID: marker.PID, ControlPort: marker.ControlPort}
 }
 
 func restartPlanUnavailable(cause string) string {

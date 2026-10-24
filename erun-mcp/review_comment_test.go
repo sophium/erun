@@ -30,10 +30,10 @@ func reviewCommentTestRuntime() shared.RuntimeConfig {
 	return shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "acme", Environment: "dev"},
 		Store: stubReviewCommentStore{config: configpkg.ERunConfig{
-			CloudProviders: []configpkg.CloudProviderConfig{{
+			CloudProviders: []model.CloudProviderConfig{{
 				Alias:    reviewCommentTestAlias,
 				Provider: configpkg.CloudProviderERun,
-				ERun:     &configpkg.ERunProviderConfig{APIURL: "https://api.test"},
+				ERun:     &model.ERunProviderConfig{APIURL: "https://api.test"},
 			}},
 		}},
 	}

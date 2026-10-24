@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -17,7 +18,7 @@ const (
 
 // memoryReadingForPercent derives the reading from raw counters, using the smallest byte
 // count that reaches percent, so the crossing itself is tested.
-func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) config.RuntimeUsage {
+func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, oomKills int64) model.RuntimeUsage {
 	bytesFor := func(percent float64) int64 {
 		return int64(math.Ceil(float64(limit) * percent / 100))
 	}
@@ -33,16 +34,16 @@ func memoryReadingForPercent(currentPercent, peakPercent float64, limit int64, o
 	} else {
 		values["memory_oom_kill"] = "0"
 	}
-	usage := config.RuntimeUsage{Tenant: "erun", Environment: "code3", Memory: config.RuntimeMemoryUsageFromValues(values)}
+	usage := model.RuntimeUsage{Tenant: "erun", Environment: "code3", Memory: config.RuntimeMemoryUsageFromValues(values)}
 	usage.Warnings = runtimeUsageWarnings(usage)
 	return usage
 }
 
-func saturatingReading(current, limit int64) config.RuntimeUsage {
-	return config.RuntimeUsage{
+func saturatingReading(current, limit int64) model.RuntimeUsage {
+	return model.RuntimeUsage{
 		Tenant:      "erun",
 		Environment: "code3",
-		Memory: config.RuntimeMemoryUsage{
+		Memory: model.RuntimeMemoryUsage{
 			CurrentBytes:     current,
 			PeakBytes:        limit,
 			PeakObserved:     true,
@@ -50,11 +51,11 @@ func saturatingReading(current, limit int64) config.RuntimeUsage {
 			PercentOfLimit:   100 * float64(current) / float64(limit),
 			OOMKillsObserved: true,
 		},
-		CPU: config.RuntimeCPUUsage{QuotaCores: 4, Periods: 20000, ThrottledPeriods: 0},
+		CPU: model.RuntimeCPUUsage{QuotaCores: 4, Periods: 20000, ThrottledPeriods: 0},
 	}
 }
 
-func memoryVerdict(t *testing.T, recommendation deploy.RuntimeSizingRecommendation) deploy.RuntimeSizingVerdict {
+func memoryVerdict(t *testing.T, recommendation model.RuntimeSizingRecommendation) model.RuntimeSizingVerdict {
 	t.Helper()
 	for _, verdict := range recommendation.Verdicts {
 		if verdict.Resource == "memory" {
@@ -62,7 +63,7 @@ func memoryVerdict(t *testing.T, recommendation deploy.RuntimeSizingRecommendati
 		}
 	}
 	t.Fatalf("recommendation carries no memory verdict: %+v", recommendation.Verdicts)
-	return deploy.RuntimeSizingVerdict{}
+	return model.RuntimeSizingVerdict{}
 }
 
 // The history is empty on purpose: a host with no retained history is the case at risk.
@@ -80,14 +81,14 @@ func TestSaturationWarningAlwaysCarriesItsRecommendation(t *testing.T) {
 			t.Fatalf("%.0f%% of the limit fired a warning but produced no recommendation at all", percent)
 		}
 		verdict := memoryVerdict(t, recommendation)
-		if verdict.Action != deploy.RuntimeSizingRaise {
+		if verdict.Action != model.RuntimeSizingRaise {
 			t.Errorf("%.0f%% of the limit warned but the recommendation says %q (%s); a saturated environment must be told what would fix it",
 				percent, verdict.Action, verdict.Reason)
 		}
 		if strings.TrimSpace(verdict.Suggested) == "" {
 			t.Errorf("%.0f%% of the limit warned but the raise suggests no size", percent)
 		}
-		if verdict.Confidence != deploy.RuntimeSizingConfidenceHigh {
+		if verdict.Confidence != model.RuntimeSizingConfidenceHigh {
 			t.Errorf("%.0f%% of the limit: a raise stands on evidence of harm and must be high confidence, got %q",
 				percent, verdict.Confidence)
 		}
@@ -109,7 +110,7 @@ func TestPeakOnlyWarningAlsoCarriesARaise(t *testing.T) {
 		t.Fatal("the peak warning fired with no recommendation beside it")
 	}
 	verdict := memoryVerdict(t, recommendation)
-	if verdict.Action != deploy.RuntimeSizingRaise {
+	if verdict.Action != model.RuntimeSizingRaise {
 		t.Errorf("peak at the ceiling warned but the recommendation says %q (%s)", verdict.Action, verdict.Reason)
 	}
 	if !strings.Contains(verdict.Reason, "100%") {
@@ -120,14 +121,14 @@ func TestPeakOnlyWarningAlsoCarriesARaise(t *testing.T) {
 func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 	limit := 6 * testGiB
 	history := deploy.RuntimeUsageHistory{
-		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
+		Samples:                 []model.RuntimeUsage{saturatingReading(1024*1024*1024, limit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
 	fromHistory, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{History: history})
 	if !ok {
 		t.Fatal("a retained sample produced no recommendation")
 	}
-	if got := memoryVerdict(t, fromHistory).Action; got != deploy.RuntimeSizingUnknown {
+	if got := memoryVerdict(t, fromHistory).Action; got != model.RuntimeSizingUnknown {
 		t.Fatalf("expected the retained history to say insufficient-evidence, got %q", got)
 	}
 
@@ -137,11 +138,11 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 		t.Fatal("the live reading produced no recommendation")
 	}
 	verdict := memoryVerdict(t, fromBoth)
-	if verdict.Action != deploy.RuntimeSizingRaise {
+	if verdict.Action != model.RuntimeSizingRaise {
 		t.Fatalf("a reading at 99%% of the limit was scored as %q (%s)", verdict.Action, verdict.Reason)
 	}
 
-	raise, ok := deploy.RuntimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, config.NamespaceResourceQuota{})
+	raise, ok := deploy.RuntimeMemoryRaiseVerdict(limit, live.Memory.PeakBytes, 0, model.NamespaceResourceQuota{})
 	if !ok {
 		t.Fatal("the raise helper disagrees with the recommendation it is the only source of")
 	}
@@ -154,7 +155,7 @@ func TestRetainedHistoryAndLiveReadingCannotDisagree(t *testing.T) {
 func TestLiveReadingIsTheSizeScoredAgainst(t *testing.T) {
 	oldLimit := 3 * testGiB
 	history := deploy.RuntimeUsageHistory{
-		Samples:                 []config.RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
+		Samples:                 []model.RuntimeUsage{saturatingReading(1024*1024*1024, oldLimit)},
 		ObservedPeakMemoryBytes: 1024 * 1024 * 1024,
 	}
 	live := saturatingReading(1024*1024*1024, testMemoryWarn)

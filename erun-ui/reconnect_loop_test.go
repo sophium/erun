@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
@@ -18,7 +19,7 @@ import (
 func TestStartSessionStopsReconnectingAfterRepeatedFailures(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -82,7 +83,7 @@ func TestRespawnDeclaresItselfAReconnect(t *testing.T) {
 	emits := newCapturedEmits()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -200,12 +201,12 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &config.ERunConfig{
-			CloudContexts: []config.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -232,9 +233,9 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 			return session, nil
 		},
 		// The cache stays running, so only the intent marker can block the respawn.
-		stopCloudContext: func(_ context.Context, name string) (config.CloudContextStatus, error) {
-			return config.CloudContextStatus{
-				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+		stopCloudContext: func(_ context.Context, name string) (model.CloudContextStatus, error) {
+			return model.CloudContextStatus{
+				CloudContextConfig: model.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
@@ -273,12 +274,12 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &config.ERunConfig{
-			CloudContexts: []config.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -293,9 +294,9 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 
 	app := NewApp(erunUIDeps{
 		store: store,
-		stopCloudContext: func(_ context.Context, name string) (config.CloudContextStatus, error) {
-			return config.CloudContextStatus{
-				CloudContextConfig: config.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+		stopCloudContext: func(_ context.Context, name string) (model.CloudContextStatus, error) {
+			return model.CloudContextStatus{
+				CloudContextConfig: model.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
 				Status:             "stopping",
 			}, nil
 		},
@@ -323,12 +324,12 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &config.ERunConfig{
-			CloudContexts: []config.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -344,8 +345,8 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 	wantErr := errors.New("aws stop failed")
 	app := NewApp(erunUIDeps{
 		store: store,
-		stopCloudContext: func(_ context.Context, _ string) (config.CloudContextStatus, error) {
-			return config.CloudContextStatus{}, wantErr
+		stopCloudContext: func(_ context.Context, _ string) (model.CloudContextStatus, error) {
+			return model.CloudContextStatus{}, wantErr
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -483,7 +484,7 @@ func sawDeployFailedMarker(emits *capturedEmits) bool {
 func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{

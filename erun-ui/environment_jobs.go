@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -56,7 +57,7 @@ func (a *App) ReadEnvironmentJobOutput(input uiJobOutputInput) (uiEnvironmentJob
 	if maxBytes <= 0 {
 		maxBytes = defaultJobOutputPageBytes
 	}
-	params := jobspkg.ReadEnvironmentJobOutputParams{
+	params := model.ReadEnvironmentJobOutputParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -90,7 +91,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 	if tenant == "" || environment == "" || id == "" {
 		return uiEnvironmentJob{}, fmt.Errorf("tenant, environment, and job id are required")
 	}
-	params := jobspkg.CancelEnvironmentJobParams{
+	params := model.CancelEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -116,7 +117,7 @@ func (a *App) CancelEnvironmentJob(input uiCancelJobInput) (uiEnvironmentJob, er
 
 // jobsReachability picks the MCP edge, the local store, or an unreachable error.
 func (a *App) jobsReachability(tenant, environment string) (config.OpenResult, bool, error) {
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})

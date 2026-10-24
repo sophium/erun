@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // authorizationCodeExchangeHandler asserts the exchange carries wantCode and a PKCE code_verifier.
@@ -85,13 +86,13 @@ func TestRunERunAuthorizationCodeLoginRoundTrip(t *testing.T) {
 func TestERunLoginBrowserCommandPerOS(t *testing.T) {
 	const authURL = "https://auth.example.test/authorize?state=1"
 	cases := []struct {
-		hostOS     core.HostOS
+		hostOS     model.HostOS
 		executable string
 		args       []string
 	}{
-		{core.HostOSDarwin, "open", []string{authURL}},
-		{core.HostOSLinux, "xdg-open", []string{authURL}},
-		{core.HostOSWindows, "cmd", []string{"/c", "start", "", authURL}},
+		{model.HostOSDarwin, "open", []string{authURL}},
+		{model.HostOSLinux, "xdg-open", []string{authURL}},
+		{model.HostOSWindows, "cmd", []string{"/c", "start", "", authURL}},
 	}
 	for _, c := range cases {
 		executable, args, err := erunLoginBrowserCommand(c.hostOS, authURL)
@@ -105,7 +106,7 @@ func TestERunLoginBrowserCommandPerOS(t *testing.T) {
 			t.Fatalf("%s: args = %v, want %v", c.hostOS, args, c.args)
 		}
 	}
-	if _, _, err := erunLoginBrowserCommand(core.HostOSUnknown, authURL); err == nil {
+	if _, _, err := erunLoginBrowserCommand(model.HostOSUnknown, authURL); err == nil {
 		t.Fatal("expected an unsupported host OS to error")
 	}
 }
@@ -369,7 +370,7 @@ func TestNoTestCanReachTheHostBrowserOpener(t *testing.T) {
 	if err != nil {
 		t.Fatalf("look up inert binary: %v", err)
 	}
-	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux, core.HostOSWindows} {
+	for _, hostOS := range []model.HostOS{model.HostOSDarwin, model.HostOSLinux, model.HostOSWindows} {
 		executable, args, err := erunLoginBrowserCommand(hostOS, "https://auth.example.test/authorize")
 		if err != nil {
 			t.Fatalf("%s: %v", hostOS, err)

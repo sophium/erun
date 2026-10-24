@@ -7,10 +7,9 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/orchestration/clusterread"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +46,7 @@ func NewServicesCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
+func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
@@ -60,14 +59,14 @@ func runServicesCommand(ctx core.Context, resolveOpen shared.OpenResolver, param
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(services)
 	}
 	return writeServicesResult(ctx, services)
 }
 
 // writeServicesResult renders the listing, with an exposed Service's address on an indented line.
-func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList) error {
+func writeServicesResult(ctx core.Context, result model.EnvironmentServiceList) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Namespace: %s\n", result.Namespace); err != nil {
 		return err
 	}
@@ -95,7 +94,7 @@ func writeServicesResult(ctx core.Context, result expose.EnvironmentServiceList)
 }
 
 // formatServicePorts renders a Service's ports, named where kubectl names them.
-func formatServicePorts(ports []clusterread.ObservedServicePort) string {
+func formatServicePorts(ports []model.ObservedServicePort) string {
 	rendered := make([]string, 0, len(ports))
 	for _, port := range ports {
 		if strings.TrimSpace(port.Name) != "" {

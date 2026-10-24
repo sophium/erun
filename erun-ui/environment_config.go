@@ -8,6 +8,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -210,7 +211,7 @@ func (a *App) validateWorkspaceSyncConfig(config configpkg.EnvConfig) error {
 	return nil
 }
 
-func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports configpkg.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(tenant string, config configpkg.EnvConfig, fallbackName string, ports model.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -398,7 +399,7 @@ func copyStringPtr(value *string) *string {
 	return &v
 }
 
-func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConfig {
+func runtimePodConfigToUI(config model.RuntimePodResources) uiRuntimePodConfig {
 	config = configpkg.NormalizeRuntimePodResources(config)
 	return uiRuntimePodConfig{
 		CPU:    strings.TrimSpace(config.CPU),
@@ -406,8 +407,8 @@ func runtimePodConfigToUI(config configpkg.RuntimePodResources) uiRuntimePodConf
 	}
 }
 
-func runtimePodConfigFromUI(config uiRuntimePodConfig) configpkg.RuntimePodResources {
-	return configpkg.NormalizeRuntimePodResources(configpkg.RuntimePodResources{
+func runtimePodConfigFromUI(config uiRuntimePodConfig) model.RuntimePodResources {
+	return configpkg.NormalizeRuntimePodResources(model.RuntimePodResources{
 		CPU:    strings.TrimSpace(config.CPU),
 		Memory: strings.TrimSpace(config.Memory),
 	})

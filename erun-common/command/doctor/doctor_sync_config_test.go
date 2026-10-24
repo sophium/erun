@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -107,12 +108,12 @@ func TestSyncConfigGenuineCloudContextDriftStillReported(t *testing.T) {
 	}
 	found := false
 	for _, field := range drifted.Drift {
-		if field.Scope == "root" && field.Key == "cloudcontexts" && field.Kind == ConfigDriftWrong {
+		if field.Scope == "root" && field.Key == "cloudcontexts" && field.Kind == model.ConfigDriftWrong {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected a root/cloudcontexts drift of kind %q, got %+v", ConfigDriftWrong, drifted.Drift)
+		t.Fatalf("expected a root/cloudcontexts drift of kind %q, got %+v", model.ConfigDriftWrong, drifted.Drift)
 	}
 }
 

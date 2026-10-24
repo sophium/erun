@@ -3,48 +3,18 @@ package core
 import (
 	"fmt"
 	"strings"
-)
 
-// OutputMode selects how a command renders its result.
-type OutputMode string
-
-const (
-	OutputText OutputMode = "text"
-	OutputJSON OutputMode = "json"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ParseOutputMode validates a raw --output value; empty means text.
-func ParseOutputMode(raw string) (OutputMode, error) {
+func ParseOutputMode(raw string) (model.OutputMode, error) {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
-	case "", string(OutputText):
-		return OutputText, nil
-	case string(OutputJSON):
-		return OutputJSON, nil
+	case "", string(model.OutputText):
+		return model.OutputText, nil
+	case string(model.OutputJSON):
+		return model.OutputJSON, nil
 	default:
-		return OutputText, fmt.Errorf("invalid --output value %q: expected %q or %q", raw, OutputText, OutputJSON)
+		return model.OutputText, fmt.Errorf("invalid --output value %q: expected %q or %q", raw, model.OutputText, model.OutputJSON)
 	}
-}
-
-// BuildResultImage is one image produced by a build.
-type BuildResultImage struct {
-	Name string `json:"name"`
-	Tag  string `json:"tag"`
-}
-
-// BuildResultChart is one Helm chart the build packaged.
-type BuildResultChart struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-// BuildResult is the structured result of `erun build`. An empty Version with
-// non-empty Scripts is a script-only build, which mints no image version.
-type BuildResult struct {
-	Version     string             `json:"version"`
-	BaseVersion string             `json:"baseVersion,omitempty"`
-	Images      []BuildResultImage `json:"images,omitempty"`
-	Charts      []BuildResultChart `json:"charts,omitempty"`
-	Scripts     []string           `json:"scripts,omitempty"`
-	// Packages mint no image version either.
-	Packages []string `json:"packages,omitempty"`
 }

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
@@ -21,7 +22,7 @@ Host erun-team-dev
 Host erun-team-gone erun-team-also-gone
   Port 17122
 `
-	want := []config.SSHHostEntry{
+	want := []model.SSHHostEntry{
 		{Alias: "erun-team-dev", HostKeyAlias: "erun-team-dev", HostName: "127.0.0.1", Port: 17022, User: "erun", IdentityFile: "/home/op/.ssh/id_ed25519"},
 		{Alias: "erun-team-gone", Port: 17122},
 		{Alias: "erun-team-also-gone", Port: 17122},
@@ -52,7 +53,7 @@ func TestParseSSHHostEntriesIgnoresNegatedNamesAndBareDirectives(t *testing.T) {
 }
 
 func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *testing.T) {
-	entries := []config.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
+	entries := []model.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
 	environments := []lifecycle.SSHEnvironmentAlias{
 		{Tenant: "team", Environment: "dev", Alias: open.SSHHostAlias("team", "dev"), LocalPort: 17022},
 	}

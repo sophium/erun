@@ -11,6 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Injected clocks and liveness: a real dead pid is racy and recyclable.
@@ -25,7 +26,7 @@ func isolateActivityCache(t *testing.T) {
 func alwaysAlive(int) bool { return true }
 func neverAlive(int) bool  { return false }
 
-func expectReleaseOutcome(t *testing.T, context string, outcome EnvironmentActivityLeaseReleaseOutcome, err error, want EnvironmentActivityLeaseReleaseOutcome) {
+func expectReleaseOutcome(t *testing.T, context string, outcome model.EnvironmentActivityLeaseReleaseOutcome, err error, want model.EnvironmentActivityLeaseReleaseOutcome) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("%s: %v", context, err)
@@ -73,7 +74,7 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 	}
 
 	outcome, err := ReleaseEnvironmentActivityLease("team", "dev", "gradle-build")
-	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
+	expectReleaseOutcome(t, "release", outcome, err, model.EnvironmentActivityLeaseReleased)
 	held, err = loadEnvironmentActivityLeases("team", "dev", now.Add(time.Minute), alwaysAlive)
 	if err != nil {
 		t.Fatalf("load after release: %v", err)
@@ -84,8 +85,8 @@ func TestActivityLeaseHoldsUntilReleased(t *testing.T) {
 }
 
 func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
-	sameHolder := EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
-	leases := []EnvironmentActivityLease{
+	sameHolder := model.EnvironmentActivityLeaseHolder{Orchestrator: "erun-devops", Tenant: "erun"}
+	leases := []model.EnvironmentActivityLease{
 		{Name: "release erun 1.0.248", Holder: sameHolder},
 		{Name: "release 1.0.248", Holder: sameHolder},
 	}
@@ -97,8 +98,8 @@ func TestFormatLeaseHoldersCollapsesSameHolderAcrossLeases(t *testing.T) {
 }
 
 func TestFormatLeaseHoldersKeepsDistinctHoldersSeparate(t *testing.T) {
-	leases := []EnvironmentActivityLease{
-		{Name: "gradle-build", Holder: EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
+	leases := []model.EnvironmentActivityLease{
+		{Name: "gradle-build", Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "eng-42"}},
 		{Name: "agent-run"},
 	}
 	got := FormatLeaseHolders(leases)
@@ -115,7 +116,7 @@ func TestActivityLeaseReleaseIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Errorf("releasing an absent lease must succeed, got %v", err)
 	}
-	if outcome != EnvironmentActivityLeaseNotHeld {
+	if outcome != model.EnvironmentActivityLeaseNotHeld {
 		t.Errorf("expected releasing an absent lease to report NotHeld, got %v", outcome)
 	}
 }
@@ -154,7 +155,7 @@ func TestActivityLeaseRenewalCannotOutrunTheLifetimeCeiling(t *testing.T) {
 		t.Fatalf("take: %v", err)
 	}
 	ceiling := start.Add(EnvironmentActivityLeaseMaxLifetime)
-	var renewed EnvironmentActivityLease
+	var renewed model.EnvironmentActivityLease
 	for at := start.Add(30 * time.Minute); at.Before(ceiling); at = at.Add(30 * time.Minute) {
 		lease, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 			Tenant: "team", Environment: "dev", Name: "runaway", TTL: time.Hour, Now: at,
@@ -219,7 +220,7 @@ func TestLeasedEnvironmentIsNotStopEligible(t *testing.T) {
 		t.Fatalf("an environment with no activity and no lease must be stop eligible, blocked by %q", idle.StopBlockedReason)
 	}
 
-	leased, err := ResolveEnvironmentIdleStatus(config, nil, []EnvironmentActivityLease{{
+	leased, err := ResolveEnvironmentIdleStatus(config, nil, []model.EnvironmentActivityLease{{
 		ID: "agent-run", Name: "agent-run", StartedAt: now, ExpiresAt: now.Add(10 * time.Minute),
 	}}, now)
 	if err != nil {
@@ -242,7 +243,7 @@ func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 
 	first, err := TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "ux", Name: "job-fix-1201", ID: "job-fix-1201",
-		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "petios"}, Now: now,
+		Exclusive: true, Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "petios"}, Now: now,
 	})
 	if err != nil {
 		t.Fatalf("first take: %v", err)
@@ -253,7 +254,7 @@ func TestExclusiveLeaseRefusesASecondHolderInTheSameScope(t *testing.T) {
 
 	_, err = TakeEnvironmentActivityLease(TakeEnvironmentActivityLeaseParams{
 		Tenant: "erun", Environment: "ux", Name: "job-fix-1245", ID: "job-fix-1245",
-		Exclusive: true, Holder: EnvironmentActivityLeaseHolder{Orchestrator: "erun"}, Now: now.Add(time.Second),
+		Exclusive: true, Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "erun"}, Now: now.Add(time.Second),
 	})
 	var conflict *EnvironmentActivityLeaseConflictError
 	if !errors.As(err, &conflict) {
@@ -428,11 +429,11 @@ func TestExclusiveLeaseReleaseOnlyDropsItsOwnClaim(t *testing.T) {
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the real holder's claim to survive a mismatched release")
 
 	outcome, err := ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
-	expectReleaseOutcome(t, "release", outcome, err, EnvironmentActivityLeaseReleased)
+	expectReleaseOutcome(t, "release", outcome, err, model.EnvironmentActivityLeaseReleased)
 	requireHeldCount(t, "erun", "ux", now, 0, "expected the scope free after its own holder released it")
 
 	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1201")
-	expectReleaseOutcome(t, "release of a vacated scope", outcome, err, EnvironmentActivityLeaseNotHeld)
+	expectReleaseOutcome(t, "release of a vacated scope", outcome, err, model.EnvironmentActivityLeaseNotHeld)
 }
 
 func expectHolderNamedInConflict(t *testing.T, err error, wantHolderID string) {
@@ -486,14 +487,18 @@ func TestReadOnlyCallersAreNeverBlockedByAHeldExclusiveLease(t *testing.T) {
 }
 
 func TestEnvironmentOperatorPresenceReason(t *testing.T) {
-	idleMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: true} }
-	busyMarker := func(name string) EnvironmentIdleMarker { return EnvironmentIdleMarker{Name: name, Idle: false} }
+	idleMarker := func(name string) model.EnvironmentIdleMarker {
+		return model.EnvironmentIdleMarker{Name: name, Idle: true}
+	}
+	busyMarker := func(name string) model.EnvironmentIdleMarker {
+		return model.EnvironmentIdleMarker{Name: name, Idle: false}
+	}
 
-	if _, present := EnvironmentOperatorPresenceReason(EnvironmentIdleStatus{}); present {
+	if _, present := EnvironmentOperatorPresenceReason(model.EnvironmentIdleStatus{}); present {
 		t.Error("no markers at all must not report an operator present")
 	}
 
-	sshBusy := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(configpkg.ActivityKindSSH)}}
+	sshBusy := model.EnvironmentIdleStatus{Markers: []model.EnvironmentIdleMarker{busyMarker(configpkg.ActivityKindSSH)}}
 	reason, present := EnvironmentOperatorPresenceReason(sshBusy)
 	if !present || reason == "" {
 		t.Fatalf("a busy ssh marker must report an operator present, got present=%v reason=%q", present, reason)
@@ -501,7 +506,7 @@ func TestEnvironmentOperatorPresenceReason(t *testing.T) {
 
 	// "process" and "codex" also fire for orchestrator jobs; only ssh means an operator.
 	for _, kind := range []string{ActivityKindProcess, configpkg.ActivityKindCodex, configpkg.ActivityKindMCP, configpkg.ActivityKindCLI, configpkg.ActivityKindAPI} {
-		status := EnvironmentIdleStatus{Markers: []EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
+		status := model.EnvironmentIdleStatus{Markers: []model.EnvironmentIdleMarker{busyMarker(kind), idleMarker(configpkg.ActivityKindSSH)}}
 		if _, present := EnvironmentOperatorPresenceReason(status); present {
 			t.Errorf("marker %q must not by itself report an operator present", kind)
 		}
@@ -515,7 +520,7 @@ func TestLeaseReleaseNamesTheStoreHoldingIt(t *testing.T) {
 	// An exclusive claim released without --exclusive stays held.
 	requireTakeLease(t, "job-fix-1301", now, true)
 	outcome, err := ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1301")
-	expectReleaseOutcome(t, "shared release of an exclusive claim", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	expectReleaseOutcome(t, "shared release of an exclusive claim", outcome, err, model.EnvironmentActivityLeaseHeldElsewhere)
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the exclusive claim to survive a release aimed at the shared store")
 	requireNoteNames(t, "job-fix-1301", false, "exclusive", "--exclusive")
 
@@ -526,12 +531,12 @@ func TestLeaseReleaseNamesTheStoreHoldingIt(t *testing.T) {
 
 	requireTakeLease(t, "job-fix-1302", now, false)
 	outcome, err = ReleaseExclusiveEnvironmentActivityLease("erun", "ux", "worktree", "job-fix-1302")
-	expectReleaseOutcome(t, "exclusive release of a shared lease", outcome, err, EnvironmentActivityLeaseHeldElsewhere)
+	expectReleaseOutcome(t, "exclusive release of a shared lease", outcome, err, model.EnvironmentActivityLeaseHeldElsewhere)
 	requireHeldCount(t, "erun", "ux", now, 1, "expected the shared lease to survive a release aimed at the exclusive store")
 	requireNoteNames(t, "job-fix-1302", true, "shared", "without --exclusive")
 
 	outcome, err = ReleaseEnvironmentActivityLease("erun", "ux", "job-fix-1303")
-	expectReleaseOutcome(t, "release of an unheld id", outcome, err, EnvironmentActivityLeaseNotHeld)
+	expectReleaseOutcome(t, "release of an unheld id", outcome, err, model.EnvironmentActivityLeaseNotHeld)
 	requireNoNote(t, "job-fix-1303", false)
 }
 

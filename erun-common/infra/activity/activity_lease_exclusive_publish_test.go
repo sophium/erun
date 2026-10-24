@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The concurrent reader runs the moment the exclusive claim first exists.
@@ -12,7 +14,7 @@ func TestAConcurrentReaderNeverSeesAHalfWrittenExclusiveClaim(t *testing.T) {
 	isolateActivityCache(t)
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
-	var readerSaw []EnvironmentActivityLease
+	var readerSaw []model.EnvironmentActivityLease
 	previous := exclusiveLeaseClaimVisible
 	exclusiveLeaseClaimVisible = func(path string) {
 		held, err := collectHeldEnvironmentActivityLeases(filepath.Dir(path), now, alwaysAlive)

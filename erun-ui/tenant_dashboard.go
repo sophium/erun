@@ -203,14 +203,14 @@ func loadTenantDashboardInviteRequests(ctx context.Context, client *platformclie
 
 // loadTenantDashboardUsers also returns the roster for resolving review authors,
 // so GET /v1/users is read once.
-func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []platformclient.PlatformUser {
+func loadTenantDashboardUsers(ctx context.Context, client *platformclient.PlatformClient, capabilities model.PlatformCapabilities, dashboard *uiTenantDashboard) []model.PlatformUser {
 	panel := uiTenantDashboardPanel{Tab: tenantDashboardTabUsers}
 	if restricted := restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers); restricted != "" {
 		panel.Restricted = restricted
 		dashboard.Panels = append(dashboard.Panels, panel)
 		return nil
 	}
-	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadUsers, err)
 		dashboard.Panels = append(dashboard.Panels, panel)
@@ -241,7 +241,7 @@ func loadTenantDashboardUsers(ctx context.Context, client *platformclient.Platfo
 	return users
 }
 
-func tenantDashboardUsernamesFromRoster(users []platformclient.PlatformUser) map[string]string {
+func tenantDashboardUsernamesFromRoster(users []model.PlatformUser) map[string]string {
 	names := make(map[string]string)
 	for _, user := range users {
 		userID := strings.TrimSpace(user.UserID)
@@ -259,7 +259,7 @@ func tenantDashboardUsernames(ctx context.Context, client *platformclient.Platfo
 	if restrictedTenantDashboardRead(capabilities, tenantDashboardReadUsers) != "" {
 		return map[string]string{}
 	}
-	users, err := client.ListUsers(ctx, platformclient.PlatformListUsersParams{})
+	users, err := client.ListUsers(ctx, model.PlatformListUsersParams{})
 	if err != nil {
 		return map[string]string{}
 	}
@@ -274,7 +274,7 @@ func loadTenantDashboardMergeQueue(ctx context.Context, client *platformclient.P
 		return
 	}
 	// Shows every repository's queue; each row names its repository.
-	reviews, err := client.ListMergeQueue(ctx, platformclient.PlatformMergeQueueParams{})
+	reviews, err := client.ListMergeQueue(ctx, model.PlatformMergeQueueParams{})
 	if err != nil {
 		panel.Error = tenantDashboardReadError(tenantDashboardReadMergeQueue, err)
 	} else {

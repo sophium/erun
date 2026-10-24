@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestPlatformClientStatusErrorMapping(t *testing.T) {
@@ -82,7 +84,7 @@ func TestPlatformClientTrimsTrailingSlashFromBaseURL(t *testing.T) {
 		if r.URL.Path != "/v1/platform" {
 			t.Fatalf("path = %q, want exactly one leading slash", r.URL.Path)
 		}
-		_ = json.NewEncoder(w).Encode(PlatformInfo{})
+		_ = json.NewEncoder(w).Encode(model.PlatformInfo{})
 	}))
 	defer srv.Close()
 

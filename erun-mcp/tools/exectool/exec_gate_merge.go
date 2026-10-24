@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -28,13 +29,13 @@ type ExecGateMergeInput struct {
 
 func ExecGateMergeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecGateMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecGateMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-		var merged *mergequeue.GateMergeWorkingTreeResult
+		var merged *model.GateMergeWorkingTreeResult
 		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
-			sources := make([]mergequeue.GateMergeSource, len(input.Sources))
+			sources := make([]model.GateMergeSource, len(input.Sources))
 			for i, source := range input.Sources {
-				sources[i] = mergequeue.GateMergeSource{Branch: source.Branch, Message: source.Message}
+				sources[i] = model.GateMergeSource{Branch: source.Branch, Message: source.Message}
 			}
-			result, err := mergequeue.GateMergeWorkingTree(runCtx, workDir, mergequeue.GateMergeWorkingTreeParams{
+			result, err := mergequeue.GateMergeWorkingTree(runCtx, workDir, model.GateMergeWorkingTreeParams{
 				Sources:      sources,
 				TargetBranch: input.TargetBranch,
 				Remote:       input.Remote,

@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
 type ReconcileBypassToolResult struct {
-	Preview bool                         `json:"preview"`
-	Result  review.ReconcileBypassResult `json:"result,omitempty"`
-	Trace   []string                     `json:"trace,omitempty"`
+	Preview bool                        `json:"preview"`
+	Result  model.ReconcileBypassResult `json:"result,omitempty"`
+	Trace   []string                    `json:"trace,omitempty"`
 }
 
 type ExecReconcileBypassInput struct {
@@ -29,7 +30,7 @@ func ExecReconcileBypassTool(runtime shared.RuntimeConfig) func(context.Context,
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "exec_reconcile-bypass"
-		result, err := review.ReconcileBypass(ctx, runtime.Store, input.Alias, review.ReconcileBypassParams{
+		result, err := review.ReconcileBypass(ctx, runtime.Store, input.Alias, model.ReconcileBypassParams{
 			RemoteURL:      input.RemoteURL,
 			RulesetID:      input.RulesetID,
 			TargetBranch:   input.TargetBranch,

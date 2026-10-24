@@ -6,6 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -45,7 +46,7 @@ func ValidateOrchestratorAlias(store OrchestratorAliasStore, alias string) error
 }
 
 // SetOrchestratorAlias sets the erun platform alias an orchestrator acts as; "" clears it.
-func SetOrchestratorAlias(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorAliasParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorAlias(ctx core.Context, store OrchestratorAliasStore, params model.SetOrchestratorAliasParams) (configpkg.OrchestratorConfig, error) {
 	if store == nil {
 		return configpkg.OrchestratorConfig{}, fmt.Errorf("store is required")
 	}
@@ -84,13 +85,7 @@ func SetOrchestratorAlias(ctx core.Context, store OrchestratorAliasStore, params
 	return orchestrator, nil
 }
 
-// SetOrchestratorAliasParams carries an already-parsed Alias; "" declares none.
-type SetOrchestratorAliasParams struct {
-	OrchestratorID string
-	Alias          string
-}
-
-func normalizeOrchestratorAliasParams(params SetOrchestratorAliasParams) (string, error) {
+func normalizeOrchestratorAliasParams(params model.SetOrchestratorAliasParams) (string, error) {
 	orchestratorID := strings.TrimSpace(params.OrchestratorID)
 	if orchestratorID == "" {
 		return "", fmt.Errorf("set orchestrator alias: no orchestrator id given — pass one explicitly (`erun orchestrator set-alias <id> --alias <alias>`)")

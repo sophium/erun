@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
 
@@ -20,43 +21,24 @@ const hostAWSCredentialsExpirationKey = "x_erun_expiration"
 // hostAWSCredentialsPath lives on the home PVC, so it outlives pod replacement.
 const hostAWSCredentialsPath = "~/.aws/credentials"
 
-// HostCredentialsRefresh reports the profile written and when it lapses.
-type HostCredentialsRefresh struct {
-	Alias      string    `json:"alias"`
-	Profile    string    `json:"profile"`
-	Path       string    `json:"path"`
-	Region     string    `json:"region,omitempty"`
-	Expiration time.Time `json:"expiration,omitzero"`
-}
-
-// HostCredentialsStatus is the pod's erun-host profile; an empty Region means none resolved.
-type HostCredentialsStatus struct {
-	Alias      string    `json:"alias"`
-	Profile    string    `json:"profile"`
-	Present    bool      `json:"present"`
-	Expiration time.Time `json:"expiration,omitzero"`
-	Expired    bool      `json:"expired"`
-	Region     string    `json:"region,omitempty"`
-}
-
 // RefreshHostAWSCredentials writes short-lived credentials into the pod's erun-host profile.
 // The secret goes over stdin, never into args, traces, or goldens.
-func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, result config.OpenResult, deps CloudDependencies) (HostCredentialsRefresh, error) {
+func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, result config.OpenResult, deps CloudDependencies) (model.HostCredentialsRefresh, error) {
 	alias := strings.TrimSpace(result.EnvConfig.CloudProviderAlias)
 	if alias == "" {
-		return HostCredentialsRefresh{}, fmt.Errorf("environment %s/%s has no AWS cloud provider alias; attach one with `erun cloud set %s %s --alias <alias>`",
+		return model.HostCredentialsRefresh{}, fmt.Errorf("environment %s/%s has no AWS cloud provider alias; attach one with `erun cloud set %s %s --alias <alias>`",
 			result.Tenant, result.Environment, result.Tenant, result.Environment)
 	}
 	provider, err := ResolveCloudProvider(store, alias)
 	if err != nil {
-		return HostCredentialsRefresh{}, err
+		return model.HostCredentialsRefresh{}, err
 	}
 	if provider.Provider != config.CloudProviderAWS {
-		return HostCredentialsRefresh{}, fmt.Errorf("cloud provider alias %q is a %s alias; host credential refresh applies to AWS aliases only", provider.Alias, provider.Provider)
+		return model.HostCredentialsRefresh{}, fmt.Errorf("cloud provider alias %q is a %s alias; host credential refresh applies to AWS aliases only", provider.Alias, provider.Provider)
 	}
 
 	region := ResolveEnvironmentAWSRegion(store, result.EnvConfig)
-	refresh := HostCredentialsRefresh{
+	refresh := model.HostCredentialsRefresh{
 		Alias:   provider.Alias,
 		Profile: HostAWSCredentialsProfile,
 		Path:    hostAWSCredentialsPath,
@@ -67,7 +49,7 @@ func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, re
 
 	req := ShellLaunchParamsFromResult(result)
 	if err := TraceAndWaitForRuntime(ctx, req); err != nil {
-		return HostCredentialsRefresh{}, err
+		return model.HostCredentialsRefresh{}, err
 	}
 	script := hostAWSCredentialsWriteScript()
 	traceRuntimeExecCommand(ctx, hostAWSCredentialsWriteArgs(req, script), "host-credentials-write-script", script)
@@ -77,18 +59,18 @@ func RefreshHostAWSCredentials(ctx core.Context, store config.CloudReadStore, re
 
 	credentials, err := ExportCloudProviderCredentials(ctx, store, alias, deps)
 	if err != nil {
-		return HostCredentialsRefresh{}, fmt.Errorf("export host credentials for %s: %w (run `erun cloud login --alias %s` if the SSO session lapsed)", provider.Alias, err, provider.Alias)
+		return model.HostCredentialsRefresh{}, fmt.Errorf("export host credentials for %s: %w (run `erun cloud login --alias %s` if the SSO session lapsed)", provider.Alias, err, provider.Alias)
 	}
 	refresh.Expiration = credentials.Expiration
 	if err := writeHostAWSCredentials(req, script, renderHostAWSCredentialsProfile(credentials, region)); err != nil {
-		return HostCredentialsRefresh{}, err
+		return model.HostCredentialsRefresh{}, err
 	}
 	return refresh, nil
 }
 
 // InspectHostAWSCredentials reports the pod profile's presence and expiry, never credential material.
-func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (HostCredentialsStatus, error) {
-	status := HostCredentialsStatus{
+func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunnerFunc, store config.CloudReadStore, result config.OpenResult) (model.HostCredentialsStatus, error) {
+	status := model.HostCredentialsStatus{
 		Alias:   strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Profile: HostAWSCredentialsProfile,
 		Region:  ResolveEnvironmentAWSRegion(store, result.EnvConfig),
@@ -96,7 +78,7 @@ func InspectHostAWSCredentials(ctx core.Context, runner kube.RemoteCommandRunner
 	req := ShellLaunchParamsFromResult(result)
 	out, err := kube.RunTracedRemoteCommand(ctx, runner, req, "host-credentials-read-script", hostAWSCredentialsReadScript())
 	if err != nil {
-		return HostCredentialsStatus{}, fmt.Errorf("read host credentials%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
+		return model.HostCredentialsStatus{}, fmt.Errorf("read host credentials%s: %w", kube.FormatRemoteCommandStderr(out.Stderr), err)
 	}
 	if ctx.DryRun {
 		return status, nil

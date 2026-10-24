@@ -5,10 +5,11 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing.T) {
-	quota := config.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
+	quota := model.NamespaceResourceQuota{CPU: "8", Memory: "17832Mi", Storage: "72Gi"}
 	manifest := namespaceResourceQuotaManifest("team-dev", quota)
 
 	limitRange := fromMarker(t, manifest, "kind: LimitRange")
@@ -37,8 +38,8 @@ func TestNamespaceResourceQuotaManifestDefaultRequestIsFixedNotTheCap(t *testing
 }
 
 func TestNamespaceResourceQuotaManifestDefaultRequestIndependentOfCapSize(t *testing.T) {
-	small := namespaceResourceQuotaManifest("team-dev", config.NamespaceResourceQuota{CPU: "2", Memory: "4096Mi", Storage: "20Gi"})
-	large := namespaceResourceQuotaManifest("team-prod", config.NamespaceResourceQuota{CPU: "32", Memory: "65536Mi", Storage: "200Gi"})
+	small := namespaceResourceQuotaManifest("team-dev", model.NamespaceResourceQuota{CPU: "2", Memory: "4096Mi", Storage: "20Gi"})
+	large := namespaceResourceQuotaManifest("team-prod", model.NamespaceResourceQuota{CPU: "32", Memory: "65536Mi", Storage: "200Gi"})
 
 	for _, manifest := range []string{small, large} {
 		requestBlock := fromMarker(t, manifest, "defaultRequest:")

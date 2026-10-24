@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // setTestHomeDir sets HOME and USERPROFILE, since Windows reads the latter.
@@ -23,7 +24,7 @@ func setTestHomeDir(t *testing.T, dir string) {
 func envTraceApp(t *testing.T, env config.EnvConfig, reachable bool, podOut string, podErr error) *App {
 	t.Helper()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]config.EnvConfig{

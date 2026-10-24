@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -40,7 +40,7 @@ func (a *App) cloudContextStatus(name string) string {
 }
 
 // A transient Unknown keeps the prior value, but only until cloudContextStatusTTL expires.
-func (a *App) applyCloudContextStatusesToCache(statuses []config.CloudContextStatus) {
+func (a *App) applyCloudContextStatusesToCache(statuses []model.CloudContextStatus) {
 	if len(statuses) == 0 {
 		return
 	}

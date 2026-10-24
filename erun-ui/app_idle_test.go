@@ -7,23 +7,22 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	openpkg "github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 	now := time.Now()
-	remote := activity.EnvironmentIdleStatus{
-		Markers: []activity.EnvironmentIdleMarker{
+	remote := model.EnvironmentIdleStatus{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
 			{Name: configpkg.ActivityKindCLI, LastActivity: now.Add(-4 * time.Minute), SecondsRemaining: 60},
 			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-1 * time.Minute), SecondsRemaining: 240},
 		},
 	}
-	local := activity.EnvironmentIdleStatus{
-		Markers: []activity.EnvironmentIdleMarker{
+	local := model.EnvironmentIdleStatus{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, LastActivity: now, SecondsRemaining: 300},
 			{Name: configpkg.ActivityKindMCP, LastActivity: now.Add(-2 * time.Minute), SecondsRemaining: 180},
 		},
@@ -42,16 +41,16 @@ func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 
 func TestMergeNewerActivityMarkersAddsMissingLocalTerminalActivity(t *testing.T) {
 	now := time.Now()
-	remote := activity.EnvironmentIdleStatus{
+	remote := model.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Markers: []activity.EnvironmentIdleMarker{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: "working-hours", LastActivity: now},
 			{Name: configpkg.ActivityKindMCP, Idle: true, LastActivity: now.Add(-10 * time.Minute), SecondsRemaining: 0},
 		},
 	}
-	local := activity.EnvironmentIdleStatus{
+	local := model.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Markers: []activity.EnvironmentIdleMarker{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, Idle: false, LastActivity: now, SecondsRemaining: 60},
 		},
 	}
@@ -86,16 +85,16 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	app := NewApp(erunUIDeps{store: store})
 	defer app.shutdown(context.Background())
 
-	remote := activity.EnvironmentIdleStatus{
-		Policy: configpkg.EnvironmentIdlePolicy{
+	remote := model.EnvironmentIdleStatus{
+		Policy: model.EnvironmentIdlePolicy{
 			Timeout:      5 * time.Minute,
 			WorkingHours: "00:00-23:59",
 		},
 		ManagedCloud: true,
-		Markers: []activity.EnvironmentIdleMarker{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindCLI, Idle: false, SecondsRemaining: 295},
 		},
-		Activity: map[string]activity.EnvironmentActivitySnapshot{
+		Activity: map[string]model.EnvironmentActivitySnapshot{
 			configpkg.ActivityKindCLI: {LastActivity: now.Add(-5 * time.Second), LastSeen: now.Add(-5 * time.Second)},
 		},
 	}
@@ -117,13 +116,13 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"team-stop": {
 				Name:               "team-stop",
 				DefaultEnvironment: "dev-stop",
@@ -155,13 +154,13 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"team-busy": {
 				Name:               "team-busy",
 				DefaultEnvironment: "dev-busy",
@@ -188,14 +187,14 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 		},
 		canConnectLocalPort: func(int) bool { return true },
 		canReachMCPEndpoint: func(int) bool { return true },
-		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-			return activity.EnvironmentIdleStatus{
+		loadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+			return model.EnvironmentIdleStatus{
 				ManagedCloud: true,
 				StopEligible: true,
-				Policy: configpkg.EnvironmentIdlePolicy{
+				Policy: model.EnvironmentIdlePolicy{
 					Timeout: 5 * time.Minute,
 				},
-				Markers: []activity.EnvironmentIdleMarker{
+				Markers: []model.EnvironmentIdleMarker{
 					{Name: "working-hours", Idle: true},
 					{Name: configpkg.ActivityKindSSH, Idle: true},
 					{Name: configpkg.ActivityKindMCP, Idle: true},
@@ -204,9 +203,9 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 				},
 			}, nil
 		},
-		stopCloudContext: func(_ context.Context, name string) (configpkg.CloudContextStatus, error) {
+		stopCloudContext: func(_ context.Context, name string) (model.CloudContextStatus, error) {
 			stopped <- name
-			return configpkg.CloudContextStatus{}, nil
+			return model.CloudContextStatus{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -226,15 +225,15 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 }
 
 func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
-	status := idleStatusToUI(activity.EnvironmentIdleStatus{
+	status := idleStatusToUI(model.EnvironmentIdleStatus{
 		ManagedCloud:      true,
 		StopEligible:      false,
 		StopBlockedReason: "waiting for activity timeout",
 		StopError:         "failed to stop instance: access denied",
-		Policy: configpkg.EnvironmentIdlePolicy{
+		Policy: model.EnvironmentIdlePolicy{
 			Timeout: 5 * time.Minute,
 		},
-		Markers: []activity.EnvironmentIdleMarker{
+		Markers: []model.EnvironmentIdleMarker{
 			{Name: configpkg.ActivityKindSSH, Idle: false, Reason: "recent activity", SecondsRemaining: 42},
 			{Name: configpkg.ActivityKindMCP, Idle: true, Reason: "last activity exceeded timeout"},
 		},
@@ -267,15 +266,15 @@ func assertIdleStatusMarkers(t *testing.T, markers []uiIdleMarker) {
 }
 
 func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
-	status := idleStatusToUI(activity.EnvironmentIdleStatus{
-		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
-		Markers: []activity.EnvironmentIdleMarker{
+	status := idleStatusToUI(model.EnvironmentIdleStatus{
+		Policy: model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Markers: []model.EnvironmentIdleMarker{
 			{
 				Name:             configpkg.ActivityKindSSH,
 				Idle:             false,
 				Reason:           "recent activity",
 				SecondsRemaining: 50,
-				Clients: []activity.EnvironmentIdleMarkerClient{
+				Clients: []model.EnvironmentIdleMarkerClient{
 					{Address: "10.0.4.7", Bytes: 1500, SecondsAgo: 2},
 					{Address: "127.0.0.1", Bytes: 548, SecondsAgo: 9},
 				},
@@ -304,9 +303,9 @@ func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
 // The AI tab occupancy notice reads Leases.
 func TestIdleStatusToUICarriesLeases(t *testing.T) {
 	now := time.Now()
-	status := idleStatusToUI(activity.EnvironmentIdleStatus{
-		Policy: configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
-		Leases: []activity.EnvironmentActivityLease{
+	status := idleStatusToUI(model.EnvironmentIdleStatus{
+		Policy: model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Leases: []model.EnvironmentActivityLease{
 			{ID: "job-fix-1201", Name: "job-fix-1201", PID: 4242, StartedAt: now.Add(-90 * time.Second)},
 		},
 	})
@@ -328,12 +327,12 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -350,12 +349,12 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		store:               store,
 		canConnectLocalPort: func(int) bool { return false },
 		canReachMCPEndpoint: func(int) bool { return false },
-		loadIdleStatus: func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-			return activity.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
+		loadIdleStatus: func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+			return model.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
 		},
-		stopCloudContext: func(context.Context, string) (configpkg.CloudContextStatus, error) {
+		stopCloudContext: func(context.Context, string) (model.CloudContextStatus, error) {
 			t.Fatal("stop should not fire while context is running")
-			return configpkg.CloudContextStatus{}, nil
+			return model.CloudContextStatus{}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -383,12 +382,12 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -405,13 +404,13 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusRunning)
 
-	result, err := openpkg.ResolveOpen(store, shared.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := openpkg.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	ui := app.idleStatusToUI(result, activity.EnvironmentIdleStatus{
+	ui := app.idleStatusToUI(result, model.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy:       model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 
@@ -427,12 +426,12 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -449,13 +448,13 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("managed-cloud", cloud.CloudContextStatusStopped)
 
-	result, err := openpkg.ResolveOpen(store, shared.OpenParams{Tenant: "erun", Environment: "remote"})
+	result, err := openpkg.ResolveOpen(store, model.OpenParams{Tenant: "erun", Environment: "remote"})
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	ui := app.idleStatusToUI(result, activity.EnvironmentIdleStatus{
+	ui := app.idleStatusToUI(result, model.EnvironmentIdleStatus{
 		ManagedCloud: true,
-		Policy:       configpkg.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Policy:       model.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
 		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
 	}, true)
 

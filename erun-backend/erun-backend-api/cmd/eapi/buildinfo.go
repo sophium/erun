@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -8,5 +9,5 @@ import (
 var buildVersion = "dev"
 
 func currentBuildVersion() string {
-	return model.NormalizeBuildInfo(model.BuildInfo{Version: buildVersion}).Version
+	return core.NormalizeBuildInfo(model.BuildInfo{Version: buildVersion}).Version
 }

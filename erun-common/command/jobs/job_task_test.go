@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -200,7 +201,7 @@ func TestCancelEnvironmentJobRefusesATaskJob(t *testing.T) {
 	<-started
 	defer close(release)
 
-	if _, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{
+	if _, err := CancelEnvironmentJob(core.Context{}, model.CancelEnvironmentJobParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          job.ID,
@@ -228,7 +229,7 @@ func TestStartTaskEnvironmentJobServesWhatTheWorkWrote(t *testing.T) {
 	}
 	waitForEnvironmentJobFinished(t, tenant, environment, job.ID)
 
-	output, err := ReadEnvironmentJobOutput(ReadEnvironmentJobOutputParams{Tenant: tenant, Environment: environment, ID: job.ID})
+	output, err := ReadEnvironmentJobOutput(model.ReadEnvironmentJobOutputParams{Tenant: tenant, Environment: environment, ID: job.ID})
 	if err != nil {
 		t.Fatalf("ReadEnvironmentJobOutput: %v", err)
 	}

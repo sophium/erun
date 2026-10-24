@@ -9,6 +9,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,7 @@ func newCloudInitCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, s
 }
 
 func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, deps cloud.CloudDependencies) *cobra.Command {
-	var params cloud.InitAWSCloudProviderParams
+	var params model.InitAWSCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "aws",
 		Short: "Set up an AWS cloud provider alias",
@@ -49,7 +50,7 @@ func newCloudInitAWSCmd(store cloud.CloudStore, promptRunner shared.PromptRunner
 }
 
 func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudDependencies) *cobra.Command {
-	var params cloud.InitCloudflareCloudProviderParams
+	var params model.InitCloudflareCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "cloudflare",
 		Short: "Set up a Cloudflare cloud provider alias",
@@ -76,7 +77,7 @@ func newCloudInitCloudflareCmd(store cloud.CloudStore, promptRunner shared.Promp
 	return cmd
 }
 
-func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
+func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) error {
 	switch {
 	case !ctx.DryRun && strings.TrimSpace(params.APIToken) == "":
 		var err error
@@ -103,7 +104,7 @@ func runCloudInitCloudflareCommand(ctx core.Context, store cloud.CloudStore, pro
 }
 
 func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *cobra.Command {
-	var params cloud.InitERunCloudProviderParams
+	var params model.InitERunCloudProviderParams
 	cmd := &cobra.Command{
 		Use:   "erun",
 		Short: "Set up a hosted erun platform cloud provider alias",
@@ -128,7 +129,7 @@ func newCloudInitERunCmd(store cloud.CloudStore, deps cloud.CloudDependencies) *
 	return cmd
 }
 
-func runCloudInitERunCommand(ctx core.Context, store cloud.CloudStore, params cloud.InitERunCloudProviderParams, deps cloud.CloudDependencies) error {
+func runCloudInitERunCommand(ctx core.Context, store cloud.CloudStore, params model.InitERunCloudProviderParams, deps cloud.CloudDependencies) error {
 	provider, err := cloud.InitERunCloudProvider(ctx, store, params, deps)
 	if err != nil {
 		return err
@@ -156,7 +157,7 @@ func resolveCloudflareAccountNonInteractive(ctx core.Context, token string, deps
 	}
 }
 
-func runCloudflareInitWizard(ctx core.Context, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) (cloud.InitCloudflareCloudProviderParams, error) {
+func runCloudflareInitWizard(ctx core.Context, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudflareCloudProviderParams, deps cloud.CloudDependencies) (model.InitCloudflareCloudProviderParams, error) {
 	out := ctx.Stdout
 	_, _ = fmt.Fprintln(out, "\nAdd a Cloudflare cloud alias")
 	_, _ = fmt.Fprintln(out, "ERun needs a delegated Cloudflare API token. It never sees your Cloudflare password.")

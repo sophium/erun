@@ -28,7 +28,7 @@ func loadTenantDashboardReviewFilterCounts(ctx context.Context, client *platform
 
 // reviewsLoadOutcome lets the Builds panel reuse the review list without inheriting its restriction.
 type reviewsLoadOutcome struct {
-	reviews    []platformclient.PlatformReview
+	reviews    []model.PlatformReview
 	err        error
 	restricted string
 }
@@ -71,7 +71,7 @@ func loadTenantDashboardReviewThreadCounts(ctx context.Context, client *platform
 
 const maxConcurrentReviewCommentReads = 8
 
-func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) map[string]int {
+func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []model.PlatformReview) map[string]int {
 	counts := make(map[string]int, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewCommentReads)
 	var wg sync.WaitGroup
@@ -104,8 +104,8 @@ func fetchReviewThreadCountsConcurrently(ctx context.Context, client *platformcl
 const maxConcurrentReviewBuildReads = 8
 
 // Every read runs to completion; the first failure is reported in review order.
-func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []platformclient.PlatformReview) ([]uiTenantDashboardBuild, error) {
-	perReview := make([][]platformclient.PlatformBuild, len(reviews))
+func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.PlatformClient, reviews []model.PlatformReview) ([]uiTenantDashboardBuild, error) {
+	perReview := make([][]model.PlatformBuild, len(reviews))
 	semaphore := make(chan struct{}, maxConcurrentReviewBuildReads)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -154,7 +154,7 @@ func fetchReviewBuildsConcurrently(ctx context.Context, client *platformclient.P
 	return builds, firstErr
 }
 
-func tenantDashboardReviews(reviews []platformclient.PlatformReview, usernames map[string]string) []uiTenantDashboardReview {
+func tenantDashboardReviews(reviews []model.PlatformReview, usernames map[string]string) []uiTenantDashboardReview {
 	converted := make([]uiTenantDashboardReview, 0, len(reviews))
 	for _, review := range reviews {
 		converted = append(converted, tenantDashboardReviewWithUsername(review, usernames))
@@ -163,13 +163,13 @@ func tenantDashboardReviews(reviews []platformclient.PlatformReview, usernames m
 }
 
 // Write paths use the base converter unresolved.
-func tenantDashboardReviewWithUsername(review platformclient.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
+func tenantDashboardReviewWithUsername(review model.PlatformReview, usernames map[string]string) uiTenantDashboardReview {
 	converted := tenantDashboardReview(review)
 	converted.AuthorUsername = usernames[review.AuthorUserID]
 	return converted
 }
 
-func tenantDashboardReview(review platformclient.PlatformReview) uiTenantDashboardReview {
+func tenantDashboardReview(review model.PlatformReview) uiTenantDashboardReview {
 	return uiTenantDashboardReview{
 		ReviewID:          review.ReviewID,
 		TenantID:          review.TenantID,

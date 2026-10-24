@@ -4,14 +4,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func testCloudContextConfig() configpkg.CloudContextConfig {
-	return configpkg.CloudContextConfig{
+func testCloudContextConfig() model.CloudContextConfig {
+	return model.CloudContextConfig{
 		Name:              "erun-001",
 		KubernetesContext: "erun-001",
 		PublicIP:          "203.0.113.10",

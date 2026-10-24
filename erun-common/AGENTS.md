@@ -62,6 +62,11 @@ import only the erun packages its row names:
 | `command/*` | `base/*`, `infra/*`, `primitive/*`, `orchestration/*`; never another `command/*` |
 | erun-backend-api | `base/*`, `infra/cloud`, `/mcpauth`, `/mcptools`, `/platformclient` |
 
+- `base/model` holds the data types modules exchange: every type another
+  module uses, with the data types those reference. It declares types, their
+  constants and methods only; behavior lives in the package that uses it.
+  `erun-integration`'s `TestModelHoldsOnlyData` fails on a free function or
+  package variable there.
 - depguard in `.golangci.yml` enforces the table: each package denies the
   module and allows only what lies beneath it. An infra package lists the exact
   infra packages it imports, so a new edge between external systems is a

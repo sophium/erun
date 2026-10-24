@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -45,12 +45,12 @@ type ContextStartInput struct {
 
 // ContextListResult aliases the shared envelope so the CLI and the MCP tool
 // cannot drift into two spellings of the same listing.
-type ContextListResult = cloud.CloudContextListResult
+type ContextListResult = model.CloudContextListResult
 
 type ContextActionResult struct {
-	Preview bool                      `json:"preview"`
-	Context config.CloudContextStatus `json:"context,omitempty"`
-	Trace   []string                  `json:"trace,omitempty"`
+	Preview bool                     `json:"preview"`
+	Context model.CloudContextStatus `json:"context,omitempty"`
+	Trace   []string                 `json:"trace,omitempty"`
 }
 
 func ContextListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextListInput) (*mcp.CallToolResult, ContextListResult, error) {
@@ -70,7 +70,7 @@ func ContextInitTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Ca
 		}
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := cloud.InitCloudContext(ctx, runtime.Store, cloud.InitCloudContextParams{
+		status, err := cloud.InitCloudContext(ctx, runtime.Store, model.InitCloudContextParams{
 			Name:               input.Name,
 			CloudProviderAlias: input.CloudProviderAlias,
 			Region:             input.Region,
@@ -99,7 +99,7 @@ func ContextStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 		}
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := cloud.StartCloudContext(ctx, runtime.Store, cloud.CloudContextParams{Name: input.Name, Force: input.Force}, cloud.CloudContextDependencies{})
+		status, err := cloud.StartCloudContext(ctx, runtime.Store, model.CloudContextParams{Name: input.Name, Force: input.Force}, cloud.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}
@@ -107,14 +107,14 @@ func ContextStartTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 	}
 }
 
-func contextPowerTool(runtime shared.RuntimeConfig, run func(core.Context, cloud.CloudContextStore, cloud.CloudContextParams, cloud.CloudContextDependencies) (config.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
+func contextPowerTool(runtime shared.RuntimeConfig, run func(core.Context, cloud.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
 		if strings.TrimSpace(input.Name) == "" {
 			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")
 		}
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		status, err := run(ctx, runtime.Store, cloud.CloudContextParams{Name: input.Name}, cloud.CloudContextDependencies{})
+		status, err := run(ctx, runtime.Store, model.CloudContextParams{Name: input.Name}, cloud.CloudContextDependencies{})
 		if err != nil {
 			return nil, ContextActionResult{}, err
 		}

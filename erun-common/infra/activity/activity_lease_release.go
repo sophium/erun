@@ -4,44 +4,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-)
 
-// EnvironmentActivityLeaseReleaseOutcome reports what a release did; every outcome is
-// success so a repeated release never fails a finished job.
-type EnvironmentActivityLeaseReleaseOutcome int
-
-const (
-	// EnvironmentActivityLeaseReleased means this call removed a held claim.
-	EnvironmentActivityLeaseReleased EnvironmentActivityLeaseReleaseOutcome = iota
-	// EnvironmentActivityLeaseNotHeld means nothing was held: never taken, already released, or reclaimed.
-	EnvironmentActivityLeaseNotHeld
-	// EnvironmentActivityLeaseHeldElsewhere: the id holds a lease of the other
-	// shape (shared vs exclusive), which stays held.
-	EnvironmentActivityLeaseHeldElsewhere
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ReleaseEnvironmentActivityLease drops a shared lease; it is idempotent.
-func ReleaseEnvironmentActivityLease(tenant, environment, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
+func ReleaseEnvironmentActivityLease(tenant, environment, id string) (model.EnvironmentActivityLeaseReleaseOutcome, error) {
 	resolved, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
 	dir, err := environmentActivityLeaseDir(tenant, environment)
 	if err != nil {
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
 	if err := os.Remove(filepath.Join(dir, resolved+".json")); err != nil {
 		if os.IsNotExist(err) {
 			// An exclusive claim released without --exclusive lands here; say so rather than
 			// report a no-match while it stays held.
 			if held, heldErr := environmentActivityLeaseHeldAsExclusiveClaim(tenant, environment, resolved); heldErr == nil && held {
-				return EnvironmentActivityLeaseHeldElsewhere, nil
+				return model.EnvironmentActivityLeaseHeldElsewhere, nil
 			}
-			return EnvironmentActivityLeaseNotHeld, nil
+			return model.EnvironmentActivityLeaseNotHeld, nil
 		}
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
-	return EnvironmentActivityLeaseReleased, nil
+	return model.EnvironmentActivityLeaseReleased, nil
 }
 
 // Exclusive claims are keyed by scope, so scan the directory for this holder.
@@ -111,32 +99,32 @@ func environmentActivityLeaseFileExists(dir, id string) bool {
 
 // ReleaseExclusiveEnvironmentActivityLease removes the claim only when this id holds it,
 // so a stale release cannot drop another holder's claim.
-func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (EnvironmentActivityLeaseReleaseOutcome, error) {
+func ReleaseExclusiveEnvironmentActivityLease(tenant, environment, scope, id string) (model.EnvironmentActivityLeaseReleaseOutcome, error) {
 	scope = NormalizeExclusiveEnvironmentActivityLeaseScope(scope)
 	resolvedID, err := ResolveEnvironmentActivityLeaseID(id, id)
 	if err != nil {
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
 	path, err := exclusiveEnvironmentActivityLeasePath(tenant, environment, scope)
 	if err != nil {
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
 	existing, err := loadEnvironmentActivityLease(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Reverse case: a shared lease released with --exclusive.
 			if environmentActivityLeaseHeldAsShared(tenant, environment, resolvedID) {
-				return EnvironmentActivityLeaseHeldElsewhere, nil
+				return model.EnvironmentActivityLeaseHeldElsewhere, nil
 			}
-			return EnvironmentActivityLeaseNotHeld, nil
+			return model.EnvironmentActivityLeaseNotHeld, nil
 		}
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
 	if existing.ID != resolvedID {
-		return EnvironmentActivityLeaseNotHeld, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
+		return model.EnvironmentActivityLeaseNotHeld, &EnvironmentActivityLeaseConflictError{Scope: scope, Holder: existing}
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return EnvironmentActivityLeaseNotHeld, err
+		return model.EnvironmentActivityLeaseNotHeld, err
 	}
-	return EnvironmentActivityLeaseReleased, nil
+	return model.EnvironmentActivityLeaseReleased, nil
 }

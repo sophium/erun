@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/environment"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -15,7 +15,7 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
 		},
 	}
@@ -30,7 +30,7 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 	if result.Health != nil {
 		t.Fatalf("preview must skip the live deploy diagnosis, got %+v", result.Health)
 	}
-	if result.State == lifecycle.EnvironmentLifecycleUnknown {
+	if result.State == model.EnvironmentLifecycleUnknown {
 		t.Fatalf("a resolvable non-managed environment with a real idle read should not report unknown")
 	}
 }
@@ -45,7 +45,7 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs:    map[string]config.EnvConfig{"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeLocalAgent}},
 			envsByTenant:  map[string][]config.EnvConfig{"tenant-a": {{Name: "dev", Type: config.EnvironmentTypeLocalAgent}}},
 		},
@@ -76,7 +76,7 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 	runtime := shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev"},
 		Store: listToolStore{
-			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a"}},
+			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a"}},
 			envConfigs: map[string]config.EnvConfig{
 				"tenant-a/dev": {Name: "dev", Type: config.EnvironmentTypeRuntime, ManagedCloud: true},
 			},
@@ -87,10 +87,10 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
-	if result.State != lifecycle.EnvironmentLifecycleUnknown {
+	if result.State != model.EnvironmentLifecycleUnknown {
 		t.Fatalf("an unobserved managed-cloud power state must read as unknown, got %s", result.State)
 	}
-	if result.State == lifecycle.EnvironmentLifecycleStopped || result.State == lifecycle.EnvironmentLifecycleIdle {
+	if result.State == model.EnvironmentLifecycleStopped || result.State == model.EnvironmentLifecycleIdle {
 		t.Fatalf("an unobserved signal must never resolve to a real state; got %s", result.State)
 	}
 }

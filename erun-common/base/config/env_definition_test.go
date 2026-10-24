@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // sentinelEnvConfig sets every field to a greppable marker; a zero field fails so
@@ -40,14 +42,14 @@ func sentinelEnvConfig() EnvConfig {
 		ImagePullSecrets:             []string{"sentinel-image-pull-secret"},
 		RegistryCredentialSecretName: "sentinel-registry-credential-secret-name",
 		PlatformAliasSecretName:      "sentinel-platform-alias-secret-name",
-		RuntimePod:                   RuntimePodResources{CPU: "111m", Memory: "111Mi"},
-		RuntimeDindPod:               RuntimePodResources{CPU: "222m", Memory: "222Mi"},
-		NamespaceQuota:               NamespaceResourceQuota{CPU: "333", Memory: "333Gi", Storage: "333Gi"},
+		RuntimePod:                   model.RuntimePodResources{CPU: "111m", Memory: "111Mi"},
+		RuntimeDindPod:               model.RuntimePodResources{CPU: "222m", Memory: "222Mi"},
+		NamespaceQuota:               model.NamespaceResourceQuota{CPU: "333", Memory: "333Gi", Storage: "333Gi"},
 		SSHD: SSHDConfig{
 			Enabled:       true,
 			LocalPort:     1234,
 			PublicKeyPath: "/sentinel/host-owned/sshd-public-key",
-			WorkspaceSync: SSHDWorkspaceSyncConfig{
+			WorkspaceSync: model.SSHDWorkspaceSyncConfig{
 				Enabled:   true,
 				LocalPath: "/sentinel/host-owned/sshd-workspace-sync",
 			},
@@ -119,7 +121,7 @@ func TestPortableAndHostOwnedFieldListsAreDisjointAndComplete(t *testing.T) {
 func platformOwnedFieldNames() []string {
 	var names []string
 	for name, entry := range portableEnvConfigFields {
-		if entry.Class == EnvFieldPlatformOwned {
+		if entry.Class == model.EnvFieldPlatformOwned {
 			names = append(names, name)
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
@@ -168,7 +169,7 @@ func runExecWriteCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFind
 	if err != nil {
 		return fmt.Errorf("read content from stdin: %w", err)
 	}
-	result, err := gitx.WriteWorkingTreeFile(ctx, projectRoot, gitx.WriteWorkingTreeFileParams{
+	result, err := gitx.WriteWorkingTreeFile(ctx, projectRoot, model.WriteWorkingTreeFileParams{
 		Path:    path,
 		Content: string(content),
 	})
@@ -218,7 +219,7 @@ func runExecCommitCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFin
 	if err != nil {
 		return fmt.Errorf("read commit message from stdin: %w", err)
 	}
-	result, err := gitx.CommitWorkingTree(ctx, projectRoot, gitx.CommitWorkingTreeParams{
+	result, err := gitx.CommitWorkingTree(ctx, projectRoot, model.CommitWorkingTreeParams{
 		Branch:  branch,
 		Message: string(message),
 		Paths:   paths,
@@ -264,7 +265,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinde
 	if err != nil {
 		return err
 	}
-	result, err := gitx.PushWorkingTreeBranch(ctx, projectRoot, gitx.PushWorkingTreeBranchParams{
+	result, err := gitx.PushWorkingTreeBranch(ctx, projectRoot, model.PushWorkingTreeBranchParams{
 		Branch: branch,
 		Remote: remote,
 	}, pushDeps)
@@ -273,7 +274,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinde
 	}
 	// The unqueued-branch warning is best-effort and never fails the push.
 	if ctx.DryRun {
-		review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, review.PushedBranchReviewNoticeParams{
+		review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, model.PushedBranchReviewNoticeParams{
 			ProjectRoot: projectRoot,
 			Branch:      result.Branch,
 			Remote:      result.Remote,
@@ -281,7 +282,7 @@ func runExecPushCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinde
 		return nil
 	}
 	ctx.Info(fmt.Sprintf("Pushed %s to %s (%s).", result.Branch, result.Remote, result.Commit))
-	review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, review.PushedBranchReviewNoticeParams{
+	review.WarnPushedBranchWithoutReview(ctx, store, cloudDeps, model.PushedBranchReviewNoticeParams{
 		ProjectRoot: projectRoot,
 		Branch:      result.Branch,
 		Remote:      result.Remote,
@@ -324,7 +325,7 @@ func runExecMergeCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFind
 	if err != nil {
 		return err
 	}
-	result, err := mergequeue.MergeWorkingTreeBranch(ctx, projectRoot, mergequeue.MergeWorkingTreeBranchParams{
+	result, err := mergequeue.MergeWorkingTreeBranch(ctx, projectRoot, model.MergeWorkingTreeBranchParams{
 		TargetBranch: targetBranch,
 		Remote:       remote,
 	}, mergequeue.MergeWorkingTreeBranchDependencies{})
@@ -368,14 +369,14 @@ func runExecDiffCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinde
 	return lifecycle.WriteRawDiff(ctx.Stdout, result)
 }
 
-func resolveExecDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) (lifecycle.DiffResult, error) {
+func resolveExecDiff(projectRoot string, runGit gitx.GitCommandRunnerFunc, opts execDiffOptions) (model.DiffResult, error) {
 	if opts.Scope == "" && opts.SelectedCommit == "" {
 		return lifecycle.ResolveGitDiff(projectRoot, runGit)
 	}
 	if opts.SelectedCommit != "" && opts.Scope != "commit" {
-		return lifecycle.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
+		return model.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
 	}
-	return lifecycle.ResolveGitDiffWithOptions(projectRoot, lifecycle.DiffOptions{
+	return lifecycle.ResolveGitDiffWithOptions(projectRoot, model.DiffOptions{
 		Scope:          opts.Scope,
 		SelectedCommit: opts.SelectedCommit,
 	}, runGit)
@@ -389,7 +390,7 @@ func runExecRawCommand(ctx core.Context, findProjectRoot sharedpkg.ProjectFinder
 	if err != nil {
 		return err
 	}
-	return core.RunRawCommand(ctx, core.RawCommandSpec{
+	return core.RunRawCommand(ctx, model.RawCommandSpec{
 		Dir:  projectRoot,
 		Args: args,
 	}, runRaw)

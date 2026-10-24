@@ -5,6 +5,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -18,9 +19,9 @@ type ExecMergeInput struct {
 
 func ExecMergeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ExecMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input ExecMergeInput) (*mcp.CallToolResult, shared.CommandOutput, error) {
-		var merged *mergequeue.MergeWorkingTreeBranchResult
+		var merged *model.MergeWorkingTreeBranchResult
 		output, err := shared.RunRuntimeCommand(runtime, input.Preview, input.Verbosity, nil, func(runCtx core.Context, workDir string) error {
-			result, err := mergequeue.MergeWorkingTreeBranch(runCtx, workDir, mergequeue.MergeWorkingTreeBranchParams{
+			result, err := mergequeue.MergeWorkingTreeBranch(runCtx, workDir, model.MergeWorkingTreeBranchParams{
 				TargetBranch: input.TargetBranch,
 				Remote:       input.Remote,
 			}, mergequeue.MergeWorkingTreeBranchDependencies{})

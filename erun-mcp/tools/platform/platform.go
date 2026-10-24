@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -16,9 +16,9 @@ type PlatformWhoamiInput struct {
 }
 
 type PlatformWhoamiResult struct {
-	Preview bool                          `json:"preview"`
-	Whoami  platformclient.PlatformWhoami `json:"whoami,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                 `json:"preview"`
+	Whoami  model.PlatformWhoami `json:"whoami,omitempty"`
+	Trace   []string             `json:"trace,omitempty"`
 }
 
 func PlatformWhoamiTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformWhoamiInput) (*mcp.CallToolResult, PlatformWhoamiResult, error) {
@@ -39,9 +39,9 @@ type PlatformVersionInput struct {
 }
 
 type PlatformVersionResult struct {
-	Preview bool                        `json:"preview"`
-	Info    platformclient.PlatformInfo `json:"info,omitempty"`
-	Trace   []string                    `json:"trace,omitempty"`
+	Preview bool               `json:"preview"`
+	Info    model.PlatformInfo `json:"info,omitempty"`
+	Trace   []string           `json:"trace,omitempty"`
 }
 
 func PlatformVersionTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformVersionInput) (*mcp.CallToolResult, PlatformVersionResult, error) {
@@ -68,9 +68,9 @@ type PlatformTenantCreateInput struct {
 }
 
 type PlatformTenantResult struct {
-	Preview bool                          `json:"preview"`
-	Tenant  platformclient.PlatformTenant `json:"tenant,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                 `json:"preview"`
+	Tenant  model.PlatformTenant `json:"tenant,omitempty"`
+	Trace   []string             `json:"trace,omitempty"`
 }
 
 func PlatformTenantCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformTenantCreateInput) (*mcp.CallToolResult, PlatformTenantResult, error) {
@@ -85,7 +85,7 @@ func PlatformTenantCreateTool(runtime shared.RuntimeConfig) func(context.Context
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_tenant_create"
-		tenant, err := platform.RunPlatformCreateTenant(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateTenantParams{
+		tenant, err := platform.RunPlatformCreateTenant(ctx, runtime.Store, input.Alias, model.PlatformCreateTenantParams{
 			Name: input.Name, Type: tenantType, Issuer: input.Issuer,
 			OrgFieldKey: input.OrgFieldKey, OrgFieldValue: input.OrgFieldValue, DisplayName: input.DisplayName,
 		}, shared.CloudDependencies())
@@ -101,9 +101,9 @@ type PlatformTenantListInput struct {
 }
 
 type PlatformTenantListResult struct {
-	Preview bool                            `json:"preview"`
-	Tenants []platformclient.PlatformTenant `json:"tenants,omitempty"`
-	Trace   []string                        `json:"trace,omitempty"`
+	Preview bool                   `json:"preview"`
+	Tenants []model.PlatformTenant `json:"tenants,omitempty"`
+	Trace   []string               `json:"trace,omitempty"`
 }
 
 func PlatformTenantListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformTenantListInput) (*mcp.CallToolResult, PlatformTenantListResult, error) {
@@ -125,9 +125,9 @@ type PlatformIdentityOrgCreateInput struct {
 }
 
 type PlatformIdentityOrgResult struct {
-	Preview bool                       `json:"preview"`
-	Org     platformclient.PlatformOrg `json:"org,omitempty"`
-	Trace   []string                   `json:"trace,omitempty"`
+	Preview bool              `json:"preview"`
+	Org     model.PlatformOrg `json:"org,omitempty"`
+	Trace   []string          `json:"trace,omitempty"`
 }
 
 // PlatformIdentityOrgCreateTool creates an org on the platform's IdP; requires
@@ -140,7 +140,7 @@ func PlatformIdentityOrgCreateTool(runtime shared.RuntimeConfig) func(context.Co
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_identity_org_create"
-		org, err := platform.RunPlatformCreateOrg(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateOrgParams{Name: input.Name}, shared.CloudDependencies())
+		org, err := platform.RunPlatformCreateOrg(ctx, runtime.Store, input.Alias, model.PlatformCreateOrgParams{Name: input.Name}, shared.CloudDependencies())
 		if err != nil {
 			return nil, PlatformIdentityOrgResult{}, err
 		}
@@ -157,9 +157,9 @@ type PlatformTenantRepairOrgMappingInput struct {
 }
 
 type PlatformTenantIssuerResult struct {
-	Preview      bool                                `json:"preview"`
-	TenantIssuer platformclient.PlatformTenantIssuer `json:"tenantIssuer,omitempty"`
-	Trace        []string                            `json:"trace,omitempty"`
+	Preview      bool                       `json:"preview"`
+	TenantIssuer model.PlatformTenantIssuer `json:"tenantIssuer,omitempty"`
+	Trace        []string                   `json:"trace,omitempty"`
 }
 
 // PlatformTenantRepairOrgMappingTool fixes an unresolvable (issuer, org)
@@ -172,7 +172,7 @@ func PlatformTenantRepairOrgMappingTool(runtime shared.RuntimeConfig) func(conte
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_tenant_repair-org-mapping"
-		issuer, err := platform.RunPlatformRepairTenantIssuerOrgMapping(ctx, runtime.Store, input.Alias, platformclient.PlatformRepairTenantIssuerOrgMappingParams{
+		issuer, err := platform.RunPlatformRepairTenantIssuerOrgMapping(ctx, runtime.Store, input.Alias, model.PlatformRepairTenantIssuerOrgMappingParams{
 			TenantID: input.TenantID, Issuer: input.Issuer, OrgFieldKey: input.OrgFieldKey, OrgFieldValue: input.OrgFieldValue,
 		}, shared.CloudDependencies())
 		if err != nil {
@@ -192,9 +192,9 @@ type PlatformUserEnrollInput struct {
 }
 
 type PlatformUserResult struct {
-	Preview bool                        `json:"preview"`
-	User    platformclient.PlatformUser `json:"user,omitempty"`
-	Trace   []string                    `json:"trace,omitempty"`
+	Preview bool               `json:"preview"`
+	User    model.PlatformUser `json:"user,omitempty"`
+	Trace   []string           `json:"trace,omitempty"`
 }
 
 func PlatformUserEnrollTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformUserEnrollInput) (*mcp.CallToolResult, PlatformUserResult, error) {
@@ -205,7 +205,7 @@ func PlatformUserEnrollTool(runtime shared.RuntimeConfig) func(context.Context, 
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_enroll"
-		user, err := platform.RunPlatformCreateUser(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateUserParams{
+		user, err := platform.RunPlatformCreateUser(ctx, runtime.Store, input.Alias, model.PlatformCreateUserParams{
 			Username: input.Username, Issuer: input.Issuer, Subject: input.Subject, TenantID: input.TenantID,
 			RoleIDs: input.RoleIDs,
 		}, shared.CloudDependencies())
@@ -240,7 +240,7 @@ func PlatformUserGrantRoleTool(runtime shared.RuntimeConfig) func(context.Contex
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_grant-role"
-		err := platform.RunPlatformGrantUserRole(ctx, runtime.Store, input.Alias, platformclient.PlatformGrantUserRoleParams{
+		err := platform.RunPlatformGrantUserRole(ctx, runtime.Store, input.Alias, model.PlatformGrantUserRoleParams{
 			UserID: input.UserID, RoleID: input.RoleID,
 		}, shared.CloudDependencies())
 		if err != nil {
@@ -256,9 +256,9 @@ type PlatformUserListInput struct {
 }
 
 type PlatformUserListResult struct {
-	Preview bool                          `json:"preview"`
-	Users   []platformclient.PlatformUser `json:"users,omitempty"`
-	Trace   []string                      `json:"trace,omitempty"`
+	Preview bool                 `json:"preview"`
+	Users   []model.PlatformUser `json:"users,omitempty"`
+	Trace   []string             `json:"trace,omitempty"`
 }
 
 func PlatformUserListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformUserListInput) (*mcp.CallToolResult, PlatformUserListResult, error) {
@@ -266,7 +266,7 @@ func PlatformUserListTool(runtime shared.RuntimeConfig) func(context.Context, *m
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_user_list"
-		users, err := platform.RunPlatformListUsers(ctx, runtime.Store, input.Alias, platformclient.PlatformListUsersParams{TenantID: input.TenantID}, shared.CloudDependencies())
+		users, err := platform.RunPlatformListUsers(ctx, runtime.Store, input.Alias, model.PlatformListUsersParams{TenantID: input.TenantID}, shared.CloudDependencies())
 		if err != nil {
 			return nil, PlatformUserListResult{}, err
 		}
@@ -279,9 +279,9 @@ type PlatformEnvListInput struct {
 }
 
 type PlatformEnvListResult struct {
-	Preview      bool                                 `json:"preview"`
-	Environments []platformclient.PlatformEnvironment `json:"environments,omitempty"`
-	Trace        []string                             `json:"trace,omitempty"`
+	Preview      bool                        `json:"preview"`
+	Environments []model.PlatformEnvironment `json:"environments,omitempty"`
+	Trace        []string                    `json:"trace,omitempty"`
 }
 
 func PlatformEnvListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformEnvListInput) (*mcp.CallToolResult, PlatformEnvListResult, error) {
@@ -303,9 +303,9 @@ type PlatformEnvGetInput struct {
 }
 
 type PlatformEnvResult struct {
-	Preview     bool                               `json:"preview"`
-	Environment platformclient.PlatformEnvironment `json:"environment,omitempty"`
-	Trace       []string                           `json:"trace,omitempty"`
+	Preview     bool                      `json:"preview"`
+	Environment model.PlatformEnvironment `json:"environment,omitempty"`
+	Trace       []string                  `json:"trace,omitempty"`
 }
 
 func PlatformEnvGetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformEnvGetInput) (*mcp.CallToolResult, PlatformEnvResult, error) {
@@ -341,7 +341,7 @@ func PlatformEnvRegisterTool(runtime shared.RuntimeConfig) func(context.Context,
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_register"
-		environment, err := platform.RunPlatformRegisterEnvironment(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateEnvironmentParams{
+		environment, err := platform.RunPlatformRegisterEnvironment(ctx, runtime.Store, input.Alias, model.PlatformCreateEnvironmentParams{
 			Name: input.Name, Type: input.Type, ContextID: input.ContextID,
 			KubernetesContext: input.KubernetesContext, RuntimeVersion: input.RuntimeVersion,
 		}, shared.CloudDependencies())
@@ -366,7 +366,7 @@ func PlatformEnvDeployTool(runtime shared.RuntimeConfig) func(context.Context, *
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_env_deploy"
-		environment, err := platform.RunPlatformDeployEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, platformclient.PlatformDeployEnvironmentParams{Version: input.Version}, shared.CloudDependencies())
+		environment, err := platform.RunPlatformDeployEnvironment(ctx, runtime.Store, input.Alias, input.EnvironmentID, model.PlatformDeployEnvironmentParams{Version: input.Version}, shared.CloudDependencies())
 		if err != nil {
 			return nil, PlatformEnvResult{}, err
 		}
@@ -428,9 +428,9 @@ type PlatformContextListInput struct {
 }
 
 type PlatformContextListResult struct {
-	Preview  bool                             `json:"preview"`
-	Contexts []platformclient.PlatformContext `json:"contexts,omitempty"`
-	Trace    []string                         `json:"trace,omitempty"`
+	Preview  bool                    `json:"preview"`
+	Contexts []model.PlatformContext `json:"contexts,omitempty"`
+	Trace    []string                `json:"trace,omitempty"`
 }
 
 func PlatformContextListTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformContextListInput) (*mcp.CallToolResult, PlatformContextListResult, error) {
@@ -452,9 +452,9 @@ type PlatformContextGetInput struct {
 }
 
 type PlatformContextResult struct {
-	Preview bool                           `json:"preview"`
-	Context platformclient.PlatformContext `json:"context,omitempty"`
-	Trace   []string                       `json:"trace,omitempty"`
+	Preview bool                  `json:"preview"`
+	Context model.PlatformContext `json:"context,omitempty"`
+	Trace   []string              `json:"trace,omitempty"`
 }
 
 func PlatformContextGetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformContextGetInput) (*mcp.CallToolResult, PlatformContextResult, error) {
@@ -486,9 +486,9 @@ type PlatformContextCreateInput struct {
 }
 
 type PlatformContextCreateResult struct {
-	Preview bool                                       `json:"preview"`
-	Result  platformclient.PlatformCreateContextResult `json:"result,omitempty"`
-	Trace   []string                                   `json:"trace,omitempty"`
+	Preview bool                              `json:"preview"`
+	Result  model.PlatformCreateContextResult `json:"result,omitempty"`
+	Trace   []string                          `json:"trace,omitempty"`
 }
 
 func PlatformContextCreateTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformContextCreateInput) (*mcp.CallToolResult, PlatformContextCreateResult, error) {
@@ -499,7 +499,7 @@ func PlatformContextCreateTool(runtime shared.RuntimeConfig) func(context.Contex
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		ctx.MCPTool = "platform_context_create"
-		result, err := platform.RunPlatformCreateContext(ctx, runtime.Store, input.Alias, platformclient.PlatformCreateContextParams{
+		result, err := platform.RunPlatformCreateContext(ctx, runtime.Store, input.Alias, model.PlatformCreateContextParams{
 			Name: input.Name, CloudProviderAlias: input.CloudProviderAlias, Region: input.Region,
 			InstanceType: input.InstanceType, DiskType: input.DiskType, DiskSizeGB: input.DiskSizeGB, Preview: input.PlanOnly,
 		}, shared.CloudDependencies())
@@ -524,9 +524,9 @@ type PlatformProvisionInput struct {
 }
 
 type PlatformProvisionResult struct {
-	Preview bool                                   `json:"preview"`
-	Result  platformclient.PlatformProvisionResult `json:"result,omitempty"`
-	Trace   []string                               `json:"trace,omitempty"`
+	Preview bool                          `json:"preview"`
+	Result  model.PlatformProvisionResult `json:"result,omitempty"`
+	Trace   []string                      `json:"trace,omitempty"`
 }
 
 func PlatformProvisionTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PlatformProvisionInput) (*mcp.CallToolResult, PlatformProvisionResult, error) {
@@ -534,12 +534,12 @@ func PlatformProvisionTool(runtime shared.RuntimeConfig) func(context.Context, *
 		if strings.TrimSpace(input.EnvName) == "" || strings.TrimSpace(input.EnvType) == "" {
 			return nil, PlatformProvisionResult{}, fmt.Errorf("envName and envType are required")
 		}
-		params := platformclient.PlatformProvisionParams{
-			Environment:       platformclient.PlatformProvisionEnvironment{Name: input.EnvName, Type: input.EnvType},
+		params := model.PlatformProvisionParams{
+			Environment:       model.PlatformProvisionEnvironment{Name: input.EnvName, Type: input.EnvType},
 			KubernetesContext: input.KubernetesContext,
 		}
 		if strings.TrimSpace(input.ContextName) != "" {
-			params.Context = &platformclient.PlatformProvisionContext{
+			params.Context = &model.PlatformProvisionContext{
 				Name: input.ContextName, CloudProviderAlias: input.ContextAlias, Region: input.ContextRegion,
 				InstanceType: input.ContextInstanceType, DiskType: input.ContextDiskType, DiskSizeGB: input.ContextDiskSizeGB,
 			}

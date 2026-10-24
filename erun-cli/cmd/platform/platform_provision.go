@@ -7,14 +7,14 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
 func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformProvisionParams
+	var params model.PlatformProvisionParams
 	cmd := &cobra.Command{
 		Use:   "provision",
 		Short: "Preview the ordered plan for provisioning a hosted environment",
@@ -37,7 +37,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform provision preview planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformProvisionResult(ctx, result); err != nil {
 					return err
 				}
@@ -60,7 +60,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 	originalRunE := cmd.RunE
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(contextName) != "" {
-			params.Context = &platformclient.PlatformProvisionContext{
+			params.Context = &model.PlatformProvisionContext{
 				Name:               contextName,
 				CloudProviderAlias: contextAlias,
 				Region:             contextRegion,
@@ -75,7 +75,7 @@ func newPlatformProvisionCmd(store config.CloudReadStore, alias *string, deps cl
 	return cmd
 }
 
-func writePlatformProvisionResult(ctx core.Context, result platformclient.PlatformProvisionResult) error {
+func writePlatformProvisionResult(ctx core.Context, result model.PlatformProvisionResult) error {
 	for _, line := range result.Plan {
 		if _, err := fmt.Fprintln(ctx.Stdout, "  "+line); err != nil {
 			return err

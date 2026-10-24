@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -17,7 +18,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 		name          string
 		helmStatus    string
 		helmReadError string
-		wantAction    deploy.DeployRecoveryAction
+		wantAction    model.DeployRecoveryAction
 		wantOK        bool
 	}{
 		{
@@ -33,13 +34,13 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 		{
 			name:       "pending-upgrade recommends clearing the lock",
 			helmStatus: "NAME: team-devops\nSTATUS: pending-upgrade\nREVISION: 3",
-			wantAction: deploy.DeployRecoveryClearPendingHelm,
+			wantAction: model.DeployRecoveryClearPendingHelm,
 			wantOK:     true,
 		},
 		{
 			name:       "failed recommends rollback",
 			helmStatus: "NAME: team-devops\nSTATUS: failed\nREVISION: 5",
-			wantAction: deploy.DeployRecoveryRollback,
+			wantAction: model.DeployRecoveryRollback,
 			wantOK:     true,
 		},
 		{
@@ -52,7 +53,7 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			action, ok := deploy.RecommendedDeployRecovery(deploy.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
+			action, ok := deploy.RecommendedDeployRecovery(model.DeployDiagnosisResult{HelmStatus: tc.helmStatus, HelmReadError: tc.helmReadError})
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v", ok, tc.wantOK)
 			}
@@ -126,8 +127,8 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 		t.Fatalf("expected no HelmReadError for a genuinely failed release, got %q", diagnosis.HelmReadError)
 	}
 	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
-	if !ok || action != deploy.DeployRecoveryRollback {
-		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, deploy.DeployRecoveryRollback)
+	if !ok || action != model.DeployRecoveryRollback {
+		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, model.DeployRecoveryRollback)
 	}
 }
 

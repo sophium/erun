@@ -2,6 +2,7 @@ package build
 
 import (
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -19,11 +20,11 @@ func (s *erunTestCloudStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	return nil
 }
 
-func erunTestProvider() configpkg.CloudProviderConfig {
-	return cloud.NormalizeCloudProviderConfig(configpkg.CloudProviderConfig{
+func erunTestProvider() model.CloudProviderConfig {
+	return cloud.NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:         "erun+api.example.test@erun",
 		Provider:      configpkg.CloudProviderERun,
 		OIDCIssuerURL: "https://auth.example.test",
-		ERun:          &configpkg.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
+		ERun:          &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
 	})
 }

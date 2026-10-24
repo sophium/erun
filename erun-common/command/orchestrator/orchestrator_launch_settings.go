@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -45,25 +46,8 @@ func parseOrchestratorLaunchSettingFlag(setting, expected, value string) (string
 	return trimmed, nil
 }
 
-type SetOrchestratorGatewayParams struct {
-	OrchestratorID string
-	UseGateway     bool
-}
-
-// SetOrchestratorModelParams carries an already-parsed Model; "" clears it.
-type SetOrchestratorModelParams struct {
-	OrchestratorID string
-	Model          string
-}
-
-// SetOrchestratorEffortParams carries an already-parsed Effort; "" clears it.
-type SetOrchestratorEffortParams struct {
-	OrchestratorID string
-	Effort         string
-}
-
 // SetOrchestratorGateway toggles gateway use; enabling it with no catalog is refused.
-func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) (configpkg.OrchestratorConfig, error) {
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "gateway",
 		usage:   "--gateway <on|off>",
@@ -72,7 +56,7 @@ func SetOrchestratorGateway(ctx core.Context, store OrchestratorAliasStore, para
 }
 
 // SetOrchestratorModel sets the launch model, refusing one the gateway cannot drive.
-func SetOrchestratorModel(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorModel(ctx core.Context, store OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) (configpkg.OrchestratorConfig, error) {
 	model := strings.TrimSpace(params.Model)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "model",
@@ -82,7 +66,7 @@ func SetOrchestratorModel(ctx core.Context, store OrchestratorAliasStore, params
 }
 
 // SetOrchestratorEffort sets the effort an orchestrator launches at.
-func SetOrchestratorEffort(ctx core.Context, store OrchestratorAliasStore, params SetOrchestratorEffortParams) (configpkg.OrchestratorConfig, error) {
+func SetOrchestratorEffort(ctx core.Context, store OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) (configpkg.OrchestratorConfig, error) {
 	effort := strings.TrimSpace(params.Effort)
 	return setOrchestratorLaunchSetting(ctx, store, params.OrchestratorID, orchestratorLaunchSettingWrite{
 		setting: "effort",

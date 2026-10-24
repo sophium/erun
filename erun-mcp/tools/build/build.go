@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
@@ -41,7 +42,7 @@ var ErrMissingPushVersion = fmt.Errorf("push requires a version: it publishes a 
 func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 		execute := func(preview bool, log io.Writer) (sharedpkg.CommandOutput, error) {
-			var result *core.BuildResult
+			var result *model.BuildResult
 			output, err := sharedpkg.RunRuntimeCommand(runtime, preview, input.Verbosity, log, func(runCtx core.Context, workDir string) error {
 				runCtx.BuildJobs = input.Jobs
 				runCtx.MCPTool = "build"
@@ -91,7 +92,7 @@ func PushTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallTo
 
 func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool, platforms []string) (shared.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
-	target := shared.DockerCommandTarget{
+	target := model.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     environment,
 		VersionOverride: versionOverride,
@@ -102,7 +103,7 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeCon
 	findProjectRoot := func() (string, string, error) {
 		return sharedpkg.RuntimeFindProjectRoot(runtime.Context, projectRoot)
 	}
-	resolveBuildContext := func() (shared.DockerBuildContext, error) {
+	resolveBuildContext := func() (model.DockerBuildContext, error) {
 		return shared.DockerBuildContextAtDir(projectRoot)
 	}
 
@@ -130,7 +131,7 @@ func resolveRuntimeBuildExecution(ctx core.Context, runtime sharedpkg.RuntimeCon
 }
 
 func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConfig, projectRoot, component, versionOverride string) (shared.DockerPushExecutionSpec, error) {
-	target := shared.DockerCommandTarget{
+	target := model.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     strings.TrimSpace(runtime.Context.Environment),
 		VersionOverride: versionOverride,
@@ -138,7 +139,7 @@ func resolveRuntimePushExecution(ctx core.Context, runtime sharedpkg.RuntimeConf
 	findProjectRoot := func() (string, string, error) {
 		return sharedpkg.RuntimeFindProjectRoot(runtime.Context, projectRoot)
 	}
-	resolveBuildContext := func() (shared.DockerBuildContext, error) {
+	resolveBuildContext := func() (model.DockerBuildContext, error) {
 		return shared.DockerBuildContextAtDir(projectRoot)
 	}
 

@@ -9,19 +9,20 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
 
-func testPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func testPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.erunpaas.com@erun",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "erun",
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),

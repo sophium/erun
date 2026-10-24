@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 )
 
@@ -29,7 +30,7 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	build, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
+	build, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", model.ReviewRecordBuildParams{
 		ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: true,
 	}, pushNoticeDeps(t))
 	if err != nil {
@@ -52,7 +53,7 @@ func TestRunReviewRecordBuildRefusesAKnownInfrastructureFailure(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
+	_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", model.ReviewRecordBuildParams{
 		ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: false,
 		FailureDetail: `failed to solve: failed to fetch oauth token: Post "https://ghcr.io/token": net/http: TLS handshake timeout`,
 	}, pushNoticeDeps(t))

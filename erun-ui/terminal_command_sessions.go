@@ -9,8 +9,8 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -36,7 +36,7 @@ func (a *App) StartCreateVersionSession(selection uiSelection, cols, rows int) (
 	if a.ctx == nil {
 		return startSessionResult{}, fmt.Errorf("start create-version session: application context is not ready")
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

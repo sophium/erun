@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
@@ -14,30 +15,30 @@ import (
 // it execs pdnsutil directly. The Ingress always applies to the target cluster.
 
 // resolveExposeDNSUpserter: explicit always wins; provider is zero on the direct path.
-func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordUpserterFunc) (DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
+func resolveExposeDNSUpserter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordUpserterFunc) (DNSRecordUpserterFunc, model.CloudProviderConfig, error) {
 	if explicit != nil {
-		return explicit, config.CloudProviderConfig{}, nil
+		return explicit, model.CloudProviderConfig{}, nil
 	}
 	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
-		return upsertPowerDNSRecord, config.CloudProviderConfig{}, nil
+		return upsertPowerDNSRecord, model.CloudProviderConfig{}, nil
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
-		return nil, config.CloudProviderConfig{}, err
+		return nil, model.CloudProviderConfig{}, err
 	}
 	return platformDNSRecordUpserter(client, environment), provider, nil
 }
 
-func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordDeleterFunc) (DNSRecordDeleterFunc, config.CloudProviderConfig, error) {
+func resolveUnexposeDNSDeleter(ctx core.Context, environment, erunAlias string, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, hasDirectOverride bool, explicit DNSRecordDeleterFunc) (DNSRecordDeleterFunc, model.CloudProviderConfig, error) {
 	if explicit != nil {
-		return explicit, config.CloudProviderConfig{}, nil
+		return explicit, model.CloudProviderConfig{}, nil
 	}
 	if hasDirectOverride || !cloud.HasAnyErunPlatformAlias(cloudStore) {
-		return deletePowerDNSRecord, config.CloudProviderConfig{}, nil
+		return deletePowerDNSRecord, model.CloudProviderConfig{}, nil
 	}
 	client, provider, err := cloud.NewPlatformClientForAlias(ctx, cloudStore, erunAlias, deps)
 	if err != nil {
-		return nil, config.CloudProviderConfig{}, err
+		return nil, model.CloudProviderConfig{}, err
 	}
 	return platformDNSRecordDeleter(client, environment), provider, nil
 }

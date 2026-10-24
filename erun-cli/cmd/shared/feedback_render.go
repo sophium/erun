@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -32,21 +33,21 @@ func AddOutputFlag(cmd *cobra.Command) {
 }
 
 // commandOutputMode falls back to text on an unset or unparsable value.
-func commandOutputMode(cmd *cobra.Command) core.OutputMode {
+func commandOutputMode(cmd *cobra.Command) model.OutputMode {
 	raw, err := cmd.Flags().GetString("output")
 	if err != nil {
-		return core.OutputText
+		return model.OutputText
 	}
 	mode, err := core.ParseOutputMode(raw)
 	if err != nil {
-		return core.OutputText
+		return model.OutputText
 	}
 	return mode
 }
 
 // CommandWantsJSON treats --json as an alias of --output json.
 func CommandWantsJSON(commandCtx core.Context, jsonFlag bool) bool {
-	return jsonFlag || commandCtx.Output == core.OutputJSON
+	return jsonFlag || commandCtx.Output == model.OutputJSON
 }
 
 func isDryRunCommand(cmd *cobra.Command) bool {

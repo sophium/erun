@@ -7,9 +7,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +44,7 @@ func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentList(ctx, environments); err != nil {
 					return err
 				}
@@ -56,7 +56,7 @@ func newPlatformEnvListCmd(store config.CloudReadStore, alias *string, deps clou
 	return cmd
 }
 
-func writePlatformEnvironmentList(ctx core.Context, environments []platformclient.PlatformEnvironment) error {
+func writePlatformEnvironmentList(ctx core.Context, environments []model.PlatformEnvironment) error {
 	if len(environments) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no environments")
 		return err
@@ -69,7 +69,7 @@ func writePlatformEnvironmentList(ctx core.Context, environments []platformclien
 	return nil
 }
 
-func writePlatformEnvironmentLine(ctx core.Context, environment platformclient.PlatformEnvironment) error {
+func writePlatformEnvironmentLine(ctx core.Context, environment model.PlatformEnvironment) error {
 	line := fmt.Sprintf("  - %s (%s) type=%s status=%s", environment.Name, environment.EnvironmentID, environment.Type, environment.Status)
 	if strings.TrimSpace(environment.RuntimeVersion) != "" {
 		line += " runtime-version=" + environment.RuntimeVersion
@@ -100,7 +100,7 @@ func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment lookup planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -113,7 +113,7 @@ func newPlatformEnvGetCmd(store config.CloudReadStore, alias *string, deps cloud
 }
 
 func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateEnvironmentParams
+	var params model.PlatformCreateEnvironmentParams
 	var localDefinition string
 	cmd := &cobra.Command{
 		Use:   "register",
@@ -134,13 +134,13 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 		Example:      "  erun platform env register --name prod --type runtime --context-id 018f... --runtime-version 1.4.2\n  erun platform env register --name dev --type local-agent --adopt --kubernetes-context kind-dev --definition acme/dev",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := shared.CommandContext(cmd)
-			var local *platform.EnvDefinitionAdoptParams
+			var local *model.EnvDefinitionAdoptParams
 			if strings.TrimSpace(localDefinition) != "" {
 				tenant, environment, err := parseLocalEnvironmentRef(localDefinition)
 				if err != nil {
 					return err
 				}
-				local = &platform.EnvDefinitionAdoptParams{Tenant: tenant, Environment: environment}
+				local = &model.EnvDefinitionAdoptParams{Tenant: tenant, Environment: environment}
 			}
 			environment, definition, err := platform.RunPlatformRegisterEnvironmentWithDefinition(ctx, store, *alias, params, local, deps)
 			if err != nil {
@@ -150,7 +150,7 @@ func newPlatformEnvRegisterCmd(store config.CloudReadStore, alias *string, deps 
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment registration planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -205,7 +205,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 		Example:      "  erun platform env push acme dev\n  erun platform env push acme dev --dry-run",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.CommandContext(cmd)
-			result, err := platform.RunPlatformPushEnvDefinition(ctx, store, *alias, platform.EnvDefinitionPushParams{
+			result, err := platform.RunPlatformPushEnvDefinition(ctx, store, *alias, model.EnvDefinitionPushParams{
 				Tenant:      args[0],
 				Environment: args[1],
 			}, deps)
@@ -216,7 +216,7 @@ func newPlatformEnvPushCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition push planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "  uploaded %s/%s to %s (definition revision %d)\n",
 					args[0], args[1], result.Environment.EnvironmentID, result.Revision); err != nil {
 					return err
@@ -263,7 +263,7 @@ func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRun
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment definition pull planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				verb := "updated"
 				if result.Created {
 					verb = "created"
@@ -285,7 +285,7 @@ func newPlatformEnvPullCmd(store config.CloudReadStore, alias *string, promptRun
 }
 
 func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformDeployEnvironmentParams
+	var params model.PlatformDeployEnvironmentParams
 	cmd := &cobra.Command{
 		Use:   "deploy ENVIRONMENT_ID",
 		Short: "Start a server-side deploy of an already-registered environment",
@@ -307,7 +307,7 @@ func newPlatformEnvDeployCmd(store config.CloudReadStore, alias *string, deps cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment deploy planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -340,7 +340,7 @@ func newPlatformEnvStopCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment stop planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}
@@ -407,7 +407,7 @@ func newPlatformEnvDeleteCmd(store config.CloudReadStore, alias *string, promptR
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform environment deletion planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformEnvironmentLine(ctx, environment); err != nil {
 					return err
 				}

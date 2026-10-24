@@ -8,18 +8,19 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func secondPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func secondPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.acme.services.erunpaas.com@acme",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "acme",
 		AccountID:     "api.acme.services.erunpaas.com",
 		OIDCIssuerURL: "https://api.acme.services.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.acme.services.erunpaas.com@acme"),
@@ -35,7 +36,7 @@ func ambiguousHostStore(t *testing.T) staticCloudStore {
 	if err != nil {
 		t.Fatalf("default cloud secret store: %v", err)
 	}
-	providers := []configpkg.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
+	providers := []model.CloudProviderConfig{testPlatformAliasProvider(), secondPlatformAliasProvider()}
 	for _, provider := range providers {
 		if err := secretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
 			t.Fatalf("save refresh token for %s: %v", provider.Alias, err)
@@ -77,7 +78,7 @@ func TestResolveHostPlatformAliasSelectsTheNamedAliasFromSeveral(t *testing.T) {
 
 // Each transport words the cause differently, so it must be distinguishable without matching text.
 func TestPlatformAliasAmbiguityIsNotTheAbsentAliasCause(t *testing.T) {
-	several := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+	several := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		testPlatformAliasProvider(), secondPlatformAliasProvider(),
 	}}}
 
@@ -108,7 +109,7 @@ func TestResolveHostPlatformAliasReportsAnExplicitSelectionItCannotHonour(t *tes
 	})
 
 	t.Run("names an infrastructure alias", func(t *testing.T) {
-		awsStore := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+		awsStore := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 			{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 		}}}
 		assertSelectionRejected(t, awsStore, deps, "dev-aws", "not an erun platform alias")

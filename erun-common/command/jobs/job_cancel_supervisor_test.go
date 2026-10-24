@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -49,7 +50,7 @@ func TestCancelRefusesToSignalTheSupervisorWhenTheWorkIsNotYetNamed(t *testing.T
 		t.Fatalf("write job record: %v", err)
 	}
 
-	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: id})
+	result, err := CancelEnvironmentJob(core.Context{}, model.CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: id})
 	if err == nil {
 		t.Fatalf("cancel signalled job %q with no recorded work pid and reported success (target %d); the only pid that record holds is the supervisor's, so this is how a cancelled job's outcome gets lost", id, result.TargetPID)
 	}

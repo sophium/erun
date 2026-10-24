@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -205,7 +206,7 @@ func buildContextBootstrapPlan(bootstrap contextBootstrapParams) ([]string, erro
 	}
 
 	store := newInMemoryCloudStore(bootstrap.alias)
-	params := cloud.InitCloudContextParams{
+	params := modelpkg.InitCloudContextParams{
 		Name:               bootstrap.name,
 		CloudProviderAlias: bootstrap.alias,
 		Region:             bootstrap.region,
@@ -239,7 +240,7 @@ type inMemoryCloudStore struct {
 func newInMemoryCloudStore(alias string) *inMemoryCloudStore {
 	return &inMemoryCloudStore{
 		config: configpkg.ERunConfig{
-			CloudProviders: []configpkg.CloudProviderConfig{{
+			CloudProviders: []modelpkg.CloudProviderConfig{{
 				Alias:    alias,
 				Provider: configpkg.CloudProviderAWS,
 			}},

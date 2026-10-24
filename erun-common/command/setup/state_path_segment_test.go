@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // displayShapedStateNames are tenant/env pairs as rendered for humans, which
@@ -35,7 +36,7 @@ func TestBootstrapDryRunTracesNoWriteItWouldRefuse(t *testing.T) {
 			if err := store.SaveEnvConfig("frs", config.EnvConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveEnvConfig environment %q = %v, want ErrUnusableStateName", name, err)
 			}
-			if err := store.SaveTenantConfig(config.TenantConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
+			if err := store.SaveTenantConfig(model.TenantConfig{Name: name}); !errors.Is(err, config.ErrUnusableStateName) {
 				t.Fatalf("SaveTenantConfig %q = %v, want ErrUnusableStateName", name, err)
 			}
 			traced := stdout.String() + stderr.String()

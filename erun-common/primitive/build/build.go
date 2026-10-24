@@ -8,10 +8,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func ResolveCurrentDockerBuildSpecs(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target shared.DockerCommandTarget) ([]shared.DockerBuildSpec, error) {
+func ResolveCurrentDockerBuildSpecs(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) ([]shared.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -38,13 +39,13 @@ func NewEmptyBuildPlanError(reason string) error {
 	return fmt.Errorf("%w: %s", ErrBuildPlanEmpty, reason)
 }
 
-func BuildEnvDisablesBuildScript(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) bool {
+func BuildEnvDisablesBuildScript(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) bool {
 	env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target)
 	return env != nil && env.DisableBuildScript
 }
 
 // RecommendBuildEnvIfMissing suggests a <tenant>-devops build environment; detection failures never block.
-func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) {
+func RecommendBuildEnvIfMissing(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
@@ -74,7 +75,7 @@ func projectDeclaresDockerRoot(projectRoot, selectedComponent string) bool {
 
 // TraceConfiguredBuildPaths traces configured build path overrides as dry-run decisions,
 // and warns when the project config is gitignored.
-func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) {
+func TraceConfiguredBuildPaths(ctx core.Context, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return
@@ -119,22 +120,22 @@ func dockerBuildsByTag(builds []shared.DockerBuildSpec) map[string]shared.Docker
 	return buildsByTag
 }
 
-func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (shared.DockerCommandTarget, *shared.ReleaseSpec, error) {
+func ResolveDockerBuildTarget(findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, error) {
 	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
 	if !target.Release {
 		return target, nil, nil
 	}
 	if target.VersionOverride != "" {
-		return shared.DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
+		return model.DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
 	if len(target.Platforms) > 0 {
-		return shared.DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports")
+		return model.DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with an explicit --platform override: a release always publishes every platform erun supports")
 	}
 
 	// A zero-value Logger drops traces.
 	releaseSpec, err := shared.ResolveReleaseSpec(core.Context{}, findProjectRoot, shared.ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
-		return shared.DockerCommandTarget{}, nil, err
+		return model.DockerCommandTarget{}, nil, err
 	}
 
 	target.Release = false

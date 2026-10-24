@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"time"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Validators run before routing, so a malformed request is refused on its own
@@ -20,7 +22,7 @@ func ValidateEnvironmentJobStart(params StartEnvironmentJobParams) error {
 }
 
 // ValidateEnvironmentJobAttach checks an attach request's target and handle.
-func ValidateEnvironmentJobAttach(params AttachEnvironmentJobParams) error {
+func ValidateEnvironmentJobAttach(params model.AttachEnvironmentJobParams) error {
 	_, err := normalizeEnvironmentJobIdentity(params.Tenant, params.Environment, params.Name, params.ID)
 	return err
 }

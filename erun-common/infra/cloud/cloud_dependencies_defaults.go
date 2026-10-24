@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func NormalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
@@ -103,7 +104,7 @@ func runAWSExportCredentialsForExecutionMode() func(core.Context, string) (Cloud
 	return defaultRunAWSExportCredentials
 }
 
-func checkAWSStatusForExecutionMode() func(core.Context, configpkg.CloudProviderConfig) CloudProviderStatus {
+func checkAWSStatusForExecutionMode() func(core.Context, model.CloudProviderConfig) model.CloudProviderStatus {
 	if configpkg.CurrentExecutionMode(awsSTSIdentityExecutionOperation) == configpkg.ExecutionModeLibrary {
 		return libraryCheckAWSStatus
 	}
@@ -366,7 +367,7 @@ func defaultResolveAWSIdentity(ctx core.Context, profile string) (AWSIdentity, e
 	return identity, nil
 }
 
-func defaultCheckAWSStatus(_ core.Context, provider configpkg.CloudProviderConfig) CloudProviderStatus {
+func defaultCheckAWSStatus(_ core.Context, provider model.CloudProviderConfig) model.CloudProviderStatus {
 	args := []string{"sts", "get-caller-identity", "--output", "json"}
 	if provider.Profile != "" {
 		args = append(args, "--profile", provider.Profile)
@@ -375,20 +376,20 @@ func defaultCheckAWSStatus(_ core.Context, provider configpkg.CloudProviderConfi
 	var stderr bytes.Buffer
 	err := core.RawCommandRunner("", "aws", args, nil, &stdout, &stderr)
 	if err == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusActive}
 	}
 	message := strings.TrimSpace(stderr.String())
 	if message == "" {
 		message = strings.TrimSpace(err.Error())
 	}
 	if errors.Is(err, exec.ErrNotFound) {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown, Message: "aws CLI is not installed"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown, Message: "aws CLI is not installed"}
 	}
 	status := configpkg.CloudTokenStatusExpired
 	if strings.Contains(strings.ToLower(message), "could not be found") || strings.Contains(strings.ToLower(message), "not found") {
 		status = configpkg.CloudTokenStatusNotConfigured
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: message}
+	return model.CloudProviderStatus{CloudProviderConfig: provider, Status: status, Message: message}
 }
 
 func captureWriter(writer io.Writer) (io.Writer, *bytes.Buffer) {

@@ -9,6 +9,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -16,74 +17,14 @@ import (
 // TerraformStore is the config surface RunTerraform reads.
 type TerraformStore interface {
 	LoadERunConfig() (configpkg.ERunConfig, string, error)
-	LoadTenantConfig(string) (configpkg.TenantConfig, string, error)
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
 	LoadEnvConfig(string, string) (configpkg.EnvConfig, string, error)
 	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
 
-// TerraformOperation is the verb RunTerraform performs against a per-env root.
-type TerraformOperation string
-
-const (
-	TerraformInit    TerraformOperation = "init"
-	TerraformApply   TerraformOperation = "apply"
-	TerraformPlan    TerraformOperation = "plan"
-	TerraformDestroy TerraformOperation = "destroy"
-)
-
 // TerraformConfirmFunc makes the operator restate the environment name before
 // apply/destroy; it is never called for plan or dry-run.
 type TerraformConfirmFunc func(ctx core.Context, environment string) error
-
-// TerraformParams are RunTerraform's inputs; empty Tenant/Environment use the
-// configured default.
-type TerraformParams struct {
-	Tenant      string
-	Environment string
-	Operation   TerraformOperation
-	ProjectRoot string
-	ExtraArgs   []string
-}
-
-// TerraformResult is the resolved Terraform plan a run would execute.
-type TerraformResult struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Operation   string `json:"operation"`
-	Namespace   string `json:"namespace"`
-	Directory   string `json:"directory"`
-	// RootSource is "configured", "repo-root", or "devops".
-	RootSource              string `json:"rootSource,omitempty"`
-	ConfiguredTerraformBase string `json:"configuredTerraformBase,omitempty"`
-	VarFile                 string `json:"varFile,omitempty"`
-	// WorkDir, StateFile and DataDir live on the home PVC, off the read-only
-	// playbook tree, so state survives a pod restart.
-	WorkDir   string `json:"workDir,omitempty"`
-	StateFile string `json:"stateFile,omitempty"`
-	DataDir   string `json:"dataDir,omitempty"`
-	EnvType   string `json:"envType,omitempty"`
-	// StateLocus says whether WorkDir is this host's home or the target pod's PVC.
-	StateLocus string `json:"stateLocus,omitempty"`
-	// KubernetesContext is the context the RFC2136 Secret is read from.
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	// LockReadonly means a baked lock file pins providers, so init never rewrites
-	// the read-only tree.
-	LockReadonly bool `json:"lockReadonly,omitempty"`
-	// LegacyStateInTree flags an ignored pre-relocation terraform.tfstate.
-	LegacyStateInTree bool `json:"legacyStateInTree,omitempty"`
-	// RFC2136SecretName and RFC2136SecretNamespace name the TSIG Secret's source;
-	// its value is never logged or serialized.
-	RFC2136SecretName      string     `json:"rfc2136SecretName,omitempty"`
-	RFC2136SecretNamespace string     `json:"rfc2136SecretNamespace,omitempty"`
-	Commands               [][]string `json:"commands"`
-	RequiresConfirmation   bool       `json:"requiresConfirmation"`
-	// Dispatched means terraform ran inside the target pod; the path fields are
-	// then unset.
-	Dispatched bool `json:"dispatched,omitempty"`
-	// Stdout and Stderr carry the dispatched run's output.
-	Stdout string `json:"stdout,omitempty"`
-	Stderr string `json:"stderr,omitempty"`
-}
 
 type terraformRootSource string
 
@@ -99,14 +40,14 @@ const terraformPlanFile = "apply.tfplan"
 // RunTerraform resolves and, unless dry-run, runs Terraform against a per-env
 // root, tracing everything first. dispatch runs it inside a remote env's own
 // pod; nil defaults to RunRemoteCommand.
-func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
+func RunTerraform(ctx core.Context, params model.TerraformParams, store TerraformStore, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if store == nil {
 		store = configpkg.ConfigStore{}
 	}
 
 	target, err := resolveTerraformTargetEnvironment(params, store)
 	if err != nil {
-		return TerraformResult{}, err
+		return model.TerraformResult{}, err
 	}
 	if target.NeedsDispatch {
 		return dispatchTerraform(ctx, target, params, confirm, dispatch)
@@ -114,12 +55,12 @@ func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore
 
 	result, steps, err := resolveTerraformPlan(params, target, store)
 	if err != nil {
-		return TerraformResult{}, err
+		return model.TerraformResult{}, err
 	}
 
 	rfc2136Secret, err := prepareTerraformRFC2136Secret(ctx, &result)
 	if err != nil {
-		return TerraformResult{}, err
+		return model.TerraformResult{}, err
 	}
 
 	traceTerraformPlan(ctx, result, steps)
@@ -135,8 +76,8 @@ func RunTerraform(ctx core.Context, params TerraformParams, store TerraformStore
 // prepareTerraformRFC2136Secret reads the TSIG secret up front so a missing one
 // is named before any plan output. The value is never stored on result, which
 // --output json serializes.
-func prepareTerraformRFC2136Secret(ctx core.Context, result *TerraformResult) (string, error) {
-	if result.Operation == string(TerraformInit) {
+func prepareTerraformRFC2136Secret(ctx core.Context, result *model.TerraformResult) (string, error) {
+	if result.Operation == string(model.TerraformInit) {
 		return "", nil
 	}
 	requirement, err := resolveTerraformRFC2136Requirement(result.Directory, result.VarFile)
@@ -156,7 +97,7 @@ func prepareTerraformRFC2136Secret(ctx core.Context, result *TerraformResult) (s
 	return secret, nil
 }
 
-func traceTerraformPlan(ctx core.Context, result TerraformResult, steps []terraformStep) {
+func traceTerraformPlan(ctx core.Context, result model.TerraformResult, steps []terraformStep) {
 	ctx.Trace(fmt.Sprintf("terraform: %s in %s (env %s/%s, type %s, namespace %s)", result.Operation, result.Directory, result.Tenant, result.Environment, terraformEnvTypeLabel(result.EnvType), result.Namespace))
 	if result.RootSource == string(terraformRootDevops) {
 		ctx.Trace(fmt.Sprintf("terraform: root under %s-devops/terraform-%s/ (devops-convention layout)", result.Tenant, result.Tenant))
@@ -164,7 +105,7 @@ func traceTerraformPlan(ctx core.Context, result TerraformResult, steps []terraf
 	if result.ConfiguredTerraformBase != "" {
 		ctx.Trace("terraform: base " + result.ConfiguredTerraformBase + " from .erun/config.yaml paths.terraform")
 	}
-	if result.Operation != string(TerraformInit) {
+	if result.Operation != string(model.TerraformInit) {
 		if result.VarFile != "" {
 			ctx.Trace("terraform: var file " + result.VarFile)
 		} else {
@@ -198,7 +139,7 @@ var terraformBackendBlockRe = regexp.MustCompile(`(?m)^\s*backend\s+"`)
 
 // Without a backend block, -backend-config is ignored and state lands in the
 // read-only playbook tree.
-func traceTerraformStateBackend(ctx core.Context, result TerraformResult) {
+func traceTerraformStateBackend(ctx core.Context, result model.TerraformResult) {
 	if terraformTreeHasBackend(result.Directory) {
 		return
 	}
@@ -228,8 +169,8 @@ func terraformTreeHasBackend(dir string) bool {
 	return false
 }
 
-func traceTerraformInitLock(ctx core.Context, result TerraformResult) {
-	if result.Operation != string(TerraformInit) {
+func traceTerraformInitLock(ctx core.Context, result model.TerraformResult) {
+	if result.Operation != string(model.TerraformInit) {
 		return
 	}
 	if result.LockReadonly {
@@ -253,7 +194,7 @@ type terraformTarget struct {
 
 // resolveTerraformTargetEnvironment confirms the env exists before deriving its
 // root, so a typo is a named error rather than a missing directory.
-func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformStore) (terraformTarget, error) {
+func resolveTerraformTargetEnvironment(params model.TerraformParams, store TerraformStore) (terraformTarget, error) {
 	tenant, environment, err := resolveTerraformScope(store, params)
 	if err != nil {
 		return terraformTarget{}, err
@@ -291,15 +232,15 @@ func resolveTerraformTargetEnvironment(params TerraformParams, store TerraformSt
 	}, nil
 }
 
-func requiresTerraformConfirmation(op TerraformOperation) bool {
-	return op == TerraformApply || op == TerraformDestroy
+func requiresTerraformConfirmation(op model.TerraformOperation) bool {
+	return op == model.TerraformApply || op == model.TerraformDestroy
 }
 
 // dispatchTerraform runs `erun terraform <op>` in the target pod, behind the
 // same confirm gate as a local run.
-func dispatchTerraform(ctx core.Context, target terraformTarget, params TerraformParams, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (TerraformResult, error) {
+func dispatchTerraform(ctx core.Context, target terraformTarget, params model.TerraformParams, confirm TerraformConfirmFunc, dispatch kube.RemoteCommandRunnerFunc) (model.TerraformResult, error) {
 	if len(params.ExtraArgs) > 0 {
-		return TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
+		return model.TerraformResult{}, fmt.Errorf("terraform %s/%s: extra terraform args are not supported when dispatching %s into %s's own runtime pod from off-environment", target.Tenant, target.Environment, params.Operation, target.Environment)
 	}
 
 	req := configpkg.ShellLaunchParams{
@@ -313,7 +254,7 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 	ctx.Trace(fmt.Sprintf("terraform: %s/%s is a %s environment — dispatching %s non-interactively into its own runtime pod instead of running on this machine", target.Tenant, target.Environment, terraformEnvTypeLabel(string(target.EnvType)), params.Operation))
 	kube.TraceRemoteCommand(ctx, req, "terraform-dispatch", script)
 
-	dispatched := TerraformResult{
+	dispatched := model.TerraformResult{
 		Tenant:      target.Tenant,
 		Environment: target.Environment,
 		Operation:   string(params.Operation),
@@ -326,10 +267,10 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 	}
 	if requiresTerraformConfirmation(params.Operation) {
 		if confirm == nil {
-			return TerraformResult{}, fmt.Errorf("terraform %s requires confirmation but none was provided", params.Operation)
+			return model.TerraformResult{}, fmt.Errorf("terraform %s requires confirmation but none was provided", params.Operation)
 		}
 		if err := confirm(ctx, target.Environment); err != nil {
-			return TerraformResult{}, err
+			return model.TerraformResult{}, err
 		}
 	}
 	if dispatch == nil {
@@ -339,14 +280,14 @@ func dispatchTerraform(ctx core.Context, target terraformTarget, params Terrafor
 	dispatched.Stdout = result.Stdout
 	dispatched.Stderr = result.Stderr
 	if err != nil {
-		return TerraformResult{}, fmt.Errorf("terraform %s: %w%s", params.Operation, err, kube.FormatRemoteCommandStderr(result.Stderr))
+		return model.TerraformResult{}, fmt.Errorf("terraform %s: %w%s", params.Operation, err, kube.FormatRemoteCommandStderr(result.Stderr))
 	}
 	return dispatched, nil
 }
 
 // terraformDispatchScript embeds --confirm-environment only after the host-side
 // gate approved: the in-pod process has no stdin.
-func terraformDispatchScript(target terraformTarget, op TerraformOperation) string {
+func terraformDispatchScript(target terraformTarget, op model.TerraformOperation) string {
 	args := []string{"erun", "terraform", string(op), "--tenant", core.ShellQuote(target.Tenant), "--environment", core.ShellQuote(target.Environment)}
 	if requiresTerraformConfirmation(op) {
 		args = append(args, "--confirm-environment", core.ShellQuote(target.Environment))
@@ -369,32 +310,32 @@ func terraformStateLocus(remoteWorktree bool) string {
 	return "this host's home directory"
 }
 
-func resolveTerraformPlan(params TerraformParams, target terraformTarget, store TerraformStore) (TerraformResult, []terraformStep, error) {
+func resolveTerraformPlan(params model.TerraformParams, target terraformTarget, store TerraformStore) (model.TerraformResult, []terraformStep, error) {
 	op := params.Operation
 	if err := validateTerraformOperation(op); err != nil {
-		return TerraformResult{}, nil, err
+		return model.TerraformResult{}, nil, err
 	}
 	projectRoot := strings.TrimSpace(params.ProjectRoot)
 	if projectRoot == "" {
-		return TerraformResult{}, nil, fmt.Errorf("project root is required")
+		return model.TerraformResult{}, nil, fmt.Errorf("project root is required")
 	}
 
 	tenant, environment, kubeContext, envType, remoteWorktree := target.Tenant, target.Environment, target.KubeContext, target.EnvType, target.RemoteWorktree
 
 	paths, err := configpkg.LoadProjectPaths(projectRoot)
 	if err != nil {
-		return TerraformResult{}, nil, err
+		return model.TerraformResult{}, nil, err
 	}
 	configuredBase := strings.TrimSpace(paths.Terraform)
 
 	dir, varFile, source, err := resolveTerraformDir(projectRoot, tenant, environment, configuredBase)
 	if err != nil {
-		return TerraformResult{}, nil, err
+		return model.TerraformResult{}, nil, err
 	}
 
 	workDir, err := resolveTerraformWorkDir(tenant, environment)
 	if err != nil {
-		return TerraformResult{}, nil, err
+		return model.TerraformResult{}, nil, err
 	}
 	stateFile := filepath.Join(workDir, "terraform.tfstate")
 	dataDir := filepath.Join(workDir, "data")
@@ -402,7 +343,7 @@ func resolveTerraformPlan(params TerraformParams, target terraformTarget, store 
 	lockReadonly := shared.FileExists(filepath.Join(dir, ".terraform.lock.hcl"))
 
 	steps := buildTerraformSteps(op, varFile, stateFile, planFile, lockReadonly, params.ExtraArgs)
-	result := TerraformResult{
+	result := model.TerraformResult{
 		Tenant:                  tenant,
 		Environment:             environment,
 		Operation:               string(op),
@@ -425,9 +366,9 @@ func resolveTerraformPlan(params TerraformParams, target terraformTarget, store 
 	return result, steps, nil
 }
 
-func validateTerraformOperation(op TerraformOperation) error {
+func validateTerraformOperation(op model.TerraformOperation) error {
 	switch op {
-	case TerraformInit, TerraformApply, TerraformPlan, TerraformDestroy:
+	case model.TerraformInit, model.TerraformApply, model.TerraformPlan, model.TerraformDestroy:
 		return nil
 	default:
 		return fmt.Errorf("unsupported terraform operation %q (want init, apply, plan, or destroy)", op)
@@ -486,7 +427,7 @@ func terraformRootNotFoundError(tenant, environment, configuredBase, configuredD
 		tenant, environment, tenant, environment, tenant, tenant, environment, environment)
 }
 
-func resolveTerraformScope(store TerraformStore, params TerraformParams) (tenant, environment string, err error) {
+func resolveTerraformScope(store TerraformStore, params model.TerraformParams) (tenant, environment string, err error) {
 	tenant = strings.TrimSpace(params.Tenant)
 	environment = strings.TrimSpace(params.Environment)
 	if tenant == "" {

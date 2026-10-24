@@ -10,6 +10,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -201,14 +202,14 @@ func openNoShellDialectForShell(shellPath string) openNoShellDialect {
 	return detectOpenNoShellDialect(shared.CurrentHostOS(), shellPath)
 }
 
-func detectOpenNoShellDialect(hostOS core.HostOS, shellPath string) openNoShellDialect {
+func detectOpenNoShellDialect(hostOS model.HostOS, shellPath string) openNoShellDialect {
 	switch strings.ToLower(filepath.Base(strings.TrimSpace(shellPath))) {
 	case "pwsh", "pwsh.exe", "powershell", "powershell.exe":
 		return openNoShellDialectPowerShell
 	case "bash", "bash.exe", "zsh", "zsh.exe", "sh", "sh.exe", "fish", "fish.exe":
 		return openNoShellDialectPOSIX
 	}
-	if hostOS == core.HostOSWindows {
+	if hostOS == model.HostOSWindows {
 		return openNoShellDialectPowerShell
 	}
 	return openNoShellDialectPOSIX

@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // inPodBlindRuntimeOnlySelection reports a runtime-only fallback reached inside
@@ -28,7 +29,7 @@ func inPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget conf
 
 // guardInPodBlindRuntimeOnlySelection refuses that fallback, which would
 // silently upgrade the runtime chart and leave components behind.
-func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, target DeployTarget, selected []string, selectionSource string) error {
+func guardInPodBlindRuntimeOnlySelection(env func(string) string, resolvedTarget config.OpenResult, target model.DeployTarget, selected []string, selectionSource string) error {
 	if !inPodBlindRuntimeOnlySelection(env, resolvedTarget, selected, selectionSource) {
 		return nil
 	}

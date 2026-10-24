@@ -4,16 +4,18 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func (c *PlatformClient) ListEnvironments(ctx context.Context) ([]PlatformEnvironment, error) {
-	var environments []PlatformEnvironment
+func (c *PlatformClient) ListEnvironments(ctx context.Context) ([]model.PlatformEnvironment, error) {
+	var environments []model.PlatformEnvironment
 	err := c.do(ctx, http.MethodGet, "/v1/environments", nil, true, &environments)
 	return environments, err
 }
 
-func (c *PlatformClient) GetEnvironment(ctx context.Context, environmentID string) (PlatformEnvironment, error) {
-	var environment PlatformEnvironment
+func (c *PlatformClient) GetEnvironment(ctx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+	var environment model.PlatformEnvironment
 	err := c.do(ctx, http.MethodGet, "/v1/environments/"+url.PathEscape(environmentID), nil, true, &environment)
 	return environment, err
 }
@@ -39,63 +41,44 @@ func (c *PlatformClient) MintMachineIdentity(ctx context.Context, environmentID 
 	return identity, err
 }
 
-// PlatformCreateEnvironmentParams is the environment-registration input.
-type PlatformCreateEnvironmentParams struct {
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	ContextID         string `json:"contextId,omitempty"`
-	KubernetesContext string `json:"kubernetesContext,omitempty"`
-	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
-	// Adopt records an existing environment without provisioning or deploying it;
-	// it requires KubernetesContext and forbids RuntimeVersion and ContextID.
-	Adopt bool `json:"adopt,omitempty"`
-	// TenantID is honoured only for operations-tenant callers (others get 403).
-	TenantID string `json:"tenantId,omitempty"`
-}
-
 // CreateEnvironment registers an environment and may start a server-side deploy;
 // poll GetEnvironment for its Status.
-func (c *PlatformClient) CreateEnvironment(ctx context.Context, params PlatformCreateEnvironmentParams) (PlatformEnvironment, error) {
-	var environment PlatformEnvironment
+func (c *PlatformClient) CreateEnvironment(ctx context.Context, params model.PlatformCreateEnvironmentParams) (model.PlatformEnvironment, error) {
+	var environment model.PlatformEnvironment
 	err := c.do(ctx, http.MethodPost, "/v1/environments", params, true, &environment)
 	return environment, err
 }
 
 // PreviewCreateEnvironment returns CreateEnvironment's plan without creating anything.
 // It always succeeds; QuotaOk says whether register would be allowed.
-func (c *PlatformClient) PreviewCreateEnvironment(ctx context.Context, params PlatformCreateEnvironmentParams) (PlatformProvisionResult, error) {
+func (c *PlatformClient) PreviewCreateEnvironment(ctx context.Context, params model.PlatformCreateEnvironmentParams) (model.PlatformProvisionResult, error) {
 	body := struct {
-		PlatformCreateEnvironmentParams
+		model.PlatformCreateEnvironmentParams
 		Preview bool `json:"preview"`
 	}{PlatformCreateEnvironmentParams: params, Preview: true}
-	var result PlatformProvisionResult
+	var result model.PlatformProvisionResult
 	err := c.do(ctx, http.MethodPost, "/v1/environments", body, true, &result)
 	return result, err
 }
 
-// PlatformDeployEnvironmentParams.Version empty deploys the pinned RuntimeVersion.
-type PlatformDeployEnvironmentParams struct {
-	Version string `json:"version,omitempty"`
-}
-
 // DeployEnvironment returns ErrPlatformConflict when a deploy is in flight.
-func (c *PlatformClient) DeployEnvironment(ctx context.Context, environmentID string, params PlatformDeployEnvironmentParams) (PlatformEnvironment, error) {
-	var environment PlatformEnvironment
+func (c *PlatformClient) DeployEnvironment(ctx context.Context, environmentID string, params model.PlatformDeployEnvironmentParams) (model.PlatformEnvironment, error) {
+	var environment model.PlatformEnvironment
 	err := c.do(ctx, http.MethodPost, "/v1/environments/"+url.PathEscape(environmentID)+"/deploy", params, true, &environment)
 	return environment, err
 }
 
 // StopEnvironment scales a runtime environment's Deployment to zero.
-func (c *PlatformClient) StopEnvironment(ctx context.Context, environmentID string) (PlatformEnvironment, error) {
-	var environment PlatformEnvironment
+func (c *PlatformClient) StopEnvironment(ctx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+	var environment model.PlatformEnvironment
 	err := c.do(ctx, http.MethodPost, "/v1/environments/"+url.PathEscape(environmentID)+"/stop", nil, true, &environment)
 	return environment, err
 }
 
 // DeleteEnvironment claims the delete and returns before teardown finishes, since
 // a stuck finalizer can wedge indefinitely; poll GetEnvironment.
-func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID string) (PlatformEnvironment, error) {
-	var environment PlatformEnvironment
+func (c *PlatformClient) DeleteEnvironment(ctx context.Context, environmentID string) (model.PlatformEnvironment, error) {
+	var environment model.PlatformEnvironment
 	err := c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID), nil, true, &environment)
 	return environment, err
 }
@@ -124,72 +107,28 @@ func (c *PlatformClient) DeleteEnvironmentHostname(ctx context.Context, environm
 	return c.do(ctx, http.MethodDelete, "/v1/environments/"+url.PathEscape(environmentID)+"/hostname", nil, true, nil)
 }
 
-func (c *PlatformClient) ListContexts(ctx context.Context) ([]PlatformContext, error) {
-	var contexts []PlatformContext
+func (c *PlatformClient) ListContexts(ctx context.Context) ([]model.PlatformContext, error) {
+	var contexts []model.PlatformContext
 	err := c.do(ctx, http.MethodGet, "/v1/contexts", nil, true, &contexts)
 	return contexts, err
 }
 
-func (c *PlatformClient) GetContext(ctx context.Context, contextID string) (PlatformContext, error) {
-	var cloudContext PlatformContext
+func (c *PlatformClient) GetContext(ctx context.Context, contextID string) (model.PlatformContext, error) {
+	var cloudContext model.PlatformContext
 	err := c.do(ctx, http.MethodGet, "/v1/contexts/"+url.PathEscape(contextID), nil, true, &cloudContext)
 	return cloudContext, err
 }
 
-// PlatformCreateContextParams registers a cluster; Preview only returns the plan.
-type PlatformCreateContextParams struct {
-	Name               string `json:"name"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceType       string `json:"instanceType,omitempty"`
-	DiskType           string `json:"diskType,omitempty"`
-	DiskSizeGB         int    `json:"diskSizeGb,omitempty"`
-	Preview            bool   `json:"preview,omitempty"`
-}
-
-// PlatformCreateContextResult has a nil Context for a preview.
-type PlatformCreateContextResult struct {
-	Context *PlatformContext `json:"context,omitempty"`
-	Plan    []string         `json:"plan"`
-}
-
 // CreateContext registers a cloud context and may start its bootstrap.
-func (c *PlatformClient) CreateContext(ctx context.Context, params PlatformCreateContextParams) (PlatformCreateContextResult, error) {
-	var result PlatformCreateContextResult
+func (c *PlatformClient) CreateContext(ctx context.Context, params model.PlatformCreateContextParams) (model.PlatformCreateContextResult, error) {
+	var result model.PlatformCreateContextResult
 	err := c.do(ctx, http.MethodPost, "/v1/contexts", params, true, &result)
 	return result, err
 }
 
-// PlatformProvisionParams sets exactly one of Context or KubernetesContext.
-type PlatformProvisionParams struct {
-	Environment       PlatformProvisionEnvironment `json:"environment"`
-	Context           *PlatformProvisionContext    `json:"context,omitempty"`
-	KubernetesContext string                       `json:"kubernetesContext,omitempty"`
-}
-
-type PlatformProvisionEnvironment struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-}
-
-type PlatformProvisionContext struct {
-	Name               string `json:"name"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceType       string `json:"instanceType,omitempty"`
-	DiskType           string `json:"diskType,omitempty"`
-	DiskSizeGB         int    `json:"diskSizeGb,omitempty"`
-}
-
-// PlatformProvisionResult reports a quota block in QuotaOk instead of failing.
-type PlatformProvisionResult struct {
-	Plan    []string `json:"plan"`
-	QuotaOk bool     `json:"quotaOk"`
-}
-
 // Provision returns the full provisioning plan without executing or persisting it.
-func (c *PlatformClient) Provision(ctx context.Context, params PlatformProvisionParams) (PlatformProvisionResult, error) {
-	var result PlatformProvisionResult
+func (c *PlatformClient) Provision(ctx context.Context, params model.PlatformProvisionParams) (model.PlatformProvisionResult, error) {
+	var result model.PlatformProvisionResult
 	err := c.do(ctx, http.MethodPost, "/v1/provision", params, true, &result)
 	return result, err
 }

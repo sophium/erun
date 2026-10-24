@@ -2,12 +2,13 @@ package deploy
 
 import (
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func ResolveCurrentDeploySpecsForDockerTarget(ctx core.Context, store deploypkg.BuildDeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext deploypkg.DeployContextResolverFunc, now shared.NowFunc, target shared.DockerCommandTarget) ([]deploypkg.DeploySpec, error) {
+func ResolveCurrentDeploySpecsForDockerTarget(ctx core.Context, store deploypkg.BuildDeployStore, findProjectRoot shared.ProjectFinderFunc, resolveDockerBuildContext shared.BuildContextResolverFunc, resolveKubernetesDeployContext deploypkg.DeployContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) ([]deploypkg.DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = deploypkg.NormalizeBuildDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	target, _, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)

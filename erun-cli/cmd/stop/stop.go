@@ -7,14 +7,14 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
-func NewStopCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
-	target := sharedpkg.OpenParams{}
+func NewStopCmd(resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) *cobra.Command {
+	target := model.OpenParams{}
 	cmd := &cobra.Command{
 		Use:   "stop [TENANT] [ENVIRONMENT]",
 		Short: "Stop an environment's runtime and return its capacity to the node",
@@ -50,7 +50,7 @@ func NewStopCmd(resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error
 }
 
 // runStopCommand skips the cloud-context preflight, which would start a stopped machine just to stop a pod.
-func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenParams, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
+func runStopCommand(ctx core.Context, args []string, overrides model.OpenParams, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error) error {
 	params, err := shared.ResolveOpenParams(ctx.Command, args, overrides)
 	if err != nil {
 		return err
@@ -76,7 +76,7 @@ func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenPar
 	if err != nil {
 		return err
 	}
-	if !ctx.DryRun && ctx.Output != core.OutputJSON {
+	if !ctx.DryRun && ctx.Output != model.OutputJSON {
 		_, _ = fmt.Fprintf(ctx.Stdout, "%s\n", stopCommandSummary(stopResult))
 	}
 	return ctx.WriteResult(stopResult)
@@ -84,7 +84,7 @@ func runStopCommand(ctx core.Context, args []string, overrides sharedpkg.OpenPar
 
 // stopCommandSummary names the ended sessions and the components left running, so
 // neither reads as a failed stop.
-func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
+func stopCommandSummary(result model.StopEnvironmentResult) string {
 	kept := stopCommandKeptComponents(result)
 	if result.AlreadyStopped {
 		return fmt.Sprintf("%s/%s was already stopped%s", result.Tenant, result.Environment, kept)
@@ -97,7 +97,7 @@ func stopCommandSummary(result lifecycle.StopEnvironmentResult) string {
 }
 
 // stopCommandKeptComponents renders the components left running, or "" when there are none.
-func stopCommandKeptComponents(result lifecycle.StopEnvironmentResult) string {
+func stopCommandKeptComponents(result model.StopEnvironmentResult) string {
 	if len(result.RemainingComponents) == 0 {
 		return ""
 	}

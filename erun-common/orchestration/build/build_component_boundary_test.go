@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -33,12 +34,12 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 
 func boundaryResolvers(projectRoot, cwd string) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
-	resolveBuildContext := func() (shared.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
+	resolveBuildContext := func() (model.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext
 }
 
-func boundaryTarget(projectRoot string) shared.DockerCommandTarget {
-	return shared.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
+func boundaryTarget(projectRoot string) model.DockerCommandTarget {
+	return model.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
 }
 
 // A `test` stage nothing consumes is pruned by BuildKit, so its tests never run.

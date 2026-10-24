@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestResolveRuntimeChartPlan(t *testing.T) {
@@ -92,14 +92,14 @@ func TestResolveRuntimeChartPlan(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			app := NewApp(erunUIDeps{
 				store: stubUIStore{
-					tenants: map[string]config.TenantConfig{"acme": {Name: "acme"}},
+					tenants: map[string]model.TenantConfig{"acme": {Name: "acme"}},
 					envs:    envs,
 				},
-				resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
+				resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
 					if testCase.listErr != nil {
-						return registry.RuntimeRegistryVersions{}, testCase.listErr
+						return model.RuntimeRegistryVersions{}, testCase.listErr
 					}
-					return registry.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
+					return model.RuntimeRegistryVersions{Tags: testCase.tags[repository]}, nil
 				},
 			})
 			got := app.resolveRuntimeChartPlan("acme", testCase.environment, snapshot, testCase.localChart)

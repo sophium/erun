@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 	"github.com/sophium/erun/erun-common/base/config"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	activitypkg "github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
@@ -155,7 +156,7 @@ func TestIdleEligibilityGaugeTracksUnderlyingActivityState(t *testing.T) {
 		t.Fatalf("erun_terminal_input_seconds_since_last = %v before any activity, want 0", got)
 	}
 
-	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH,
 		Now: time.Now().Add(-5 * time.Second),
 	}); err != nil {
@@ -176,18 +177,18 @@ func TestTerminalInputUnionsSSHCLIAndMCPActivity(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", cacheDir)
 
 	now := time.Now()
-	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindSSH, Now: now.Add(-1 * time.Hour),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(ssh) failed: %v", err)
 	}
-	if err := activitypkg.RecordEnvironmentActivity(activitypkg.EnvironmentActivityParams{
+	if err := activitypkg.RecordEnvironmentActivity(modelpkg.EnvironmentActivityParams{
 		Tenant: "acme", Environment: "dev", Kind: config.ActivityKindCLI, Now: now.Add(-2 * time.Second),
 	}); err != nil {
 		t.Fatalf("RecordEnvironmentActivity(cli) failed: %v", err)
 	}
 
-	status := activitypkg.EnvironmentIdleStatus{}
+	status := modelpkg.EnvironmentIdleStatus{}
 	activity, err := activitypkg.LoadEnvironmentActivity("acme", "dev")
 	if err != nil {
 		t.Fatalf("LoadEnvironmentActivity failed: %v", err)

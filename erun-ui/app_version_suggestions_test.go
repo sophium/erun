@@ -15,7 +15,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]configpkg.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"frs": {
 					Name:               "frs",
 					DefaultEnvironment: "prod",
@@ -31,24 +31,24 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 		},
 		findProjectRoot:  func() (string, string, error) { return "frs", projectRoot, nil },
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "frs-devops":
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
 					LatestStable:   "1.0.11",
 					LatestSnapshot: "1.0.12-snapshot-20260414165809",
 				}, nil
 			case configpkg.DefaultRuntimeImageName:
-				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return model.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{}, nil
+			return model.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -96,11 +96,11 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 			},
 		},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			switch repository {
 			case "team-devops":
 				tenantImageNamespace = namespace
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.11", "1.0.12-snapshot-20260608120000"},
 					LatestStable:   "1.0.11",
@@ -110,11 +110,11 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 				if namespace != configpkg.DefaultContainerRegistry {
 					t.Fatalf("ERun fallback image must use the default registry, got %s", namespace)
 				}
-				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return model.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{}, nil
+			return model.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -134,19 +134,19 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 				"team/prod": {
 					Name: "prod",
 					ContainerRegistries: configpkg.ContainerRegistries{
-						{Registry: "ghcr.io/acme", Roles: []configpkg.RegistryRole{configpkg.RegistryRoleBuild, configpkg.RegistryRoleFrom}},
-						{Registry: "registry.internal/acme", Roles: []configpkg.RegistryRole{configpkg.RegistryRoleTo, configpkg.RegistryRoleDeploy}},
+						{Registry: "ghcr.io/acme", Roles: []model.RegistryRole{model.RegistryRoleBuild, model.RegistryRoleFrom}},
+						{Registry: "registry.internal/acme", Roles: []model.RegistryRole{model.RegistryRoleTo, model.RegistryRoleDeploy}},
 					},
 				},
 			},
 		},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == "team-devops" {
 				queried[namespace] = true
-				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
+				return model.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
 			}
-			return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+			return model.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 		},
 	})
 
@@ -160,15 +160,15 @@ func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
 	}
 }
 
-func missingTenantImageRegistry(t *testing.T) func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
+func missingTenantImageRegistry(t *testing.T) func(context.Context, string, string) (model.RuntimeRegistryVersions, error) {
 	t.Helper()
 
-	return func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+	return func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 		if namespace != configpkg.DefaultContainerRegistry {
 			t.Fatalf("unexpected registry namespace: %s", namespace)
 		}
 		if repository == "frs-devops" {
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
 				LatestStable:   "1.0.11",
@@ -176,14 +176,14 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 			}, nil
 		}
 		if repository == configpkg.DefaultRuntimeImageName {
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:        namespace + "/" + repository,
 				Tags:         []string{"1.0.50", "1.0.49"},
 				LatestStable: "1.0.50",
 			}, nil
 		}
 		t.Fatalf("unexpected registry repository: %s", repository)
-		return registry.RuntimeRegistryVersions{}, nil
+		return model.RuntimeRegistryVersions{}, nil
 	}
 }
 
@@ -192,7 +192,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
@@ -200,7 +200,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"},
 				LatestStable:   "1.0.48",
@@ -228,15 +228,15 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			switch repository {
 			case "test-devops":
-				return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+				return model.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
 			case configpkg.DefaultRuntimeImageName:
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:          namespace + "/" + repository,
 					Tags:           []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"},
 					LatestStable:   "1.0.50",
@@ -245,7 +245,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 			default:
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{}, nil
+			return model.RuntimeRegistryVersions{}, nil
 		},
 	})
 
@@ -265,12 +265,12 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected registry namespace: %s", namespace)
 			}
 			if repository == "test-devops" {
-				return registry.RuntimeRegistryVersions{
+				return model.RuntimeRegistryVersions{
 					Image:        namespace + "/" + repository,
 					Tags:         []string{"1.0.48"},
 					LatestStable: "1.0.48",
@@ -279,7 +279,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 			if repository != configpkg.DefaultRuntimeImageName {
 				t.Fatalf("unexpected registry repository: %s", repository)
 			}
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:          namespace + "/" + repository,
 				Tags:           []string{"1.0.50", "1.0.49", "1.0.51-snapshot-20260414165809"},
 				LatestStable:   "1.0.50",
@@ -307,11 +307,11 @@ func TestLoadVersionSuggestionsSurfacesAuthNoticeForPrivateImage(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
-				return registry.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", registry.ErrRegistryAuthRequired)
+				return model.RuntimeRegistryVersions{}, fmt.Errorf("ghcr tags request failed: 401 Unauthorized: %w", registry.ErrRegistryAuthRequired)
 			}
-			return registry.RuntimeRegistryVersions{
+			return model.RuntimeRegistryVersions{
 				Image:        namespace + "/" + repository,
 				Tags:         []string{"1.0.50", "1.0.49"},
 				LatestStable: "1.0.50",
@@ -338,11 +338,11 @@ func TestLoadVersionSuggestionsMarksUnreachableRegistry(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:            stubUIStore{},
 		resolveBuildInfo: func() model.BuildInfo { return model.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if repository == "frs-devops" {
-				return registry.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
+				return model.RuntimeRegistryVersions{}, fmt.Errorf("dial tcp: connection refused")
 			}
-			return registry.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
+			return model.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.50"}, LatestStable: "1.0.50"}, nil
 		},
 	})
 

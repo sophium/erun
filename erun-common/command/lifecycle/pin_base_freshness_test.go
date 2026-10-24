@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func gitOutputForTest(t *testing.T, dir string, args ...string) string {
@@ -37,9 +39,9 @@ func newCheckoutBehindItsRemote(t *testing.T, behind int) string {
 	return dir
 }
 
-func annotatePinPlanForTest(t *testing.T, projectRoot string) PinPlan {
+func annotatePinPlanForTest(t *testing.T, projectRoot string) model.PinPlan {
 	t.Helper()
-	plan := PinPlan{Tenant: "frs", Environment: "build", ProjectRoot: projectRoot, Target: "1.0.291"}
+	plan := model.PinPlan{Tenant: "frs", Environment: "build", ProjectRoot: projectRoot, Target: "1.0.291"}
 	AnnotatePinPlanBaseFreshness(testContext(), &plan)
 	return plan
 }

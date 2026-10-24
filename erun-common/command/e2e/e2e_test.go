@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestE2EServiceURLBuildArgFoldsTheServiceName(t *testing.T) {
@@ -53,7 +54,7 @@ func TestRefuseLoopbackE2ETarget(t *testing.T) {
 }
 
 func TestE2EDockerBuildNestsUnderTheCPUCapWhenOneApplies(t *testing.T) {
-	suite := E2ESuite{Component: "console", Dockerfile: "team-devops/e2e/console/Dockerfile"}
+	suite := model.E2ESuite{Component: "console", Dockerfile: "team-devops/e2e/console/Dockerfile"}
 	args := strings.Join(e2eDockerBuildArgs(suite, "1.2.3", "https://console.example.test", nil, nil, "/docker/erun-build-cpu-cap-pod"), " ")
 	if !strings.Contains(args, "--cgroup-parent /docker/erun-build-cpu-cap-pod -f team-devops/e2e/console/Dockerfile .") {
 		t.Fatalf("an in-pod e2e run should carry --cgroup-parent, got %q", args)
@@ -67,7 +68,7 @@ func TestE2ELogPathWithoutAnEnvironment(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	got, err := e2eLogPath(E2ETarget{}, "console")
+	got, err := e2eLogPath(model.E2ETarget{}, "console")
 	if err != nil {
 		t.Fatalf("expected a log path without an environment, got %v", err)
 	}

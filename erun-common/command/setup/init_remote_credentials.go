@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
@@ -76,7 +77,7 @@ func ghcrRegistriesRequiringCredential(list config.ContainerRegistries) []string
 		if registry == "" || !registrypkg.IsGHCRRegistry(registry) {
 			continue
 		}
-		if !entry.HasRole(config.RegistryRoleBuild) && !entry.HasRole(config.RegistryRoleDeploy) {
+		if !entry.HasRole(model.RegistryRoleBuild) && !entry.HasRole(model.RegistryRoleDeploy) {
 			continue
 		}
 		if _, ok := seen[registry]; ok {

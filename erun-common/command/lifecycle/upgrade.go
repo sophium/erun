@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
@@ -17,12 +18,12 @@ import (
 // UpgradeVersionsOverrideEnv is a test-only seam forcing the resolver's channel targets.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
 
-func runtimeVersionsOverrideFromEnvWithError() (registrypkg.RuntimeRegistryVersions, string, bool) {
+func runtimeVersionsOverrideFromEnvWithError() (model.RuntimeRegistryVersions, string, bool) {
 	raw := strings.TrimSpace(os.Getenv(UpgradeVersionsOverrideEnv))
 	if raw == "" {
-		return registrypkg.RuntimeRegistryVersions{}, "", false
+		return model.RuntimeRegistryVersions{}, "", false
 	}
-	var versions registrypkg.RuntimeRegistryVersions
+	var versions model.RuntimeRegistryVersions
 	var forcedError string
 	for _, part := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
@@ -42,12 +43,12 @@ func runtimeVersionsOverrideFromEnvWithError() (registrypkg.RuntimeRegistryVersi
 }
 
 // RegistryVersionsLookup queries one image repository for its latest channel versions.
-type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (registrypkg.RuntimeRegistryVersions, error)
+type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error)
 
 // SourcedRuntimeVersions pairs a registry with the runtime versions it offers.
 type SourcedRuntimeVersions struct {
 	Registry string
-	Versions registrypkg.RuntimeRegistryVersions
+	Versions model.RuntimeRegistryVersions
 }
 
 // EnvVersionsResolver resolves one environment's candidate versions, one entry per registry.
@@ -121,30 +122,17 @@ func upgradeDiscoveryRegistries(env config.EnvConfig) []string {
 	return registries
 }
 
-// UpgradeTarget scopes an upgrade run; VersionOverride targets every env without a registry lookup.
-type UpgradeTarget struct {
-	Tenant          string
-	Environment     string
-	VersionOverride string
-	Force           bool
-	// GateEnvironment names the tenant's merge-queue gate, which erun does not store. It is always
-	// included and rolled first. Requires Tenant and must exist in it.
-	GateEnvironment string
-	// Fleet includes every non-host environment in Tenant regardless of opt-in. Requires Tenant.
-	Fleet bool
-}
-
 // ResolveUpgradePlanForStore resolves the Upgrade-all plan, tracing every decision for --dry-run.
-func ResolveUpgradePlanForStore(ctx core.Context, store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func ResolveUpgradePlanForStore(ctx core.Context, store deploypkg.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, ctx.Trace)
 }
 
 // BuildUpgradePlan is the untraced plan resolver for in-process callers.
-func BuildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
+func BuildUpgradePlan(store deploypkg.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver) (UpgradePlan, error) {
 	return buildUpgradePlan(store, target, resolveVersions, nil)
 }
 
-func buildUpgradePlan(store deploypkg.DeployStore, target UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
+func buildUpgradePlan(store deploypkg.DeployStore, target model.UpgradeTarget, resolveVersions EnvVersionsResolver, trace func(string)) (UpgradePlan, error) {
 	traceln := func(msg string) {
 		if trace != nil {
 			trace(msg)
@@ -179,7 +167,7 @@ type upgradeScope struct {
 	fleet           bool
 }
 
-func normalizeUpgradeScope(target UpgradeTarget) (upgradeScope, error) {
+func normalizeUpgradeScope(target model.UpgradeTarget) (upgradeScope, error) {
 	scope := upgradeScope{
 		tenant:          strings.TrimSpace(target.Tenant),
 		environment:     strings.TrimSpace(target.Environment),
@@ -197,8 +185,8 @@ func normalizeUpgradeScope(target UpgradeTarget) (upgradeScope, error) {
 }
 
 // A gate environment that is not found must fail the plan.
-func collectUpgradePlanItems(store deploypkg.DeployStore, tenants []config.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]UpgradePlanItem, bool, error) {
-	items := make([]UpgradePlanItem, 0)
+func collectUpgradePlanItems(store deploypkg.DeployStore, tenants []model.TenantConfig, scope upgradeScope, resolveVersions EnvVersionsResolver, traceln func(string)) ([]model.UpgradePlanItem, bool, error) {
+	items := make([]model.UpgradePlanItem, 0)
 	gateFound := scope.gateEnvironment == ""
 	for _, tenant := range tenants {
 		if scope.tenant != "" && tenant.Name != scope.tenant {
@@ -225,7 +213,7 @@ func envConfigsContain(envs []config.EnvConfig, name string) bool {
 	return false
 }
 
-func appendTenantUpgradeItems(items []UpgradePlanItem, tenant string, envs []config.EnvConfig, scopeEnv, override, gateEnvironment string, fleet bool, resolveVersions EnvVersionsResolver, traceln func(string)) []UpgradePlanItem {
+func appendTenantUpgradeItems(items []model.UpgradePlanItem, tenant string, envs []config.EnvConfig, scopeEnv, override, gateEnvironment string, fleet bool, resolveVersions EnvVersionsResolver, traceln func(string)) []model.UpgradePlanItem {
 	for _, env := range envs {
 		if scopeEnv != "" && env.Name != scopeEnv {
 			continue
@@ -262,7 +250,7 @@ func upgradeInclusionTrace(tenant string, env config.EnvConfig, fleet, isGate bo
 }
 
 // prioritizeGateUpgradeItem moves the gate first so it rolls before what it gates.
-func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment string) []UpgradePlanItem {
+func prioritizeGateUpgradeItem(items []model.UpgradePlanItem, tenant, gateEnvironment string) []model.UpgradePlanItem {
 	for i, item := range items {
 		if item.Tenant != tenant || item.Environment != gateEnvironment {
 			continue
@@ -270,7 +258,7 @@ func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment 
 		if i == 0 {
 			return items
 		}
-		reordered := make([]UpgradePlanItem, 0, len(items))
+		reordered := make([]model.UpgradePlanItem, 0, len(items))
 		reordered = append(reordered, item)
 		reordered = append(reordered, items[:i]...)
 		reordered = append(reordered, items[i+1:]...)
@@ -279,14 +267,14 @@ func prioritizeGateUpgradeItem(items []UpgradePlanItem, tenant, gateEnvironment 
 	return items
 }
 
-func resolveEnvUpgradeItem(tenant string, env config.EnvConfig, override string, resolveVersions EnvVersionsResolver, traceln func(string)) UpgradePlanItem {
+func resolveEnvUpgradeItem(tenant string, env config.EnvConfig, override string, resolveVersions EnvVersionsResolver, traceln func(string)) model.UpgradePlanItem {
 	channel := env.ResolvedUpgradeChannel()
 	current := strings.TrimSpace(env.RuntimeVersion)
-	item := UpgradePlanItem{Tenant: tenant, Environment: env.Name, Channel: channel, Current: current}
+	item := model.UpgradePlanItem{Tenant: tenant, Environment: env.Name, Channel: channel, Current: current}
 
 	if override != "" {
 		traceln(fmt.Sprintf("upgrade: %s/%s using version override %s for all channels", tenant, env.Name, override))
-		item.Candidates = []UpgradeVersionCandidate{{Version: override}}
+		item.Candidates = []model.UpgradeVersionCandidate{{Version: override}}
 		item.Target = override
 		item.Lagging = override != current
 		return item
@@ -330,8 +318,8 @@ func resolveEnvUpgradeItem(tenant string, env config.EnvConfig, override string,
 }
 
 // anyResolved separates "up to date" from "nothing resolved".
-func collectUpgradeCandidates(sourced []SourcedRuntimeVersions, channel, current string) ([]UpgradeVersionCandidate, bool) {
-	candidates := make([]UpgradeVersionCandidate, 0, len(sourced))
+func collectUpgradeCandidates(sourced []SourcedRuntimeVersions, channel, current string) ([]model.UpgradeVersionCandidate, bool) {
+	candidates := make([]model.UpgradeVersionCandidate, 0, len(sourced))
 	seen := make(map[string]struct{}, len(sourced))
 	anyResolved := false
 	for _, sv := range sourced {
@@ -347,7 +335,7 @@ func collectUpgradeCandidates(sourced []SourcedRuntimeVersions, channel, current
 			continue
 		}
 		seen[target] = struct{}{}
-		candidates = append(candidates, UpgradeVersionCandidate{Version: target, Registry: sv.Registry})
+		candidates = append(candidates, model.UpgradeVersionCandidate{Version: target, Registry: sv.Registry})
 	}
 	return candidates, anyResolved
 }
@@ -359,7 +347,7 @@ func candidateRegistrySuffix(registry string) string {
 	return ""
 }
 
-func candidateSummary(candidates []UpgradeVersionCandidate) string {
+func candidateSummary(candidates []model.UpgradeVersionCandidate) string {
 	parts := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		parts = append(parts, candidate.Version+candidateRegistrySuffix(candidate.Registry))
@@ -368,13 +356,13 @@ func candidateSummary(candidates []UpgradeVersionCandidate) string {
 }
 
 // UpgradeItemDeployer redeploys one lagging env to its target version.
-type UpgradeItemDeployer func(ctx core.Context, item UpgradePlanItem) error
+type UpgradeItemDeployer func(ctx core.Context, item model.UpgradePlanItem) error
 
 // UpgradeOccupancyError refuses an upgrade of a held environment, since the roll recreates its pod.
 type UpgradeOccupancyError struct {
 	Tenant      string
 	Environment string
-	Holders     []activity.EnvironmentActivityLease
+	Holders     []model.EnvironmentActivityLease
 }
 
 func (e *UpgradeOccupancyError) Error() string {
@@ -384,11 +372,11 @@ func (e *UpgradeOccupancyError) Error() string {
 
 // LeaseGuardedUpgradeDeployer refuses held environments unless override (traced), and holds an
 // exclusive lease during the deploy so concurrent upgrades cannot race.
-func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder activity.EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
+func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, holder model.EnvironmentActivityLeaseHolder, now func() time.Time) UpgradeItemDeployer {
 	if now == nil {
 		now = time.Now
 	}
-	return func(ctx core.Context, item UpgradePlanItem) error {
+	return func(ctx core.Context, item model.UpgradePlanItem) error {
 		nowValue := now()
 		leases, err := activity.LoadEnvironmentActivityLeases(item.Tenant, item.Environment, nowValue)
 		if err != nil {
@@ -421,17 +409,17 @@ func LeaseGuardedUpgradeDeployer(deploy UpgradeItemDeployer, override bool, hold
 
 // UpgradeItemFailure records a member whose deploy returned an error.
 type UpgradeItemFailure struct {
-	Item  UpgradePlanItem `json:"item"`
-	Error string          `json:"error"`
+	Item  model.UpgradePlanItem `json:"item"`
+	Error string                `json:"error"`
 }
 
 // UpgradeResult summarizes an upgrade run; unresolved members are never counted as up to date.
 type UpgradeResult struct {
-	Plan       UpgradePlan          `json:"plan"`
-	Upgraded   []UpgradePlanItem    `json:"upgraded,omitempty"`
-	UpToDate   []UpgradePlanItem    `json:"upToDate,omitempty"`
-	Unresolved []UpgradePlanItem    `json:"unresolved,omitempty"`
-	Failed     []UpgradeItemFailure `json:"failed,omitempty"`
+	Plan       UpgradePlan             `json:"plan"`
+	Upgraded   []model.UpgradePlanItem `json:"upgraded,omitempty"`
+	UpToDate   []model.UpgradePlanItem `json:"upToDate,omitempty"`
+	Unresolved []model.UpgradePlanItem `json:"unresolved,omitempty"`
+	Failed     []UpgradeItemFailure    `json:"failed,omitempty"`
 }
 
 // RunUpgradePlan deploys every lagging member, continuing past per-env failures.
@@ -460,7 +448,7 @@ func RunUpgradePlan(ctx core.Context, plan UpgradePlan, deploy UpgradeItemDeploy
 	return result
 }
 
-func upgradeItemAnnouncement(dryRun bool, item UpgradePlanItem) string {
+func upgradeItemAnnouncement(dryRun bool, item model.UpgradePlanItem) string {
 	verb := "Upgrading"
 	if dryRun {
 		verb = "Would upgrade"
@@ -475,7 +463,7 @@ func upgradeCompletionSummary(dryRun bool, result UpgradeResult) string {
 	return fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed))
 }
 
-func unresolvedReasonSuffix(item UpgradePlanItem) string {
+func unresolvedReasonSuffix(item model.UpgradePlanItem) string {
 	if reason := strings.TrimSpace(item.UnresolvedReason); reason != "" {
 		return ": " + reason
 	}
@@ -489,36 +477,14 @@ func displayVersion(v string) string {
 	return v
 }
 
-// UpgradeVersionCandidate is one newer version for an env and the registry that offered it.
-type UpgradeVersionCandidate struct {
-	Version  string `json:"version"`
-	Registry string `json:"registry,omitempty"`
-}
-
-// UpgradePlanItem is one environment's upgrade decision; an empty Target is up to date,
-// unresolved, or awaiting a pick, per UnresolvedReason.
-type UpgradePlanItem struct {
-	Tenant      string `json:"tenant"`
-	Environment string `json:"environment"`
-	Channel     string `json:"channel"`
-	Current     string `json:"current"`
-	Target      string `json:"target"`
-	Lagging     bool   `json:"lagging"`
-	// Candidates holds the distinct newer versions; more than one needs a pick.
-	Candidates       []UpgradeVersionCandidate `json:"candidates,omitempty"`
-	UnresolvedReason string                    `json:"unresolvedReason,omitempty"`
-	// IsGate marks the environment named by UpgradeTarget.GateEnvironment.
-	IsGate bool `json:"isGate,omitempty"`
-}
-
 // UpgradePlan is the resolved Upgrade-all plan.
 type UpgradePlan struct {
-	Items []UpgradePlanItem `json:"items"`
+	Items []model.UpgradePlanItem `json:"items"`
 }
 
 // Lagging returns the items whose current version differs from a resolvable target.
-func (p UpgradePlan) Lagging() []UpgradePlanItem {
-	lagging := make([]UpgradePlanItem, 0, len(p.Items))
+func (p UpgradePlan) Lagging() []model.UpgradePlanItem {
+	lagging := make([]model.UpgradePlanItem, 0, len(p.Items))
 	for _, item := range p.Items {
 		if item.Lagging {
 			lagging = append(lagging, item)
@@ -527,7 +493,7 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 	return lagging
 }
 
-func channelTarget(versions registrypkg.RuntimeRegistryVersions, channel string) string {
+func channelTarget(versions model.RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == config.UpgradeChannelSnapshot {
 		// No snapshots published means the stable release is the newest candidate, not none.
 		if stable, snapshot, superseded := stableSupersedesSnapshot(versions); superseded || snapshot == "" {
@@ -540,7 +506,7 @@ func channelTarget(versions registrypkg.RuntimeRegistryVersions, channel string)
 
 // A snapshot is a pre-release of its base version, so a stable at or above that base supersedes it.
 // Unparseable versions keep the snapshot.
-func stableSupersedesSnapshot(versions registrypkg.RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
+func stableSupersedesSnapshot(versions model.RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
 	stable = strings.TrimSpace(versions.LatestStable)
 	snapshot = strings.TrimSpace(versions.LatestSnapshot)
 	if stable == "" || snapshot == "" {

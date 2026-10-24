@@ -11,7 +11,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ErrCloudProviderNoOIDC marks a provider (Cloudflare) that has no OIDC issuer, so
@@ -28,38 +28,10 @@ type EnvironmentCloudAliasStore interface {
 	SaveEnvConfig(string, configpkg.EnvConfig) error
 }
 
-type CloudProviderStatus struct {
-	configpkg.CloudProviderConfig `json:",inline" yaml:",inline"`
-	Status                        string `json:"status" yaml:"status"`
-	Message                       string `json:"message,omitempty" yaml:"message,omitempty"`
-}
-
 type AWSIdentity struct {
 	Account string `json:"Account"`
 	Arn     string `json:"Arn"`
 	UserID  string `json:"UserId"`
-}
-
-type InitAWSCloudProviderParams struct {
-	Profile       string
-	Username      string
-	AccountID     string
-	RoleName      string
-	Region        string
-	SSORegion     string
-	SSOStartURL   string
-	OIDCIssuerURL string
-	SkipLogin     bool
-}
-
-type CloudLoginParams struct {
-	Alias string
-	Force bool
-	// Scopes are added to "openid offline_access"; reserved scopes such as
-	// urn:zitadel:iam:user:resourceowner are often not advertised in discovery.
-	Scopes []string
-	// Flow selects the OIDC grant for an erun-hosted alias; other providers ignore it.
-	Flow string
 }
 
 // Auto prefers the device grant and falls back to auth code + PKCE, so one unusable
@@ -84,22 +56,11 @@ func NormalizeERunLoginFlow(flow string) (string, error) {
 	}
 }
 
-type CloudBearerParams struct {
-	Alias    string
-	Audience string
-}
-
 type CloudBearerToken struct {
 	Alias    string
 	Provider string
 	Token    string
 	Issuer   string
-}
-
-type SetEnvironmentCloudAliasParams struct {
-	Tenant      string
-	Environment string
-	Alias       string
 }
 
 type CloudDependencies struct {
@@ -110,14 +71,14 @@ type CloudDependencies struct {
 	RunAWSEnableOIDC        func(core.Context, string) (string, error)
 	RunAWSExportCredentials func(core.Context, string) (CloudProviderCredentials, error)
 	ResolveAWSIdentity      func(core.Context, string) (AWSIdentity, error)
-	CheckAWSStatus          func(core.Context, configpkg.CloudProviderConfig) CloudProviderStatus
+	CheckAWSStatus          func(core.Context, model.CloudProviderConfig) model.CloudProviderStatus
 
 	// CloudSecretStore is nil unless a transport wires one.
 	VerifyCloudflareToken  func(core.Context, string) (CloudflareTokenInfo, error)
 	ListCloudflareAccounts func(core.Context, string) ([]CloudflareAccount, error)
 	CloudSecretStore       CloudSecretStore
 
-	FetchPlatformInfo            func(core.Context, string) (platformclient.PlatformInfo, error)
+	FetchPlatformInfo            func(core.Context, string) (model.PlatformInfo, error)
 	FetchOIDCDiscovery           func(core.Context, string) (OIDCDiscovery, error)
 	StartERunDeviceAuthorization func(core.Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error)
 	PollERunDeviceToken          func(core.Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error)
@@ -160,7 +121,7 @@ type AWSProfileConfig struct {
 	Region      string
 }
 
-func NormalizeCloudProviderConfig(config configpkg.CloudProviderConfig) configpkg.CloudProviderConfig {
+func NormalizeCloudProviderConfig(config model.CloudProviderConfig) model.CloudProviderConfig {
 	config.Alias = strings.TrimSpace(config.Alias)
 	config.Provider = strings.ToLower(strings.TrimSpace(config.Provider))
 	config.Username = strings.TrimSpace(config.Username)
@@ -195,7 +156,7 @@ func CloudProviderAlias(username, accountID, provider string) string {
 	return username + "+" + accountID + "@" + provider
 }
 
-func ListCloudProviders(store configpkg.CloudReadStore) ([]configpkg.CloudProviderConfig, error) {
+func ListCloudProviders(store configpkg.CloudReadStore) ([]model.CloudProviderConfig, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")
 	}
@@ -209,36 +170,36 @@ func ListCloudProviders(store configpkg.CloudReadStore) ([]configpkg.CloudProvid
 	return normalizedCloudProviders(config.CloudProviders), nil
 }
 
-func ListCloudProviderStatuses(store configpkg.CloudReadStore, deps CloudDependencies) ([]CloudProviderStatus, error) {
+func ListCloudProviderStatuses(store configpkg.CloudReadStore, deps CloudDependencies) ([]model.CloudProviderStatus, error) {
 	providers, err := ListCloudProviders(store)
 	if err != nil {
 		return nil, err
 	}
-	statuses := make([]CloudProviderStatus, 0, len(providers))
+	statuses := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		statuses = append(statuses, CloudProviderTokenStatus(provider, deps))
 	}
 	return statuses, nil
 }
 
-func ResolveCloudProvider(store configpkg.CloudReadStore, alias string) (configpkg.CloudProviderConfig, error) {
+func ResolveCloudProvider(store configpkg.CloudReadStore, alias string) (model.CloudProviderConfig, error) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
-		return configpkg.CloudProviderConfig{}, fmt.Errorf("cloud provider alias is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("cloud provider alias is required")
 	}
 	providers, err := ListCloudProviders(store)
 	if err != nil {
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	for _, provider := range providers {
 		if provider.Alias == alias {
 			return provider, nil
 		}
 	}
-	return configpkg.CloudProviderConfig{}, fmt.Errorf("cloud provider alias %q is not configured", alias)
+	return model.CloudProviderConfig{}, fmt.Errorf("cloud provider alias %q is not configured", alias)
 }
 
-func ResolveTenantCloudProviderIssuers(store configpkg.CloudReadStore, tenant configpkg.TenantConfig) ([]string, error) {
+func ResolveTenantCloudProviderIssuers(store configpkg.CloudReadStore, tenant model.TenantConfig) ([]string, error) {
 	aliases := configpkg.NormalizedTenantCloudProviderAliases(tenant.CloudProviderAliases)
 	if len(aliases) == 0 {
 		return nil, nil
@@ -271,7 +232,7 @@ func cloudProviderSupportsOIDC(provider string) bool {
 	return strings.ToLower(strings.TrimSpace(provider)) != configpkg.CloudProviderCloudflare
 }
 
-func CloudProviderOIDCIssuerURL(provider configpkg.CloudProviderConfig) string {
+func CloudProviderOIDCIssuerURL(provider model.CloudProviderConfig) string {
 	provider = NormalizeCloudProviderConfig(provider)
 	if provider.OIDCIssuerURL != "" {
 		return provider.OIDCIssuerURL
@@ -294,32 +255,32 @@ func AttachTenantCloudProviderAlias(aliases []string, primary, alias string) ([]
 	return configpkg.NormalizeTenantCloudProviderAliases(attached, alias)
 }
 
-func SaveCloudProviderConfig(store CloudStore, provider configpkg.CloudProviderConfig) (configpkg.CloudProviderConfig, error) {
+func SaveCloudProviderConfig(store CloudStore, provider model.CloudProviderConfig) (model.CloudProviderConfig, error) {
 	if store == nil {
-		return configpkg.CloudProviderConfig{}, fmt.Errorf("store is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	provider = NormalizeCloudProviderConfig(provider)
 	if provider.Alias == "" {
-		return configpkg.CloudProviderConfig{}, fmt.Errorf("cloud provider alias is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("cloud provider alias is required")
 	}
 	config, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
 		config = configpkg.ERunConfig{}
 	} else if err != nil {
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	config.CloudProviders = UpsertCloudProvider(config.CloudProviders, provider)
 	if err := store.SaveERunConfig(config); err != nil {
-		return configpkg.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	return provider, nil
 }
 
-func CloudProviderTokenStatus(provider configpkg.CloudProviderConfig, deps CloudDependencies) CloudProviderStatus {
+func CloudProviderTokenStatus(provider model.CloudProviderConfig, deps CloudDependencies) model.CloudProviderStatus {
 	provider = NormalizeCloudProviderConfig(provider)
 	deps = NormalizeCloudDependencies(deps)
 	if provider.Provider == "" {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusNotConfigured, Message: "provider is not configured"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusNotConfigured, Message: "provider is not configured"}
 	}
 	if deps.CheckAWSStatus != nil && provider.Provider == configpkg.CloudProviderAWS {
 		return deps.CheckAWSStatus(core.Context{}, provider)
@@ -331,7 +292,7 @@ func CloudProviderTokenStatus(provider configpkg.CloudProviderConfig, deps Cloud
 		return erunCloudProviderTokenStatus(provider, deps)
 	}
 	if provider.Provider != configpkg.CloudProviderAWS {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown, Message: "unsupported provider"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: configpkg.CloudTokenStatusUnknown, Message: "unsupported provider"}
 	}
 	return defaultCheckAWSStatus(core.Context{}, provider)
 }
@@ -350,10 +311,10 @@ func AWSUsernameFromARN(arn string) string {
 	return arn
 }
 
-func UpsertCloudProvider(providers []configpkg.CloudProviderConfig, provider configpkg.CloudProviderConfig) []configpkg.CloudProviderConfig {
+func UpsertCloudProvider(providers []model.CloudProviderConfig, provider model.CloudProviderConfig) []model.CloudProviderConfig {
 	provider = NormalizeCloudProviderConfig(provider)
 	updated := false
-	result := make([]configpkg.CloudProviderConfig, 0, len(providers)+1)
+	result := make([]model.CloudProviderConfig, 0, len(providers)+1)
 	for _, existing := range providers {
 		existing = NormalizeCloudProviderConfig(existing)
 		if existing.Alias == "" {
@@ -375,8 +336,8 @@ func UpsertCloudProvider(providers []configpkg.CloudProviderConfig, provider con
 	return result
 }
 
-func normalizedCloudProviders(providers []configpkg.CloudProviderConfig) []configpkg.CloudProviderConfig {
-	result := make([]configpkg.CloudProviderConfig, 0, len(providers))
+func normalizedCloudProviders(providers []model.CloudProviderConfig) []model.CloudProviderConfig {
+	result := make([]model.CloudProviderConfig, 0, len(providers))
 	for _, provider := range providers {
 		provider = NormalizeCloudProviderConfig(provider)
 		if provider.Alias == "" {

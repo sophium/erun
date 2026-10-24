@@ -1,10 +1,5 @@
 package model
 
-import (
-	"fmt"
-	"strings"
-)
-
 // Review statuses: OPEN while being worked on, then exactly one of the others.
 // erun-backend-api's reviews table constrains status to this set.
 const (
@@ -16,24 +11,47 @@ const (
 	ReviewStatusMerged = "MERGED"
 )
 
-// ReviewStatuses is the closed vocabulary in display order.
-var ReviewStatuses = []string{
-	ReviewStatusOpen, ReviewStatusClosed, ReviewStatusFailed,
-	ReviewStatusReady, ReviewStatusMerge, ReviewStatusMerged,
+// Shared by the `erun review` CLI and MCP tools: every HTTP call is traced
+// first so --dry-run and MCP previews never touch the network.
+
+// ReviewListParams is the `erun review list` input. Repository is not
+// defaulted from the checkout, so listing discovers work across repositories.
+type ReviewListParams struct {
+	Repository     string
+	TargetBranch   string
+	SourceBranch   string
+	Status         string
+	AuthorUserID   string
+	ReviewerUserID string
+	Mine           bool
+	WaitingOnMe    bool
 }
 
-// NormalizeReviewStatus validates a status filter case-insensitively; empty means
-// no filter. A typo must fail rather than read as an empty queue.
-func NormalizeReviewStatus(status string) (string, error) {
-	trimmed := strings.TrimSpace(status)
-	if trimmed == "" {
-		return "", nil
-	}
-	normalized := strings.ToUpper(trimmed)
-	for _, candidate := range ReviewStatuses {
-		if normalized == candidate {
-			return candidate, nil
-		}
-	}
-	return "", fmt.Errorf("unsupported review status %q: expected one of %s", trimmed, strings.Join(ReviewStatuses, ", "))
+// ReviewDetail is the `erun review show` result. UnresolvedThreads counts OPEN
+// root comments.
+type ReviewDetail struct {
+	Review            PlatformReview    `json:"review"`
+	Comments          []PlatformComment `json:"comments"`
+	Builds            []PlatformBuild   `json:"builds"`
+	UnresolvedThreads int               `json:"unresolvedThreads"`
+}
+
+// ReviewCommentParams is the `erun review comment` input; ParentCommentID makes
+// it a reply.
+type ReviewCommentParams struct {
+	ReviewID        string
+	CommitID        string
+	FilePath        string
+	Line            int
+	Body            string
+	ParentCommentID string
+}
+
+// ReviewRecordBuildParams is the `erun review record-build` input.
+type ReviewRecordBuildParams struct {
+	ReviewID      string
+	CommitID      string
+	Version       string
+	Successful    bool
+	FailureDetail string
 }

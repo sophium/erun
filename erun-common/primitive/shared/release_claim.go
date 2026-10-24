@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -31,7 +32,7 @@ func releaseVersionClaimID(version string, pid int) string {
 }
 
 // TakeReleaseVersionClaim takes the version's exclusive lease; separate so it can be tested with a fake clock.
-func TakeReleaseVersionClaim(tenant, environment, version string, holder activity.EnvironmentActivityLeaseHolder, pid int, now time.Time) (activity.EnvironmentActivityLease, error) {
+func TakeReleaseVersionClaim(tenant, environment, version string, holder model.EnvironmentActivityLeaseHolder, pid int, now time.Time) (model.EnvironmentActivityLease, error) {
 	return activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant:      tenant,
 		Environment: environment,
@@ -58,7 +59,7 @@ func ReleaseVersionClaimRefusalError(version string, err error) error {
 
 // ClaimReleaseVersion takes the local exclusive lease and the repository-global claim before
 // sync-remote mutates anything, and returns a func that drops both. No-op off-pod.
-func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) string) (func(), error) {
+func ClaimReleaseVersion(ctx core.Context, spec model.ReleaseSpec, env func(string) string) (func(), error) {
 	tenant, environment, ok := core.InjectedRuntimePodIdentity(env)
 	if !ok {
 		return func() {}, nil
@@ -68,7 +69,7 @@ func ClaimReleaseVersion(ctx core.Context, spec ReleaseSpec, env func(string) st
 		return func() {}, nil
 	}
 
-	holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
+	holder := model.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(env(OrchestratorIDEnvVar)), Tenant: tenant}
 	pid := os.Getpid()
 
 	// Read before taking our own local claim, so a live holder found is somebody else.
@@ -154,7 +155,7 @@ func (h *releaseRepoClaimHandle) set(sha string) {
 }
 
 // renewReleaseClaims renews both claims best-effort; a failed renewal retries next tick.
-func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment string, holder activity.EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
+func renewReleaseClaims(ctx core.Context, spec model.ReleaseSpec, tenant, environment string, holder model.EnvironmentActivityLeaseHolder, pid int, repo *releaseRepoClaimHandle) {
 	_, _ = TakeReleaseVersionClaim(tenant, environment, spec.Version, holder, pid, time.Time{})
 
 	sha := repo.get()
@@ -167,7 +168,7 @@ func renewReleaseClaims(ctx core.Context, spec ReleaseSpec, tenant, environment 
 }
 
 // releaseRepoClaimIfHeld drops the repository claim if one was taken (an inconclusive read leaves "").
-func releaseRepoClaimIfHeld(ctx core.Context, spec ReleaseSpec, repo *releaseRepoClaimHandle) {
+func releaseRepoClaimIfHeld(ctx core.Context, spec model.ReleaseSpec, repo *releaseRepoClaimHandle) {
 	if sha := repo.get(); sha != "" {
 		_ = deleteReleaseRepoClaim(ctx, spec.ProjectRoot, spec.Version, sha)
 	}

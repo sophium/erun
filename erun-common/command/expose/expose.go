@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -208,20 +209,20 @@ func RunExposeService(ctx core.Context, params ExposeServiceParams, store Expose
 	return result, nil
 }
 
-func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, config.CloudProviderConfig, error) {
+func resolveExposePlanAndDNSWriter(ctx core.Context, params ExposeServiceParams, store ExposeStore, cloudStore config.CloudReadStore, deps cloud.CloudDependencies, upsertDNSRecord DNSRecordUpserterFunc) (ExposeServiceResult, DNSRecordUpserterFunc, model.CloudProviderConfig, error) {
 	result, err := resolveExposeServicePlan(params, store)
 	if err != nil {
-		return ExposeServiceResult{}, nil, config.CloudProviderConfig{}, err
+		return ExposeServiceResult{}, nil, model.CloudProviderConfig{}, err
 	}
 	hasDirectOverride := strings.TrimSpace(params.ServicesZone) != "" || strings.TrimSpace(params.PlatformNamespace) != ""
 	upsertDNSRecord, dnsProvider, err := resolveExposeDNSUpserter(ctx, result.Environment, params.ErunAlias, cloudStore, deps, hasDirectOverride, upsertDNSRecord)
 	if err != nil {
-		return ExposeServiceResult{}, nil, config.CloudProviderConfig{}, err
+		return ExposeServiceResult{}, nil, model.CloudProviderConfig{}, err
 	}
 	return result, upsertDNSRecord, dnsProvider, nil
 }
 
-func traceExposePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, dnsProvider config.CloudProviderConfig) {
+func traceExposePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, ingressParams IngressApplyParams, dnsProvider model.CloudProviderConfig) {
 	ctx.Trace(fmt.Sprintf("expose: %s -> service %s.%s.svc:%d", result.Hostname, result.BackendService, result.Namespace, result.ServicePort))
 	ctx.Trace(fmt.Sprintf("expose: per-env wildcard %s A %s ttl %d (zone %s)", result.WildcardName, result.TargetIP, dnsParams.TTL, result.ServicesZone))
 	ctx.Trace(fmt.Sprintf("expose: ingress class %s", result.IngressClass))
@@ -238,7 +239,7 @@ func traceExposePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNS
 
 // traceExposeDNSWritePlan names the record before writing it: DNS changes are
 // externally visible and slow to undo.
-func traceExposeDNSWritePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, dnsProvider config.CloudProviderConfig) {
+func traceExposeDNSWritePlan(ctx core.Context, result ExposeServiceResult, dnsParams DNSRecordUpsertParams, dnsProvider model.CloudProviderConfig) {
 	if dnsProvider.Alias == "" {
 		ctx.Trace(fmt.Sprintf("expose: platform powerdns namespace %s", result.PlatformNamespace))
 		ctx.TraceCommand("", "kubectl", powerDNSUpsertArgs(dnsParams)...)

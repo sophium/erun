@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -30,50 +31,6 @@ const (
 	// RulesetBypassExempt is invisible to the bypass ledger; never plan one.
 	RulesetBypassExempt = "exempt"
 )
-
-// PlanRulesetBypassParams is the `erun exec plan-ruleset-bypass` input.
-type PlanRulesetBypassParams struct {
-	// RemoteURL defaults to the checkout's origin.
-	RemoteURL string
-	RulesetID int64
-	// TargetBranch, when set, must be governed by the ruleset.
-	TargetBranch string
-	// QueueActorType is User, Integration, Team, RepositoryRole, or DeployKey.
-	QueueActorType string
-	// QueueActor is a login for User, otherwise GitHub's numeric actor id.
-	QueueActor string
-	OutDir     string
-}
-
-// RulesetBypassActor is one entry of a ruleset's bypass list.
-type RulesetBypassActor struct {
-	ActorID    *int64 `json:"actor_id"`
-	ActorType  string `json:"actor_type"`
-	BypassMode string `json:"bypass_mode"`
-}
-
-// PlanRulesetBypassResult is the plan and the payload files for each stage.
-type PlanRulesetBypassResult struct {
-	Owner        string `json:"owner"`
-	Repo         string `json:"repo"`
-	RulesetID    int64  `json:"rulesetId"`
-	RulesetName  string `json:"rulesetName"`
-	TargetBranch string `json:"targetBranch,omitempty"`
-	// CurrentBypassActors lets a reader tell a stale plan from a current one.
-	CurrentBypassActors []RulesetBypassActor `json:"currentBypassActors"`
-	// CallerCanBypass is GitHub's answer for the reading token.
-	CallerCanBypass      string `json:"callerCanBypass,omitempty"`
-	QueueActorType       string `json:"queueActorType"`
-	QueueActor           string `json:"queueActor"`
-	QueueActorID         int64  `json:"queueActorId"`
-	QueueActorPushAccess string `json:"queueActorPushAccess,omitempty"`
-	// Stage1File grants the queue identity bypass alongside today's actors.
-	Stage1File string `json:"stage1File"`
-	// Stage2File demotes every other always-bypass actor to pull_request.
-	Stage2File string `json:"stage2File"`
-	// RollbackFile restores the bypass list exactly as it is today.
-	RollbackFile string `json:"rollbackFile"`
-}
 
 // PlanRulesetBypassDependencies are the GitHub HTTP and gh token seams.
 type PlanRulesetBypassDependencies struct {
@@ -98,7 +55,7 @@ type planRulesetBypassInputs struct {
 
 var rulesetBypassActorTypes = []string{"User", "Integration", "Team", "RepositoryRole", "OrganizationAdmin", "DeployKey"}
 
-func resolvePlanRulesetBypassInputs(ctx core.Context, params PlanRulesetBypassParams) (planRulesetBypassInputs, error) {
+func resolvePlanRulesetBypassInputs(ctx core.Context, params model.PlanRulesetBypassParams) (planRulesetBypassInputs, error) {
 	ctx.Trace("plan-ruleset-bypass: resolving inputs")
 	if params.RulesetID <= 0 {
 		ctx.Trace("plan-ruleset-bypass: input resolution failed: ruleset id is required")
@@ -138,13 +95,13 @@ func resolvePlanRulesetBypassInputs(ctx core.Context, params PlanRulesetBypassPa
 
 // PlanRulesetBypass verifies the preconditions and writes the two-stage edit
 // and rollback that leave one non-human identity as the only always-bypass actor.
-func PlanRulesetBypass(ctx core.Context, params PlanRulesetBypassParams, deps PlanRulesetBypassDependencies) (PlanRulesetBypassResult, error) {
+func PlanRulesetBypass(ctx core.Context, params model.PlanRulesetBypassParams, deps PlanRulesetBypassDependencies) (model.PlanRulesetBypassResult, error) {
 	inputs, err := resolvePlanRulesetBypassInputs(ctx, params)
 	if err != nil {
-		return PlanRulesetBypassResult{}, err
+		return model.PlanRulesetBypassResult{}, err
 	}
 	deps = normalizePlanRulesetBypassDependencies(deps)
-	result := PlanRulesetBypassResult{
+	result := model.PlanRulesetBypassResult{
 		Owner: inputs.owner, Repo: inputs.repo, RulesetID: inputs.rulesetID,
 		TargetBranch: inputs.targetBranch, QueueActorType: inputs.actorType, QueueActor: inputs.actor,
 	}
@@ -169,37 +126,37 @@ func PlanRulesetBypass(ctx core.Context, params PlanRulesetBypassParams, deps Pl
 	token, ok := deps.ResolveToken(inputs.owner)
 	if !ok {
 		ctx.Trace("plan-ruleset-bypass: token resolution failed: no gh CLI session or GITHUB_TOKEN/GH_TOKEN set")
-		return PlanRulesetBypassResult{}, fmt.Errorf(
+		return model.PlanRulesetBypassResult{}, fmt.Errorf(
 			"no GitHub token available to read the ruleset; run 'gh auth login' or set GITHUB_TOKEN")
 	}
 	return finishPlanRulesetBypass(ctx, deps.Client, token, inputs, result)
 }
 
-func finishPlanRulesetBypass(ctx core.Context, client *http.Client, token string, inputs planRulesetBypassInputs, result PlanRulesetBypassResult) (PlanRulesetBypassResult, error) {
+func finishPlanRulesetBypass(ctx core.Context, client *http.Client, token string, inputs planRulesetBypassInputs, result model.PlanRulesetBypassResult) (model.PlanRulesetBypassResult, error) {
 	ruleset, err := getGitHubRuleset(context.Background(), client, token, inputs.owner, inputs.repo, inputs.rulesetID)
 	if err != nil {
-		return PlanRulesetBypassResult{}, err
+		return model.PlanRulesetBypassResult{}, err
 	}
 	result.RulesetName = ruleset.Name
 	result.CurrentBypassActors = ruleset.BypassActors
 	result.CallerCanBypass = ruleset.CurrentUserCanBypass
 	if ruleset.BypassActors == nil {
-		return PlanRulesetBypassResult{}, fmt.Errorf(
+		return model.PlanRulesetBypassResult{}, fmt.Errorf(
 			"github did not return ruleset %d's bypass actors: it only returns them to a token with write access to the ruleset, so plan this with an admin token",
 			inputs.rulesetID)
 	}
 	if err := checkRulesetGovernsBranch(ctx, ruleset, inputs.targetBranch); err != nil {
-		return PlanRulesetBypassResult{}, err
+		return model.PlanRulesetBypassResult{}, err
 	}
 
 	actorID, err := resolveQueueActorID(ctx, client, token, inputs)
 	if err != nil {
-		return PlanRulesetBypassResult{}, err
+		return model.PlanRulesetBypassResult{}, err
 	}
 	result.QueueActorID = actorID
 	access, err := resolveQueueActorPushAccess(ctx, client, token, inputs)
 	if err != nil {
-		return PlanRulesetBypassResult{}, err
+		return model.PlanRulesetBypassResult{}, err
 	}
 	result.QueueActorPushAccess = access
 
@@ -214,7 +171,7 @@ func finishPlanRulesetBypass(ctx core.Context, client *http.Client, token string
 		{result.Stage2File, stage2},
 	} {
 		if err := writeRulesetPlanFile(ctx, write.path, write.payload); err != nil {
-			return PlanRulesetBypassResult{}, err
+			return model.PlanRulesetBypassResult{}, err
 		}
 	}
 	return result, nil
@@ -223,23 +180,23 @@ func finishPlanRulesetBypass(ctx core.Context, client *http.Client, token string
 // githubRuleset keeps rules and conditions raw: the update endpoint replaces,
 // so they must round-trip byte for byte.
 type githubRuleset struct {
-	ID                   int64                `json:"id"`
-	Name                 string               `json:"name"`
-	Target               string               `json:"target"`
-	Enforcement          string               `json:"enforcement"`
-	Conditions           json.RawMessage      `json:"conditions"`
-	Rules                json.RawMessage      `json:"rules"`
-	BypassActors         []RulesetBypassActor `json:"bypass_actors"`
-	CurrentUserCanBypass string               `json:"current_user_can_bypass"`
+	ID                   int64                      `json:"id"`
+	Name                 string                     `json:"name"`
+	Target               string                     `json:"target"`
+	Enforcement          string                     `json:"enforcement"`
+	Conditions           json.RawMessage            `json:"conditions"`
+	Rules                json.RawMessage            `json:"rules"`
+	BypassActors         []model.RulesetBypassActor `json:"bypass_actors"`
+	CurrentUserCanBypass string                     `json:"current_user_can_bypass"`
 }
 
 type githubRulesetUpdate struct {
-	Name         string               `json:"name"`
-	Target       string               `json:"target"`
-	Enforcement  string               `json:"enforcement"`
-	Conditions   json.RawMessage      `json:"conditions,omitempty"`
-	Rules        json.RawMessage      `json:"rules,omitempty"`
-	BypassActors []RulesetBypassActor `json:"bypass_actors"`
+	Name         string                     `json:"name"`
+	Target       string                     `json:"target"`
+	Enforcement  string                     `json:"enforcement"`
+	Conditions   json.RawMessage            `json:"conditions,omitempty"`
+	Rules        json.RawMessage            `json:"rules,omitempty"`
+	BypassActors []model.RulesetBypassActor `json:"bypass_actors"`
 }
 
 func getGitHubRuleset(ctx context.Context, client *http.Client, token, owner, repo string, id int64) (githubRuleset, error) {
@@ -329,7 +286,7 @@ func resolveQueueActorPushAccess(ctx core.Context, client *http.Client, token st
 }
 
 func rulesetWithQueueActorGranted(ruleset githubRuleset, actorID int64, actorType string) githubRulesetUpdate {
-	actors := make([]RulesetBypassActor, 0, len(ruleset.BypassActors)+1)
+	actors := make([]model.RulesetBypassActor, 0, len(ruleset.BypassActors)+1)
 	actors = append(actors, ruleset.BypassActors...)
 	if !hasBypassActor(actors, actorID, actorType) {
 		actors = append(actors, newRulesetBypassActor(actorID, actorType, RulesetBypassAlways))
@@ -339,7 +296,7 @@ func rulesetWithQueueActorGranted(ruleset githubRuleset, actorID int64, actorTyp
 
 // Exempt actors are demoted too: the bypass ledger cannot see them.
 func rulesetWithOtherActorsDemoted(stage1 githubRulesetUpdate, actorID int64, actorType string) githubRulesetUpdate {
-	actors := make([]RulesetBypassActor, 0, len(stage1.BypassActors))
+	actors := make([]model.RulesetBypassActor, 0, len(stage1.BypassActors))
 	for _, actor := range stage1.BypassActors {
 		if sameBypassActor(actor, actorID, actorType) {
 			actors = append(actors, actor)
@@ -354,15 +311,15 @@ func rulesetWithOtherActorsDemoted(stage1 githubRulesetUpdate, actorID int64, ac
 	return stage1
 }
 
-func rulesetUpdatePayload(ruleset githubRuleset, actors []RulesetBypassActor) githubRulesetUpdate {
+func rulesetUpdatePayload(ruleset githubRuleset, actors []model.RulesetBypassActor) githubRulesetUpdate {
 	return githubRulesetUpdate{
 		Name: ruleset.Name, Target: ruleset.Target, Enforcement: ruleset.Enforcement,
 		Conditions: ruleset.Conditions, Rules: ruleset.Rules, BypassActors: actors,
 	}
 }
 
-func newRulesetBypassActor(actorID int64, actorType, mode string) RulesetBypassActor {
-	actor := RulesetBypassActor{ActorType: actorType, BypassMode: mode}
+func newRulesetBypassActor(actorID int64, actorType, mode string) model.RulesetBypassActor {
+	actor := model.RulesetBypassActor{ActorType: actorType, BypassMode: mode}
 	if actorID > 0 {
 		id := actorID
 		actor.ActorID = &id
@@ -370,7 +327,7 @@ func newRulesetBypassActor(actorID int64, actorType, mode string) RulesetBypassA
 	return actor
 }
 
-func hasBypassActor(actors []RulesetBypassActor, actorID int64, actorType string) bool {
+func hasBypassActor(actors []model.RulesetBypassActor, actorID int64, actorType string) bool {
 	for _, actor := range actors {
 		if sameBypassActor(actor, actorID, actorType) {
 			return true
@@ -379,7 +336,7 @@ func hasBypassActor(actors []RulesetBypassActor, actorID int64, actorType string
 	return false
 }
 
-func sameBypassActor(actor RulesetBypassActor, actorID int64, actorType string) bool {
+func sameBypassActor(actor model.RulesetBypassActor, actorID int64, actorType string) bool {
 	if !strings.EqualFold(actor.ActorType, actorType) {
 		return false
 	}

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -25,16 +25,16 @@ const (
 
 // ReleaseRepoClaimRecord carries Environment, not a pid: the holder may be in any environment.
 type ReleaseRepoClaimRecord struct {
-	Holder      activity.EnvironmentActivityLeaseHolder `json:"holder"`
-	Environment string                                  `json:"environment,omitempty"`
-	StartedAt   time.Time                               `json:"startedAt"`
-	ExpiresAt   time.Time                               `json:"expiresAt"`
+	Holder      model.EnvironmentActivityLeaseHolder `json:"holder"`
+	Environment string                               `json:"environment,omitempty"`
+	StartedAt   time.Time                            `json:"startedAt"`
+	ExpiresAt   time.Time                            `json:"expiresAt"`
 }
 
 // ReleaseRepoClaimConflictError carries Now so Error is a pure function of its fields.
 type ReleaseRepoClaimConflictError struct {
 	Version     string
-	Holder      activity.EnvironmentActivityLeaseHolder
+	Holder      model.EnvironmentActivityLeaseHolder
 	Environment string
 	StartedAt   time.Time
 	ExpiresAt   time.Time
@@ -61,7 +61,7 @@ func releaseClaimRunningFor(startedAt, now time.Time) string {
 }
 
 // ReleaseClaimHolderDescription appends each half only when present.
-func ReleaseClaimHolderDescription(holder activity.EnvironmentActivityLeaseHolder, environment string) string {
+func ReleaseClaimHolderDescription(holder model.EnvironmentActivityLeaseHolder, environment string) string {
 	desc := holder.String()
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
@@ -88,7 +88,7 @@ type releaseRepoClaimLocalHolder func() bool
 // TakeReleaseRepoClaim creates, reclaims, or refuses the remote claim. An empty sha with nil
 // error means the remote was unreadable and the release proceeds without it.
 // localHolderAlive must be read before the caller takes its own local claim.
-func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
+func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder model.EnvironmentActivityLeaseHolder, now time.Time, localHolderAlive releaseRepoClaimLocalHolder) (string, error) {
 	ref := ReleaseRepoClaimRef(version)
 
 	for attempt := 0; attempt < releaseRepoClaimMaxAttempts; attempt++ {
@@ -132,7 +132,7 @@ func TakeReleaseRepoClaim(ctx core.Context, projectRoot, environment, version st
 
 // RenewReleaseRepoClaim CAS-extends the caller's own claim, best-effort, carrying the
 // original StartedAt forward from its own locally-present blob.
-func RenewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder activity.EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
+func RenewReleaseRepoClaim(ctx core.Context, projectRoot, environment, version string, holder model.EnvironmentActivityLeaseHolder, now time.Time, currentSHA string) (string, error) {
 	existing, err := ReadReleaseRepoClaimBlob(ctx, projectRoot, currentSHA)
 	if err != nil {
 		return "", err
@@ -169,7 +169,7 @@ func releaseRepoClaimHeld(record ReleaseRepoClaimRecord, now time.Time, environm
 	return localHolderAlive()
 }
 
-func WriteReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string, holder activity.EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
+func WriteReleaseRepoClaimBlob(ctx core.Context, projectRoot, environment string, holder model.EnvironmentActivityLeaseHolder, startedAt, now time.Time) (string, error) {
 	record := ReleaseRepoClaimRecord{
 		Holder:      holder,
 		Environment: environment,

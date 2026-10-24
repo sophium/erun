@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/workspace"
 )
 
 func hostWorkspaceStore(localPath string) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -25,7 +26,7 @@ func hostWorkspaceStore(localPath string) stubUIStore {
 				Type:              config.EnvironmentTypeRemoteAgent,
 				SSHD: config.SSHDConfig{
 					Enabled: true,
-					WorkspaceSync: config.SSHDWorkspaceSyncConfig{
+					WorkspaceSync: model.SSHDWorkspaceSyncConfig{
 						Enabled:   true,
 						LocalPath: localPath,
 					},
@@ -94,7 +95,7 @@ func TestRunHostArtifactRejectsMissingAndTraversal(t *testing.T) {
 
 func hostTypeEnvironmentStore(localPath string) stubUIStore {
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]config.EnvConfig{

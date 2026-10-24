@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -27,7 +28,7 @@ type UpgradeInput struct {
 func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input UpgradeInput) (*mcp.CallToolResult, sharedpkg.JobEnvelopeOutput, error) {
 		execute := sharedpkg.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, workDir string) error {
-			target := lifecycle.UpgradeTarget{
+			target := model.UpgradeTarget{
 				Tenant:          strings.TrimSpace(runtime.Context.Tenant),
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				VersionOverride: strings.TrimSpace(input.Version),
@@ -38,17 +39,17 @@ func UpgradeTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 				return err
 			}
 
-			deployer := func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
+			deployer := func(ctx core.Context, item model.UpgradePlanItem) error {
 				findProjectRoot := func() (string, string, error) {
 					return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
 				}
-				resolveBuildContext := func() (shared.DockerBuildContext, error) {
+				resolveBuildContext := func() (model.DockerBuildContext, error) {
 					return shared.DockerBuildContextAtDir(workDir)
 				}
-				resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+				resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 					return deploy.KubernetesDeployContextAtDir(workDir), nil
 				}
-				deployTarget := deploy.DeployTarget{
+				deployTarget := model.DeployTarget{
 					Tenant:          item.Tenant,
 					Environment:     item.Environment,
 					RepoPath:        workDir,

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Greater than 1 so runDeployStep takes its parallel branch.
@@ -20,7 +20,7 @@ func parallelRaceTestSpecs() []DeploySpec {
 	for i := range specs {
 		name := fmt.Sprintf("component-%d", i)
 		specs[i] = DeploySpec{
-			DeployContext: shared.KubernetesDeployContext{ComponentName: name},
+			DeployContext: model.KubernetesDeployContext{ComponentName: name},
 			Deploy: HelmDeploySpec{
 				ReleaseName:       name,
 				Namespace:         "ns-" + name,

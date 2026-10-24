@@ -7,34 +7,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
-
-// ObservedCertificate is a Certificate's readiness; Orders is populated only when Ready is false.
-type ObservedCertificate struct {
-	Name       string                     `json:"name"`
-	Ready      bool                       `json:"ready"`
-	Reason     string                     `json:"reason,omitempty"`
-	Message    string                     `json:"message,omitempty"`
-	SecretName string                     `json:"secretName,omitempty"`
-	DNSNames   []string                   `json:"dnsNames,omitempty"`
-	Orders     []ObservedCertificateOrder `json:"orders,omitempty"`
-}
-
-type ObservedCertificateOrder struct {
-	Name       string                         `json:"name"`
-	State      string                         `json:"state,omitempty"`
-	Reason     string                         `json:"reason,omitempty"`
-	Challenges []ObservedCertificateChallenge `json:"challenges,omitempty"`
-}
-
-type ObservedCertificateChallenge struct {
-	Name    string `json:"name"`
-	Type    string `json:"type,omitempty"`
-	DNSName string `json:"dnsName,omitempty"`
-	State   string `json:"state,omitempty"`
-	Reason  string `json:"reason,omitempty"`
-}
 
 type certificateList struct {
 	Items []CertificateItem `json:"items"`
@@ -140,11 +115,11 @@ func resourcesOwnedBy(resources []OwnedResourceItem, ownerKind, ownerName string
 	return owned
 }
 
-func BuildObservedCertificates(certs []CertificateItem, requests, orders, challenges []OwnedResourceItem) []ObservedCertificate {
-	result := make([]ObservedCertificate, 0, len(certs))
+func BuildObservedCertificates(certs []CertificateItem, requests, orders, challenges []OwnedResourceItem) []model.ObservedCertificate {
+	result := make([]model.ObservedCertificate, 0, len(certs))
 	for _, cert := range certs {
 		ready, reason, message := certificateReady(cert)
-		observed := ObservedCertificate{
+		observed := model.ObservedCertificate{
 			Name:       cert.Metadata.Name,
 			Ready:      ready,
 			Reason:     reason,
@@ -160,16 +135,16 @@ func BuildObservedCertificates(certs []CertificateItem, requests, orders, challe
 	return result
 }
 
-func observedOrdersForCertificate(certificateName string, requests, orders, challenges []OwnedResourceItem) []ObservedCertificateOrder {
+func observedOrdersForCertificate(certificateName string, requests, orders, challenges []OwnedResourceItem) []model.ObservedCertificateOrder {
 	crName, ok := LatestCertificateRequestName(requests, certificateName)
 	if !ok {
 		return nil
 	}
-	var result []ObservedCertificateOrder
+	var result []model.ObservedCertificateOrder
 	for _, order := range resourcesOwnedBy(orders, "CertificateRequest", crName) {
-		oo := ObservedCertificateOrder{Name: order.Metadata.Name, State: order.Status.State, Reason: order.Status.Reason}
+		oo := model.ObservedCertificateOrder{Name: order.Metadata.Name, State: order.Status.State, Reason: order.Status.Reason}
 		for _, challenge := range resourcesOwnedBy(challenges, "Order", order.Metadata.Name) {
-			oo.Challenges = append(oo.Challenges, ObservedCertificateChallenge{
+			oo.Challenges = append(oo.Challenges, model.ObservedCertificateChallenge{
 				Name:    challenge.Metadata.Name,
 				Type:    challenge.Spec.Type,
 				DNSName: challenge.Spec.DNSName,
@@ -208,7 +183,7 @@ func fetchOwnedResourceList(args []string, kind string) ([]OwnedResourceItem, er
 }
 
 // FetchObservedCertificates reads Certificates and walks the failure chain only for unready ones.
-func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]ObservedCertificate, error) {
+func FetchObservedCertificates(ctx core.Context, req config.ShellLaunchParams, certArgs []string) ([]model.ObservedCertificate, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(certArgs)
 	if err != nil {
 		if isKubectlUnknownResource(stderr) {

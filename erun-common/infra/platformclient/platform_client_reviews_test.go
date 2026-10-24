@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestPlatformClientAdvanceMergeQueueNamesTheOccupyingReview(t *testing.T) {
@@ -18,7 +20,7 @@ func TestPlatformClientAdvanceMergeQueueNamesTheOccupyingReview(t *testing.T) {
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	_, err := client.AdvanceMergeQueue(context.Background(), PlatformMergeQueueParams{TargetBranch: "main"})
+	_, err := client.AdvanceMergeQueue(context.Background(), model.PlatformMergeQueueParams{TargetBranch: "main"})
 
 	var occupied *PlatformMergeQueueOccupiedError
 	if !errors.As(err, &occupied) {
@@ -45,7 +47,7 @@ func TestPlatformClientAdvanceMergeQueueKeepsTheThreadRefusal(t *testing.T) {
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	_, err := client.AdvanceMergeQueue(context.Background(), PlatformMergeQueueParams{TargetBranch: "main"})
+	_, err := client.AdvanceMergeQueue(context.Background(), model.PlatformMergeQueueParams{TargetBranch: "main"})
 
 	var blocked *PlatformMergeQueueBlockedError
 	if !errors.As(err, &blocked) {

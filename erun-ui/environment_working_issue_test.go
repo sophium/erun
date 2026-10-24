@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestParseIssueNumberFromBranch(t *testing.T) {
@@ -31,7 +32,7 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 func workingIssueApp(t *testing.T, env config.EnvConfig, run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -127,7 +128,7 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string, string) (string, error), run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"acme": {Name: "acme", DefaultEnvironment: "dev"},
 		},
 		envs: map[string]config.EnvConfig{

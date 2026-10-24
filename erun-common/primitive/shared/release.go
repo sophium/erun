@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -14,84 +15,9 @@ type (
 	GitBranchCheckerFunc func(core.Context, string, string) (bool, error)
 )
 
-type ReleaseMode string
-
-const (
-	ReleaseModeStable     ReleaseMode = "stable"
-	ReleaseModeCandidate  ReleaseMode = "candidate"
-	ReleaseModePrerelease ReleaseMode = "prerelease"
-)
-
 type ReleaseParams struct {
 	ProjectRoot string
 	Force       bool
-}
-
-type ReleaseFileUpdate struct {
-	Path    string `json:"path"`
-	Content string `json:"content"`
-}
-
-type ReleaseChartSpec struct {
-	ChartPath  string `json:"chartPath"`
-	Version    string `json:"version"`
-	AppVersion string `json:"appVersion"`
-}
-
-type ReleaseDockerImageSpec struct {
-	ContextDir     string `json:"contextDir"`
-	DockerfilePath string `json:"dockerfilePath"`
-	ImageName      string `json:"imageName"`
-	Registry       string `json:"registry,omitempty"`
-	Tag            string `json:"tag"`
-	Version        string `json:"version"`
-}
-
-type ReleaseCommandSpec struct {
-	Dir  string   `json:"dir,omitempty"`
-	Name string   `json:"name"`
-	Args []string `json:"args"`
-}
-
-type ReleaseStage struct {
-	Name          string                    `json:"name"`
-	FileUpdates   []ReleaseFileUpdate       `json:"fileUpdates,omitempty"`
-	GitCommands   []ReleaseCommandSpec      `json:"gitCommands,omitempty"`
-	PackagingSync *ReleasePackagingSyncSpec `json:"packagingSync,omitempty"`
-}
-
-type ReleasePackagingSyncSpec struct {
-	ProjectRoot     string `json:"projectRoot,omitempty"`
-	Version         string `json:"version"`
-	FormulaPath     string `json:"formulaPath,omitempty"`
-	ScoopPath       string `json:"scoopPath,omitempty"`
-	MarketplacePath string `json:"marketplacePath,omitempty"`
-}
-
-// ReleaseSpec runs Stages while the release is still private and recoverable;
-// PostPublishStages hold the irreversible pushes. `erun release` reaches them having
-// published nothing, and its failures must not claim otherwise.
-type ReleaseSpec struct {
-	ProjectRoot       string                   `json:"projectRoot"`
-	ReleaseRoot       string                   `json:"releaseRoot"`
-	Branch            string                   `json:"branch"`
-	Commit            string                   `json:"commit"`
-	BaseVersion       string                   `json:"baseVersion"`
-	Version           string                   `json:"version"`
-	NextVersion       string                   `json:"nextVersion,omitempty"`
-	VersionFilePath   string                   `json:"versionFilePath"`
-	Mode              ReleaseMode              `json:"mode"`
-	Force             bool                     `json:"force,omitempty"`
-	Charts            []ReleaseChartSpec       `json:"charts,omitempty"`
-	DockerImages      []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
-	Stages            []ReleaseStage           `json:"stages,omitempty"`
-	PostPublishStages []ReleaseStage           `json:"postPublishStages,omitempty"`
-	// LinuxPackages are exported during the publish and attached once the tag is public.
-	LinuxPackages   []LinuxPackageSpec `json:"linuxPackages,omitempty"`
-	LinuxPackageDir string             `json:"linuxPackageDir,omitempty"`
-
-	// ArtifactsPublished is run state, not plan; always false for `erun release`.
-	ArtifactsPublished bool `json:"-"`
 }
 
 type releaseInputs struct {
@@ -103,39 +29,39 @@ type releaseInputs struct {
 	BaseVersion         string
 	Version             string
 	VersionFilePath     string
-	Mode                ReleaseMode
+	Mode                model.ReleaseMode
 	DevelopBranchExists bool
 }
 
 type releaseArtifacts struct {
-	Charts        []ReleaseChartSpec
-	Images        []ReleaseDockerImageSpec
-	FileUpdates   []ReleaseFileUpdate
-	PackagingSync *ReleasePackagingSyncSpec
-	LinuxPackages []LinuxPackageSpec
+	Charts        []model.ReleaseChartSpec
+	Images        []model.ReleaseDockerImageSpec
+	FileUpdates   []model.ReleaseFileUpdate
+	PackagingSync *model.ReleasePackagingSyncSpec
+	LinuxPackages []model.LinuxPackageSpec
 }
 
-func ResolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
+func ResolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, params ReleaseParams) (model.ReleaseSpec, error) {
 	return resolveReleaseSpec(ctx, findProjectRoot, configpkg.LoadProjectConfig, gitx.GitCurrentBranch, gitx.GitShortCommit, GitBranchExists, gitx.GitCommandRunner, params)
 }
 
-func resolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (ReleaseSpec, error) {
+func resolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit gitx.GitValueResolverFunc, branchExists GitBranchCheckerFunc, runGit gitx.GitCommandRunnerFunc, params ReleaseParams) (model.ReleaseSpec, error) {
 	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit)
 
 	inputs, err := resolveReleaseInputs(ctx, findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, runGit, params)
 	if err != nil {
-		return ReleaseSpec{}, err
+		return model.ReleaseSpec{}, err
 	}
 	artifacts, err := discoverReleaseArtifacts(ctx, inputs)
 	if err != nil {
-		return ReleaseSpec{}, err
+		return model.ReleaseSpec{}, err
 	}
 	nextVersion, stages, postPublishStages, err := resolveReleaseStages(inputs, artifacts.FileUpdates, artifacts.PackagingSync)
 	if err != nil {
-		return ReleaseSpec{}, err
+		return model.ReleaseSpec{}, err
 	}
 
-	return ReleaseSpec{
+	return model.ReleaseSpec{
 		ProjectRoot:       inputs.ProjectRoot,
 		ReleaseRoot:       inputs.ReleaseRoot,
 		Branch:            inputs.Branch,
@@ -155,9 +81,9 @@ func resolveReleaseSpec(ctx core.Context, findProjectRoot ProjectFinderFunc, loa
 	}, nil
 }
 
-type ReleasePackagingSyncerFunc func(core.Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error)
+type ReleasePackagingSyncerFunc func(core.Context, model.ReleasePackagingSyncSpec) ([]model.ReleaseFileUpdate, error)
 
-func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func RunReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	if runGit == nil {
 		runGit = gitx.GitCommandRunner
 	}
@@ -176,7 +102,7 @@ func RunReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRu
 
 // RunClaimedReleaseSpec runs once the version is claimed. A nil publisher (erun release)
 // skips everything the publish owns, so a tag never implies artifacts exist.
-func RunClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
+func RunClaimedReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc, publisher *ReleasePublisher) error {
 	traceReleaseSpec(ctx, spec)
 	if err := ensureReleaseCouldPublish(spec, publisher); err != nil {
 		return err
@@ -204,7 +130,7 @@ func RunClaimedReleaseSpec(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCo
 }
 
 // uploadPublishedLinuxPackages runs only for a run that published, after the tag push.
-func uploadPublishedLinuxPackages(ctx core.Context, spec ReleaseSpec, publisher *ReleasePublisher) error {
+func uploadPublishedLinuxPackages(ctx core.Context, spec model.ReleaseSpec, publisher *ReleasePublisher) error {
 	if publisher == nil || publisher.Publish == nil {
 		return nil
 	}
@@ -220,7 +146,7 @@ func ensureReleaseHasDiskHeadroom(ctx core.Context, publisher *ReleasePublisher)
 	return ensureReleaseDiskHeadroom(ctx)
 }
 
-func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) error {
+func ensureReleaseCouldPublish(spec model.ReleaseSpec, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		return nil
 	}
@@ -228,7 +154,7 @@ func ensureReleaseCouldPublish(spec ReleaseSpec, publisher *ReleasePublisher) er
 }
 
 // publishClaimedRelease publishes, or says nothing was published (erun release).
-func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
+func publishClaimedRelease(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc, publisher *ReleasePublisher) error {
 	if publisher == nil {
 		if spec.Version != "" {
 			ctx.Info("release version: " + spec.Version + " (source control only; no artifacts were built or published)")
@@ -243,7 +169,7 @@ func publishClaimedRelease(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCo
 	return runReleasePublication(ctx, *publisher)
 }
 
-func runReleaseStages(ctx core.Context, spec ReleaseSpec, stages []ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStages(ctx core.Context, spec model.ReleaseSpec, stages []model.ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	for _, stage := range stages {
 		stepCtx, finish := ctx.StartTimingStep(stage.Name)
 		err := runReleaseStage(stepCtx, spec, stage, runGit, syncPackagingChecksums)
@@ -255,7 +181,7 @@ func runReleaseStages(ctx core.Context, spec ReleaseSpec, stages []ReleaseStage,
 	return nil
 }
 
-func traceReleaseSpec(ctx core.Context, spec ReleaseSpec) {
+func traceReleaseSpec(ctx core.Context, spec model.ReleaseSpec) {
 	ctx.Trace(fmt.Sprintf("release: branch=%s mode=%s version=%s", spec.Branch, spec.Mode, spec.Version))
 	if spec.NextVersion != "" {
 		ctx.Trace("next version: " + spec.NextVersion)
@@ -277,7 +203,7 @@ func ensureReleaseWorktreeClean(ctx core.Context, projectRoot string) error {
 	return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
 }
 
-func runReleaseStage(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+func runReleaseStage(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, runGit gitx.GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	ctx.Trace("stage: " + stage.Name)
 	stageFileUpdates, err := releaseStageFileUpdates(ctx, stage, syncPackagingChecksums)
 	if err != nil {
@@ -294,8 +220,8 @@ func runReleaseStage(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, run
 	return nil
 }
 
-func releaseStageFileUpdates(ctx core.Context, stage ReleaseStage, syncPackagingChecksums ReleasePackagingSyncerFunc) ([]ReleaseFileUpdate, error) {
-	updates := append([]ReleaseFileUpdate{}, stage.FileUpdates...)
+func releaseStageFileUpdates(ctx core.Context, stage model.ReleaseStage, syncPackagingChecksums ReleasePackagingSyncerFunc) ([]model.ReleaseFileUpdate, error) {
+	updates := append([]model.ReleaseFileUpdate{}, stage.FileUpdates...)
 	if stage.PackagingSync == nil {
 		return updates, nil
 	}
@@ -306,7 +232,7 @@ func releaseStageFileUpdates(ctx core.Context, stage ReleaseStage, syncPackaging
 	return append(updates, generatedUpdates...), nil
 }
 
-func writeReleaseFileUpdates(ctx core.Context, updates []ReleaseFileUpdate) error {
+func writeReleaseFileUpdates(ctx core.Context, updates []model.ReleaseFileUpdate) error {
 	for _, update := range updates {
 		ctx.TraceBlock("write "+update.Path, strings.TrimRight(update.Content, "\n"))
 		if ctx.DryRun {
@@ -319,14 +245,14 @@ func writeReleaseFileUpdates(ctx core.Context, updates []ReleaseFileUpdate) erro
 	return nil
 }
 
-func releaseStageCommands(ctx core.Context, stage ReleaseStage, updates []ReleaseFileUpdate) []ReleaseCommandSpec {
+func releaseStageCommands(ctx core.Context, stage model.ReleaseStage, updates []model.ReleaseFileUpdate) []model.ReleaseCommandSpec {
 	if !ctx.DryRun && stage.PackagingSync != nil && len(updates) == 0 {
 		return nil
 	}
 	return stage.GitCommands
 }
 
-func RunReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
+func RunReleaseCommand(ctx core.Context, spec model.ReleaseSpec, stage model.ReleaseStage, command model.ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
 		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
@@ -355,7 +281,7 @@ func RunReleaseCommand(ctx core.Context, spec ReleaseSpec, stage ReleaseStage, c
 }
 
 // runReleaseStageCommand captures a push's stderr, the only stream GitHub's bypass notice uses.
-func runReleaseStageCommand(ctx core.Context, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
+func runReleaseStageCommand(ctx core.Context, command model.ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	if !isGitPushArgs(command.Args) {
 		return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 	}

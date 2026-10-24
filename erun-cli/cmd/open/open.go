@@ -9,12 +9,12 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -31,11 +31,11 @@ func refuseOpenForHostEnvironment(result config.OpenResult) error {
 func resolveOpenTarget(
 	ctx core.Context,
 	args []string,
-	target sharedpkg.OpenParams,
+	target model.OpenParams,
 	vscode bool,
 	intellij bool,
-	resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error),
-	runInitForOpen func(core.Context, sharedpkg.OpenParams) error,
+	resolveOpen func(model.OpenParams) (config.OpenResult, error),
+	runInitForOpen func(core.Context, model.OpenParams) error,
 	saveEnvConfig func(string, config.EnvConfig) error,
 ) (config.OpenResult, bool, error) {
 	if vscode && intellij {
@@ -62,7 +62,7 @@ func resolveOpenTarget(
 	return result, false, nil
 }
 
-func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, sharedpkg.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func(model.OpenParams) (config.OpenResult, error), saveEnvConfig func(string, config.EnvConfig) error, runInitForOpen func(core.Context, model.OpenParams) error, promptRunner shared.PromptRunner, openShell OpenShellRunner, runManagedDeploy func(core.Context, config.OpenResult) error, checkKubernetesDeployment deploy.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(core.Context, config.OpenResult, bool) (deploy.DeploySpec, error), deployHelmChart deploy.HelmChartDeployerFunc, activateMCP shared.MCPForwarder, activateAPI shared.APIForwarder, activateSSHD shared.SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -74,7 +74,7 @@ func NewOpenCmd(prepareContext func(core.Context) core.Context, resolveOpen func
 	var aiTab bool
 	var contributeTab bool
 	var reconnect bool
-	target := sharedpkg.OpenParams{}
+	target := model.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:   "open [TENANT] [ENVIRONMENT]",
@@ -165,7 +165,7 @@ type OpenOptions struct {
 	Reconnect        bool
 }
 
-func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
+func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForArgs func(core.Context, []string) error) (config.OpenResult, bool, error) {
 	_, result, err := shared.ResolveOpenArgs(ctx.Command, args, resolveOpen)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -178,7 +178,7 @@ func ResolveOpenWithInitStop(ctx core.Context, args []string, shouldRunInit func
 	return config.OpenResult{}, true, nil
 }
 
-func resolveOpenWithInitStopForParams(ctx core.Context, params sharedpkg.OpenParams, shouldRunInit func(error) bool, resolveOpen func(sharedpkg.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, sharedpkg.OpenParams) error) (config.OpenResult, bool, error) {
+func resolveOpenWithInitStopForParams(ctx core.Context, params model.OpenParams, shouldRunInit func(error) bool, resolveOpen func(model.OpenParams) (config.OpenResult, error), runInitForOpen func(core.Context, model.OpenParams) error) (config.OpenResult, bool, error) {
 	result, err := resolveOpen(params)
 	if !shouldRunInit(err) {
 		return result, false, err
@@ -315,7 +315,7 @@ func (r *resolvedOpenRunner) ensureKubernetesContext() error {
 
 func (r *resolvedOpenRunner) recordActivity() {
 	if !r.ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
-		_ = activity.RecordEnvironmentActivity(activity.EnvironmentActivityParams{
+		_ = activity.RecordEnvironmentActivity(model.EnvironmentActivityParams{
 			Tenant:      r.result.Tenant,
 			Environment: r.result.Environment,
 			Kind:        config.ActivityKindCLI,

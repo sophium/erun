@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // seedPinnedTenantRepo lays down a tenant repo pinned to three erun versions at once.
@@ -163,7 +164,7 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 		t.Fatalf("resolve: %v", err)
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteImageReference {
+		if site.Kind == model.PinSiteImageReference {
 			t.Fatalf("erun-devops must not also surface as an image-reference site: %+v", site)
 		}
 	}
@@ -220,8 +221,8 @@ func TestRefreshPinnedChartLocksStopsAtTheFailingChart(t *testing.T) {
 // A terraform-only re-pin must not shell out to helm.
 func TestRefreshPinnedChartLocksSkipsWhenNoChartMoved(t *testing.T) {
 	root := t.TempDir()
-	plan := PinPlan{ProjectRoot: root, Target: "1.0.175", Sites: []PinSite{
-		{Kind: PinSiteTerraformRef, Path: "terraform-acme/dev/main.tf", Current: "1.0.102", Target: "1.0.175"},
+	plan := model.PinPlan{ProjectRoot: root, Target: "1.0.175", Sites: []model.PinSite{
+		{Kind: model.PinSiteTerraformRef, Path: "terraform-acme/dev/main.tf", Current: "1.0.102", Target: "1.0.175"},
 	}}
 	called := 0
 	if err := RefreshPinnedChartLocks(core.Context{Logger: core.NewLoggerWithWriters(0, io.Discard, io.Discard)}, plan, func(core.Context, string) error {

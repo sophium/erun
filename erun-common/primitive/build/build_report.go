@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -28,7 +29,7 @@ type ReportBuildOutcomeParams struct {
 	Version       string
 	Successful    bool
 	FailureDetail string
-	Profile       *core.BuildProfileSummary
+	Profile       *model.BuildProfileSummary
 }
 
 // ReportBuildOutcome self-reports the build outcome, best-effort, never failing the build.
@@ -87,13 +88,13 @@ func buildReportTraceDetails(params ReportBuildOutcomeParams, commitID string) [
 	return details
 }
 
-func createUnattachedBuildReport(client *platformclient.PlatformClient, params ReportBuildOutcomeParams, commitID string) (platformclient.PlatformBuild, error) {
+func createUnattachedBuildReport(client *platformclient.PlatformClient, params ReportBuildOutcomeParams, commitID string) (model.PlatformBuild, error) {
 	timeoutCtx, cancel := context.WithTimeout(context.Background(), buildReportTimeout)
 	defer cancel()
 
 	environmentID, err := cloud.ResolvePlatformEnvironmentID(timeoutCtx, client, params.Environment)
 	if err != nil {
-		return platformclient.PlatformBuild{}, err
+		return model.PlatformBuild{}, err
 	}
 	return client.CreateUnattachedBuild(timeoutCtx, platformclient.PlatformCreateUnattachedBuildParams{
 		EnvironmentID: environmentID,

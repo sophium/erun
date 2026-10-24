@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -19,7 +19,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 
 	const tenant, environment, version = "erun", "build", "1.0.290"
 	ctx := newTestClaimContext()
-	cancelled := activity.EnvironmentActivityLeaseHolder{Tenant: tenant}
+	cancelled := model.EnvironmentActivityLeaseHolder{Tenant: tenant}
 	start := time.Now()
 
 	cancelledSHA, err := shared.TakeReleaseRepoClaim(ctx, repo, environment, version, cancelled, start, nil)
@@ -35,7 +35,7 @@ func TestClaimReleaseVersionReclaimsTheLeftoversOfACancelledRelease(t *testing.T
 		t.Fatal("the cancelled holder's claim must still be inside its TTL to reproduce the reported refusal")
 	}
 
-	spec := shared.ReleaseSpec{ProjectRoot: repo, Version: version}
+	spec := model.ReleaseSpec{ProjectRoot: repo, Version: version}
 	release, err := shared.ClaimReleaseVersion(ctx, spec, runtimePodEnvForTest(tenant, environment))
 	if err != nil {
 		t.Fatalf("the next attempt in this environment must reclaim a cancelled holder's claim, got: %v", err)

@@ -11,6 +11,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -34,7 +35,7 @@ func tcpListenerPort(t *testing.T, listener net.Listener) int {
 type stubUIStore struct {
 	config         *configpkg.ERunConfig
 	projectConfigs map[string]configpkg.ProjectConfig
-	tenants        map[string]configpkg.TenantConfig
+	tenants        map[string]model.TenantConfig
 	envs           map[string]configpkg.EnvConfig
 	// listTenantsErr simulates a fresh install where ListTenantConfigs fails with ErrNotInitialized.
 	listTenantsErr error
@@ -42,7 +43,7 @@ type stubUIStore struct {
 
 func testCloudContextDeps(actions *[]string) cloud.CloudContextDependencies {
 	return cloud.CloudContextDependencies{
-		RunAWS: func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
+		RunAWS: func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 			*actions = append(*actions, "aws "+strings.Join(args, " "))
 			if strings.Join(args, " ") == "ec2 describe-instances --instance-ids i-test --query Reservations[0].Instances[0].PublicIpAddress --output text" {
 				return "203.0.113.10", nil
@@ -95,17 +96,17 @@ func (s stubUIStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	return nil
 }
 
-func (s stubUIStore) LoadTenantConfig(name string) (configpkg.TenantConfig, string, error) {
+func (s stubUIStore) LoadTenantConfig(name string) (model.TenantConfig, string, error) {
 	config, ok := s.tenants[name]
 	if !ok {
-		return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
+		return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s stubUIStore) SaveTenantConfig(config configpkg.TenantConfig) error {
+func (s stubUIStore) SaveTenantConfig(config model.TenantConfig) error {
 	if s.tenants == nil {
-		s.tenants = make(map[string]configpkg.TenantConfig)
+		s.tenants = make(map[string]model.TenantConfig)
 	}
 	s.tenants[config.Name] = config
 	return nil
@@ -137,11 +138,11 @@ func (s stubUIStore) DeleteEnvConfig(tenant, environment string) error {
 	return nil
 }
 
-func (s stubUIStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
+func (s stubUIStore) ListTenantConfigs() ([]model.TenantConfig, error) {
 	if s.listTenantsErr != nil {
 		return nil, s.listTenantsErr
 	}
-	tenants := make([]configpkg.TenantConfig, 0, len(s.tenants))
+	tenants := make([]model.TenantConfig, 0, len(s.tenants))
 	for _, tenant := range s.tenants {
 		tenants = append(tenants, tenant)
 	}

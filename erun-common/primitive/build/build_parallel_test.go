@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -26,7 +26,7 @@ func buildSpecFromDockerfile(t *testing.T, dir, tag, from string) shared.DockerB
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write dockerfile: %v", err)
 	}
-	return shared.DockerBuildSpec{Image: helm.DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
+	return shared.DockerBuildSpec{Image: model.DockerImageReference{Tag: tag}, DockerfilePath: path, ContextDir: dir}
 }
 
 func dependencyContext(stdout, stderr io.Writer) core.Context {

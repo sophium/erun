@@ -10,85 +10,27 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// One erun version is recorded in several places in a tenant repo and they must agree.
-// Sites are found by pattern rather than a fixed layout, since tenants add modules and umbrellas.
-
-// PinSiteKind names what kind of reference a site is.
-type PinSiteKind string
-
-const (
-	PinSiteRuntimeVersion PinSiteKind = "runtime-version"
-	PinSiteTerraformRef   PinSiteKind = "terraform-ref"
-	PinSiteHelmDependency PinSiteKind = "helm-dependency"
-	PinSiteRuntimeImage   PinSiteKind = "runtime-image"
-	PinSiteImageReference PinSiteKind = "image-reference"
-	PinSiteRuntimeChart   PinSiteKind = "runtime-chart"
-)
-
 // PinSiteSummary is the phrase every re-pin surface uses to name a site kind.
 type PinSiteSummary struct {
-	Kind   PinSiteKind
+	Kind   model.PinSiteKind
 	Phrase string
 }
 
 // PinSiteSummaries enumerates what a re-pin rewrites; every surface listing re-pin sites must
 // carry each phrase (TestEverySurfaceDescribingARepinNamesEveryPinSiteKind).
 var PinSiteSummaries = []PinSiteSummary{
-	{Kind: PinSiteTerraformRef, Phrase: "Terraform module"},
-	{Kind: PinSiteImageReference, Phrase: "dns01_webhook_image"},
-	{Kind: PinSiteHelmDependency, Phrase: "umbrella"},
-	{Kind: PinSiteRuntimeImage, Phrase: "build-env image"},
-	{Kind: PinSiteRuntimeChart, Phrase: "own stock"},
-	{Kind: PinSiteRuntimeVersion, Phrase: "runtime version"},
+	{Kind: model.PinSiteTerraformRef, Phrase: "Terraform module"},
+	{Kind: model.PinSiteImageReference, Phrase: "dns01_webhook_image"},
+	{Kind: model.PinSiteHelmDependency, Phrase: "umbrella"},
+	{Kind: model.PinSiteRuntimeImage, Phrase: "build-env image"},
+	{Kind: model.PinSiteRuntimeChart, Phrase: "own stock"},
+	{Kind: model.PinSiteRuntimeVersion, Phrase: "runtime version"},
 }
-
-// PinSite is one place a version is recorded, and what it would become.
-type PinSite struct {
-	Kind PinSiteKind `json:"kind"`
-	// Path is repo-relative, or empty for the environment's own config.
-	Path    string `json:"path,omitempty"`
-	Detail  string `json:"detail,omitempty"`
-	Current string `json:"current"`
-	Target  string `json:"target"`
-}
-
-// Aligned reports whether this site already holds the target.
-func (s PinSite) Aligned() bool {
-	return strings.TrimSpace(s.Current) == strings.TrimSpace(s.Target)
-}
-
-// PinPlan is every site a re-pin would touch, resolved before anything is written.
-type PinPlan struct {
-	Tenant      string    `json:"tenant"`
-	Environment string    `json:"environment"`
-	Target      string    `json:"target"`
-	Previous    string    `json:"previous,omitempty"`
-	ProjectRoot string    `json:"projectRoot"`
-	Sites       []PinSite `json:"sites"`
-	// Skipped explains why apparent version references were left out of Sites.
-	Skipped []string `json:"skipped,omitempty"`
-	// ProjectRootNote is set only when ProjectRoot fell back to the caller's working directory.
-	ProjectRootNote string `json:"projectRootNote,omitempty"`
-	// BaseFreshness is how far the checkout is behind its tracked ref; nil when none could be read.
-	BaseFreshness *PinBaseFreshness `json:"baseFreshness,omitempty"`
-}
-
-// Changes is the sites that would actually move; empty means a no-op.
-func (p PinPlan) Changes() []PinSite {
-	changes := make([]PinSite, 0, len(p.Sites))
-	for _, site := range p.Sites {
-		if !site.Aligned() {
-			changes = append(changes, site)
-		}
-	}
-	return changes
-}
-
-func (p PinPlan) Aligned() bool { return len(p.Changes()) == 0 }
 
 // Only erun's own module sources are rewritten.
 var erunTerraformRefPattern = regexp.MustCompile(`(github\.com/sophium/erun\.git//[^"'\s?]*\?ref=)v?([0-9][^"'\s]*)`)
@@ -122,16 +64,16 @@ func normalizePinPlanInputs(tenant, environment, projectRoot, target string) (st
 }
 
 // ResolvePinPlan reports what moving projectRoot's pin sites to target would change, without writing.
-func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfig, target string) (PinPlan, error) {
+func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfig, target string) (model.PinPlan, error) {
 	if env.ResolvedType() == config.EnvironmentTypeHost {
-		return PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
+		return model.PinPlan{}, fmt.Errorf("pin %s/%s: %s is a host environment — it has no pod and no runtime version to pin", tenant, environment, environment)
 	}
 	tenant, environment, projectRoot, target, err := normalizePinPlanInputs(tenant, environment, projectRoot, target)
 	if err != nil {
-		return PinPlan{}, err
+		return model.PinPlan{}, err
 	}
 
-	plan := PinPlan{
+	plan := model.PinPlan{
 		Tenant:      tenant,
 		Environment: environment,
 		Target:      target,
@@ -149,7 +91,7 @@ func ResolvePinPlan(projectRoot, tenant, environment string, env config.EnvConfi
 
 	fileSites, err := scanPinFiles(projectRoot, target)
 	if err != nil {
-		return PinPlan{}, err
+		return model.PinPlan{}, err
 	}
 	plan.Sites = append(plan.Sites, fileSites...)
 	return plan, nil
@@ -243,15 +185,15 @@ func ownLineRuntimeVersionSkipNote(tenant, environment string, statements []runt
 
 // runtimeversion and a stock runtimeimage's tag follow erun's line only when the runtime image
 // does; otherwise they are skipped, since the erun target tag does not exist on that line.
-func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env config.EnvConfig) ([]PinSite, []string) {
-	var sites []PinSite
+func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, env config.EnvConfig) ([]model.PinSite, []string) {
+	var sites []model.PinSite
 	var skipped []string
 	image := strings.TrimSpace(env.RuntimeImage)
 	if ownLine := ownLineImageStatements(tenant, env); len(ownLine) > 0 {
 		skipped = append(skipped, ownLineRuntimeVersionSkipNote(tenant, environment, ownLine))
 	} else {
-		sites = append(sites, PinSite{
-			Kind:    PinSiteRuntimeVersion,
+		sites = append(sites, model.PinSite{
+			Kind:    model.PinSiteRuntimeVersion,
 			Detail:  tenant + "/" + environment,
 			Current: strings.TrimSpace(env.RuntimeVersion),
 			Target:  target,
@@ -269,8 +211,8 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 		skipped = append(skipped, "runtimeimage "+image+" is not the stock erun-devops image; its tag rides the tenant's own release line, not erun's, so pin leaves it alone")
 		return sites, skipped
 	}
-	sites = append(sites, PinSite{
-		Kind:    PinSiteRuntimeImage,
+	sites = append(sites, model.PinSite{
+		Kind:    model.PinSiteRuntimeImage,
 		Detail:  image,
 		Current: version,
 		Target:  target,
@@ -280,7 +222,7 @@ func resolveRuntimeVersionAndImagePinSites(tenant, environment, target string, e
 
 // resolveRuntimeChartPinSite moves only erun's stock chart with an explicit version; anything
 // else yields a skip note and never blocks.
-func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
+func resolveRuntimeChartPinSite(chart, target string) (*model.PinSite, string) {
 	if chart == "" {
 		return nil, ""
 	}
@@ -296,8 +238,8 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 	if chartVersion == "" {
 		return nil, ""
 	}
-	return &PinSite{
-		Kind:    PinSiteRuntimeChart,
+	return &model.PinSite{
+		Kind:    model.PinSiteRuntimeChart,
 		Detail:  chart,
 		Current: chartVersion,
 		Target:  target,
@@ -306,7 +248,7 @@ func resolveRuntimeChartPinSite(chart, target string) (*PinSite, string) {
 
 // DescribeCwdFallbackProjectRoot names the fallback root's HEAD and warns when its pins disagree
 // with what is deployed. Best-effort: an unreadable HEAD never fails the plan.
-func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
+func DescribeCwdFallbackProjectRoot(ctx core.Context, plan model.PinPlan) string {
 	note := "project root resolved from the caller's working directory, not a known checkout of this environment or its tenant"
 	if head, err := gitx.GitShortCommit(ctx, plan.ProjectRoot); err == nil && strings.TrimSpace(head) != "" {
 		note += "; HEAD is " + strings.TrimSpace(head)
@@ -316,7 +258,7 @@ func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 		return note
 	}
 	for _, site := range plan.Sites {
-		if site.Kind == PinSiteRuntimeVersion {
+		if site.Kind == model.PinSiteRuntimeVersion {
 			continue
 		}
 		current := strings.TrimSpace(site.Current)
@@ -329,7 +271,7 @@ func DescribeCwdFallbackProjectRoot(ctx core.Context, plan PinPlan) string {
 }
 
 // ApplyPinPlan rewrites every file site; env-config sites are applied via ApplyPinnedEnvConfig.
-func ApplyPinPlan(plan PinPlan) error {
+func ApplyPinPlan(plan model.PinPlan) error {
 	byPath := map[string]struct{}{}
 	for _, site := range plan.Changes() {
 		if site.Path == "" {
@@ -366,20 +308,20 @@ func ApplyPinPlan(plan PinPlan) error {
 
 // ApplyPinnedEnvConfig returns the env config with every env-config site applied, so the caller
 // saves once; separate saves would overwrite each other since a save writes the whole struct.
-func ApplyPinnedEnvConfig(env config.EnvConfig, plan PinPlan) (config.EnvConfig, bool) {
+func ApplyPinnedEnvConfig(env config.EnvConfig, plan model.PinPlan) (config.EnvConfig, bool) {
 	updated := env
 	changed := false
-	if planHasSite(plan, PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
+	if planHasSite(plan, model.PinSiteRuntimeVersion) && strings.TrimSpace(updated.RuntimeVersion) != strings.TrimSpace(plan.Target) {
 		updated.RuntimeVersion = plan.Target
 		changed = true
 	}
-	if planHasEnvConfigSite(plan, PinSiteRuntimeImage) {
+	if planHasEnvConfigSite(plan, model.PinSiteRuntimeImage) {
 		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeImage, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeImage) {
 			updated.RuntimeImage = rewritten
 			changed = true
 		}
 	}
-	if planHasSite(plan, PinSiteRuntimeChart) {
+	if planHasSite(plan, model.PinSiteRuntimeChart) {
 		if rewritten := rewritePinnedReferenceVersion(updated.RuntimeChart, plan.Target); rewritten != strings.TrimSpace(updated.RuntimeChart) {
 			updated.RuntimeChart = rewritten
 			changed = true
@@ -388,7 +330,7 @@ func ApplyPinnedEnvConfig(env config.EnvConfig, plan PinPlan) (config.EnvConfig,
 	return updated, changed
 }
 
-func planHasSite(plan PinPlan, kind PinSiteKind) bool {
+func planHasSite(plan model.PinPlan, kind model.PinSiteKind) bool {
 	for _, site := range plan.Sites {
 		if site.Kind == kind {
 			return true
@@ -398,7 +340,7 @@ func planHasSite(plan PinPlan, kind PinSiteKind) bool {
 }
 
 // Only sites from the env config (empty Path) are persisted here; file sites are rewritten by ApplyPinPlan.
-func planHasEnvConfigSite(plan PinPlan, kind PinSiteKind) bool {
+func planHasEnvConfigSite(plan model.PinPlan, kind model.PinSiteKind) bool {
 	for _, site := range plan.Sites {
 		if site.Kind == kind && strings.TrimSpace(site.Path) == "" {
 			return true
@@ -451,11 +393,11 @@ func RunHelmDependencyUpdate(ctx core.Context, chartDir string) error {
 }
 
 // PinnedChartDirs lists each chart directory a plan rewrote, once.
-func PinnedChartDirs(plan PinPlan) []string {
+func PinnedChartDirs(plan model.PinPlan) []string {
 	seen := map[string]struct{}{}
 	dirs := make([]string, 0, len(plan.Sites))
 	for _, site := range plan.Changes() {
-		if site.Kind != PinSiteHelmDependency || strings.TrimSpace(site.Path) == "" {
+		if site.Kind != model.PinSiteHelmDependency || strings.TrimSpace(site.Path) == "" {
 			continue
 		}
 		dir := filepath.Dir(filepath.Join(plan.ProjectRoot, filepath.FromSlash(site.Path)))
@@ -470,7 +412,7 @@ func PinnedChartDirs(plan PinPlan) []string {
 }
 
 // RefreshPinnedChartLocks regenerates each re-pinned chart's lock, stopping at the first failure.
-func RefreshPinnedChartLocks(ctx core.Context, plan PinPlan, update HelmDependencyUpdater) error {
+func RefreshPinnedChartLocks(ctx core.Context, plan model.PinPlan, update HelmDependencyUpdater) error {
 	if update == nil {
 		update = RunHelmDependencyUpdate
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The executed helm command must match the traced one.
@@ -32,7 +33,7 @@ func TestHelmDeployParamsPreservesCommand(t *testing.T) {
 		MCPAuthIssuer:        "file:///etc/erun/mcp-auth/desktopid.pub",
 		MCPAuthAudience:      "erun-mcp:frs/prod",
 		RuntimeRegistry:      "ghcr.io/sophium",
-		ContainerRegistries:  config.ContainerRegistries{{Registry: "ghcr.io/sophium", Roles: []config.RegistryRole{"deploy"}}},
+		ContainerRegistries:  config.ContainerRegistries{{Registry: "ghcr.io/sophium", Roles: []model.RegistryRole{"deploy"}}},
 		DisableBuildScript:   true,
 		PlatformAccount:      true,
 		Platform:             config.PlatformConfig{BaseDomain: "erunpaas.com", Env: "frs-prod", ServicesZone: "frs.erunpaas.com"},

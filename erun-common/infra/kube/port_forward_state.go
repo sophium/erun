@@ -10,21 +10,8 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// A state file records that someone (CLI or desktop) established a forward, so it
-// answers "is this environment reachable" for both transports.
-
-// PortForwardState is one forward's record; sshd's extra fields are ignored.
-type PortForwardState struct {
-	Tenant            string `json:"tenant"`
-	Environment       string `json:"environment"`
-	KubernetesContext string `json:"kubernetesContext"`
-	Namespace         string `json:"namespace"`
-	LocalPort         int    `json:"localPort"`
-	LogPath           string `json:"logPath,omitempty"`
-	ProcessID         int    `json:"processId,omitempty"`
-}
 
 // PortForwardStatePath is a forward's state location. It lives under the config dir, not the
 // cache, so eviction cannot orphan a running forward, and resolves through configRoot
@@ -106,7 +93,7 @@ func legacyPortForwardRoot() (string, bool) {
 
 // legacyUserConfigDir keys the macOS branch on the detected host so tests can pin it anywhere.
 func legacyUserConfigDir() (string, error) {
-	if core.DetectHost().OS == core.HostOSDarwin {
+	if core.DetectHost().OS == model.HostOSDarwin {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
@@ -189,7 +176,7 @@ var portForwardLogHeldByProcess = logHeldByLiveProcess
 
 // logHeldByLiveProcess reports false when it cannot ask (no lsof, Windows, probe failure).
 func logHeldByLiveProcess(logPath string) bool {
-	if core.DetectHost().OS == core.HostOSWindows {
+	if core.DetectHost().OS == model.HostOSWindows {
 		return false
 	}
 	for _, path := range []string{logPath, logPath + ".1"} {
@@ -209,14 +196,14 @@ func logHeldByLiveProcess(logPath string) bool {
 
 // readPortForwardStateFile bypasses LoadPortForwardState's configured-environment filter, since
 // the record's processId is the only evidence its log is still written.
-func readPortForwardStateFile(path string) (PortForwardState, bool) {
+func readPortForwardStateFile(path string) (model.PortForwardState, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return PortForwardState{}, false
+		return model.PortForwardState{}, false
 	}
-	var state PortForwardState
+	var state model.PortForwardState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return PortForwardState{}, false
+		return model.PortForwardState{}, false
 	}
 	return state, true
 }
@@ -243,28 +230,28 @@ func pathStats(path string) bool {
 
 // LoadPortForwardState reads a forward's state. A missing file, or one naming an unconfigured
 // environment, reads as no forward: the orphan's port may now belong to another environment.
-func LoadPortForwardState(kind, tenant, environment string) (PortForwardState, bool, error) {
+func LoadPortForwardState(kind, tenant, environment string) (model.PortForwardState, bool, error) {
 	path, err := PortForwardStatePath(kind, tenant, environment)
 	if err != nil {
-		return PortForwardState{}, false, err
+		return model.PortForwardState{}, false, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return PortForwardState{}, false, nil
+			return model.PortForwardState{}, false, nil
 		}
-		return PortForwardState{}, false, err
+		return model.PortForwardState{}, false, err
 	}
-	var state PortForwardState
+	var state model.PortForwardState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return PortForwardState{}, false, fmt.Errorf("%s: %w", path, err)
+		return model.PortForwardState{}, false, fmt.Errorf("%s: %w", path, err)
 	}
 	configured, err := environmentIsConfigured(tenant, environment)
 	if err != nil {
-		return PortForwardState{}, false, err
+		return model.PortForwardState{}, false, err
 	}
 	if !configured {
-		return PortForwardState{}, false, nil
+		return model.PortForwardState{}, false, nil
 	}
 	return state, state.LocalPort > 0, nil
 }

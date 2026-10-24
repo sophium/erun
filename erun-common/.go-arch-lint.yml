@@ -128,15 +128,20 @@ deps:
   base-config:
     mayDependOn:
       - base-core
+      - base-model
     canUse:
       - github-com-adrg-xdg
       - gopkg-in-yaml-v3
+  base-core:
+    mayDependOn:
+      - base-model
   cmd-pkgmove:
     canUse:
       - golang-org-x-tools
   command-ai:
     mayDependOn:
       - base-config
+      - base-core
       - base-model
       - command-podruntime
       - infra-cloud
@@ -146,6 +151,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-cloud
       - infra-gitx
       - infra-kube
@@ -180,6 +186,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-kube
   command-jobs:
     mayDependOn:
@@ -206,7 +213,6 @@ deps:
       - infra-cloud
       - infra-gitx
       - infra-kube
-      - infra-platformclient
       - infra-registry
       - orchestration-clusterread
       - orchestration-diagnosis
@@ -218,18 +224,21 @@ deps:
   command-mergequeue:
     mayDependOn:
       - base-core
+      - base-model
       - infra-gitx
       - primitive-shared
   command-observe:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - orchestration-clusterread
       - primitive-deploy
   command-orchestrator:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - command-ai
       - infra-activity
       - infra-kube
@@ -242,6 +251,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - command-setup
       - infra-cloud
       - infra-platformclient
@@ -278,6 +288,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - command-lifecycle
       - infra-activity
       - infra-cloud
@@ -296,6 +307,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-kube
       - orchestration-clusterread
       - primitive-deploy
@@ -304,6 +316,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-codesign
       - infra-mcp
       - primitive-open
@@ -319,6 +332,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-activity
       - infra-kube
       - infra-platformclient
@@ -330,21 +344,25 @@ deps:
   infra-codesign:
     mayDependOn:
       - base-core
+      - base-model
   infra-gitx:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-kube
   infra-helm:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
     canUse:
       - gopkg-in-yaml-v3
   infra-kube:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
     canUse:
       - github-com-adrg-xdg
       - k8s-io-api
@@ -353,6 +371,7 @@ deps:
       - sigs-k8s-io-yaml
   infra-mcp:
     mayDependOn:
+      - base-model
       - infra-kube
   infra-mcpauth:
     mayDependOn:
@@ -364,7 +383,6 @@ deps:
   infra-platformclient:
     mayDependOn:
       - base-config
-      - base-core
       - base-model
   infra-registry:
     mayDependOn:
@@ -375,12 +393,14 @@ deps:
   infra-remoteinit:
     mayDependOn:
       - base-config
+      - base-model
     canUse:
       - gopkg-in-yaml-v3
   orchestration-build:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-helm
       - primitive-build
       - primitive-deploy
@@ -390,10 +410,12 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - primitive-deploy
   orchestration-deploy:
     mayDependOn:
       - base-core
+      - base-model
       - primitive-build
       - primitive-deploy
       - primitive-shared
@@ -401,17 +423,17 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-cloud
       - infra-kube
       - primitive-open
-      - primitive-shared
   orchestration-execute:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-cloud
       - infra-gitx
-      - infra-helm
       - orchestration-build
       - orchestration-deploy
       - orchestration-release
@@ -422,7 +444,7 @@ deps:
   orchestration-release:
     mayDependOn:
       - base-core
-      - infra-helm
+      - base-model
       - infra-registry
       - orchestration-build
       - primitive-build
@@ -433,6 +455,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-cloud
       - infra-helm
       - infra-kube
@@ -461,6 +484,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-activity
       - infra-cloud
       - infra-kube
@@ -476,7 +500,7 @@ deps:
   primitive-release:
     mayDependOn:
       - base-core
-      - infra-activity
+      - base-model
       - infra-gitx
       - primitive-shared
     canUse:
@@ -485,6 +509,7 @@ deps:
     mayDependOn:
       - base-config
       - base-core
+      - base-model
       - infra-activity
       - infra-cloud
       - infra-gitx

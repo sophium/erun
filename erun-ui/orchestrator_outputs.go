@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/codesign"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -40,12 +41,12 @@ func ensureOrchestratorOutputsDir(id string) (string, error) {
 }
 
 // ListOrchestratorOutputs lists outputs newest-first via the in-pod MCP server's resolver.
-func (a *App) ListOrchestratorOutputs(id string) (jobs.RuntimeOutputsListResult, error) {
+func (a *App) ListOrchestratorOutputs(id string) (model.RuntimeOutputsListResult, error) {
 	dir, err := orchestratorOutputsDir(id)
 	if err != nil {
-		return jobs.RuntimeOutputsListResult{}, err
+		return model.RuntimeOutputsListResult{}, err
 	}
-	return jobs.ResolveLocalOutputs(jobs.RuntimeOutputsParams{Dir: dir})
+	return jobs.ResolveLocalOutputs(model.RuntimeOutputsParams{Dir: dir})
 }
 
 // DownloadOrchestratorOutput saves one entry via a Save dialog (a folder as
@@ -61,7 +62,7 @@ func (a *App) DownloadOrchestratorOutput(id, name string) (string, error) {
 	if a.ctx == nil {
 		return "", fmt.Errorf("application context is not ready")
 	}
-	out, err := jobs.DownloadLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	out, err := jobs.DownloadLocalOutput(model.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return "", err
 	}
@@ -90,7 +91,7 @@ func (a *App) RunOrchestratorOutputOnHost(id, name string) error {
 		return err
 	}
 	// StatLocalOutput refuses a name that climbs out of the outputs directory.
-	entry, err := jobs.StatLocalOutput(jobs.RuntimeOutputDownloadParams{Dir: dir, Name: name})
+	entry, err := jobs.StatLocalOutput(model.RuntimeOutputDownloadParams{Dir: dir, Name: name})
 	if err != nil {
 		return err
 	}

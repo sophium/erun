@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -33,7 +34,7 @@ func init() {
 // registering, writing any error to stderr as the erun binary does.
 func runJobSupervisorStartupHelper(mode string) int {
 	id := os.Getenv(jobAliveSupervisorHelperIDEnv)
-	params := EnvironmentJobSupervisorParams{
+	params := model.EnvironmentJobSupervisorParams{
 		Tenant:      os.Getenv(jobAliveSupervisorHelperTenantEnv),
 		Environment: os.Getenv(jobAliveSupervisorHelperEnvNameEnv),
 		ID:          id,

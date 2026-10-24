@@ -14,6 +14,7 @@ import (
 	"github.com/adrg/xdg"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -120,15 +121,15 @@ func newHostedUploadApp(t *testing.T, platform *hostedUploadPlatform) *App {
 	if err := secrets.SaveCloudSecret(refreshRef, "refresh-1"); err != nil {
 		t.Fatalf("seed refresh token: %v", err)
 	}
-	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	if err := configpkg.SaveERunConfig(configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    testERunAlias,
 		Provider: configpkg.CloudProviderERun,
 		Username: "erun",
-		ERun:     &configpkg.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
+		ERun:     &model.ERunProviderConfig{APIURL: platform.URL, ClientID: "test-client", RefreshTokenRef: refreshRef},
 	}}}); err != nil {
 		t.Fatalf("save root config: %v", err)
 	}
-	if err := configpkg.SaveTenantConfig(configpkg.TenantConfig{Name: hostedUploadTenant}); err != nil {
+	if err := configpkg.SaveTenantConfig(model.TenantConfig{Name: hostedUploadTenant}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	jwt := testUIJWTWithSubject(testERunIssuer, testERunSubject)

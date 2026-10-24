@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/diff"
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -39,7 +39,7 @@ func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
 	assertStructuredDiffOutput(t, output, projectRoot)
 }
 
-func assertStructuredDiffOutput(t *testing.T, output lifecycle.DiffResult, projectRoot string) {
+func assertStructuredDiffOutput(t *testing.T, output model.DiffResult, projectRoot string) {
 	t.Helper()
 
 	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {

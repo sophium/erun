@@ -12,11 +12,10 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) LoadState() (uiState, error) {
-	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, shared.OpenParams{
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, model.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -63,7 +62,7 @@ func (a *App) LoadState() (uiState, error) {
 	return state, nil
 }
 
-func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (registrypkg.RuntimeRegistryVersions, error) {
+func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) (model.RuntimeRegistryVersions, error) {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()

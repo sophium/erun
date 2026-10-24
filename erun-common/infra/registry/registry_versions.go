@@ -14,6 +14,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -44,14 +45,7 @@ func isTransientRegistryError(err error) bool {
 	return false
 }
 
-type RuntimeRegistryVersions struct {
-	Image          string
-	Tags           []string
-	LatestStable   string
-	LatestSnapshot string
-}
-
-type RuntimeRegistryVersionResolverFunc func(context.Context) (RuntimeRegistryVersions, error)
+type RuntimeRegistryVersionResolverFunc func(context.Context) (model.RuntimeRegistryVersions, error)
 
 type RuntimeVersionSuggestion struct {
 	Label   string `json:"label"`
@@ -60,7 +54,7 @@ type RuntimeVersionSuggestion struct {
 	Image   string `json:"image,omitempty"`
 }
 
-func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (RuntimeRegistryVersions, error) {
+func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (model.RuntimeRegistryVersions, error) {
 	config, _, _ := configpkg.LoadERunConfig()
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, config.RuntimeRegistry)
 }
@@ -70,14 +64,14 @@ const registryListMaxAttempts = 3
 
 var registryListRetryBase = 200 * time.Millisecond
 
-func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg configpkg.RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
+func ResolveConfiguredRuntimeRegistryVersions(ctx context.Context, cfg configpkg.RuntimeRegistryConfig) (model.RuntimeRegistryVersions, error) {
 	resolved := cfg.Resolved()
-	return resolveRegistryVersionsWithRetry(ctx, func() (RuntimeRegistryVersions, error) {
+	return resolveRegistryVersionsWithRetry(ctx, func() (model.RuntimeRegistryVersions, error) {
 		return resolveConfiguredRuntimeRegistryVersionsOnce(ctx, resolved)
 	})
 }
 
-func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved configpkg.RuntimeRegistryConfig) (RuntimeRegistryVersions, error) {
+func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved configpkg.RuntimeRegistryConfig) (model.RuntimeRegistryVersions, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	if owner, ok := configpkg.GhcrOwnerFromNamespace(resolved.Namespace); ok {
 		return resolveGHCRRuntimeRegistryVersionsAt(ctx, client, owner, resolved.Repository, resolved.BaseURL, resolved.TokenURL)
@@ -88,12 +82,12 @@ func resolveConfiguredRuntimeRegistryVersionsOnce(ctx context.Context, resolved 
 	return resolveDockerHubRuntimeRegistryVersionsAt(ctx, client, resolved.Namespace, resolved.Repository, resolved.BaseURL)
 }
 
-func resolveRegistryVersionsWithRetry(ctx context.Context, resolve func() (RuntimeRegistryVersions, error)) (RuntimeRegistryVersions, error) {
+func resolveRegistryVersionsWithRetry(ctx context.Context, resolve func() (model.RuntimeRegistryVersions, error)) (model.RuntimeRegistryVersions, error) {
 	var lastErr error
 	for attempt := 0; attempt < registryListMaxAttempts; attempt++ {
 		if attempt > 0 {
 			if err := sleepWithContext(ctx, registryListRetryBase*time.Duration(attempt)); err != nil {
-				return RuntimeRegistryVersions{}, err
+				return model.RuntimeRegistryVersions{}, err
 			}
 		}
 		versions, err := resolve()
@@ -102,7 +96,7 @@ func resolveRegistryVersionsWithRetry(ctx context.Context, resolve func() (Runti
 		}
 		lastErr = err
 	}
-	return RuntimeRegistryVersions{}, lastErr
+	return model.RuntimeRegistryVersions{}, lastErr
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -124,18 +118,18 @@ func sleepWithContext(ctx context.Context, d time.Duration) error {
 }
 
 // ResolveRuntimeImageRegistryVersions takes an explicit namespace/repository pair.
-func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
+func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 	return ResolveConfiguredRuntimeRegistryVersions(ctx, configpkg.RuntimeRegistryConfig{
 		Namespace:  namespace,
 		Repository: repository,
 	})
 }
 
-func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, namespace, repository, baseURL string) (RuntimeRegistryVersions, error) {
+func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, namespace, repository, baseURL string) (model.RuntimeRegistryVersions, error) {
 	namespace = strings.TrimSpace(namespace)
 	repository = strings.TrimSpace(repository)
 	if namespace == "" || repository == "" {
-		return RuntimeRegistryVersions{}, fmt.Errorf("docker hub namespace and repository are required")
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("docker hub namespace and repository are required")
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -150,7 +144,7 @@ func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http
 	for endpoint != "" {
 		page, err := fetchDockerHubTagPage(ctx, client, endpoint)
 		if err != nil {
-			return RuntimeRegistryVersions{}, err
+			return model.RuntimeRegistryVersions{}, err
 		}
 		for _, tag := range page.Results {
 			if name := strings.TrimSpace(tag.Name); name != "" {
@@ -165,11 +159,11 @@ func resolveDockerHubRuntimeRegistryVersionsAt(ctx context.Context, client *http
 	return versions, nil
 }
 
-func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, owner, repository, baseURL, tokenURL string) (RuntimeRegistryVersions, error) {
+func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Client, owner, repository, baseURL, tokenURL string) (model.RuntimeRegistryVersions, error) {
 	owner = strings.TrimSpace(owner)
 	repository = strings.TrimSpace(repository)
 	if owner == "" || repository == "" {
-		return RuntimeRegistryVersions{}, fmt.Errorf("ghcr owner and repository are required")
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("ghcr owner and repository are required")
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -182,12 +176,12 @@ func resolveGHCRRuntimeRegistryVersionsAt(ctx context.Context, client *http.Clie
 	auth, hasAuth := resolveGHCRBasicAuth(owner)
 	token, err := FetchGHCRPullToken(ctx, client, repoPath, tokenURL, auth, hasAuth)
 	if err != nil {
-		return RuntimeRegistryVersions{}, err
+		return model.RuntimeRegistryVersions{}, err
 	}
 
 	tags, err := collectGHCRTags(ctx, client, baseURL+"/v2/"+repoPath+"/tags/list", token)
 	if err != nil {
-		return RuntimeRegistryVersions{}, err
+		return model.RuntimeRegistryVersions{}, err
 	}
 
 	versions := latestRuntimeVersionsFromTags(tags)
@@ -376,7 +370,7 @@ func fetchDockerHubTagPage(ctx context.Context, client *http.Client, endpoint st
 	return page, nil
 }
 
-func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
+func latestRuntimeVersionsFromTags(tags []string) model.RuntimeRegistryVersions {
 	var latestStable Semver
 	latestSnapshot := ""
 	latestSnapshotTime := ""
@@ -400,7 +394,7 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 		}
 	}
 
-	result := RuntimeRegistryVersions{
+	result := model.RuntimeRegistryVersions{
 		Tags:           uniqueTags,
 		LatestSnapshot: latestSnapshot,
 	}
@@ -444,16 +438,8 @@ func newerRegistrySnapshotVersion(tag, latestSnapshotTime string) (string, bool)
 	return snapshotTime, true
 }
 
-func (versions RuntimeRegistryVersions) HasVersion(version string) bool {
-	version = strings.TrimSpace(version)
-	if version == "" || len(versions.Tags) == 0 {
-		return false
-	}
-	return slices.Contains(versions.Tags, version)
-}
-
-func RuntimeDeployVersionSuggestions(info model.BuildInfo, registry RuntimeRegistryVersions) []RuntimeVersionSuggestion {
-	info = model.NormalizeBuildInfo(info)
+func RuntimeDeployVersionSuggestions(info model.BuildInfo, registry model.RuntimeRegistryVersions) []RuntimeVersionSuggestion {
+	info = core.NormalizeBuildInfo(info)
 	suggestions := make([]RuntimeVersionSuggestion, 0, 4)
 	addSuggestion := func(label, value string) {
 		value = strings.TrimSpace(value)

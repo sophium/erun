@@ -7,18 +7,18 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/registry"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	rootConfig := &configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{
+		CloudProviders: []model.CloudProviderConfig{
 			{Alias: "team-cloud", Provider: configpkg.CloudProviderAWS},
 		},
-		CloudContexts: []configpkg.CloudContextConfig{
+		CloudContexts: []model.CloudContextConfig{
 			{
 				Name:               "team-context",
 				Provider:           configpkg.CloudProviderAWS,
@@ -37,7 +37,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		projectConfigs: map[string]configpkg.ProjectConfig{
 			projectRoot: {ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/project")},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"frs": {
 				Name: "frs",
 			},
@@ -50,7 +50,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 				ContainerRegistries: configpkg.SingleContainerRegistries("registry.example/old"),
 				CloudProviderAlias:  "team-cloud",
 				RuntimeVersion:      "1.0.0",
-				RuntimePod: configpkg.RuntimePodResources{
+				RuntimePod: model.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
 				},
@@ -106,7 +106,7 @@ func TestSaveAndLoadDeployComponentsRoundTrip(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config:  &configpkg.ERunConfig{},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:           "prod",
@@ -148,7 +148,7 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config:  &configpkg.ERunConfig{},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/local": {
 				Name:              "local",
@@ -168,11 +168,11 @@ func TestLoadDeployComponentsLocalAgentShowsPublishedVersionView(t *testing.T) {
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
-			return registry.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
+			return model.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
 		},
 	})
 
@@ -215,7 +215,7 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config:  &configpkg.ERunConfig{},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
@@ -232,11 +232,11 @@ func TestLoadDeployComponentsVersionAwareFiltersUnavailableCharts(t *testing.T) 
 	}
 	app := NewApp(erunUIDeps{
 		store: store,
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (registry.RuntimeRegistryVersions, error) {
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (model.RuntimeRegistryVersions, error) {
 			if namespace != configpkg.DefaultContainerRegistry {
 				t.Fatalf("unexpected chart registry namespace: %s", namespace)
 			}
-			return registry.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
+			return model.RuntimeRegistryVersions{Tags: chartTags[repository]}, nil
 		},
 	})
 
@@ -270,7 +270,7 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config:  &configpkg.ERunConfig{},
-		tenants: map[string]configpkg.TenantConfig{"frs": {Name: "frs"}},
+		tenants: map[string]model.TenantConfig{"frs": {Name: "frs"}},
 		envs: map[string]configpkg.EnvConfig{
 			"frs/prod": {
 				Name:              "prod",
@@ -285,8 +285,8 @@ func TestLoadDeployComponentsRuntimeChartReflectsTenantChart(t *testing.T) {
 		t.Helper()
 		app := NewApp(erunUIDeps{
 			store: store,
-			resolveImageRegistry: func(_ context.Context, _, repository string) (registry.RuntimeRegistryVersions, error) {
-				return registry.RuntimeRegistryVersions{Tags: tags[repository]}, nil
+			resolveImageRegistry: func(_ context.Context, _, repository string) (model.RuntimeRegistryVersions, error) {
+				return model.RuntimeRegistryVersions{Tags: tags[repository]}, nil
 			},
 		})
 		components, err := app.LoadDeployComponents(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.20"})

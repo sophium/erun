@@ -273,20 +273,6 @@ func IsDockerUnknownBlobError(message string) bool {
 	return strings.Contains(message, "unknown blob") || strings.Contains(message, "blob_unknown")
 }
 
-func (e DockerRegistryAuthError) Error() string {
-	if e.Message != "" {
-		return e.Message
-	}
-	if e.Err != nil {
-		return e.Err.Error()
-	}
-	return "docker registry authorization failed"
-}
-
-func (e DockerRegistryAuthError) Unwrap() error {
-	return e.Err
-}
-
 // dockerVersionRegistryPattern catches .Chart.AppVersion leaking in as a registry.
 var dockerVersionRegistryPattern = regexp.MustCompile(`^\d+\.\d+\.\d+`)
 

@@ -5,20 +5,21 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
-	LoadTenantConfig(string) (TenantConfig, string, error)
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
 	LoadEnvConfig(string, string) (EnvConfig, string, error)
 }
 
 type OpenResult struct {
 	Tenant       string
 	Environment  string
-	TenantConfig TenantConfig
+	TenantConfig model.TenantConfig
 	EnvConfig    EnvConfig
-	LocalPorts   EnvironmentLocalPorts
+	LocalPorts   model.EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
 	// ClusterPullRegistry is the resolved in-cluster pull host deploy renders in
@@ -133,7 +134,7 @@ type ShellLaunchParams struct {
 	// RuntimeVersion and RuntimePod are the recorded deploy intent observe diffs
 	// against the live release.
 	RuntimeVersion string
-	RuntimePod     RuntimePodResources
+	RuntimePod     model.RuntimePodResources
 }
 
 func RuntimeReleaseName(tenant string) string {

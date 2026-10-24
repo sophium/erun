@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // worktreeAdoptStagingName keeps an interrupted copy from looking like a
@@ -29,13 +30,6 @@ const (
 	WorktreeAdoptAdoptedOriginal WorktreeAdoptOutcome = "adopted-original-kept"
 )
 
-// WorktreeAdoptParams paths are mounted outside /home/erun so the claim cannot
-// shadow the tree being read.
-type WorktreeAdoptParams struct {
-	LegacyDir string
-	ClaimDir  string
-}
-
 // WorktreeAdoptResult is the structured result of AdoptWorktree.
 type WorktreeAdoptResult struct {
 	Outcome      WorktreeAdoptOutcome `json:"outcome"`
@@ -48,7 +42,7 @@ type WorktreeAdoptResult struct {
 // AdoptWorktree copies a legacy home-volume checkout into the worktree claim
 // before the claim mounts over it, which would otherwise sync an empty tree to
 // the host mirror. It copies before setting aside, so a failed run loses nothing.
-func AdoptWorktree(ctx core.Context, params WorktreeAdoptParams) (WorktreeAdoptResult, error) {
+func AdoptWorktree(ctx core.Context, params model.WorktreeAdoptParams) (WorktreeAdoptResult, error) {
 	result := WorktreeAdoptResult{LegacyDir: params.LegacyDir, ClaimDir: params.ClaimDir, DryRun: ctx.DryRun}
 	if params.LegacyDir == "" || params.ClaimDir == "" {
 		return result, errors.New("worktree-adopt: both the legacy worktree directory and the worktree claim directory are required")
@@ -82,7 +76,7 @@ func previewWorktreeAdoption(ctx core.Context, result WorktreeAdoptResult, prese
 	return result
 }
 
-func decideWorktreeAdoption(ctx core.Context, params WorktreeAdoptParams) (WorktreeAdoptOutcome, error) {
+func decideWorktreeAdoption(ctx core.Context, params model.WorktreeAdoptParams) (WorktreeAdoptOutcome, error) {
 	if !isDirectory(params.ClaimDir) {
 		ctx.Info(fmt.Sprintf("worktree-adopt: no worktree volume staged at %s; nothing to adopt", params.ClaimDir))
 		return WorktreeAdoptNoClaim, nil
@@ -124,7 +118,7 @@ func worktreeClaimIsEmpty(claimDir string) (bool, error) {
 	return true, nil
 }
 
-func promoteWorktreeCopy(ctx core.Context, params WorktreeAdoptParams) error {
+func promoteWorktreeCopy(ctx core.Context, params model.WorktreeAdoptParams) error {
 	staging := filepath.Join(params.ClaimDir, worktreeAdoptStagingName)
 	if err := os.RemoveAll(staging); err != nil {
 		return fmt.Errorf("worktree-adopt: clear abandoned staging dir %s: %w", staging, err)

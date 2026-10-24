@@ -11,13 +11,11 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/command/mergequeue"
-	"github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -63,19 +61,19 @@ type CommandOutput struct {
 	Stderr           string                  `json:"stderr,omitempty"`
 	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
 	// Build lets an agent thread the minted version into push/deploy.
-	Build *core.BuildResult `json:"build,omitempty"`
+	Build *model.BuildResult `json:"build,omitempty"`
 	// Pin is the resolved re-pin plan.
-	Pin                *PinOutput                               `json:"pin,omitempty"`
-	Write              *gitx.WriteWorkingTreeFileResult         `json:"write,omitempty"`
-	Commit             *gitx.CommitWorkingTreeResult            `json:"commit,omitempty"`
-	Push               *gitx.PushWorkingTreeBranchResult        `json:"push,omitempty"`
-	Merge              *mergequeue.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
-	GateMerge          *mergequeue.GateMergeWorkingTreeResult   `json:"gateMerge,omitempty"`
-	ReportCommitStatus *review.ReportCommitStatusResult         `json:"reportCommitStatus,omitempty"`
-	ClosePullRequest   *review.ClosePullRequestResult           `json:"closePullRequest,omitempty"`
-	Spec               *shared.ReleaseSpec                      `json:"spec,omitempty"`
+	Pin                *PinOutput                          `json:"pin,omitempty"`
+	Write              *model.WriteWorkingTreeFileResult   `json:"write,omitempty"`
+	Commit             *model.CommitWorkingTreeResult      `json:"commit,omitempty"`
+	Push               *model.PushWorkingTreeBranchResult  `json:"push,omitempty"`
+	Merge              *model.MergeWorkingTreeBranchResult `json:"merge,omitempty"`
+	GateMerge          *model.GateMergeWorkingTreeResult   `json:"gateMerge,omitempty"`
+	ReportCommitStatus *model.ReportCommitStatusResult     `json:"reportCommitStatus,omitempty"`
+	ClosePullRequest   *model.ClosePullRequestResult       `json:"closePullRequest,omitempty"`
+	Spec               *model.ReleaseSpec                  `json:"spec,omitempty"`
 	// Interaction is a question init needs answered in a follow-up call.
-	Interaction *setup.BootstrapInitInteraction `json:"interaction,omitempty"`
+	Interaction *model.BootstrapInitInteraction `json:"interaction,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)

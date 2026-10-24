@@ -12,6 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
@@ -391,7 +392,7 @@ func TestChangingLaunchSettingsOnARunningOrchestratorAsksForARestart(t *testing.
 		t.Fatalf("expected the restart to launch the configured model, got %q", launch.Model)
 	}
 
-	_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, orchestrator.SetOrchestratorEffortParams{
+	_, err = orchestrator.SetOrchestratorEffort(core.Context{}, app.deps.store, model.SetOrchestratorEffortParams{
 		OrchestratorID: created.ID, Effort: "low",
 	})
 	mustNoErr(t, err, "SetOrchestratorEffort")
@@ -451,7 +452,7 @@ func TestLaunchSettingsPersistAndSurviveAnUnrelatedEdit(t *testing.T) {
 	requireLaunchSettingsRow(t, "rename", renamed, want, false)
 	requireStoredLaunchSettings(t, app, "after rename", want)
 
-	_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, orchestrator.SetOrchestratorModelParams{
+	_, err = orchestrator.SetOrchestratorModel(core.Context{}, app.deps.store, model.SetOrchestratorModelParams{
 		OrchestratorID: created.ID, Model: "",
 	})
 	mustNoErr(t, err, "SetOrchestratorModel")

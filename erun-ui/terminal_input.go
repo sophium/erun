@@ -10,9 +10,8 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) SendSessionInput(sessionID int, data string) error {
@@ -63,7 +62,7 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	if selection.Tenant == "" || selection.Environment == "" || a.deps.recordActivity == nil {
 		return
 	}
-	_ = a.deps.recordActivity(activity.EnvironmentActivityParams{
+	_ = a.deps.recordActivity(model.EnvironmentActivityParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Kind:        configpkg.ActivityKindCLI,
@@ -85,7 +84,7 @@ func (a *App) SavePastedFile(sessionID int, payload pastedFilePayload) (pastedFi
 		return pastedFileResult{}, fmt.Errorf("no active terminal session")
 	}
 
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      managed.selection.Tenant,
 		Environment: managed.selection.Environment,
 	})

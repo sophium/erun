@@ -4,8 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 const activityPollerInterval = 5 * time.Second
@@ -49,7 +49,7 @@ func (a *App) seedConfiguredKubeContexts() {
 	if a.deps.store == nil {
 		return
 	}
-	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, shared.OpenParams{})
+	result, err := lifecycle.ResolveListResult(a.deps.store, a.deps.findProjectRoot, model.OpenParams{})
 	if err != nil {
 		return
 	}

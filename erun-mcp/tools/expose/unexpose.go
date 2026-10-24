@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -39,7 +40,7 @@ func UnexposeTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 
 		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
 			runCtx.MCPTool = "unexpose"
-			_, err := expose.RunUnexposeService(runCtx, expose.UnexposeParams{
+			_, err := expose.RunUnexposeService(runCtx, model.UnexposeParams{
 				Tenant:             tenant,
 				Environment:        environment,
 				ProjectRoot:        projectRoot,

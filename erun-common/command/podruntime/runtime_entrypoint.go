@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
@@ -198,7 +199,7 @@ func RunRuntimeEntrypoint(ctx core.Context, params RuntimeEntrypointParams) (int
 		traceRuntimeEntrypointPlan(ctx, boot, command)
 		return 0, nil
 	}
-	if hostOS := core.ResolveDetectedHostOS(); hostOS != core.HostOSLinux {
+	if hostOS := core.ResolveDetectedHostOS(); hostOS != model.HostOSLinux {
 		return 1, fmt.Errorf("%w; this host is %s", ErrRuntimeEntrypointUnsupported, hostOS)
 	}
 	boot.env = runtimeEnvWithCloudMetadata(boot.env, func() runtimeCloudMetadata {

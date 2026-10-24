@@ -10,55 +10,10 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-// GateMergeSource is one branch to squash, in landing order; Message is its squash
-// commit message, with the branch's carried trailers appended beneath it.
-type GateMergeSource struct {
-	Branch  string
-	Message string
-}
-
-// GateMergeWorkingTreeParams squash-merges Sources onto TargetBranch's current remote tip,
-// one commit per landed source. Batching tests whether branches build together.
-type GateMergeWorkingTreeParams struct {
-	Sources []GateMergeSource
-	// TargetBranch is checked out fresh from its remote tip, not the working tree's branch.
-	TargetBranch string
-	// Remote defaults to "origin".
-	Remote string
-	// UnderLeaseID names an exclusive environment claim the caller already holds.
-	UnderLeaseID string
-}
-
-// GateMergeLandedSource is one source branch that squash-merged cleanly.
-type GateMergeLandedSource struct {
-	SourceBranch string `json:"sourceBranch"`
-	SourceCommit string `json:"sourceCommit"`
-	Commit       string `json:"commit"`
-	// CarriedTrailers is always serialized, so "carried none" is distinguishable from "not read".
-	CarriedTrailers []string `json:"carriedTrailers"`
-}
-
-// GateMergeSkippedSource is one source that did not land; a skip is reported, not fatal.
-type GateMergeSkippedSource struct {
-	SourceBranch    string   `json:"sourceBranch"`
-	SourceCommit    string   `json:"sourceCommit,omitempty"`
-	Reason          string   `json:"reason"`
-	ConflictedFiles []string `json:"conflictedFiles,omitempty"`
-}
-
-// GateMergeWorkingTreeResult is what landed; Commit is the stack tip, or the target's tip if
-// every source was skipped.
-type GateMergeWorkingTreeResult struct {
-	TargetBranch string                   `json:"targetBranch"`
-	Remote       string                   `json:"remote"`
-	Commit       string                   `json:"commit"`
-	Landed       []GateMergeLandedSource  `json:"landed"`
-	Skipped      []GateMergeSkippedSource `json:"skipped,omitempty"`
-}
 
 // GateMergeWorkingTreeDependencies lets tests replace the git plumbing.
 type GateMergeWorkingTreeDependencies struct {
@@ -95,13 +50,13 @@ func normalizeGateMergeWorkingTreeDependencies(deps GateMergeWorkingTreeDependen
 // GateMergeWorkingTree squashes each source onto a fresh checkout of TargetBranch. A source
 // that conflicts (other than only atlas.sum), stages nothing, or fails the regression
 // policy is skipped, not fatal. The working tree must be clean, since this switches branches.
-func GateMergeWorkingTree(ctx core.Context, root string, params GateMergeWorkingTreeParams, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
+func GateMergeWorkingTree(ctx core.Context, root string, params model.GateMergeWorkingTreeParams, deps GateMergeWorkingTreeDependencies) (model.GateMergeWorkingTreeResult, error) {
 	target := strings.TrimSpace(params.TargetBranch)
 	if target == "" {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("target branch is required")
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("target branch is required")
 	}
 	if err := validateGateMergeSources(params.Sources); err != nil {
-		return GateMergeWorkingTreeResult{}, err
+		return model.GateMergeWorkingTreeResult{}, err
 	}
 	remote := strings.TrimSpace(params.Remote)
 	if remote == "" {
@@ -112,27 +67,27 @@ func GateMergeWorkingTree(ctx core.Context, root string, params GateMergeWorking
 	// Gate-merges rewrite the environment's one shared worktree, so concurrent runs land the
 	// wrong tree; refuse before fetching, in --dry-run too.
 	if err := shared.EnsureEnvironmentNotExclusivelyHeld(ctx, "gate-merge", params.UnderLeaseID); err != nil {
-		return GateMergeWorkingTreeResult{}, err
+		return model.GateMergeWorkingTreeResult{}, err
 	}
 
 	clean, err := deps.WorkingTreeClean(ctx, root)
 	if err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("check working tree is clean: %w", err)
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("check working tree is clean: %w", err)
 	}
 	if !clean {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("refusing to gate-merge: the working tree has uncommitted changes")
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("refusing to gate-merge: the working tree has uncommitted changes")
 	}
 
 	targetRef := gateMergeFetchRef(target)
 	fetchArgs := traceGateMergePlan(ctx, root, params.Sources, target, remote, targetRef)
 	if ctx.DryRun {
-		return GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}, nil
+		return model.GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}, nil
 	}
 
 	return fetchAndGateMergeWorkingTree(ctx, root, params.Sources, target, remote, fetchArgs, targetRef, deps)
 }
 
-func validateGateMergeSources(sources []GateMergeSource) error {
+func validateGateMergeSources(sources []model.GateMergeSource) error {
 	if len(sources) == 0 {
 		return fmt.Errorf("at least one source branch is required")
 	}
@@ -279,7 +234,7 @@ func gateMergeFetchSpec(branch string) string {
 }
 
 // traceGateMergePlan traces the whole plan, also outside --dry-run, and returns the fetch argv.
-func traceGateMergePlan(ctx core.Context, root string, sources []GateMergeSource, target, remote, targetRef string) []string {
+func traceGateMergePlan(ctx core.Context, root string, sources []model.GateMergeSource, target, remote, targetRef string) []string {
 	fetchArgs := []string{"fetch", remote, gateMergeFetchSpec(target)}
 	for _, source := range sources {
 		fetchArgs = append(fetchArgs, gateMergeFetchSpec(source.Branch))
@@ -294,26 +249,26 @@ func traceGateMergePlan(ctx core.Context, root string, sources []GateMergeSource
 	return fetchArgs
 }
 
-func fetchAndGateMergeWorkingTree(ctx core.Context, root string, sources []GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (GateMergeWorkingTreeResult, error) {
+func fetchAndGateMergeWorkingTree(ctx core.Context, root string, sources []model.GateMergeSource, target, remote string, fetchArgs []string, targetRef string, deps GateMergeWorkingTreeDependencies) (model.GateMergeWorkingTreeResult, error) {
 	if output, err := runGitCapturingOutput(root, deps, fetchArgs...); err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, output)
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("git fetch: %w: %s", err, output)
 	}
 
 	if output, err := runGitCapturingOutput(root, deps, "checkout", "-B", target, targetRef); err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("git checkout: %w: %s", err, output)
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("git checkout: %w: %s", err, output)
 	}
 
-	result := GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}
+	result := model.GateMergeWorkingTreeResult{TargetBranch: target, Remote: remote}
 	tip, err := deps.ResolveRef(ctx, root, "HEAD")
 	if err != nil {
-		return GateMergeWorkingTreeResult{}, fmt.Errorf("resolve target tip: %w", err)
+		return model.GateMergeWorkingTreeResult{}, fmt.Errorf("resolve target tip: %w", err)
 	}
 	result.Commit = tip
 
 	for _, source := range sources {
 		landed, skipped, err := gateMergeOneSource(ctx, root, source, remote, targetRef, deps)
 		if err != nil {
-			return GateMergeWorkingTreeResult{}, err
+			return model.GateMergeWorkingTreeResult{}, err
 		}
 		if skipped != nil {
 			result.Skipped = append(result.Skipped, *skipped)
@@ -336,11 +291,11 @@ func runGitCapturingOutput(root string, deps GateMergeWorkingTreeDependencies, a
 
 // gateMergeOneSource squashes and commits one source. Conflicts are backed out with
 // `reset --hard` (--squash records no MERGE_HEAD to abort) and skipped; other git failures are fatal.
-func gateMergeOneSource(ctx core.Context, root string, source GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+func gateMergeOneSource(ctx core.Context, root string, source model.GateMergeSource, remote, targetRef string, deps GateMergeWorkingTreeDependencies) (*model.GateMergeLandedSource, *model.GateMergeSkippedSource, error) {
 	sourceRef := gateMergeFetchRef(source.Branch)
 	sourceCommit, err := deps.ResolveRef(ctx, root, sourceRef)
 	if err != nil {
-		return nil, &GateMergeSkippedSource{
+		return nil, &model.GateMergeSkippedSource{
 			SourceBranch: source.Branch,
 			Reason:       fmt.Sprintf("could not resolve %s after fetch: %v", sourceRef, err),
 		}, nil
@@ -363,7 +318,7 @@ func gateMergeOneSource(ctx core.Context, root string, source GateMergeSource, r
 		return nil, nil, fmt.Errorf("read what squashing %s staged: %w", source.Branch, err)
 	}
 	if len(staged) == 0 {
-		return nil, &GateMergeSkippedSource{
+		return nil, &model.GateMergeSkippedSource{
 			SourceBranch: source.Branch,
 			SourceCommit: sourceCommit,
 			Reason:       fmt.Sprintf("squashing %s onto %s staged no changes: the source is already contained in the target", source.Branch, remote),
@@ -373,7 +328,7 @@ func gateMergeOneSource(ctx core.Context, root string, source GateMergeSource, r
 	return commitGateMergeSource(ctx, root, source, sourceCommit, sourceRef, targetRef, staged, deps)
 }
 
-func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource, sourceCommit, sourceRef, targetRef string, staged []string, deps GateMergeWorkingTreeDependencies) (*GateMergeLandedSource, *GateMergeSkippedSource, error) {
+func commitGateMergeSource(ctx core.Context, root string, source model.GateMergeSource, sourceCommit, sourceRef, targetRef string, staged []string, deps GateMergeWorkingTreeDependencies) (*model.GateMergeLandedSource, *model.GateMergeSkippedSource, error) {
 	trailers, bodies, err := gateMergeCarriedTrailers(ctx, root, targetRef, sourceRef, deps)
 	if err != nil {
 		return nil, nil, err
@@ -396,7 +351,7 @@ func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource
 		return nil, nil, fmt.Errorf("resolve squash merge commit for %s: %w", source.Branch, err)
 	}
 
-	return &GateMergeLandedSource{
+	return &model.GateMergeLandedSource{
 		SourceBranch:    source.Branch,
 		SourceCommit:    sourceCommit,
 		Commit:          commit,
@@ -405,17 +360,17 @@ func commitGateMergeSource(ctx core.Context, root string, source GateMergeSource
 }
 
 // refuseGateMergeSourceOnPolicy backs out and skips a source that fails the regression policy.
-func refuseGateMergeSourceOnPolicy(root string, source GateMergeSource, sourceCommit string, bodies, staged []string, deps GateMergeWorkingTreeDependencies) (GateMergeSkippedSource, bool, error) {
+func refuseGateMergeSourceOnPolicy(root string, source model.GateMergeSource, sourceCommit string, bodies, staged []string, deps GateMergeWorkingTreeDependencies) (model.GateMergeSkippedSource, bool, error) {
 	readFile := func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(root, filepath.FromSlash(path))) }
 	policyErr := evaluateMergeRegressionPolicy(source.Branch, bodies, staged, readFile)
 	if policyErr == nil {
-		return GateMergeSkippedSource{}, false, nil
+		return model.GateMergeSkippedSource{}, false, nil
 	}
 	var resetStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-		return GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after refusing %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+		return model.GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after refusing %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
 	}
-	return GateMergeSkippedSource{
+	return model.GateMergeSkippedSource{
 		SourceBranch: source.Branch,
 		SourceCommit: sourceCommit,
 		Reason:       "regression-test policy: " + policyErr.Error(),
@@ -424,23 +379,23 @@ func refuseGateMergeSourceOnPolicy(root string, source GateMergeSource, sourceCo
 
 // skipConflictedGateMergeSource returns skip=false with nil error when every conflict was a
 // regenerated atlas.sum; a non-nil error is fatal for the batch.
-func skipConflictedGateMergeSource(root string, source GateMergeSource, remote, sourceCommit, sourceRef, mergeOutput string, mergeErr error, deps GateMergeWorkingTreeDependencies) (GateMergeSkippedSource, bool, error) {
+func skipConflictedGateMergeSource(root string, source model.GateMergeSource, remote, sourceCommit, sourceRef, mergeOutput string, mergeErr error, deps GateMergeWorkingTreeDependencies) (model.GateMergeSkippedSource, bool, error) {
 	conflicted, conflictErr := deps.ConflictedFiles(root, deps.RunGit)
 	if conflictErr != nil || len(conflicted) == 0 {
-		return GateMergeSkippedSource{}, false, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, mergeErr, mergeOutput)
+		return model.GateMergeSkippedSource{}, false, fmt.Errorf("git merge --squash %s: %w: %s", sourceRef, mergeErr, mergeOutput)
 	}
 	remaining, resolveErr := resolveAtlasSumConflicts(root, deps.RunGit, deps.RunAtlasHash, conflicted)
 	if resolveErr != nil {
-		return GateMergeSkippedSource{}, false, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
+		return model.GateMergeSkippedSource{}, false, fmt.Errorf("regenerate conflicted atlas.sum for %s: %w", source.Branch, resolveErr)
 	}
 	if len(remaining) == 0 {
-		return GateMergeSkippedSource{}, false, nil
+		return model.GateMergeSkippedSource{}, false, nil
 	}
 	var resetStderr bytes.Buffer
 	if err := deps.RunGit(root, io.Discard, &resetStderr, "reset", "--hard", "HEAD"); err != nil {
-		return GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
+		return model.GateMergeSkippedSource{}, false, fmt.Errorf("git reset --hard after a conflicted squash of %s: %w: %s", source.Branch, err, strings.TrimSpace(resetStderr.String()))
 	}
-	return GateMergeSkippedSource{
+	return model.GateMergeSkippedSource{
 		SourceBranch:    source.Branch,
 		SourceCommit:    sourceCommit,
 		Reason:          fmt.Sprintf("squashing %s onto %s left %d file(s) conflicted", source.Branch, remote, len(remaining)),

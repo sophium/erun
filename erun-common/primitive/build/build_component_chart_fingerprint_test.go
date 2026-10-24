@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -34,7 +34,7 @@ func TestBuildFingerprintExcludesChartForVersionPinnedBase(t *testing.T) {
 		return shared.DockerBuildSpec{
 			ContextDir:     dockerDir,
 			DockerfilePath: dockerfile,
-			Image:          helm.DockerImageReference{ImageName: "comp", VersionFromBuildDir: pinned},
+			Image:          model.DockerImageReference{ImageName: "comp", VersionFromBuildDir: pinned},
 		}
 	}
 	fingerprint := func(pinned bool) string {

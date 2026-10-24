@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -123,9 +124,9 @@ func TestRunDeployDiagnosisNamesTheMissingGatewayRouting(t *testing.T) {
 	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
 	status := diagnosis.AgentCredentials
-	if status.State != deploy.RuntimeAgentCredentialMissing {
+	if status.State != model.RuntimeAgentCredentialMissing {
 		t.Fatalf("AgentCredentials.State = %q, want %q (readError=%q)",
-			status.State, deploy.RuntimeAgentCredentialMissing, status.ReadError)
+			status.State, model.RuntimeAgentCredentialMissing, status.ReadError)
 	}
 	if status.GatewayBaseURL != "https://openrouter.ai/api" {
 		t.Fatalf("AgentCredentials.GatewayBaseURL = %q, want the configured gateway", status.GatewayBaseURL)
@@ -152,8 +153,8 @@ func TestRunDeployDiagnosisConfirmsGatewayRoutingWhenTheTemplateCarriesIt(t *tes
 
 	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
-	if got := diagnosis.AgentCredentials.State; got != deploy.RuntimeAgentCredentialConfigured {
-		t.Fatalf("AgentCredentials.State = %q, want %q", got, deploy.RuntimeAgentCredentialConfigured)
+	if got := diagnosis.AgentCredentials.State; got != model.RuntimeAgentCredentialConfigured {
+		t.Fatalf("AgentCredentials.State = %q, want %q", got, model.RuntimeAgentCredentialConfigured)
 	}
 }
 
@@ -163,8 +164,8 @@ func TestRunDeployDiagnosisMakesNoAgentClaimWithoutAGateway(t *testing.T) {
 
 	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(nil))
 
-	if got := diagnosis.AgentCredentials.State; got != deploy.RuntimeAgentCredentialNotApplicable {
-		t.Fatalf("AgentCredentials.State = %q, want %q", got, deploy.RuntimeAgentCredentialNotApplicable)
+	if got := diagnosis.AgentCredentials.State; got != model.RuntimeAgentCredentialNotApplicable {
+		t.Fatalf("AgentCredentials.State = %q, want %q", got, model.RuntimeAgentCredentialNotApplicable)
 	}
 	if stub.askedFor(t, "get deployment") {
 		t.Fatalf("an install with no gateway paid for a pod-template read anyway; invocations: %v", stub.invocations(t))
@@ -178,8 +179,8 @@ func TestRunDeployDiagnosisDoesNotCallAnUnreadTemplateMissing(t *testing.T) {
 	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), gatewayDiagnosisRequest(reportedGateway()))
 
 	status := diagnosis.AgentCredentials
-	if status.State != deploy.RuntimeAgentCredentialUnknown {
-		t.Fatalf("AgentCredentials.State = %q, want %q", status.State, deploy.RuntimeAgentCredentialUnknown)
+	if status.State != model.RuntimeAgentCredentialUnknown {
+		t.Fatalf("AgentCredentials.State = %q, want %q", status.State, model.RuntimeAgentCredentialUnknown)
 	}
 	if status.ReadError == "" {
 		t.Fatalf("AgentCredentials.ReadError is empty, want the reason the template could not be read")
@@ -194,12 +195,12 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 	cases := []struct {
 		name   string
 		params deploy.RuntimeAgentCredentialParams
-		want   deploy.RuntimeAgentCredentialState
+		want   model.RuntimeAgentCredentialState
 	}{
 		{
 			name:   "no catalog configured",
 			params: deploy.RuntimeAgentCredentialParams{Container: config.DevopsComponentName, ContainerEnvObserved: true},
-			want:   deploy.RuntimeAgentCredentialNotApplicable,
+			want:   model.RuntimeAgentCredentialNotApplicable,
 		},
 		{
 			name: "the environment opted out of the catalog",
@@ -209,7 +210,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 				Container:            config.DevopsComponentName,
 				ContainerEnvObserved: true,
 			},
-			want: deploy.RuntimeAgentCredentialNotApplicable,
+			want: model.RuntimeAgentCredentialNotApplicable,
 		},
 		{
 			name: "the template carries the routing variable",
@@ -219,7 +220,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 				ContainerEnvObserved: true,
 				ContainerEnvNames:    []string{"HOME", deploy.GatewayBaseURLEnv},
 			},
-			want: deploy.RuntimeAgentCredentialConfigured,
+			want: model.RuntimeAgentCredentialConfigured,
 		},
 		{
 			name: "a padded routing variable still counts",
@@ -229,7 +230,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 				ContainerEnvObserved: true,
 				ContainerEnvNames:    []string{" " + deploy.GatewayBaseURLEnv + " "},
 			},
-			want: deploy.RuntimeAgentCredentialConfigured,
+			want: model.RuntimeAgentCredentialConfigured,
 		},
 		{
 			name: "the template was read and carries nothing",
@@ -239,7 +240,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 				ContainerEnvObserved: true,
 				ContainerEnvNames:    reportedRuntimePodEnvNames(),
 			},
-			want: deploy.RuntimeAgentCredentialMissing,
+			want: model.RuntimeAgentCredentialMissing,
 		},
 		{
 			name: "the template was never read",
@@ -247,7 +248,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 				Gateway:   reportedGateway(),
 				Container: config.DevopsComponentName,
 			},
-			want: deploy.RuntimeAgentCredentialUnknown,
+			want: model.RuntimeAgentCredentialUnknown,
 		},
 	}
 	for _, tc := range cases {
@@ -256,7 +257,7 @@ func TestResolveRuntimeAgentCredentialStatus(t *testing.T) {
 			if got.State != tc.want {
 				t.Fatalf("State = %q, want %q", got.State, tc.want)
 			}
-			if tc.want == deploy.RuntimeAgentCredentialMissing && got.GatewayBaseURL == "" {
+			if tc.want == model.RuntimeAgentCredentialMissing && got.GatewayBaseURL == "" {
 				t.Fatalf("a missing-routing verdict must still name the gateway that is being dropped")
 			}
 		})

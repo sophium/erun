@@ -7,42 +7,29 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-// WriteWorkingTreeFileParams has no default Path, so content lands only where the caller chose.
-type WriteWorkingTreeFileParams struct {
-	// Path is absolute or relative to the working tree root.
-	Path string
-	// Content is written verbatim; nothing in it is interpreted.
-	Content string
-}
-
-// WriteWorkingTreeFileResult is what the write actually did.
-type WriteWorkingTreeFileResult struct {
-	Path  string `json:"path"`
-	Bytes int64  `json:"bytes"`
-}
-
 // WriteWorkingTreeFile writes Content without any shell and refuses paths outside root.
-func WriteWorkingTreeFile(ctx core.Context, root string, params WriteWorkingTreeFileParams) (WriteWorkingTreeFileResult, error) {
+func WriteWorkingTreeFile(ctx core.Context, root string, params model.WriteWorkingTreeFileParams) (model.WriteWorkingTreeFileResult, error) {
 	resolved, _, err := resolveWorkingTreePath(root, params.Path)
 	if err != nil {
-		return WriteWorkingTreeFileResult{}, err
+		return model.WriteWorkingTreeFileResult{}, err
 	}
 
 	content := []byte(params.Content)
 	ctx.TraceCommand("", "write-file", resolved)
 	if ctx.DryRun {
-		return WriteWorkingTreeFileResult{Path: resolved, Bytes: int64(len(content))}, nil
+		return model.WriteWorkingTreeFileResult{Path: resolved, Bytes: int64(len(content))}, nil
 	}
 
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
-		return WriteWorkingTreeFileResult{}, fmt.Errorf("write %q: %w", resolved, err)
+		return model.WriteWorkingTreeFileResult{}, fmt.Errorf("write %q: %w", resolved, err)
 	}
 	if err := os.WriteFile(resolved, content, 0o644); err != nil {
-		return WriteWorkingTreeFileResult{}, fmt.Errorf("write %q: %w", resolved, err)
+		return model.WriteWorkingTreeFileResult{}, fmt.Errorf("write %q: %w", resolved, err)
 	}
-	return WriteWorkingTreeFileResult{Path: resolved, Bytes: int64(len(content))}, nil
+	return model.WriteWorkingTreeFileResult{Path: resolved, Bytes: int64(len(content))}, nil
 }
 
 // resolveWorkingTreePath refuses "../" escapes, outside absolute paths, root itself, and

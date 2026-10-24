@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // setConfigHomeForModeTest points config resolution at a temp dir and returns a restore func.
@@ -48,7 +49,7 @@ func rewriteAsLegacyModeAndResave(t *testing.T, path string, save func()) {
 	assertConfigFileMode(t, path, 0o600)
 }
 
-func assertBackupsAreRestricted(t *testing.T, backups []ConfigBackup) {
+func assertBackupsAreRestricted(t *testing.T, backups []model.ConfigBackup) {
 	t.Helper()
 	if len(backups) == 0 {
 		t.Fatal("expected a dated backup to have been written")

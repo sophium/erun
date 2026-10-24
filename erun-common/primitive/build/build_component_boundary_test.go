@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -30,12 +30,12 @@ func boundaryProject(t *testing.T, componentDockerfile string) (projectRoot, com
 
 func boundaryResolvers(projectRoot, cwd string) (shared.ProjectFinderFunc, shared.BuildContextResolverFunc) {
 	findProjectRoot := func() (string, string, error) { return "team", projectRoot, nil }
-	resolveBuildContext := func() (shared.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
+	resolveBuildContext := func() (model.DockerBuildContext, error) { return shared.DockerBuildContextAtDir(cwd) }
 	return findProjectRoot, resolveBuildContext
 }
 
-func boundaryTarget(projectRoot string) shared.DockerCommandTarget {
-	return shared.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
+func boundaryTarget(projectRoot string) model.DockerCommandTarget {
+	return model.DockerCommandTarget{ProjectRoot: projectRoot, Environment: "dev", VersionOverride: "1.0.0", NoIncremental: true}
 }
 
 func TestDockerfileTestStageConsumerForms(t *testing.T) {
@@ -70,7 +70,7 @@ func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 	projectRoot, componentDir, _ := boundaryProject(t, consumedTestStageDockerfileContent)
 	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
 
-	contexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, shared.DockerCommandTarget{ProjectRoot: projectRoot})
+	contexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, model.DockerCommandTarget{ProjectRoot: projectRoot})
 	if err != nil {
 		t.Fatalf("ResolveCurrentDockerBuildContexts: %v", err)
 	}
@@ -102,7 +102,7 @@ func testOutcomeBuild(t *testing.T, dockerfile string) shared.DockerBuildSpec {
 	return shared.DockerBuildSpec{
 		ContextDir:     dir,
 		DockerfilePath: writeTestDockerfile(t, dir, dockerfile),
-		Image:          helm.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
+		Image:          model.DockerImageReference{ImageName: "api", Tag: "ghcr.io/sophium/api:1.0.0"},
 		Platforms:      []string{"linux/amd64"},
 	}
 }

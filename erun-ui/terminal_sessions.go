@@ -11,10 +11,9 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 func (a *App) OpenIDE(selection uiSelection, ide string) error {
@@ -43,7 +42,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 }
 
 func (a *App) resolveOpenIDEParams(selection uiSelection, ide string) (startTerminalSessionParams, error) {
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
@@ -77,19 +76,19 @@ func formatOpenIDEError(ide, output string, err error) error {
 	return fmt.Errorf("open %s: %w", ide, err)
 }
 
-func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (lifecycle.DiffResult, error) {
+func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (model.DiffResult, error) {
 	selection = normalizeSelection(selection)
 	options.Scope = strings.TrimSpace(options.Scope)
 	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
 	if err := errMissingTenantOrEnvironment("load diff", selection.Tenant, selection.Environment); err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return lifecycle.DiffResult{}, err
+		return model.DiffResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -97,7 +96,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (lifecycle.
 	}
 	mcpPort := configpkg.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return lifecycle.DiffResult{}, wrapMCPUnreachableErrorWithKind(
+		return model.DiffResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
@@ -106,7 +105,7 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (lifecycle.
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	diff, err := a.deps.loadDiff(ctx, endpoint, bearer, options)
 	if err != nil && isMCPDialFailure(err) {
-		return lifecycle.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return model.DiffResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return diff, err
 }

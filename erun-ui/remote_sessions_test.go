@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A socket whose program is gone is a leftover and must not be rebuilt as a tab.
@@ -27,7 +28,7 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -44,7 +45,7 @@ func TestListRemoteAppSessionsRebuildsOnlyRunningSessions(t *testing.T) {
 
 func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	app := NewApp(erunUIDeps{store: stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -76,7 +77,7 @@ func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]config.EnvConfig{
@@ -191,7 +192,7 @@ func TestCloseSessionEndsRemoteCustomTerminal(t *testing.T) {
 	projectRoot := t.TempDir()
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{
-			tenants: map[string]config.TenantConfig{
+			tenants: map[string]model.TenantConfig{
 				"erun": {Name: "erun", DefaultEnvironment: "remote"},
 			},
 			envs: map[string]config.EnvConfig{

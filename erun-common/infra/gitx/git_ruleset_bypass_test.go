@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // gitHubBypassNotice is the real stderr shape, including blank separator lines.
@@ -31,7 +32,7 @@ func TestPushWorkingTreeBranchReportsAGitHubRulesetBypass(t *testing.T) {
 		},
 	}
 
-	result, err := PushWorkingTreeBranch(ctx, t.TempDir(), PushWorkingTreeBranchParams{Branch: "main"}, deps)
+	result, err := PushWorkingTreeBranch(ctx, t.TempDir(), model.PushWorkingTreeBranchParams{Branch: "main"}, deps)
 	if err != nil {
 		t.Fatalf("a bypassed push still succeeds, so it must not be reported as an error: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestPushWorkingTreeBranchStaysSilentWhenNoRuleWasBypassed(t *testing.T) {
 		},
 	}
 
-	if _, err := PushWorkingTreeBranch(ctx, t.TempDir(), PushWorkingTreeBranchParams{Branch: "feature/widget"}, deps); err != nil {
+	if _, err := PushWorkingTreeBranch(ctx, t.TempDir(), model.PushWorkingTreeBranchParams{Branch: "feature/widget"}, deps); err != nil {
 		t.Fatalf("push: %v", err)
 	}
 	if got := out.String(); strings.Contains(got, "bypassing") {

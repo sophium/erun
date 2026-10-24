@@ -9,21 +9,22 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
 
-func ResolveKubernetesDeployContext() (shared.KubernetesDeployContext, error) {
+func ResolveKubernetesDeployContext() (model.KubernetesDeployContext, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return shared.KubernetesDeployContext{}, err
+		return model.KubernetesDeployContext{}, err
 	}
 
 	return KubernetesDeployContextAtDir(dir), nil
 }
 
-func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]shared.KubernetesDeployContext, error) {
+func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]model.KubernetesDeployContext, error) {
 	if resolveDeployContext == nil {
 		return nil, fmt.Errorf("helm chart not found in current directory")
 	}
@@ -38,7 +39,7 @@ func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinder
 		if err := ValidateHelmChartPath(deployContext.ChartPath); err != nil {
 			return nil, err
 		}
-		return []shared.KubernetesDeployContext{deployContext}, nil
+		return []model.KubernetesDeployContext{deployContext}, nil
 	}
 
 	if deployContexts, err := shared.ResolveKubernetesDeployContextsAtDir(deployContext.Dir); err == nil {
@@ -56,8 +57,8 @@ func ResolveCurrentKubernetesDeployContexts(findProjectRoot shared.ProjectFinder
 	return nil, fmt.Errorf("helm chart not found in current directory")
 }
 
-func KubernetesDeployContextAtDir(dir string) shared.KubernetesDeployContext {
-	context := shared.KubernetesDeployContext{Dir: dir}
+func KubernetesDeployContextAtDir(dir string) model.KubernetesDeployContext {
+	context := model.KubernetesDeployContext{Dir: dir}
 	componentName := filepath.Base(dir)
 	parentName := filepath.Base(filepath.Dir(dir))
 
@@ -91,7 +92,7 @@ func traceConfiguredDeployPaths(ctx core.Context, repoPath string) {
 	}
 }
 
-func CheckKubernetesDeployment(ctx core.Context, params KubernetesDeploymentCheckParams) (bool, error) {
+func CheckKubernetesDeployment(ctx core.Context, params model.KubernetesDeploymentCheckParams) (bool, error) {
 	deployed, output, err := checkKubernetesDeploymentWithContext(ctx, params, params.KubernetesContext)
 	if err == nil {
 		return deployed, nil
@@ -111,7 +112,7 @@ func CheckKubernetesDeployment(ctx core.Context, params KubernetesDeploymentChec
 
 // checkKubernetesDeploymentWithContext returns an error only when it cannot
 // decide; absence is (false, output, nil).
-func checkKubernetesDeploymentWithContext(ctx core.Context, params KubernetesDeploymentCheckParams, kubectlContext string) (bool, string, error) {
+func checkKubernetesDeploymentWithContext(ctx core.Context, params model.KubernetesDeploymentCheckParams, kubectlContext string) (bool, string, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(kubectlContext) != "" {
 		args = append(args, "--context", kubectlContext)
@@ -224,12 +225,12 @@ func isKubernetesContextMissingMessage(output string) bool {
 	return false
 }
 
-func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool {
+func hasExpectedDeploymentSettings(params model.KubernetesDeploymentCheckParams) bool {
 	return strings.TrimSpace(params.ExpectedRepoPath) != "" ||
 		params.ExpectedSSHD != nil ||
 		params.ExpectedMCPPort > 0 ||
 		params.ExpectedSSHPort > 0 ||
-		params.ExpectedRuntimePod != (configpkg.RuntimePodResources{})
+		params.ExpectedRuntimePod != (model.RuntimePodResources{})
 }
 
 type deploymentEnvVar struct {
@@ -237,7 +238,7 @@ type deploymentEnvVar struct {
 	Value string `json:"value"`
 }
 
-func deploymentMatchesExpectedSettings(ctx core.Context, params KubernetesDeploymentCheckParams) (bool, error) {
+func deploymentMatchesExpectedSettings(ctx core.Context, params model.KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -264,7 +265,7 @@ func deploymentMatchesExpectedSettings(ctx core.Context, params KubernetesDeploy
 						Name      string             `json:"name"`
 						Env       []deploymentEnvVar `json:"env"`
 						Resources struct {
-							Limits configpkg.RuntimePodResources `json:"limits"`
+							Limits model.RuntimePodResources `json:"limits"`
 						} `json:"resources"`
 					} `json:"containers"`
 				} `json:"spec"`
@@ -276,7 +277,7 @@ func deploymentMatchesExpectedSettings(ctx core.Context, params KubernetesDeploy
 	}
 
 	matches := expectedDeploymentMatches(params)
-	var runtimeLimits configpkg.RuntimePodResources
+	var runtimeLimits model.RuntimePodResources
 	runtimeFound := false
 	for _, container := range deployment.Spec.Template.Spec.Containers {
 		for _, env := range container.Env {
@@ -304,17 +305,17 @@ type deploymentExpectedMatches struct {
 
 // expectedDeploymentMatches starts unset expectations as true. ERUN_API_PORT is
 // excluded: tenant charts may omit it, which would force a redeploy on every open.
-func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
+func expectedDeploymentMatches(params model.KubernetesDeploymentCheckParams) deploymentExpectedMatches {
 	return deploymentExpectedMatches{
 		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",
 		sshd:       params.ExpectedSSHD == nil,
 		mcpPort:    params.ExpectedMCPPort <= 0,
 		sshPort:    params.ExpectedSSHPort <= 0,
-		runtimePod: params.ExpectedRuntimePod == (configpkg.RuntimePodResources{}),
+		runtimePod: params.ExpectedRuntimePod == (model.RuntimePodResources{}),
 	}
 }
 
-func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams, name, value string) {
+func (m *deploymentExpectedMatches) apply(params model.KubernetesDeploymentCheckParams, name, value string) {
 	switch strings.TrimSpace(name) {
 	case "ERUN_REPO_PATH":
 		m.repoPath = matchesExpectedRepoPath(value, params.ExpectedRepoPath)
@@ -352,8 +353,8 @@ func matchesExpectedPort(value string, expected int) bool {
 	return strings.TrimSpace(value) == fmt.Sprintf("%d", expected)
 }
 
-func matchesExpectedRuntimePod(value, expected configpkg.RuntimePodResources) bool {
-	if expected == (configpkg.RuntimePodResources{}) {
+func matchesExpectedRuntimePod(value, expected model.RuntimePodResources) bool {
+	if expected == (model.RuntimePodResources{}) {
 		return true
 	}
 	value = configpkg.NormalizeRuntimePodResources(value)

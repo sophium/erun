@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 	"github.com/sophium/erun/erun-mcp/tools/upgrade"
@@ -18,7 +19,7 @@ func TestUpgradeToolPreviewResolvesPlan(t *testing.T) {
 		Context: shared.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: projectRoot},
 		Store: listToolStore{
 			toolConfig:    config.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]config.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
+			tenantConfigs: map[string]model.TenantConfig{"tenant-a": {Name: "tenant-a", DefaultEnvironment: "dev"}},
 			envsByTenant: map[string][]config.EnvConfig{
 				"tenant-a": {{Name: "dev", Type: config.EnvironmentTypeRuntime, RuntimeVersion: "3.0.0", AutoUpgrade: true}},
 			},

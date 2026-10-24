@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func fakeRestartDeps(t *testing.T, marker DesktopControlMarker, markerErr error, alive bool, post func(context.Context, int, string) (DesktopRestartResponse, error)) DesktopRestartDeps {
@@ -46,8 +48,8 @@ func TestRestartDesktopApp_DryRunReportsAPlanTheDesktopCouldNotAnswer(t *testing
 		return DesktopRestartResponse{OK: false, Error: "the open set could not be read"}, nil
 	})
 	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", true)
-	if outcome.Status != DesktopRestartWouldRestart {
-		t.Fatalf("status = %q, want %q", outcome.Status, DesktopRestartWouldRestart)
+	if outcome.Status != model.DesktopRestartWouldRestart {
+		t.Fatalf("status = %q, want %q", outcome.Status, model.DesktopRestartWouldRestart)
 	}
 	if !strings.Contains(outcome.PreviewUnavailable, "the open set could not be read") {
 		t.Fatalf("PreviewUnavailable = %q, want it to name the desktop's own reason", outcome.PreviewUnavailable)
@@ -72,8 +74,8 @@ func TestRestartDesktopApp_RestartedOnSuccess(t *testing.T) {
 		return DesktopRestartResponse{}, nil
 	}
 	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", false)
-	if outcome.Status != DesktopRestartRestarted {
-		t.Fatalf("status = %q, want %q", outcome.Status, DesktopRestartRestarted)
+	if outcome.Status != model.DesktopRestartRestarted {
+		t.Fatalf("status = %q, want %q", outcome.Status, model.DesktopRestartRestarted)
 	}
 	if gotOrchestratorID != "orch-1" {
 		t.Fatalf("orchestratorID forwarded = %q, want %q", gotOrchestratorID, "orch-1")
@@ -89,8 +91,8 @@ func TestRestartDesktopApp_RefusedWhenPostTransportFails(t *testing.T) {
 	}
 	deps := fakeRestartDeps(t, DesktopControlMarker{PID: 123, ControlPort: 4242}, nil, true, post)
 	outcome := RestartDesktopApp(context.Background(), deps, "orch-1", false)
-	if outcome.Status != DesktopRestartRefused {
-		t.Fatalf("status = %q, want %q", outcome.Status, DesktopRestartRefused)
+	if outcome.Status != model.DesktopRestartRefused {
+		t.Fatalf("status = %q, want %q", outcome.Status, model.DesktopRestartRefused)
 	}
 	if outcome.Reason == "" {
 		t.Fatal("expected a reason naming the unreachable control endpoint")

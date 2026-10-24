@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	mcppkg "github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
@@ -208,7 +209,7 @@ var mcpSessionTimeout = 5 * time.Minute
 var mcpServerLogger = slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 func newServer(info model.BuildInfo, runtime shared.RuntimeConfig, identity shared.AuthIdentity, metrics *shared.MetricsRecorder) *mcp.Server {
-	info = model.NormalizeBuildInfo(info)
+	info = core.NormalizeBuildInfo(info)
 	runtime = normalizeRuntimeConfig(runtime)
 
 	server := mcp.NewServer(&mcp.Implementation{

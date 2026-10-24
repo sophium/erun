@@ -11,11 +11,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
 )
 
@@ -149,9 +149,9 @@ func availableEnvBackupDates(tenant, environment string) string {
 	return strings.Join(dates, ", ")
 }
 
-func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (config.ConfigBackup, bool, error) {
+func resolveDoctorEnvBackupSelector(tenant, environment, selector string) (model.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return config.ConfigBackup{Path: selector}, true, nil
+		return model.ConfigBackup{Path: selector}, true, nil
 	}
 	return config.FindEnvConfigBackupByDate(tenant, environment, selector)
 }
@@ -181,7 +181,7 @@ func runDoctorTenantEnvActions(runtime sharedpkg.RuntimeConfig, input DoctorInpu
 		return err
 	}
 	// A host environment's daemon is local, so an unreachable cluster says nothing about it.
-	if diagnosis.ClusterUnreachable && doctor.ResolveDoctorDockerDaemon(req).Kind != doctor.DoctorDockerDaemonHost {
+	if diagnosis.ClusterUnreachable && doctor.ResolveDoctorDockerDaemon(req).Kind != model.DoctorDockerDaemonHost {
 		if err := writeDoctorPodUnreachableSkip(runCtx, "Docker storage"); err != nil {
 			return err
 		}
@@ -244,7 +244,7 @@ func runDoctorRootConfigToolFlow(runtime sharedpkg.RuntimeConfig, input DoctorIn
 	return report, false, nil
 }
 
-func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, inspection config.RootConfigInspection, selector string, report *sharedpkg.DoctorRootConfigReport) (config.RootConfigInspection, error) {
+func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx core.Context, inspection model.RootConfigInspection, selector string, report *sharedpkg.DoctorRootConfigReport) (model.RootConfigInspection, error) {
 	backup, ok, err := resolveDoctorBackupSelector(inspection, selector)
 	if err != nil {
 		return inspection, err
@@ -262,24 +262,24 @@ func restoreDoctorRootConfigFromBackup(runtime sharedpkg.RuntimeConfig, runCtx c
 	return refreshDoctorInspection(runtime, report)
 }
 
-func refreshDoctorInspection(runtime sharedpkg.RuntimeConfig, report *sharedpkg.DoctorRootConfigReport) (config.RootConfigInspection, error) {
+func refreshDoctorInspection(runtime sharedpkg.RuntimeConfig, report *sharedpkg.DoctorRootConfigReport) (model.RootConfigInspection, error) {
 	refreshed, err := config.InspectRootConfig(runtime.Store)
 	if err != nil {
-		return config.RootConfigInspection{}, err
+		return model.RootConfigInspection{}, err
 	}
 	report.Inspection = refreshed
 	return refreshed, nil
 }
 
-func doctorRootConfigBlocks(inspection config.RootConfigInspection, input DoctorInput) bool {
-	if inspection.ConfigStatus != config.RootConfigStatusOK {
+func doctorRootConfigBlocks(inspection model.RootConfigInspection, input DoctorInput) bool {
+	if inspection.ConfigStatus != model.RootConfigStatusOK {
 		return true
 	}
 	return len(inspection.OrphanedAliases) > 0 && onlyRootConfigDoctorInput(input)
 }
 
-func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection config.RootConfigInspection, report *sharedpkg.DoctorRootConfigReport) error {
-	byAlias := make(map[string]config.OrphanedAlias, len(inspection.OrphanedAliases))
+func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, runCtx core.Context, inspection model.RootConfigInspection, report *sharedpkg.DoctorRootConfigReport) error {
+	byAlias := make(map[string]model.OrphanedAlias, len(inspection.OrphanedAliases))
 	for _, orphan := range inspection.OrphanedAliases {
 		byAlias[orphan.Alias] = orphan
 	}
@@ -293,7 +293,7 @@ func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, r
 			report.UnresolvedAliases = append(report.UnresolvedAliases, alias)
 			continue
 		}
-		params := doctor.RepairOrphanedAliasParams{
+		params := model.RepairOrphanedAliasParams{
 			Orphan:        orphan,
 			SSOStartURL:   strings.TrimSpace(entry.SSOStartURL),
 			SSORegion:     strings.TrimSpace(entry.SSORegion),
@@ -310,18 +310,18 @@ func runDoctorAliasRepairs(runtime sharedpkg.RuntimeConfig, input DoctorInput, r
 	return nil
 }
 
-func resolveDoctorBackupSelector(inspection config.RootConfigInspection, selector string) (config.ConfigBackup, bool, error) {
+func resolveDoctorBackupSelector(inspection model.RootConfigInspection, selector string) (model.ConfigBackup, bool, error) {
 	if strings.ContainsAny(selector, "/\\") {
-		return config.ConfigBackup{Path: selector}, true, nil
+		return model.ConfigBackup{Path: selector}, true, nil
 	}
 	backup, ok, err := config.FindRootConfigBackupByDate(inspection.ConfigPath, selector)
 	if err != nil {
-		return config.ConfigBackup{}, false, err
+		return model.ConfigBackup{}, false, err
 	}
 	return backup, ok, nil
 }
 
-func preferredRegionForOrphanAlias(orphan config.OrphanedAlias) string {
+func preferredRegionForOrphanAlias(orphan model.OrphanedAlias) string {
 	for _, ref := range orphan.ReferencedByCloudContexts {
 		region := strings.TrimSpace(ref.Region)
 		if region != "" {
@@ -342,7 +342,7 @@ func firstNonBlank(values ...string) string {
 
 // writeDoctorDeployDiagnosis is read-only, so it runs under preview too; later
 // sections reuse its ClusterUnreachable instead of re-probing.
-func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (deploy.DeployDiagnosisResult, error) {
+func writeDoctorDeployDiagnosis(runCtx core.Context, req config.ShellLaunchParams) (model.DeployDiagnosisResult, error) {
 	diagnosis := deploy.RunDeployDiagnosis(runCtx, req)
 	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
 		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
@@ -371,7 +371,7 @@ func writeDoctorPodUnreachableSkip(runCtx core.Context, header string) error {
 // not a failure, unless a prune was requested against it.
 func writeDoctorInspection(runCtx core.Context, target config.OpenResult, req config.ShellLaunchParams, pruneRequested bool) error {
 	inspection, err := doctor.RunDoctorInspection(runCtx, nil, req)
-	var unavailable doctor.DoctorDockerDaemonUnavailableError
+	var unavailable model.DoctorDockerDaemonUnavailableError
 	daemonUnavailable := errors.As(err, &unavailable)
 	if daemonUnavailable && pruneRequested {
 		return err
@@ -412,13 +412,13 @@ func runDoctorRecoveryToolActions(runCtx core.Context, input DoctorInput, req co
 	return nil
 }
 
-func deployRecoveryActionsFromInput(input DoctorInput) []deploy.DeployRecoveryAction {
-	actions := make([]deploy.DeployRecoveryAction, 0, 2)
+func deployRecoveryActionsFromInput(input DoctorInput) []model.DeployRecoveryAction {
+	actions := make([]model.DeployRecoveryAction, 0, 2)
 	if input.ClearPendingHelm {
-		actions = append(actions, deploy.DeployRecoveryClearPendingHelm)
+		actions = append(actions, model.DeployRecoveryClearPendingHelm)
 	}
 	if input.Rollback {
-		actions = append(actions, deploy.DeployRecoveryRollback)
+		actions = append(actions, model.DeployRecoveryRollback)
 	}
 	return actions
 }
@@ -447,7 +447,7 @@ func runDoctorToolActions(runCtx core.Context, input DoctorInput, req config.She
 }
 
 // writeDoctorAction names the daemon too, since acting on the wrong one reclaims nothing.
-func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action doctor.DoctorAction) error {
+func writeDoctorAction(runCtx core.Context, req config.ShellLaunchParams, action model.DoctorAction) error {
 	if runCtx.DryRun {
 		return nil
 	}
@@ -476,19 +476,19 @@ func resolveDoctorOpenResult(runtime sharedpkg.RuntimeConfig, input DoctorInput)
 	if err != nil {
 		return config.OpenResult{}, err
 	}
-	return diagnosispkg.ResolveDoctorTarget(runtime.Store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	return diagnosispkg.ResolveDoctorTarget(runtime.Store, model.OpenParams{Tenant: tenant, Environment: environment})
 }
 
-func doctorActionsFromInput(input DoctorInput) []doctor.DoctorAction {
-	actions := make([]doctor.DoctorAction, 0, 3)
+func doctorActionsFromInput(input DoctorInput) []model.DoctorAction {
+	actions := make([]model.DoctorAction, 0, 3)
 	if input.PruneImages {
-		actions = append(actions, doctor.DoctorActionPruneImages)
+		actions = append(actions, model.DoctorActionPruneImages)
 	}
 	if input.PruneBuildCache {
-		actions = append(actions, doctor.DoctorActionPruneBuildCache)
+		actions = append(actions, model.DoctorActionPruneBuildCache)
 	}
 	if input.PruneContainers {
-		actions = append(actions, doctor.DoctorActionPruneContainers)
+		actions = append(actions, model.DoctorActionPruneContainers)
 	}
 	return actions
 }

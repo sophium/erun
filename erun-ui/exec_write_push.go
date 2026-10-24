@@ -7,10 +7,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/gitx"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // uiExecCommitInput.Branch is verified server-side and refused on mismatch.
@@ -52,18 +51,18 @@ func validateExecCommitInput(selection uiSelection, input uiExecCommitInput) (br
 
 // ExecCommit commits the selected environment's working tree immediately; there
 // is no preview.
-func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.CommitWorkingTreeResult, error) {
+func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (model.CommitWorkingTreeResult, error) {
 	selection = normalizeSelection(selection)
 	branch, message, err := validateExecCommitInput(selection, input)
 	if err != nil {
-		return gitx.CommitWorkingTreeResult{}, err
+		return model.CommitWorkingTreeResult{}, err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return gitx.CommitWorkingTreeResult{}, err
+		return model.CommitWorkingTreeResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -71,7 +70,7 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.C
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return gitx.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
+		return model.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
@@ -80,27 +79,27 @@ func (a *App) ExecCommit(selection uiSelection, input uiExecCommitInput) (gitx.C
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	commit, err := a.deps.execCommit(ctx, endpoint, bearer, branch, message)
 	if err != nil && isMCPDialFailure(err) {
-		return gitx.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return model.CommitWorkingTreeResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return commit, err
 }
 
 // ExecPush pushes the selected environment's current branch to its remote.
-func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushWorkingTreeBranchResult, error) {
+func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (model.PushWorkingTreeBranchResult, error) {
 	selection = normalizeSelection(selection)
 	branch := strings.TrimSpace(input.Branch)
 	if err := errMissingTenantOrEnvironment("push environment branch", selection.Tenant, selection.Environment); err != nil {
-		return gitx.PushWorkingTreeBranchResult{}, err
+		return model.PushWorkingTreeBranchResult{}, err
 	}
 	if branch == "" {
-		return gitx.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return gitx.PushWorkingTreeBranchResult{}, err
+		return model.PushWorkingTreeBranchResult{}, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -108,7 +107,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushW
 	}
 	mcpPort := config.MCPPortForResult(result)
 	if a.deps.canReachMCPEndpoint != nil && !a.deps.canReachMCPEndpoint(mcpPort) {
-		return gitx.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
+		return model.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(
 			a.classifyMCPUnreachable(mcpPort),
 			errors.New(mcp.DescribeLocalMCPUnreachable(result.Tenant, result.EnvConfig.Name, mcpPort)),
 		)
@@ -117,7 +116,7 @@ func (a *App) ExecPush(selection uiSelection, input uiExecPushInput) (gitx.PushW
 	bearer := a.mcpBearer(result.Tenant, result.EnvConfig.Name)
 	push, err := a.deps.execPush(ctx, endpoint, bearer, branch, strings.TrimSpace(input.Remote))
 	if err != nil && isMCPDialFailure(err) {
-		return gitx.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
+		return model.PushWorkingTreeBranchResult{}, wrapMCPUnreachableErrorWithKind(a.classifyMCPUnreachable(mcpPort), err)
 	}
 	return push, err
 }

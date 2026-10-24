@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ExposedService is one erun-expose Ingress ("expose-<service>"); the Ingress is the source of truth.
@@ -47,7 +48,7 @@ func ListExposedServices(req config.ShellLaunchParams) ([]ExposedService, error)
 }
 
 // FilterExposedServices maps observed Ingresses to erun-expose exposures.
-func FilterExposedServices(ingresses []ObservedIngress, certs []ObservedCertificate) []ExposedService {
+func FilterExposedServices(ingresses []model.ObservedIngress, certs []model.ObservedCertificate) []ExposedService {
 	tlsSecretByHost := TlsSecretsByHost(ingresses)
 	certBySecret := certificatesBySecret(certs)
 	services := make([]ExposedService, 0, len(ingresses))
@@ -71,7 +72,7 @@ func FilterExposedServices(ingresses []ObservedIngress, certs []ObservedCertific
 }
 
 // TlsSecretsByHost maps each TLS-terminated host to its Ingress's TLS Secret name.
-func TlsSecretsByHost(ingresses []ObservedIngress) map[string]string {
+func TlsSecretsByHost(ingresses []model.ObservedIngress) map[string]string {
 	tlsSecretByHost := make(map[string]string)
 	for _, ing := range ingresses {
 		for _, tls := range ing.TLS {
@@ -83,8 +84,8 @@ func TlsSecretsByHost(ingresses []ObservedIngress) map[string]string {
 	return tlsSecretByHost
 }
 
-func certificatesBySecret(certs []ObservedCertificate) map[string]ObservedCertificate {
-	certBySecret := make(map[string]ObservedCertificate, len(certs))
+func certificatesBySecret(certs []model.ObservedCertificate) map[string]model.ObservedCertificate {
+	certBySecret := make(map[string]model.ObservedCertificate, len(certs))
 	for _, cert := range certs {
 		if cert.SecretName != "" {
 			certBySecret[cert.SecretName] = cert
@@ -94,7 +95,7 @@ func certificatesBySecret(certs []ObservedCertificate) map[string]ObservedCertif
 }
 
 // tlsReadiness reports an absent Certificate as not ready with a reason, never as success.
-func tlsReadiness(secretName string, certBySecret map[string]ObservedCertificate) (ready bool, notReadyReason string) {
+func tlsReadiness(secretName string, certBySecret map[string]model.ObservedCertificate) (ready bool, notReadyReason string) {
 	cert, found := certBySecret[secretName]
 	if !found {
 		return false, fmt.Sprintf("no certificate found for secret %s", secretName)
@@ -107,7 +108,7 @@ func tlsReadiness(secretName string, certBySecret map[string]ObservedCertificate
 
 // certificateNotReadyReason prefers the deepest CertificateRequest/Order/Challenge
 // reason over the Certificate's often generic condition.
-func certificateNotReadyReason(cert ObservedCertificate) string {
+func certificateNotReadyReason(cert model.ObservedCertificate) string {
 	for _, order := range cert.Orders {
 		for _, challenge := range order.Challenges {
 			if challenge.Reason != "" {

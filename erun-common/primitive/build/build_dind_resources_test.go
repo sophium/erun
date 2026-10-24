@@ -7,23 +7,24 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 type fakeDockerStoreForDindResources struct {
-	tenant config.TenantConfig
+	tenant model.TenantConfig
 	envs   []config.EnvConfig
 }
 
-func (f fakeDockerStoreForDindResources) ListTenantConfigs() ([]config.TenantConfig, error) {
-	return []config.TenantConfig{f.tenant}, nil
+func (f fakeDockerStoreForDindResources) ListTenantConfigs() ([]model.TenantConfig, error) {
+	return []model.TenantConfig{f.tenant}, nil
 }
 
-func (f fakeDockerStoreForDindResources) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
+func (f fakeDockerStoreForDindResources) LoadTenantConfig(name string) (model.TenantConfig, string, error) {
 	if name == f.tenant.Name {
 		return f.tenant, "", nil
 	}
-	return config.TenantConfig{}, "", fmt.Errorf("tenant %q not found", name)
+	return model.TenantConfig{}, "", fmt.Errorf("tenant %q not found", name)
 }
 
 func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config.EnvConfig, error) {
@@ -33,10 +34,10 @@ func (f fakeDockerStoreForDindResources) ListEnvConfigs(tenant string) ([]config
 	return f.envs, nil
 }
 
-func storeWithDindConfig(t *testing.T, projectRoot string, resources config.RuntimePodResources) shared.DockerStore {
+func storeWithDindConfig(t *testing.T, projectRoot string, resources model.RuntimePodResources) shared.DockerStore {
 	t.Helper()
 	return fakeDockerStoreForDindResources{
-		tenant: config.TenantConfig{Name: "acme"},
+		tenant: model.TenantConfig{Name: "acme"},
 		envs: []config.EnvConfig{{
 			Name:           "dev",
 			LocalRepoPath:  filepath.Clean(projectRoot),
@@ -61,10 +62,10 @@ func TestResolveDockerBuildDindPodResourcesPrefersEnvVarsOverConfig(t *testing.T
 	t.Setenv(shared.DindMemoryLimitMiBEnvVar, "8192")
 
 	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
+	store := storeWithDindConfig(t, dir, model.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
 
 	got := shared.ResolveDockerBuildDindPodResources(store, dir, "dev")
-	want := config.RuntimePodResources{CPU: "8", Memory: "8192Mi"}
+	want := model.RuntimePodResources{CPU: "8", Memory: "8192Mi"}
 	if got != want {
 		t.Fatalf("expected env vars to win, got %+v want %+v", got, want)
 	}
@@ -76,10 +77,10 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarPerField(t *tes
 	t.Setenv(shared.DindMemoryLimitMiBEnvVar, "8192")
 
 	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
+	store := storeWithDindConfig(t, dir, model.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
 
 	got := shared.ResolveDockerBuildDindPodResources(store, dir, "dev")
-	want := config.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
+	want := model.RuntimePodResources{CPU: "2", Memory: "8192Mi"}
 	if got != want {
 		t.Fatalf("expected malformed CPU to fall back to config and memory to take the env var, got %+v want %+v", got, want)
 	}
@@ -92,7 +93,7 @@ func TestResolveDockerBuildDindPodResourcesIgnoresMalformedEnvVarWithNoConfig(t 
 
 	dir := t.TempDir()
 	got := shared.ResolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
-	want := config.RuntimePodResources{CPU: "8", Memory: config.DefaultRuntimeDindMemory}
+	want := model.RuntimePodResources{CPU: "8", Memory: config.DefaultRuntimeDindMemory}
 	if got != want {
 		t.Fatalf("expected valid CPU env var and default memory, got %+v want %+v", got, want)
 	}

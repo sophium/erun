@@ -18,30 +18,6 @@ const (
 	CloudTokenStatusUnknown       = "unknown"
 )
 
-type CloudProviderConfig struct {
-	Alias         string `json:"alias" yaml:"alias"`
-	Provider      string `json:"provider" yaml:"provider"`
-	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
-	AccountID     string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
-	Profile       string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	SSORegion     string `json:"ssoRegion,omitempty" yaml:"ssoregion,omitempty"`
-	SSOStartURL   string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
-	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" yaml:"oidcissuerurl,omitempty"`
-
-	// Cloudflare is set only for CloudProviderCloudflare; the token is stored as a secret-store reference.
-	Cloudflare *CloudflareProviderConfig `json:"cloudflare,omitempty" yaml:"cloudflare,omitempty"`
-
-	// ERun is set only for CloudProviderERun; the refresh token is stored as a secret-store reference.
-	ERun *ERunProviderConfig `json:"erun,omitempty" yaml:"erun,omitempty"`
-}
-
-// CloudflareProviderConfig is a Cloudflare alias identity; only TokenRef is persisted, never the token.
-type CloudflareProviderConfig struct {
-	AccountID string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
-	TokenName string `json:"tokenName,omitempty" yaml:"tokenname,omitempty"`
-	TokenRef  string `json:"tokenRef,omitempty" yaml:"tokenref,omitempty"`
-}
-
 // ParseCloudProviderAlias is the inverse of CloudProviderAlias; ok=false means it cannot be parsed.
 func ParseCloudProviderAlias(alias string) (username, accountID, provider string, ok bool) {
 	alias = strings.TrimSpace(alias)

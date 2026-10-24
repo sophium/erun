@@ -9,23 +9,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
-
-// ObservedHelmRelease is the runtime release's record; Found false with Error set means observe could not look.
-type ObservedHelmRelease struct {
-	Name           string                     `json:"name"`
-	Found          bool                       `json:"found"`
-	Revision       int                        `json:"revision,omitempty"`
-	Status         string                     `json:"status,omitempty"`
-	Chart          string                     `json:"chart,omitempty"`
-	ChartVersion   string                     `json:"chartVersion,omitempty"`
-	AppVersion     string                     `json:"appVersion,omitempty"`
-	ImageOverrides map[string]string          `json:"imageOverrides,omitempty"`
-	RuntimePod     config.RuntimePodResources `json:"runtimePod,omitempty"`
-	// Error explains why a field could not be populated; empty means the read is trustworthy.
-	Error string `json:"error,omitempty"`
-}
 
 // ObserveHelmStatusArgs builds `helm status <release> -o json`.
 func ObserveHelmStatusArgs(req config.ShellLaunchParams) []string {
@@ -79,19 +65,19 @@ func splitHelmChartNameVersion(chart string) (name, version string, ok bool) {
 }
 
 // FetchObservedHelmRelease reads the runtime release; Error distinguishes a failed read from a missing release.
-func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *ObservedHelmRelease {
+func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace string) *model.ObservedHelmRelease {
 	raw, stderr, err := runObserveHelm(args)
 	if err != nil {
 		if deploy.IsHelmReleaseNotFound(stderr) {
-			return &ObservedHelmRelease{Name: releaseName}
+			return &model.ObservedHelmRelease{Name: releaseName}
 		}
-		return &ObservedHelmRelease{Name: releaseName, Error: deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err)}
+		return &model.ObservedHelmRelease{Name: releaseName, Error: deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err)}
 	}
 	var status helmStatusOutput
 	if jsonErr := json.Unmarshal(raw, &status); jsonErr != nil {
-		return &ObservedHelmRelease{Name: releaseName, Error: fmt.Sprintf("observe: could not parse helm status for release %q: %v", releaseName, jsonErr)}
+		return &model.ObservedHelmRelease{Name: releaseName, Error: fmt.Sprintf("observe: could not parse helm status for release %q: %v", releaseName, jsonErr)}
 	}
-	release := &ObservedHelmRelease{
+	release := &model.ObservedHelmRelease{
 		Name:     status.Name,
 		Found:    true,
 		Revision: status.Version,
@@ -110,7 +96,7 @@ func FetchObservedHelmRelease(args, listArgs []string, releaseName, namespace st
 
 // populateObservedChartFields fills chart fields from `helm list`, recording in Error
 // when it cannot rather than leaving them empty.
-func populateObservedChartFields(release *ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
+func populateObservedChartFields(release *model.ObservedHelmRelease, listArgs []string, releaseName, namespace string) {
 	raw, stderr, err := runObserveHelm(listArgs)
 	if err != nil {
 		release.Error = appendObserveHelmReleaseError(release.Error, "could not determine chart/appVersion: "+deploy.ObserveHelmReadErrorMessage(releaseName, namespace, stderr, err))
@@ -186,34 +172,34 @@ func stringifyMap(m map[string]interface{}) map[string]string {
 	return out
 }
 
-func findRuntimePodResourceLimits(values map[string]interface{}) config.RuntimePodResources {
+func findRuntimePodResourceLimits(values map[string]interface{}) model.RuntimePodResources {
 	if v, ok := values["runtime"]; ok {
 		if m, ok := v.(map[string]interface{}); ok {
-			if resources := runtimePodResourcesFromRuntimeValue(m); resources != (config.RuntimePodResources{}) {
+			if resources := runtimePodResourcesFromRuntimeValue(m); resources != (model.RuntimePodResources{}) {
 				return resources
 			}
 		}
 	}
 	for _, v := range values {
 		if child, ok := v.(map[string]interface{}); ok {
-			if resources := findRuntimePodResourceLimits(child); resources != (config.RuntimePodResources{}) {
+			if resources := findRuntimePodResourceLimits(child); resources != (model.RuntimePodResources{}) {
 				return resources
 			}
 		}
 	}
-	return config.RuntimePodResources{}
+	return model.RuntimePodResources{}
 }
 
-func runtimePodResourcesFromRuntimeValue(runtime map[string]interface{}) config.RuntimePodResources {
+func runtimePodResourcesFromRuntimeValue(runtime map[string]interface{}) model.RuntimePodResources {
 	resources, ok := runtime["resources"].(map[string]interface{})
 	if !ok {
-		return config.RuntimePodResources{}
+		return model.RuntimePodResources{}
 	}
 	limits, ok := resources["limits"].(map[string]interface{})
 	if !ok {
-		return config.RuntimePodResources{}
+		return model.RuntimePodResources{}
 	}
 	cpu, _ := limits["cpu"].(string)
 	memory, _ := limits["memory"].(string)
-	return config.RuntimePodResources{CPU: cpu, Memory: memory}
+	return model.RuntimePodResources{CPU: cpu, Memory: memory}
 }

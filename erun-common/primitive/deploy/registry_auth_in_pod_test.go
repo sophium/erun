@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -51,7 +52,7 @@ func ghcrPrivateRegistryServer(t *testing.T, version string) *httptest.Server {
 	return server
 }
 
-func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (registry.RuntimeRegistryVersions, error) {
+func resolveGHCRChartWithDeclaredCredential(t *testing.T, version string) (model.RuntimeRegistryVersions, error) {
 	t.Helper()
 	server := ghcrPrivateRegistryServer(t, version)
 	return registry.ResolveConfiguredRuntimeRegistryVersions(context.Background(), config.RuntimeRegistryConfig{

@@ -9,6 +9,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcptools"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
@@ -174,7 +175,7 @@ func usageTestStoreOfType(tenant, environment string, envType config.Environment
 	}
 	return listToolStore{
 		toolConfig:    config.ERunConfig{DefaultTenant: tenant},
-		tenantConfigs: map[string]config.TenantConfig{tenant: {Name: tenant, DefaultEnvironment: environment}},
+		tenantConfigs: map[string]model.TenantConfig{tenant: {Name: tenant, DefaultEnvironment: environment}},
 		envConfigs:    map[string]config.EnvConfig{tenant + "/" + environment: env},
 		envsByTenant:  map[string][]config.EnvConfig{tenant: {env}},
 	}

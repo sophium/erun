@@ -6,9 +6,9 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/observe"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -57,8 +57,8 @@ func NewObserveCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error) {
-	checks := make([]observe.ObserveSecretCheck, 0, len(raw))
+func parseObserveSecretChecks(raw []string) ([]model.ObserveSecretCheck, error) {
+	checks := make([]model.ObserveSecretCheck, 0, len(raw))
 	for _, entry := range raw {
 		name, key, found := strings.Cut(entry, "=")
 		name = strings.TrimSpace(name)
@@ -66,25 +66,25 @@ func parseObserveSecretChecks(raw []string) ([]observe.ObserveSecretCheck, error
 		if !found || name == "" || key == "" {
 			return nil, fmt.Errorf("--secret must be name=key, got %q", entry)
 		}
-		checks = append(checks, observe.ObserveSecretCheck{Name: name, Key: key})
+		checks = append(checks, model.ObserveSecretCheck{Name: name, Key: key})
 	}
 	return checks, nil
 }
 
-func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, checks []observe.ObserveSecretCheck) error {
+func runObserveCommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, checks []model.ObserveSecretCheck) error {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	observed, err := observe.RunObservation(ctx, req, observe.ObserveParams{Secrets: checks})
+	observed, err := observe.RunObservation(ctx, req, model.ObserveParams{Secrets: checks})
 	if err != nil {
 		return err
 	}
 	if ctx.DryRun {
 		return nil
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(observed)
 	}
 	return writeObserveResult(ctx, observed)

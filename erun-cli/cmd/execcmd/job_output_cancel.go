@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ func newJobOutputCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		Example: "  erun exec job output --tenant team --environment dev --id suite --offset 4096",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobOutput(cmd, resolveOpen, jobspkg.ReadEnvironmentJobOutputParams{
+			return runJobOutput(cmd, resolveOpen, model.ReadEnvironmentJobOutputParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -45,7 +46,7 @@ func newJobOutputCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jobspkg.ReadEnvironmentJobOutputParams) error {
+func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.ReadEnvironmentJobOutputParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -57,7 +58,7 @@ func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if _, err := fmt.Fprint(ctx.Stdout, output.Output); err != nil {
 			return err
 		}
@@ -70,7 +71,7 @@ func runJobOutput(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	return ctx.WriteResult(output)
 }
 
-func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.ReadEnvironmentJobOutputParams) (jobspkg.EnvironmentJobOutput, bool, error) {
+func readJobOutput(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.ReadEnvironmentJobOutputParams) (jobspkg.EnvironmentJobOutput, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return jobOutputFromEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -102,7 +103,7 @@ func newJobCancelCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 			"  erun exec job cancel --tenant team --environment dev --id suite --signal KILL",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobCancel(cmd, resolveOpen, jobspkg.CancelEnvironmentJobParams{
+			return runJobCancel(cmd, resolveOpen, model.CancelEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -117,7 +118,7 @@ func newJobCancelCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jobspkg.CancelEnvironmentJobParams) error {
+func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.CancelEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		message := fmt.Sprintf("job already finished: %s (%s)", result.Job.ID, result.Job.State)
 		if result.Signalled {
 			message = fmt.Sprintf("job cancelled: %s, SIG%s to process group %d", result.Job.ID, result.Signal, result.TargetPID)
@@ -141,7 +142,7 @@ func runJobCancel(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	return ctx.WriteResult(result)
 }
 
-func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.CancelEnvironmentJobParams) (jobspkg.CancelEnvironmentJobResult, bool, error) {
+func cancelJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.CancelEnvironmentJobParams) (jobspkg.CancelEnvironmentJobResult, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return cancelJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}

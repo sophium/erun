@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/remoteinit"
 )
 
@@ -25,7 +26,7 @@ type RemoteInitFinishPrompt func(label string) (string, error)
 
 // RunRemoteInitFinish runs the missing recovery steps (tracing them under
 // dry-run), mirroring `erun init --remote`, and returns the updated inspection.
-func RunRemoteInitFinish(ctx core.Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (RemoteInitInspection, error) {
+func RunRemoteInitFinish(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (model.RemoteInitInspection, error) {
 	if inspection.HomeDir == "" {
 		return inspection, errors.New("home directory is required to finish remote init")
 	}
@@ -63,7 +64,7 @@ func RunRemoteInitFinish(ctx core.Context, inspection RemoteInitInspection, para
 	return saveRemoteInitCompletionMarker(ctx, inspection, repository, repositoryURL)
 }
 
-func resolveRemoteInitRepositoryURL(ctx core.Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, missing []RemoteInitInspectionItem) (string, error) {
+func resolveRemoteInitRepositoryURL(ctx core.Context, inspection model.RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, missing []model.RemoteInitInspectionItem) (string, error) {
 	repositoryURL := strings.TrimSpace(params.RepositoryURL)
 	if repositoryURL == "" {
 		repositoryURL = strings.TrimSpace(inspection.Marker.RepositoryURL)
@@ -85,16 +86,16 @@ func resolveRemoteInitRepositoryURL(ctx core.Context, inspection RemoteInitInspe
 	return repositoryURL, nil
 }
 
-func appendMissingCodeCommitKeypair(missing []RemoteInitInspectionItem, repository remoteinit.RemoteRepositorySpec, homeDir string) []RemoteInitInspectionItem {
+func appendMissingCodeCommitKeypair(missing []model.RemoteInitInspectionItem, repository remoteinit.RemoteRepositorySpec, homeDir string) []model.RemoteInitInspectionItem {
 	if repository.CodeCommitHost == "" || remoteInitMissingItem(missing, "CodeCommit SSH keypair") {
 		return missing
 	}
 	rsaPath := defaultRemoteInitCodeCommitSSHKeyPath(homeDir)
 	if _, err := os.Stat(rsaPath); err != nil {
-		missing = append(missing, RemoteInitInspectionItem{
+		missing = append(missing, model.RemoteInitInspectionItem{
 			Label:  "CodeCommit SSH keypair",
 			Path:   rsaPath,
-			Status: RemoteInitInspectionStatusMissing,
+			Status: model.RemoteInitInspectionStatusMissing,
 		})
 	}
 	return missing
@@ -108,7 +109,7 @@ type remoteInitKeyState struct {
 	needsGitCheckout           bool
 }
 
-func applyRemoteInitMissingItems(ctx core.Context, inspection RemoteInitInspection, missing []RemoteInitInspectionItem) (remoteInitKeyState, error) {
+func applyRemoteInitMissingItems(ctx core.Context, inspection model.RemoteInitInspection, missing []model.RemoteInitInspectionItem) (remoteInitKeyState, error) {
 	state := remoteInitKeyState{sshKeyPath: defaultRemoteInitSSHKeyPath(inspection.HomeDir)}
 	for _, item := range orderRemoteInitMissingItems(missing) {
 		if err := applyRemoteInitMissingItem(ctx, inspection, item, &state); err != nil {
@@ -120,7 +121,7 @@ func applyRemoteInitMissingItems(ctx core.Context, inspection RemoteInitInspecti
 
 // applyRemoteInitMissingItem materializes one item; the clone is deferred
 // until every key exists.
-func applyRemoteInitMissingItem(ctx core.Context, inspection RemoteInitInspection, item RemoteInitInspectionItem, state *remoteInitKeyState) error {
+func applyRemoteInitMissingItem(ctx core.Context, inspection model.RemoteInitInspection, item model.RemoteInitInspectionItem, state *remoteInitKeyState) error {
 	switch item.Label {
 	case "project root":
 		return finishRemoteInitProjectRoot(ctx, item.Path)
@@ -145,7 +146,7 @@ func applyRemoteInitMissingItem(ctx core.Context, inspection RemoteInitInspectio
 }
 
 // runRemoteInitGitCheckout may set repository's CodeCommit SSH key ID.
-func runRemoteInitGitCheckout(ctx core.Context, inspection RemoteInitInspection, repository *remoteinit.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
+func runRemoteInitGitCheckout(ctx core.Context, inspection model.RemoteInitInspection, repository *remoteinit.RemoteRepositorySpec, state remoteInitKeyState, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) error {
 	codeCommitKeyPath := state.codeCommitKeyPath
 	if repository.CodeCommitHost != "" {
 		if codeCommitKeyPath == "" {
@@ -164,7 +165,7 @@ func runRemoteInitGitCheckout(ctx core.Context, inspection RemoteInitInspection,
 	return finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, state.sshKeyPath, *repository)
 }
 
-func saveRemoteInitCompletionMarker(ctx core.Context, inspection RemoteInitInspection, repository remoteinit.RemoteRepositorySpec, repositoryURL string) (RemoteInitInspection, error) {
+func saveRemoteInitCompletionMarker(ctx core.Context, inspection model.RemoteInitInspection, repository remoteinit.RemoteRepositorySpec, repositoryURL string) (model.RemoteInitInspection, error) {
 	updated := inspection
 	updated.Marker.Tenant = inspection.Tenant
 	updated.Marker.Environment = inspection.Environment
@@ -218,7 +219,7 @@ func resolveCodeCommitSSHKeyID(ctx core.Context, repository *remoteinit.RemoteRe
 
 // resolveRemoteInitRepositorySpec shares init's URL parser; a blank URL yields
 // a zero spec, treated as plain SSH.
-func resolveRemoteInitRepositorySpec(repositoryURL string, marker remoteinit.RemoteInitMarker) remoteinit.RemoteRepositorySpec {
+func resolveRemoteInitRepositorySpec(repositoryURL string, marker model.RemoteInitMarker) remoteinit.RemoteRepositorySpec {
 	repositoryURL = strings.TrimSpace(repositoryURL)
 	if repositoryURL == "" {
 		return remoteinit.RemoteRepositorySpec{
@@ -245,9 +246,9 @@ func remoteInitMarkerRepositoryURL(repository remoteinit.RemoteRepositorySpec, f
 
 // orderRemoteInitMissingItems puts the project root and keypairs before the
 // checkout, including a dynamically appended CodeCommit item.
-func orderRemoteInitMissingItems(items []RemoteInitInspectionItem) []RemoteInitInspectionItem {
+func orderRemoteInitMissingItems(items []model.RemoteInitInspectionItem) []model.RemoteInitInspectionItem {
 	order := []string{"project root", "SSH keypair", "CodeCommit SSH keypair", "git checkout", "agent skills"}
-	ordered := make([]RemoteInitInspectionItem, 0, len(items))
+	ordered := make([]model.RemoteInitInspectionItem, 0, len(items))
 	for _, label := range order {
 		for _, item := range items {
 			if item.Label == label {
@@ -258,7 +259,7 @@ func orderRemoteInitMissingItems(items []RemoteInitInspectionItem) []RemoteInitI
 	return ordered
 }
 
-func remoteInitMissingItem(items []RemoteInitInspectionItem, label string) bool {
+func remoteInitMissingItem(items []model.RemoteInitInspectionItem, label string) bool {
 	for _, item := range items {
 		if item.Label == label {
 			return true
@@ -268,7 +269,7 @@ func remoteInitMissingItem(items []RemoteInitInspectionItem, label string) bool 
 }
 
 // WriteRemoteInitInspectionReport renders the inspection to ctx.Stdout.
-func WriteRemoteInitInspectionReport(ctx core.Context, inspection RemoteInitInspection) error {
+func WriteRemoteInitInspectionReport(ctx core.Context, inspection model.RemoteInitInspection) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Remote init checks for %s/%s:\n", remoteInitOrUnknown(inspection.Tenant), remoteInitOrUnknown(inspection.Environment)); err != nil {
 		return err
 	}

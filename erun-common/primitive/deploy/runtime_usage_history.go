@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -32,13 +32,13 @@ type RuntimeUsageHistory struct {
 	Restarts int `json:"restarts,omitempty"`
 
 	// Samples is never used to recompute the aggregates.
-	Samples []config.RuntimeUsage `json:"samples,omitempty"`
+	Samples []model.RuntimeUsage `json:"samples,omitempty"`
 }
 
 // Latest returns the newest retained sample.
-func (h RuntimeUsageHistory) Latest() (config.RuntimeUsage, bool) {
+func (h RuntimeUsageHistory) Latest() (model.RuntimeUsage, bool) {
 	if len(h.Samples) == 0 {
-		return config.RuntimeUsage{}, false
+		return model.RuntimeUsage{}, false
 	}
 	return h.Samples[len(h.Samples)-1], true
 }

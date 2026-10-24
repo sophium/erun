@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A pod template predating the chart's gateway block drops the gateway values
@@ -15,29 +16,6 @@ import (
 
 // GatewayBaseURLEnv is rendered once a gateway is configured; the runtime settings relay keys off it too.
 const GatewayBaseURLEnv = "ANTHROPIC_BASE_URL"
-
-// RuntimeAgentCredentialState is the verdict on the pod's model-provider wiring.
-type RuntimeAgentCredentialState string
-
-const (
-	// RuntimeAgentCredentialNotApplicable asserts nothing: an env no gateway routes may reach a provider otherwise.
-	RuntimeAgentCredentialNotApplicable RuntimeAgentCredentialState = "not-applicable"
-	RuntimeAgentCredentialConfigured    RuntimeAgentCredentialState = "configured"
-	// RuntimeAgentCredentialMissing: a gateway routes the env but the template lacks the routing variable.
-	RuntimeAgentCredentialMissing RuntimeAgentCredentialState = "missing"
-	// RuntimeAgentCredentialUnknown is never reported as Missing: an unread template is not evidence of absence.
-	RuntimeAgentCredentialUnknown RuntimeAgentCredentialState = "unknown"
-)
-
-// RuntimeAgentCredentialStatus answers whether the runtime pod can reach the configured provider.
-type RuntimeAgentCredentialStatus struct {
-	State RuntimeAgentCredentialState `json:"state"`
-	// GatewayBaseURL is a routing address, never a credential.
-	GatewayBaseURL string `json:"gatewayBaseURL,omitempty"`
-	Container      string `json:"container,omitempty"`
-	// ReadError is set only when the template could not be observed, never for a genuinely empty one.
-	ReadError string `json:"readError,omitempty"`
-}
 
 // RuntimeAgentCredentialParams carries ContainerEnvObserved so an unread template
 // is distinguishable from an empty one.
@@ -51,25 +29,25 @@ type RuntimeAgentCredentialParams struct {
 }
 
 // ResolveRuntimeAgentCredentialStatus is pure and never infers Missing from an unread template.
-func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) RuntimeAgentCredentialStatus {
-	status := RuntimeAgentCredentialStatus{Container: strings.TrimSpace(params.Container)}
+func ResolveRuntimeAgentCredentialStatus(params RuntimeAgentCredentialParams) model.RuntimeAgentCredentialStatus {
+	status := model.RuntimeAgentCredentialStatus{Container: strings.TrimSpace(params.Container)}
 	gateway := config.EffectiveGateway(params.Claude, params.Gateway)
 	if !gateway.Configured() {
-		status.State = RuntimeAgentCredentialNotApplicable
+		status.State = model.RuntimeAgentCredentialNotApplicable
 		return status
 	}
 	status.GatewayBaseURL = gateway.Endpoint()
 	if !params.ContainerEnvObserved {
-		status.State = RuntimeAgentCredentialUnknown
+		status.State = model.RuntimeAgentCredentialUnknown
 		return status
 	}
 	for _, name := range params.ContainerEnvNames {
 		if strings.TrimSpace(name) == GatewayBaseURLEnv {
-			status.State = RuntimeAgentCredentialConfigured
+			status.State = model.RuntimeAgentCredentialConfigured
 			return status
 		}
 	}
-	status.State = RuntimeAgentCredentialMissing
+	status.State = model.RuntimeAgentCredentialMissing
 	return status
 }
 
@@ -122,7 +100,7 @@ func RuntimeDeploymentContainerEnvNames(raw []byte, container string) (names []s
 
 // runtimeAgentCredentialApplicability resolves NotApplicable or Unknown without
 // reading, so an unreachable cluster still distinguishes the two.
-func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
+func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) model.RuntimeAgentCredentialStatus {
 	return ResolveRuntimeAgentCredentialStatus(RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,
@@ -131,7 +109,7 @@ func runtimeAgentCredentialApplicability(req config.ShellLaunchParams) RuntimeAg
 }
 
 // inspectRuntimeAgentCredentials skips the read entirely when no gateway is configured.
-func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchParams) RuntimeAgentCredentialStatus {
+func inspectRuntimeAgentCredentials(ctx core.Context, req config.ShellLaunchParams) model.RuntimeAgentCredentialStatus {
 	params := RuntimeAgentCredentialParams{
 		Claude:    req.Claude,
 		Gateway:   req.Gateway,

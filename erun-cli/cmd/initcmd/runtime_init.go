@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
@@ -159,7 +160,7 @@ func runInstallSkillsCommand(ctx core.Context, skillsDir, agentsDir string) erro
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return ctx.WriteResult(result)
 	}
 	for _, target := range result.Targets {

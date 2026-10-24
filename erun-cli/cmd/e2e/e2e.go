@@ -5,6 +5,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -64,7 +65,7 @@ func NewE2ECmd(resolveOpen shared.OpenResolver, findProjectRoot sharedpkg.Projec
 	return cmd
 }
 
-func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, findProjectRoot sharedpkg.ProjectFinderFunc, component, baseURL, version string) error {
+func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, findProjectRoot sharedpkg.ProjectFinderFunc, component, baseURL, version string) error {
 	plan, err := e2e.ResolveE2EPlan(findProjectRoot, component)
 	if err != nil {
 		return err
@@ -80,14 +81,14 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params sha
 		return err
 	}
 
-	e2eResult, err := e2e.RunE2E(ctx, e2e.E2EParams{
+	e2eResult, err := e2e.RunE2E(ctx, model.E2EParams{
 		Plan:        plan,
 		Target:      target,
 		BaseURL:     baseURL,
 		Version:     version,
 		TargetNamed: targetNamed,
 	})
-	if e2eResult == nil || ctx.DryRun || ctx.Output != core.OutputJSON {
+	if e2eResult == nil || ctx.DryRun || ctx.Output != model.OutputJSON {
 		return err
 	}
 	if writeErr := ctx.WriteResult(e2eResult); writeErr != nil {
@@ -97,16 +98,16 @@ func runE2ECommand(ctx core.Context, resolveOpen shared.OpenResolver, params sha
 }
 
 // resolveE2ETarget resolves no environment when --base-url and --version name the target.
-func resolveE2ETarget(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, targetNamed bool, baseURL, version string) (e2e.E2ETarget, error) {
+func resolveE2ETarget(resolveOpen shared.OpenResolver, params model.OpenParams, targetNamed bool, baseURL, version string) (model.E2ETarget, error) {
 	if !targetNamed && strings.TrimSpace(baseURL) != "" && strings.TrimSpace(version) != "" {
-		return e2e.E2ETarget{}, nil
+		return model.E2ETarget{}, nil
 	}
 	result, err := resolveOpen(params)
 	if err != nil {
-		return e2e.E2ETarget{}, err
+		return model.E2ETarget{}, err
 	}
 	req := cloud.ShellLaunchParamsFromResult(result)
-	return e2e.E2ETarget{
+	return model.E2ETarget{
 		Tenant:            req.Tenant,
 		Environment:       req.Environment,
 		Namespace:         req.Namespace,

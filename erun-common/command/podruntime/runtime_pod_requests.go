@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -20,7 +21,7 @@ func RuntimePodRequestsArgs(req config.ShellLaunchParams) []string {
 }
 
 // readRuntimeUsageRequests never fails its caller: losing requests must not cost the cgroup reading.
-func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams) *config.RuntimeUsageRequests {
+func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerFunc, req config.ShellLaunchParams) *model.RuntimeUsageRequests {
 	ctx.TraceCommand("", "kubectl", RuntimePodRequestsArgs(req)...)
 	if ctx.DryRun {
 		// A zero reading would claim a reservation of nothing.
@@ -31,11 +32,11 @@ func readRuntimeUsageRequests(ctx core.Context, runner RuntimePodRequestsRunnerF
 	}
 	raw, err := runner(RuntimePodRequestsArgs(req))
 	if err != nil {
-		return &config.RuntimeUsageRequests{Unavailable: err.Error()}
+		return &model.RuntimeUsageRequests{Unavailable: err.Error()}
 	}
 	requests, err := parseRuntimePodRequests(raw)
 	if err != nil {
-		return &config.RuntimeUsageRequests{Unavailable: err.Error()}
+		return &model.RuntimeUsageRequests{Unavailable: err.Error()}
 	}
 	return requests
 }
@@ -48,7 +49,7 @@ func runPodRequestsKubectl(args []string) ([]byte, error) {
 	return raw, nil
 }
 
-func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
+func parseRuntimePodRequests(raw []byte) (*model.RuntimeUsageRequests, error) {
 	if strings.TrimSpace(string(raw)) == "" {
 		return nil, fmt.Errorf("kubectl returned no pod list for this environment's release")
 	}
@@ -68,7 +69,7 @@ func parseRuntimePodRequests(raw []byte) (*config.RuntimeUsageRequests, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &config.RuntimeUsageRequests{Containers: containers, Pod: podRequests}, nil
+	return &model.RuntimeUsageRequests{Containers: containers, Pod: podRequests}, nil
 }
 
 // During a rollout the Running pod wins; ties sort by name for a deterministic reading.
@@ -97,22 +98,22 @@ func selectRuntimePodForRequests(items []deploy.PodStatusItem) (deploy.PodStatus
 
 // An unparseable quantity is an error, not a zero: understating the reservation is the
 // one wrong answer that matters.
-func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]config.KubernetesRequests, error) {
-	var containers map[string]config.KubernetesRequests
+func declaredContainerRequests(pod deploy.PodStatusItem) (map[string]model.KubernetesRequests, error) {
+	var containers map[string]model.KubernetesRequests
 	for _, container := range pod.Spec.Containers {
 		requests, err := kubernetesRequestsFromValues(container.Resources.Requests)
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", container.Name, err)
 		}
 		if containers == nil {
-			containers = make(map[string]config.KubernetesRequests, len(pod.Spec.Containers))
+			containers = make(map[string]model.KubernetesRequests, len(pod.Spec.Containers))
 		}
 		containers[container.Name] = requests
 	}
 	return containers, nil
 }
 
-func effectivePodRequests(pod deploy.PodStatusItem) (config.KubernetesRequests, error) {
+func effectivePodRequests(pod deploy.PodStatusItem) (model.KubernetesRequests, error) {
 	return EffectiveKubernetesPodRequests(
 		kubernetesContainerResources(pod.Spec.Containers),
 		kubernetesContainerResources(pod.Spec.InitContainers),
@@ -139,24 +140,24 @@ func kubernetesContainerResources(containers []deploy.SpecContainerEntry) []Kube
 
 // EffectiveKubernetesPodRequests is max(max over init containers, sum over containers),
 // per resource, matching the scheduler.
-func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (config.KubernetesRequests, error) {
+func EffectiveKubernetesPodRequests(containers, initContainers []KubernetesContainerResources) (model.KubernetesRequests, error) {
 	sum, err := sumContainerRequests(containers)
 	if err != nil {
-		return config.KubernetesRequests{}, err
+		return model.KubernetesRequests{}, err
 	}
 	initPeak, err := maxContainerRequests(initContainers)
 	if err != nil {
-		return config.KubernetesRequests{}, err
+		return model.KubernetesRequests{}, err
 	}
 	return kubectlRequestsMax(sum, initPeak), nil
 }
 
-func sumContainerRequests(containers []KubernetesContainerResources) (config.KubernetesRequests, error) {
-	total := config.KubernetesRequests{}
+func sumContainerRequests(containers []KubernetesContainerResources) (model.KubernetesRequests, error) {
+	total := model.KubernetesRequests{}
 	for _, container := range containers {
 		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
-			return config.KubernetesRequests{}, fmt.Errorf("container %s: %w", container.Name, err)
+			return model.KubernetesRequests{}, fmt.Errorf("container %s: %w", container.Name, err)
 		}
 		total.CPUMilli += requests.CPUMilli
 		total.MemoryBytes += requests.MemoryBytes
@@ -164,38 +165,38 @@ func sumContainerRequests(containers []KubernetesContainerResources) (config.Kub
 	return total, nil
 }
 
-func maxContainerRequests(containers []KubernetesContainerResources) (config.KubernetesRequests, error) {
-	peak := config.KubernetesRequests{}
+func maxContainerRequests(containers []KubernetesContainerResources) (model.KubernetesRequests, error) {
+	peak := model.KubernetesRequests{}
 	for _, container := range containers {
 		requests, err := kubernetesRequestsFromValues(container.Requests)
 		if err != nil {
-			return config.KubernetesRequests{}, fmt.Errorf("init container %s: %w", container.Name, err)
+			return model.KubernetesRequests{}, fmt.Errorf("init container %s: %w", container.Name, err)
 		}
 		peak = kubectlRequestsMax(peak, requests)
 	}
 	return peak, nil
 }
 
-func kubectlRequestsMax(a, b config.KubernetesRequests) config.KubernetesRequests {
-	return config.KubernetesRequests{
+func kubectlRequestsMax(a, b model.KubernetesRequests) model.KubernetesRequests {
+	return model.KubernetesRequests{
 		CPUMilli:    max(a.CPUMilli, b.CPUMilli),
 		MemoryBytes: max(a.MemoryBytes, b.MemoryBytes),
 	}
 }
 
-func kubernetesRequestsFromValues(values map[string]string) (config.KubernetesRequests, error) {
-	requests := config.KubernetesRequests{}
+func kubernetesRequestsFromValues(values map[string]string) (model.KubernetesRequests, error) {
+	requests := model.KubernetesRequests{}
 	if raw := strings.TrimSpace(values["cpu"]); raw != "" {
 		milli, err := config.ParseKubernetesCPUToMilli(raw)
 		if err != nil {
-			return config.KubernetesRequests{}, fmt.Errorf("cpu request %q: %w", raw, err)
+			return model.KubernetesRequests{}, fmt.Errorf("cpu request %q: %w", raw, err)
 		}
 		requests.CPUMilli = milli
 	}
 	if raw := strings.TrimSpace(values["memory"]); raw != "" {
 		mib, err := config.ParseKubernetesMemoryToMi(raw)
 		if err != nil {
-			return config.KubernetesRequests{}, fmt.Errorf("memory request %q: %w", raw, err)
+			return model.KubernetesRequests{}, fmt.Errorf("memory request %q: %w", raw, err)
 		}
 		requests.MemoryBytes = mib * (1 << 20)
 	}

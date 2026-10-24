@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -27,7 +27,7 @@ func DockerManifestArgs(sub string, insecure bool) []string {
 
 // StableBaseVersionTag returns the unsuffixed local tag a wrapper resolves from
 // `FROM image:${ERUN_VERSION}`.
-func StableBaseVersionTag(image helm.DockerImageReference) string {
+func StableBaseVersionTag(image model.DockerImageReference) string {
 	baseVersion := strings.TrimSpace(image.BaseVersion)
 	if baseVersion == "" {
 		return ""
@@ -44,7 +44,7 @@ func StableBaseVersionTag(image helm.DockerImageReference) string {
 	return tag
 }
 
-func FingerprintTag(image helm.DockerImageReference, fingerprint, platform string) string {
+func FingerprintTag(image model.DockerImageReference, fingerprint, platform string) string {
 	registry := strings.TrimSpace(image.Registry)
 	repo := image.ImageName
 	if registry != "" {
@@ -70,7 +70,7 @@ func platformShortSuffix(platform string) string {
 }
 
 func shouldRetryAfterGHCRNamespaceLogin(err error, tag string, stdout, stderr io.Writer) bool {
-	var authErr DockerRegistryAuthError
+	var authErr model.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return false
 	}
@@ -241,7 +241,7 @@ func RunDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) erro
 
 	message := capture.Combined()
 	if IsDockerPushAuthorizationError(message) {
-		return DockerRegistryAuthError{
+		return model.DockerRegistryAuthError{
 			Tag:      tag,
 			Registry: registrypkg.DockerRegistryFromImageTag(tag),
 			Message:  strings.TrimSpace(message),

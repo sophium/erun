@@ -3,29 +3,12 @@ package observe
 import (
 	"fmt"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-// ObservedPod is one pod's readiness and, when not ready, the reason.
-type ObservedPod struct {
-	Name         string              `json:"name"`
-	Phase        string              `json:"phase"`
-	Ready        bool                `json:"ready"`
-	RestartCount int                 `json:"restartCount"`
-	Reason       string              `json:"reason,omitempty"`
-	Containers   []ObservedContainer `json:"containers,omitempty"`
-}
-
-// ObservedContainer is the image a container actually runs, plus its spec limits;
-// a hand-patched image is otherwise invisible.
-type ObservedContainer struct {
-	Name           string            `json:"name"`
-	Image          string            `json:"image"`
-	ResourceLimits map[string]string `json:"resourceLimits,omitempty"`
-}
-
 // fetchObservedPods reuses deploy's partial pod parse, tolerating kubectl version drift.
-func fetchObservedPods(args []string) ([]ObservedPod, error) {
+func fetchObservedPods(args []string) ([]model.ObservedPod, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		return nil, fmt.Errorf("observe: get pods: %w", deploy.KubectlErrorMessage(err, stderr))
@@ -34,15 +17,15 @@ func fetchObservedPods(args []string) ([]ObservedPod, error) {
 	if !ok {
 		return nil, fmt.Errorf("observe: parse pods: unrecognized kubectl output")
 	}
-	pods := make([]ObservedPod, 0, len(list.Items))
+	pods := make([]model.ObservedPod, 0, len(list.Items))
 	for _, item := range list.Items {
 		pods = append(pods, observedPodFromStatus(item))
 	}
 	return pods, nil
 }
 
-func observedPodFromStatus(item deploy.PodStatusItem) ObservedPod {
-	pod := ObservedPod{
+func observedPodFromStatus(item deploy.PodStatusItem) model.ObservedPod {
+	pod := model.ObservedPod{
 		Name:  item.Metadata.Name,
 		Phase: item.Status.Phase,
 		Ready: podStatusReady(item),
@@ -53,7 +36,7 @@ func observedPodFromStatus(item deploy.PodStatusItem) ObservedPod {
 	}
 	for _, cs := range item.Status.ContainerStatuses {
 		pod.RestartCount += cs.RestartCount
-		pod.Containers = append(pod.Containers, ObservedContainer{
+		pod.Containers = append(pod.Containers, model.ObservedContainer{
 			Name:           cs.Name,
 			Image:          cs.Image,
 			ResourceLimits: specLimits[cs.Name],

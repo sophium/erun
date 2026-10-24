@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 )
 
@@ -53,7 +54,7 @@ func (a *App) runHostedDefinitionUpload(ctx context.Context, tenant, environment
 	}
 	defer cancel()
 
-	upload, err := platform.PushEnvironmentDefinition(requestCtx, a.deps.store, client, platform.EnvDefinitionPushParams{
+	upload, err := platform.PushEnvironmentDefinition(requestCtx, a.deps.store, client, model.EnvDefinitionPushParams{
 		Tenant:      tenant,
 		Environment: environment,
 	})

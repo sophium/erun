@@ -11,6 +11,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -26,7 +27,7 @@ func isolateJobsCache(t *testing.T) {
 func jobsTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -93,7 +94,7 @@ func TestLoadEnvironmentJobsReportsStaleForwardInsteadOfEmpty(t *testing.T) {
 
 func TestLoadEnvironmentJobsFallsBackToLocalWhenNotOpen(t *testing.T) {
 	isolateJobsCache(t)
-	if _, err := jobspkg.AttachEnvironmentJob(core.Context{}, jobspkg.AttachEnvironmentJobParams{
+	if _, err := jobspkg.AttachEnvironmentJob(core.Context{}, model.AttachEnvironmentJobParams{
 		Tenant:      "erun",
 		Environment: "ux",
 		Name:        "Investigate ux",

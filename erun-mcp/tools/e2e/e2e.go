@@ -7,6 +7,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -37,9 +38,9 @@ func E2eTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRe
 				runCtx.Info("e2e: no e2e/<component>/Dockerfile suite found; nothing to run")
 				return nil
 			}
-			_, err = e2e.RunE2E(runCtx, e2e.E2EParams{
+			_, err = e2e.RunE2E(runCtx, model.E2EParams{
 				Plan: plan,
-				Target: e2e.E2ETarget{
+				Target: model.E2ETarget{
 					Tenant:            runtime.Context.Tenant,
 					Environment:       runtime.Context.Environment,
 					Namespace:         config.KubernetesNamespaceName(runtime.Context.Tenant, runtime.Context.Environment),

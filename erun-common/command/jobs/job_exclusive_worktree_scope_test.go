@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -19,7 +20,7 @@ func seedExclusiveClaim(t *testing.T, tenant, environment, id, name, scope strin
 	if _, err := activity.TakeEnvironmentActivityLease(activity.TakeEnvironmentActivityLeaseParams{
 		Tenant: tenant, Environment: environment, Name: name, ID: id,
 		Exclusive: true, Scope: scope, Now: time.Now(),
-		Holder: activity.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
+		Holder: model.EnvironmentActivityLeaseHolder{Orchestrator: "erun"},
 	}); err != nil {
 		t.Fatalf("take exclusive claim %s: %v", id, err)
 	}

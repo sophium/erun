@@ -8,15 +8,10 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-type KubernetesDeployContext struct {
-	Dir           string
-	ComponentName string
-	ChartPath     string
-}
-
-func ResolveKubernetesDeployContextsAtDir(dir string) ([]KubernetesDeployContext, error) {
+func ResolveKubernetesDeployContextsAtDir(dir string) ([]model.KubernetesDeployContext, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || filepath.Base(dir) != "k8s" {
 		return nil, fmt.Errorf("helm chart not found in current directory")
@@ -33,13 +28,13 @@ func ResolveKubernetesDeployContextsAtDir(dir string) ([]KubernetesDeployContext
 	return deployContexts, nil
 }
 
-func KubernetesDeployContextsUnderDir(dir string) ([]KubernetesDeployContext, error) {
+func KubernetesDeployContextsUnderDir(dir string) ([]model.KubernetesDeployContext, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
-	deployContexts := make([]KubernetesDeployContext, 0, len(entries))
+	deployContexts := make([]model.KubernetesDeployContext, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -50,7 +45,7 @@ func KubernetesDeployContextsUnderDir(dir string) ([]KubernetesDeployContext, er
 			continue
 		}
 
-		deployContexts = append(deployContexts, KubernetesDeployContext{
+		deployContexts = append(deployContexts, model.KubernetesDeployContext{
 			Dir:           dir,
 			ComponentName: entry.Name(),
 			ChartPath:     chartPath,
@@ -87,7 +82,7 @@ func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, proje
 		return ResolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
 	}
 
-	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+	projectRoot, err := ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 	if err != nil {
 		return "", false, err
 	}
@@ -101,7 +96,7 @@ func resolveConventionDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, proje
 func configuredK8sDirForDeploy(findProjectRoot ProjectFinderFunc, projectRootOverride string) (string, bool, error) {
 	projectRoot := strings.TrimSpace(projectRootOverride)
 	if projectRoot == "" {
-		resolved, err := ResolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+		resolved, err := ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 		if err != nil {
 			return "", false, err
 		}

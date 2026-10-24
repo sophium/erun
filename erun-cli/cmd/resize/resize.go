@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -59,10 +60,10 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 				Now:                            time.Now,
 				DeployHelmChart:                deployHelmChart,
 				LoadActivityLeases:             resizeActivityLeaseLoader(cmd.Context(), ctx, resolveOpen),
-			}, lifecycle.RuntimeResizeParams{
+			}, model.RuntimeResizeParams{
 				Tenant:      tenant,
 				Environment: environment,
-				Input: lifecycle.RuntimeResizeInput{
+				Input: model.RuntimeResizeInput{
 					CPU:                 cpu,
 					Memory:              memory,
 					DindCPU:             dindCPU,
@@ -70,12 +71,12 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 					ApplyRecommendation: applyRecommendation,
 				},
 				OverrideLease: overrideLease,
-				Holder:        activity.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
+				Holder:        model.EnvironmentActivityLeaseHolder{Orchestrator: orchestrator},
 			})
 			if err != nil {
 				return err
 			}
-			if ctx.Output == core.OutputJSON {
+			if ctx.Output == model.OutputJSON {
 				return ctx.WriteResult(result)
 			}
 			return writeResizeResult(ctx, result)
@@ -97,10 +98,10 @@ func NewResizeCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver,
 // resizeActivityLeaseLoader reads leases from the target environment's own store,
 // via its MCP edge when off-environment. It runs even under --dry-run, since
 // dry-run must still answer "would this be refused".
-func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver) func(string, string, time.Time) ([]activity.EnvironmentActivityLease, error) {
+func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver) func(string, string, time.Time) ([]model.EnvironmentActivityLease, error) {
 	probeCtx := commandCtx
 	probeCtx.DryRun = false
-	return func(tenant, environment string, now time.Time) ([]activity.EnvironmentActivityLease, error) {
+	return func(tenant, environment string, now time.Time) ([]model.EnvironmentActivityLease, error) {
 		if shared.EnvironmentTargetsItself() {
 			return activity.LoadEnvironmentActivityLeases(tenant, environment, now)
 		}
@@ -109,7 +110,7 @@ func resizeActivityLeaseLoader(ctx context.Context, commandCtx core.Context, res
 	}
 }
 
-func writeResizeResult(ctx core.Context, result lifecycle.RuntimeResizeResult) error {
+func writeResizeResult(ctx core.Context, result model.RuntimeResizeResult) error {
 	if ctx.DryRun {
 		return nil
 	}

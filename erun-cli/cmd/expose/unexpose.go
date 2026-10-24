@@ -7,6 +7,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/expose"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -59,7 +60,7 @@ func runUnexposeCommand(ctx core.Context, store expose.ExposeStore, cloudStore c
 			projectRoot = root
 		}
 	}
-	result, err := expose.RunUnexposeService(ctx, expose.UnexposeParams{
+	result, err := expose.RunUnexposeService(ctx, model.UnexposeParams{
 		Tenant:             strings.TrimSpace(tenant),
 		Environment:        strings.TrimSpace(environment),
 		ProjectRoot:        projectRoot,

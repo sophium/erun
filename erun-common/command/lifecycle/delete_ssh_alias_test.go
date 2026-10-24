@@ -8,6 +8,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 )
 
@@ -15,11 +16,11 @@ type deleteSSHConfigStore struct {
 	envs map[string][]configpkg.EnvConfig
 }
 
-func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (configpkg.TenantConfig, string, error) {
-	return configpkg.TenantConfig{Name: tenant}, "", nil
+func (s *deleteSSHConfigStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{Name: tenant}, "", nil
 }
 
-func (s *deleteSSHConfigStore) SaveTenantConfig(configpkg.TenantConfig) error { return nil }
+func (s *deleteSSHConfigStore) SaveTenantConfig(model.TenantConfig) error { return nil }
 
 func (s *deleteSSHConfigStore) DeleteTenantConfig(string) error { return nil }
 
@@ -64,7 +65,7 @@ func sandboxSSHConfig(t *testing.T) string {
 
 func writeSSHConfigBlock(t *testing.T, path, alias string, port int) {
 	t.Helper()
-	if err := configpkg.UpsertSSHConfig(path, configpkg.SSHHostEntry{
+	if err := configpkg.UpsertSSHConfig(path, model.SSHHostEntry{
 		Alias:        alias,
 		HostKeyAlias: alias,
 		HostName:     "127.0.0.1",
@@ -98,7 +99,7 @@ func TestDeleteEnvironmentKeepsSSHConfigBlockAnotherEnvironmentOwns(t *testing.T
 	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{
 		"team": {{Name: "dev_1"}, {Name: "dev-1"}},
 	}}
-	result, err := RunDeleteEnvironment(core.Context{}, DeleteEnvironmentParams{
+	result, err := RunDeleteEnvironment(core.Context{}, model.DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev_1",
 	}, store, nil)
 	if err != nil {
@@ -117,7 +118,7 @@ func TestDeleteEnvironmentDryRunReportsBlockWithoutRemovingIt(t *testing.T) {
 	writeSSHConfigBlock(t, configPath, open.SSHHostAlias("team", "dev"), 17022)
 
 	store := &deleteSSHConfigStore{envs: map[string][]configpkg.EnvConfig{"team": {{Name: "dev"}}}}
-	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, DeleteEnvironmentParams{
+	result, err := RunDeleteEnvironment(core.Context{DryRun: true}, model.DeleteEnvironmentParams{
 		Tenant: "team", Environment: "dev",
 	}, store, nil)
 	if err != nil {

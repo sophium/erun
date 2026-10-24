@@ -9,8 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/expose"
-	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/services"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -40,7 +39,7 @@ func servicesTestRuntime(t *testing.T, tenant, environment string) shared.Runtim
 	return shared.RuntimeConfig{
 		Context: shared.RuntimeContext{Tenant: tenant, Environment: environment, RepoPath: repoPath},
 		Store: listToolStore{
-			tenantConfigs: map[string]config.TenantConfig{tenant: {Name: tenant}},
+			tenantConfigs: map[string]model.TenantConfig{tenant: {Name: tenant}},
 			envConfigs: map[string]config.EnvConfig{
 				tenant + "/" + environment: {Name: environment, LocalRepoPath: repoPath, KubernetesContext: "test-context"},
 			},
@@ -73,12 +72,12 @@ func TestServicesToolReportsWhatTheNamespaceRunsAndWhatIsExposed(t *testing.T) {
 		t.Fatalf("listing does not name the environment it read: %+v", output)
 	}
 
-	want := []expose.EnvironmentService{
-		{Name: "frs-web", Type: "ClusterIP", Ports: []clusterread.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
+	want := []model.EnvironmentService{
+		{Name: "frs-web", Type: "ClusterIP", Ports: []model.ObservedServicePort{{Port: 80, Protocol: "TCP"}}},
 		{
 			Name: "pw-api", Type: "ClusterIP",
-			Ports:    []clusterread.ObservedServicePort{{Name: "http", Port: 8080, Protocol: "TCP"}},
-			Exposure: &expose.ServiceExposure{Label: "validator", Hostname: "validator.frs-dev.services.example.com", Scheme: "https"},
+			Ports:    []model.ObservedServicePort{{Name: "http", Port: 8080, Protocol: "TCP"}},
+			Exposure: &model.ServiceExposure{Label: "validator", Hostname: "validator.frs-dev.services.example.com", Scheme: "https"},
 		},
 	}
 	if !reflect.DeepEqual(output.Services, want) {

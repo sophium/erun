@@ -11,7 +11,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -104,7 +103,7 @@ func resolveEnvironmentJobDir(dir string) (string, error) {
 
 // normalizeEnvironmentJobIdentity validates the target and defaults the id to the name.
 func normalizeEnvironmentJobIdentity(tenant, environment, name, id string) (string, error) {
-	if err := model.ErrMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve environment job identity", tenant, environment); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(name) == "" {

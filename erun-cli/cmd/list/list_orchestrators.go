@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
-func writeOrchestrators(ctx core.Context, orchestrators []lifecycle.ListOrchestratorResult) error {
+func writeOrchestrators(ctx core.Context, orchestrators []modelpkg.ListOrchestratorResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Orchestrators:"); err != nil {
 		return err
 	}
@@ -26,7 +26,7 @@ func writeOrchestrators(ctx core.Context, orchestrators []lifecycle.ListOrchestr
 	return nil
 }
 
-func writeOrchestratorEntry(ctx core.Context, orchestrator lifecycle.ListOrchestratorResult) error {
+func writeOrchestratorEntry(ctx core.Context, orchestrator modelpkg.ListOrchestratorResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "  - %s %q\n", orchestrator.ID, orchestrator.Name); err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func writeOrchestratorAlias(ctx core.Context, alias string) error {
 	return err
 }
 
-func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator lifecycle.ListOrchestratorResult) error {
+func writeOrchestratorLaunchSettings(ctx core.Context, orchestrator modelpkg.ListOrchestratorResult) error {
 	var lines []string
 	if orchestrator.UseGateway {
 		lines = append(lines, "gateway: on")
@@ -98,14 +98,14 @@ func writeOrchestratorDirectories(ctx core.Context, directories []string) error 
 }
 
 // orchestratorEnvRoleLabel renders an empty role as "undeclared", not a default.
-func orchestratorEnvRoleLabel(role config.OrchestratorEnvRole) string {
+func orchestratorEnvRoleLabel(role modelpkg.OrchestratorEnvRole) string {
 	if role == "" {
 		return "undeclared"
 	}
 	return string(role)
 }
 
-func writeOrchestratorEnvEntry(ctx core.Context, env lifecycle.ListOrchestratorEnvResult) error {
+func writeOrchestratorEnvEntry(ctx core.Context, env modelpkg.ListOrchestratorEnvResult) error {
 	line := "      - " + env.Tenant + "/" + env.Environment
 	line += " role=" + orchestratorEnvRoleLabel(env.Role)
 	if strings.TrimSpace(env.Directory) != "" {

@@ -10,6 +10,7 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/doctor"
 )
 
@@ -48,7 +49,7 @@ func runDoctorInRuntime(ctx core.Context, promptRunner shared.PromptRunner, opti
 	return writeRemoteInitFinishReport(ctx, updated)
 }
 
-func writeRemoteInitShortCircuit(ctx core.Context, inspection doctor.RemoteInitInspection) (bool, error) {
+func writeRemoteInitShortCircuit(ctx core.Context, inspection model.RemoteInitInspection) (bool, error) {
 	if inspection.Complete() {
 		_, err := fmt.Fprintln(ctx.Stdout, "Remote init is complete; nothing to finish.")
 		return true, err
@@ -81,7 +82,7 @@ func remoteInitPromptFunc(promptRunner shared.PromptRunner) doctor.RemoteInitFin
 	}
 }
 
-func writeRemoteInitFinishReport(ctx core.Context, updated doctor.RemoteInitInspection) error {
+func writeRemoteInitFinishReport(ctx core.Context, updated model.RemoteInitInspection) error {
 	if ctx.DryRun {
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry-run: would finish remote init by running the steps traced above.")
 		return err

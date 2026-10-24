@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -25,7 +26,7 @@ const releasePushRebaseAttempts = 2
 
 // ensureReleaseBaseBranchUnmoved refuses a release whose base branch moved since sync-remote,
 // before the build spends. An unreadable remote lets the release proceed.
-func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
+func ensureReleaseBaseBranchUnmoved(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	if branch == "" {
 		return nil
@@ -67,7 +68,7 @@ func releaseBaseBranchAhead(projectRoot, branch string, runGit gitx.GitCommandRu
 	return ahead, true
 }
 
-func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) error {
+func movedReleaseBaseBranchError(spec model.ReleaseSpec, branch string, ahead int) error {
 	return fmt.Errorf("origin/%s has moved since this release rebased onto it: it carries %d commit(s) this release is not built on.\n"+
 		"Building now would publish %s and push its tag, and only then fail at the final push with everything already public.\n"+
 		"Nothing is published yet, so absorb the move and re-run:\n"+
@@ -78,7 +79,7 @@ func movedReleaseBaseBranchError(spec ReleaseSpec, branch string, ahead int) err
 }
 
 // isReleaseBranchPush excludes tag pushes: a moved branch cannot reject a tag.
-func isReleaseBranchPush(stage ReleaseStage, command ReleaseCommandSpec) bool {
+func isReleaseBranchPush(stage model.ReleaseStage, command model.ReleaseCommandSpec) bool {
 	return stage.Name == releasePushStageName &&
 		command.Name == "git" &&
 		isGitPushArgs(command.Args)
@@ -91,7 +92,7 @@ func isGitPushArgs(args []string) bool {
 
 // RunReleaseBranchPush pushes the generated commits, rebasing onto a moved base branch and
 // retrying (bounded), since the tag is already public by now.
-func RunReleaseBranchPush(ctx core.Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
+func RunReleaseBranchPush(ctx core.Context, spec model.ReleaseSpec, command model.ReleaseCommandSpec, runGit gitx.GitCommandRunnerFunc) error {
 	branch := strings.TrimSpace(spec.Branch)
 	var pushOutput strings.Builder
 	err := runReleasePush(ctx, command.Dir, runGit, &pushOutput, command.Args...)
@@ -174,7 +175,7 @@ func releasePushReasonIsMovedBranch(reason string) bool {
 
 // ReleasePushRejectedError names the rejected ref, what the registry holds, and that the
 // public tag must not be deleted. The registry claim follows spec.ArtifactsPublished.
-func ReleasePushRejectedError(spec ReleaseSpec, rejections []ReleasePushRejection, cause error) error {
+func ReleasePushRejectedError(spec model.ReleaseSpec, rejections []ReleasePushRejection, cause error) error {
 	// described carries git's reason; names is the bare ref for the recovery command.
 	described := make([]string, 0, len(rejections))
 	names := make([]string, 0, len(rejections))
@@ -214,7 +215,7 @@ func ReleasePushRejectedError(spec ReleaseSpec, rejections []ReleasePushRejectio
 }
 
 // ReleaseRebaseFailedRecovery says what remains when the retry's rebase could not apply.
-func ReleaseRebaseFailedRecovery(spec ReleaseSpec, branch string) string {
+func ReleaseRebaseFailedRecovery(spec model.ReleaseSpec, branch string) string {
 	version := strings.TrimSpace(spec.Version)
 	if spec.ArtifactsPublished {
 		return fmt.Sprintf("version %s is already published, so rebase the release's own commits onto origin/%s by hand and push them", version, branch)
@@ -223,7 +224,7 @@ func ReleaseRebaseFailedRecovery(spec ReleaseSpec, branch string) string {
 }
 
 // ReleaseRepointFailedRecovery says what remains when the public tag could not be re-pointed.
-func ReleaseRepointFailedRecovery(spec ReleaseSpec) string {
+func ReleaseRepointFailedRecovery(spec model.ReleaseSpec) string {
 	version := strings.TrimSpace(spec.Version)
 	if spec.ArtifactsPublished {
 		return fmt.Sprintf("version %s is already published, so move tag v%s onto the rebased release commit by hand and force-push it", version, version)
@@ -233,7 +234,7 @@ func ReleaseRepointFailedRecovery(spec ReleaseSpec) string {
 
 // repointReleaseTagIfRebased force-moves the release tag onto its replayed commit after a
 // rebase; an annotated tag update is never a fast-forward.
-func repointReleaseTagIfRebased(ctx core.Context, spec ReleaseSpec, projectRoot string, runGit gitx.GitCommandRunnerFunc) error {
+func repointReleaseTagIfRebased(ctx core.Context, spec model.ReleaseSpec, projectRoot string, runGit gitx.GitCommandRunnerFunc) error {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
 		return nil
@@ -351,7 +352,7 @@ func GitTagAnnotationSubject(projectRoot, tag string) (string, error) {
 }
 
 // releaseBranchPushArgs is the retried push; the tag is already re-pointed if it had to move.
-func releaseBranchPushArgs(spec ReleaseSpec, command ReleaseCommandSpec) []string {
+func releaseBranchPushArgs(spec model.ReleaseSpec, command model.ReleaseCommandSpec) []string {
 	version := strings.TrimSpace(spec.Version)
 	if version == "" {
 		return command.Args

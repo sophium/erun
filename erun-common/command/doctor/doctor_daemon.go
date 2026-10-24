@@ -7,102 +7,54 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// DoctorDockerDaemonKind is resolved from the environment: pruning any daemon
-// other than the build's reclaims nothing yet still reports success.
-type DoctorDockerDaemonKind string
-
-const (
-	// DoctorDockerDaemonDindSidecar is the runtime pod's erun-dind sidecar, where builds run.
-	DoctorDockerDaemonDindSidecar DoctorDockerDaemonKind = "dind-sidecar"
-
-	// DoctorDockerDaemonHost is this machine's daemon, used by host environments.
-	DoctorDockerDaemonHost DoctorDockerDaemonKind = "host"
-
-	// DoctorDockerDaemonNone means no daemon holds the build images; Where says why.
-	DoctorDockerDaemonNone DoctorDockerDaemonKind = "none"
-)
-
-// DoctorDockerDaemon is the daemon a docker-storage read or prune acts on.
-type DoctorDockerDaemon struct {
-	Kind DoctorDockerDaemonKind
-	// Container is empty for a host daemon.
-	Container string
-	Label     string
-	// Where explains which daemon this is, or why there is none; it stands alone
-	// as the reason a prune cannot run.
-	Where string
-}
-
-// DoctorDockerDaemonUnavailableError reports that the environment has no build
-// daemon; it is not a transient reachability failure.
-type DoctorDockerDaemonUnavailableError struct {
-	Daemon DoctorDockerDaemon
-}
-
-func (e DoctorDockerDaemonUnavailableError) Error() string {
-	if strings.TrimSpace(e.Daemon.Where) == "" {
-		return "no docker daemon in this environment holds its build images"
-	}
-	return e.Daemon.Where
-}
-
 // ResolveDoctorDockerDaemon picks the daemon from the environment's type.
-func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) DoctorDockerDaemon {
+func ResolveDoctorDockerDaemon(req config.ShellLaunchParams) model.DoctorDockerDaemon {
 	switch {
 	// Checked first: the chart's dind condition uses the same predicate.
 	case req.Type.UsesDindSidecar():
-		return DoctorDockerDaemon{
-			Kind:      DoctorDockerDaemonDindSidecar,
+		return model.DoctorDockerDaemon{
+			Kind:      model.DoctorDockerDaemonDindSidecar,
 			Container: build.RuntimeDindContainerName,
 			Label:     "the " + build.RuntimeDindContainerName + " sidecar",
 			Where: fmt.Sprintf("container %s of deployment/%s in namespace %s, where this environment's image builds run and where its build images are stored",
 				build.RuntimeDindContainerName, config.RuntimeReleaseName(req.Tenant), req.Namespace),
 		}
 	case req.Type == config.EnvironmentTypeHost:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonHost,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonHost,
 			Label: "this machine's docker daemon",
 			Where: "the docker daemon on this machine, where a host environment's builds run (it is a worktree here with no pod)",
 		}
 	case req.Type == config.EnvironmentTypeRuntime:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonNone,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonNone,
 			Label: "no build daemon",
 			Where: "this environment resolves to type \"runtime\", which installs published versions by reference and never builds: its pod carries no " +
 				build.RuntimeDindContainerName + " sidecar, so it holds no build images to prune. Prune a build environment (a local-agent, remote-agent, or host environment) instead",
 		}
 	default:
-		return DoctorDockerDaemon{
-			Kind:  DoctorDockerDaemonNone,
+		return model.DoctorDockerDaemon{
+			Kind:  model.DoctorDockerDaemonNone,
 			Label: "no known build daemon",
 			Where: fmt.Sprintf("this environment's type is %q, so doctor cannot tell which docker daemon holds its build images. Set the environment's type (local-agent, remote-agent, runtime, or host) and retry", string(req.Type)),
 		}
 	}
 }
 
-// Unavailable reports whether no daemon holds this environment's build images.
-func (d DoctorDockerDaemon) Unavailable() bool {
-	return d.Kind == DoctorDockerDaemonNone
-}
-
-// Report describes the daemon and where it is, or why there is none.
-func (d DoctorDockerDaemon) Report() string {
-	return d.Label + " — " + d.Where
-}
-
 // DoctorDockerDaemonLine names the daemon a docker-storage section's figures came from.
-func DoctorDockerDaemonLine(daemon DoctorDockerDaemon) string {
+func DoctorDockerDaemonLine(daemon model.DoctorDockerDaemon) string {
 	return "docker storage: " + daemon.Report()
 }
 
 // DoctorActionDescriptionOn names a prune action and the daemon it acts on.
-func DoctorActionDescriptionOn(action DoctorAction, daemon DoctorDockerDaemon) string {
+func DoctorActionDescriptionOn(action model.DoctorAction, daemon model.DoctorDockerDaemon) string {
 	return fmt.Sprintf("%s (%s)", DoctorActionDescription(action), daemon.Label)
 }
 
@@ -142,14 +94,14 @@ func doctorInspectionSteps() []doctorDockerStep {
 	}
 }
 
-func doctorActionSteps(action DoctorAction) ([]doctorDockerStep, error) {
+func doctorActionSteps(action model.DoctorAction) ([]doctorDockerStep, error) {
 	var prune []string
 	switch action {
-	case DoctorActionPruneImages:
+	case model.DoctorActionPruneImages:
 		prune = []string{"image", "prune", "-a", "-f"}
-	case DoctorActionPruneBuildCache:
+	case model.DoctorActionPruneBuildCache:
 		prune = []string{"builder", "prune", "-a", "-f"}
-	case DoctorActionPruneContainers:
+	case model.DoctorActionPruneContainers:
 		prune = []string{"container", "prune", "-f"}
 	default:
 		return nil, fmt.Errorf("unsupported doctor action %q", action)
@@ -225,7 +177,7 @@ type DoctorDockerStore struct {
 
 // DoctorDockerResult is one operation's daemon, output and readings by readKey.
 type DoctorDockerResult struct {
-	Daemon   DoctorDockerDaemon
+	Daemon   model.DoctorDockerDaemon
 	Stdout   string
 	Stderr   string
 	Readings map[string]DoctorDockerStore
@@ -276,8 +228,8 @@ func formatDockerStoreBytes(bytes uint64) string {
 	}
 }
 
-func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
-	if daemon.Kind == DoctorDockerDaemonHost {
+func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCommandRunnerFunc, req config.ShellLaunchParams, daemon model.DoctorDockerDaemon, label string, steps []doctorDockerStep) (DoctorDockerResult, error) {
+	if daemon.Kind == model.DoctorDockerDaemonHost {
 		return runDoctorDockerStepsLocally(ctx, daemon, steps)
 	}
 	script := doctorDockerScript(steps)
@@ -305,7 +257,7 @@ func runDoctorDockerSteps(ctx core.Context, runner diagnosis.RuntimeContainerCom
 
 // runDoctorDockerStepsLocally runs each step directly, without a shell. A failed
 // step does not abort the rest; it errors only when nothing succeeded.
-func runDoctorDockerStepsLocally(ctx core.Context, daemon DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
+func runDoctorDockerStepsLocally(ctx core.Context, daemon model.DoctorDockerDaemon, steps []doctorDockerStep) (DoctorDockerResult, error) {
 	result := DoctorDockerResult{Daemon: daemon, Readings: map[string]DoctorDockerStore{}}
 	var stdout, stderr bytes.Buffer
 	var failure doctorStepFailure

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func staticToken(token string) PlatformTokenMinter {
@@ -19,7 +21,7 @@ func TestPlatformClientPlatformDoesNotAuthenticate(t *testing.T) {
 		if r.Header.Get("Authorization") != "" {
 			t.Fatal("GET /v1/platform must not send a bearer token")
 		}
-		_ = json.NewEncoder(w).Encode(PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-1"})
+		_ = json.NewEncoder(w).Encode(model.PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-1"})
 	}))
 	defer srv.Close()
 
@@ -38,7 +40,7 @@ func TestPlatformClientWithMCPToolSendsAuditHeader(t *testing.T) {
 		if got := r.Header.Get(MCPToolAuditHeader); got != "review_show" {
 			t.Fatalf("%s = %q, want %q", MCPToolAuditHeader, got, "review_show")
 		}
-		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+		_ = json.NewEncoder(w).Encode(model.PlatformWhoami{TenantID: "tenant-1"})
 	}))
 	defer srv.Close()
 
@@ -53,7 +55,7 @@ func TestPlatformClientWithoutMCPToolSendsNoAuditHeader(t *testing.T) {
 		if got := r.Header.Get(MCPToolAuditHeader); got != "" {
 			t.Fatalf("%s = %q, want empty", MCPToolAuditHeader, got)
 		}
-		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1"})
+		_ = json.NewEncoder(w).Encode(model.PlatformWhoami{TenantID: "tenant-1"})
 	}))
 	defer srv.Close()
 
@@ -86,7 +88,7 @@ func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/users" {
 			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
 		}
-		var body PlatformCreateUserParams
+		var body model.PlatformCreateUserParams
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
@@ -94,12 +96,12 @@ func TestPlatformClientCreateUserSendsJSONBodyAndReturnsCreated(t *testing.T) {
 			t.Fatalf("body = %+v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "alice"})
+		_ = json.NewEncoder(w).Encode(model.PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "alice"})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	user, err := client.CreateUser(context.Background(), PlatformCreateUserParams{Username: "alice", TenantID: "tenant-b"})
+	user, err := client.CreateUser(context.Background(), model.PlatformCreateUserParams{Username: "alice", TenantID: "tenant-b"})
 	if err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
@@ -116,12 +118,12 @@ func TestPlatformClientCreateUserSendsRoleIDs(t *testing.T) {
 			t.Fatalf("decode request body: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "admin"})
+		_ = json.NewEncoder(w).Encode(model.PlatformUser{UserID: "user-1", TenantID: "tenant-b", Username: "admin"})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{
+	if _, err := client.CreateUser(context.Background(), model.PlatformCreateUserParams{
 		Username: "admin", TenantID: "tenant-b", RoleIDs: []string{"role-admin"},
 	}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
@@ -140,12 +142,12 @@ func TestPlatformClientCreateUserOmitsEmptyRoleIDs(t *testing.T) {
 			t.Fatalf("decode request body: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(PlatformUser{UserID: "user-1", Username: "alice"})
+		_ = json.NewEncoder(w).Encode(model.PlatformUser{UserID: "user-1", Username: "alice"})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	if _, err := client.CreateUser(context.Background(), PlatformCreateUserParams{Username: "alice"}); err != nil {
+	if _, err := client.CreateUser(context.Background(), model.PlatformCreateUserParams{Username: "alice"}); err != nil {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	if _, present := raw["roleIds"]; present {
@@ -158,12 +160,12 @@ func TestPlatformClientListUsersEncodesTenantIDQueryParam(t *testing.T) {
 		if r.URL.Query().Get("tenantId") != "tenant-b" {
 			t.Fatalf("query = %s", r.URL.RawQuery)
 		}
-		_ = json.NewEncoder(w).Encode([]PlatformUser{{UserID: "u1"}})
+		_ = json.NewEncoder(w).Encode([]model.PlatformUser{{UserID: "u1"}})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	users, err := client.ListUsers(context.Background(), PlatformListUsersParams{TenantID: "tenant-b"})
+	users, err := client.ListUsers(context.Background(), model.PlatformListUsersParams{TenantID: "tenant-b"})
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
@@ -177,7 +179,7 @@ func TestPlatformClientGetEnvironmentEscapesPathSegment(t *testing.T) {
 		if r.URL.EscapedPath() != "/v1/environments/env%201" {
 			t.Errorf("escaped path = %q, want /v1/environments/env%%201", r.URL.EscapedPath())
 		}
-		_ = json.NewEncoder(w).Encode(PlatformEnvironment{EnvironmentID: "env 1"})
+		_ = json.NewEncoder(w).Encode(model.PlatformEnvironment{EnvironmentID: "env 1"})
 	}))
 	defer srv.Close()
 
@@ -192,18 +194,18 @@ func TestPlatformClientDeployEnvironment(t *testing.T) {
 		if r.URL.Path != "/v1/environments/env-1/deploy" || r.Method != http.MethodPost {
 			t.Fatalf("method=%s path=%s", r.Method, r.URL.Path)
 		}
-		var body PlatformDeployEnvironmentParams
+		var body model.PlatformDeployEnvironmentParams
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body.Version != "1.2.3" {
 			t.Fatalf("body = %+v", body)
 		}
 		w.WriteHeader(http.StatusAccepted)
-		_ = json.NewEncoder(w).Encode(PlatformEnvironment{EnvironmentID: "env-1", Status: "provisioning"})
+		_ = json.NewEncoder(w).Encode(model.PlatformEnvironment{EnvironmentID: "env-1", Status: "provisioning"})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	environment, err := client.DeployEnvironment(context.Background(), "env-1", PlatformDeployEnvironmentParams{Version: "1.2.3"})
+	environment, err := client.DeployEnvironment(context.Background(), "env-1", model.PlatformDeployEnvironmentParams{Version: "1.2.3"})
 	if err != nil {
 		t.Fatalf("DeployEnvironment: %v", err)
 	}
@@ -214,17 +216,17 @@ func TestPlatformClientDeployEnvironment(t *testing.T) {
 
 func TestPlatformClientCreateContextPreviewReturnsPlanOnly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body PlatformCreateContextParams
+		var body model.PlatformCreateContextParams
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if !body.Preview {
 			t.Fatal("expected preview=true in the request body")
 		}
-		_ = json.NewEncoder(w).Encode(PlatformCreateContextResult{Plan: []string{"step 1", "step 2"}})
+		_ = json.NewEncoder(w).Encode(model.PlatformCreateContextResult{Plan: []string{"step 1", "step 2"}})
 	}))
 	defer srv.Close()
 
 	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	result, err := client.CreateContext(context.Background(), PlatformCreateContextParams{
+	result, err := client.CreateContext(context.Background(), model.PlatformCreateContextParams{
 		Name: "ctx-1", CloudProviderAlias: "dev+123@aws", Region: "us-east-1", Preview: true,
 	})
 	if err != nil {

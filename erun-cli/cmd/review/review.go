@@ -11,7 +11,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +38,7 @@ func NewReviewCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *co
 }
 
 func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params reviewpkg.ReviewListParams
+	var params model.ReviewListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List reviews on the erun platform",
@@ -67,7 +66,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewList(ctx, reviews); err != nil {
 					return err
 				}
@@ -87,7 +86,7 @@ func newReviewListCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	return cmd
 }
 
-func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) error {
+func writeReviewList(ctx core.Context, reviews []model.PlatformReview) error {
 	if len(reviews) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no reviews")
 		return err
@@ -102,7 +101,7 @@ func writeReviewList(ctx core.Context, reviews []platformclient.PlatformReview) 
 
 // writeReviewLine renders one review. The repository is always named so queues of
 // different repositories cannot read as the same one.
-func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) error {
+func writeReviewLine(ctx core.Context, review model.PlatformReview) error {
 	repository := review.Repository
 	if strings.TrimSpace(repository) == "" {
 		repository = "(no repository recorded)"
@@ -115,7 +114,7 @@ func writeReviewLine(ctx core.Context, review platformclient.PlatformReview) err
 
 // reviewIssueSuffix renders the review's issue link with its provenance; an issue
 // parsed from a branch name is a guess and must not print like a declared one.
-func reviewIssueSuffix(review platformclient.PlatformReview) string {
+func reviewIssueSuffix(review model.PlatformReview) string {
 	if strings.TrimSpace(review.IssueRef) == "" {
 		return ""
 	}
@@ -142,7 +141,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review show planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewDetail(ctx, detail); err != nil {
 					return err
 				}
@@ -154,7 +153,7 @@ func newReviewShowCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	return cmd
 }
 
-func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
+func writeReviewDetail(ctx core.Context, detail model.ReviewDetail) error {
 	if err := writeReviewLine(ctx, detail.Review); err != nil {
 		return err
 	}
@@ -170,7 +169,7 @@ func writeReviewDetail(ctx core.Context, detail reviewpkg.ReviewDetail) error {
 }
 
 // writeReviewCommentLine renders one comment. Thread status lives on root comments only.
-func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformComment) error {
+func writeReviewCommentLine(ctx core.Context, comment model.PlatformComment) error {
 	if strings.TrimSpace(comment.ParentCommentID) != "" {
 		_, err := fmt.Fprintf(ctx.Stdout, "    ↳ [%s] %s:%d %s\n", comment.CommentID, comment.FilePath, comment.Line, comment.Body)
 		return err
@@ -180,7 +179,7 @@ func writeReviewCommentLine(ctx core.Context, comment platformclient.PlatformCom
 }
 
 func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateReviewParams
+	var params model.PlatformCreateReviewParams
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Open a review on the erun platform",
@@ -214,7 +213,7 @@ func newReviewCreateCmd(store config.CloudReadStore, alias *string, deps cloud.C
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review creation planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -254,7 +253,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 			if err != nil {
 				return fmt.Errorf("read comment body from stdin: %w", err)
 			}
-			comment, err := reviewpkg.RunReviewComment(ctx, store, *alias, reviewpkg.ReviewCommentParams{
+			comment, err := reviewpkg.RunReviewComment(ctx, store, *alias, model.ReviewCommentParams{
 				ReviewID:        args[0],
 				CommitID:        commitID,
 				FilePath:        filePath,
@@ -269,7 +268,7 @@ func newReviewCommentCmd(store config.CloudReadStore, alias *string, deps cloud.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review comment planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -306,7 +305,7 @@ func newReviewResolveCmd(store config.CloudReadStore, alias *string, deps cloud.
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review resolve planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -339,7 +338,7 @@ func newReviewUnresolveCmd(store config.CloudReadStore, alias *string, deps clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review unresolve planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewCommentLine(ctx, comment); err != nil {
 					return err
 				}
@@ -367,7 +366,7 @@ func newReviewCloseCmd(store config.CloudReadStore, alias *string, deps cloud.Cl
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review close planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}

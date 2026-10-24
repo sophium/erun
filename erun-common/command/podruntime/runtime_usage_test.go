@@ -12,6 +12,7 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -85,7 +86,7 @@ func hasWarningContaining(warnings []string, substr string) bool {
 // PeakBytes/OOMKills are omitempty, so only the Observed bits tell an unread
 // value from a genuine zero.
 func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
-	unread, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100})
+	unread, err := json.Marshal(model.RuntimeMemoryUsage{CurrentBytes: 100})
 	if err != nil {
 		t.Fatalf("marshal unread: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 		t.Errorf("an unread peak must omit both peakBytes and peakObserved, got %s", unread)
 	}
 
-	genuineZero, err := json.Marshal(config.RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
+	genuineZero, err := json.Marshal(model.RuntimeMemoryUsage{CurrentBytes: 100, PeakObserved: true})
 	if err != nil {
 		t.Fatalf("marshal genuine zero: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 		t.Errorf("a genuine zero peak still omits the zero-valued peakBytes key, got %s", genuineZero)
 	}
 
-	var roundTripped config.RuntimeMemoryUsage
+	var roundTripped model.RuntimeMemoryUsage
 	if err := json.Unmarshal(genuineZero, &roundTripped); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestRunRuntimeUsageDindExecFailureFailsSoft(t *testing.T) {
 		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
 	}
 
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("a failed dind exec must not fail the whole call, got: %v", err)
 	}
@@ -186,7 +187,7 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 		}
 		return kube.RemoteCommandResult{Stdout: runtimeUsageRuntimeContainerReading()}, nil
 	}
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
+	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, model.RuntimeUsageParams{Interval: time.Second})
 	if err != nil {
 		t.Fatalf("RunRuntimeUsage: %v", err)
 	}
@@ -312,12 +313,12 @@ func TestClampRuntimeUsageInterval(t *testing.T) {
 func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	const limit = int64(6442450944) // 6144Mi, the runtimepod in the observed report
 
-	restarted := config.RuntimeMemoryUsage{
+	restarted := model.RuntimeMemoryUsage{
 		CurrentBytes: 1503238554, PeakBytes: 2254857830, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(1503238554) / float64(limit),
 		OOMKills: 0, OOMKillsObserved: true,
 	}
-	unrestarted := config.RuntimeMemoryUsage{
+	unrestarted := model.RuntimeMemoryUsage{
 		CurrentBytes: 6442450943, PeakBytes: 6443237376, PeakObserved: true,
 		LimitBytes: limit, PercentOfLimit: 100 * float64(6442450943) / float64(limit),
 		OOMKills: 1, OOMKillsObserved: true,
@@ -336,7 +337,7 @@ func TestRetainedMemoryWarningsSurviveAContainerRestart(t *testing.T) {
 	})
 
 	t.Run("a genuinely idle environment is still healthy", func(t *testing.T) {
-		idle := config.RuntimeMemoryUsage{
+		idle := model.RuntimeMemoryUsage{
 			CurrentBytes: 52428800, PeakBytes: 104857600, PeakObserved: true,
 			LimitBytes: limit, PercentOfLimit: 100 * float64(52428800) / float64(limit),
 			OOMKillsObserved: true,
@@ -394,8 +395,8 @@ func TestApplyRetainedUsageWarningsReadsTheEnvironmentHistory(t *testing.T) {
 		t.Fatalf("no retained history must not manufacture a warning, got %v", warnings)
 	}
 
-	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, config.RuntimeUsage{
-		Memory: config.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
+	history := AppendRuntimeUsageSample(deploy.RuntimeUsageHistory{}, model.RuntimeUsage{
+		Memory: model.RuntimeMemoryUsage{LimitBytes: 6442450944, PeakBytes: 6443237376, PeakObserved: true, OOMKills: 1, OOMKillsObserved: true},
 	}, time.Now())
 	if err := SaveRuntimeUsageHistory("erun", "code3", history); err != nil {
 		t.Fatalf("save history: %v", err)

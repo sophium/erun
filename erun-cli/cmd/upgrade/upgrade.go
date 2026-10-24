@@ -6,9 +6,9 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/registry"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
@@ -63,7 +63,7 @@ func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfi
 			if err != nil {
 				return err
 			}
-			holder := activity.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
+			holder := model.EnvironmentActivityLeaseHolder{Orchestrator: strings.TrimSpace(orchestrator)}
 			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
 			deployer = lifecycle.LeaseGuardedUpgradeDeployer(deployer, overrideLease, holder, nil)
 			return runUpgrade(shared.WithCloudContextPreflight(shared.CommandContext(cmd), store), store, target, deployer)
@@ -81,7 +81,7 @@ func NewUpgradeCmd(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfi
 	return cmd
 }
 
-func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (lifecycle.UpgradeTarget, error) {
+func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, versionOverride string, force, fleet bool) (model.UpgradeTarget, error) {
 	if len(args) >= 1 {
 		tenant = args[0]
 	}
@@ -89,9 +89,9 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 		environment = args[1]
 	}
 	if strings.TrimSpace(environment) != "" && strings.TrimSpace(tenant) == "" {
-		return lifecycle.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
+		return model.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
 	}
-	return lifecycle.UpgradeTarget{
+	return model.UpgradeTarget{
 		Tenant:          strings.TrimSpace(tenant),
 		Environment:     strings.TrimSpace(environment),
 		VersionOverride: strings.TrimSpace(versionOverride),
@@ -101,7 +101,7 @@ func upgradeTargetFromArgs(args []string, tenant, environment, gateEnvironment, 
 	}, nil
 }
 
-func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target lifecycle.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
+func runUpgrade(ctx core.Context, store deploypkg.DeployStore, target model.UpgradeTarget, deploy lifecycle.UpgradeItemDeployer) error {
 	// Only a scoped run has one env to attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
 		var closeEnvTrace func()
@@ -153,8 +153,8 @@ func printUpgradeDryRunMarker(ctx core.Context) error {
 }
 
 func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploypkg.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploypkg.HelmChartDeployerFunc, force bool) lifecycle.UpgradeItemDeployer {
-	return func(ctx core.Context, item lifecycle.UpgradePlanItem) error {
-		deployTarget := deploypkg.DeployTarget{
+	return func(ctx core.Context, item model.UpgradePlanItem) error {
+		deployTarget := model.DeployTarget{
 			Tenant:          item.Tenant,
 			Environment:     item.Environment,
 			VersionOverride: item.Target,
@@ -177,21 +177,21 @@ func newUpgradeDeployer(store deploypkg.DeployStore, saveEnvConfig deploypkg.Env
 
 // upgradeScopeReason explains an empty plan. --fleet and --gate-environment ignore
 // opt-in, so an empty plan there means the tenant has no environments.
-func upgradeScopeReason(target lifecycle.UpgradeTarget) string {
+func upgradeScopeReason(target model.UpgradeTarget) string {
 	if target.Fleet || target.GateEnvironment != "" {
 		return " to roll"
 	}
 	return " opted into Upgrade all"
 }
 
-func gateSuffix(item lifecycle.UpgradePlanItem) string {
+func gateSuffix(item model.UpgradePlanItem) string {
 	if item.IsGate {
 		return "  [gate]"
 	}
 	return ""
 }
 
-func scopeSuffix(target lifecycle.UpgradeTarget) string {
+func scopeSuffix(target model.UpgradeTarget) string {
 	if target.Environment != "" {
 		return fmt.Sprintf(" for %s/%s", target.Tenant, target.Environment)
 	}
@@ -201,7 +201,7 @@ func scopeSuffix(target lifecycle.UpgradeTarget) string {
 	return ""
 }
 
-func laggingSuffix(item lifecycle.UpgradePlanItem) string {
+func laggingSuffix(item model.UpgradePlanItem) string {
 	if item.Lagging {
 		return "  (will upgrade)"
 	}

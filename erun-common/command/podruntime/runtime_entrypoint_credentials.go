@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"gopkg.in/yaml.v3"
@@ -140,12 +141,12 @@ func syncRuntimePlatformAlias(_ core.Context, boot runtimeBoot, _ *runtimeSuperv
 	return seedRuntimePlatformAliasToken(boot, configHome)
 }
 
-func readRuntimePlatformAliasEntry(path string) ([]config.CloudProviderConfig, error) {
+func readRuntimePlatformAliasEntry(path string) ([]model.CloudProviderConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var providers []config.CloudProviderConfig
+	var providers []model.CloudProviderConfig
 	if err := yaml.Unmarshal(data, &providers); err != nil {
 		return nil, fmt.Errorf("read the platform alias entry %s: %w", path, err)
 	}

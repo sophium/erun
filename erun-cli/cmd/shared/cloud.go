@@ -7,6 +7,7 @@ import (
 	"github.com/manifoldco/promptui"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -16,11 +17,11 @@ func CloudDependencies() cloud.CloudDependencies {
 }
 
 // RefreshEnvironmentHostCredentials re-injects the operator's short-lived AWS credentials into the env's pod.
-func RefreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenResult) (cloud.HostCredentialsRefresh, error) {
+func RefreshEnvironmentHostCredentials(ctx core.Context, result configpkg.OpenResult) (model.HostCredentialsRefresh, error) {
 	return cloud.RefreshHostAWSCredentials(ctx, configpkg.ConfigStore{}, result, CloudDependencies())
 }
 
-func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
+func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunner PromptRunner, params model.InitAWSCloudProviderParams, deps cloud.CloudDependencies) error {
 	var err error
 	if strings.TrimSpace(params.Profile) == "" && awsInitParamsNeedPrompt(params) {
 		printAWSInitGuidance(ctx)
@@ -39,7 +40,7 @@ func RunCloudInitAWSCommand(ctx core.Context, store cloud.CloudStore, promptRunn
 	return WriteCloudProviderSaved(ctx, provider)
 }
 
-func traceAWSCloudInitDryRun(ctx core.Context, params cloud.InitAWSCloudProviderParams) error {
+func traceAWSCloudInitDryRun(ctx core.Context, params model.InitAWSCloudProviderParams) error {
 	if strings.TrimSpace(params.Profile) == "" {
 		traceAWSConfigureSetPlan(ctx, params, "erun-sso-<timestamp>")
 	}
@@ -67,14 +68,14 @@ func traceAWSCloudInitDryRun(ctx core.Context, params cloud.InitAWSCloudProvider
 	return err
 }
 
-func promptAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams) (cloud.InitAWSCloudProviderParams, error) {
+func promptAWSInitParams(promptRunner PromptRunner, params model.InitAWSCloudProviderParams) (model.InitAWSCloudProviderParams, error) {
 	if strings.TrimSpace(params.Profile) != "" {
 		return params, nil
 	}
 	return promptMissingAWSInitParams(promptRunner, params)
 }
 
-func promptMissingAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSCloudProviderParams) (cloud.InitAWSCloudProviderParams, error) {
+func promptMissingAWSInitParams(promptRunner PromptRunner, params model.InitAWSCloudProviderParams) (model.InitAWSCloudProviderParams, error) {
 	var err error
 	params.SSOStartURL, err = promptCloudValueIfEmpty(promptRunner, params.SSOStartURL, "AWS SSO start URL", "")
 	if err != nil {
@@ -100,7 +101,7 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params cloud.InitAWSC
 }
 
 // awsInitParamsNeedPrompt reports whether the AWS SSO wizard will prompt for anything.
-func awsInitParamsNeedPrompt(params cloud.InitAWSCloudProviderParams) bool {
+func awsInitParamsNeedPrompt(params model.InitAWSCloudProviderParams) bool {
 	return strings.TrimSpace(params.SSOStartURL) == "" ||
 		strings.TrimSpace(params.SSORegion) == "" ||
 		strings.TrimSpace(params.AccountID) == "" ||
@@ -148,7 +149,7 @@ func RequiredCloudPrompt(promptRunner PromptRunner, label, defaultValue string) 
 	return strings.TrimSpace(value), nil
 }
 
-func traceAWSConfigureSetPlan(ctx core.Context, params cloud.InitAWSCloudProviderParams, profile string) {
+func traceAWSConfigureSetPlan(ctx core.Context, params model.InitAWSCloudProviderParams, profile string) {
 	region := strings.TrimSpace(params.Region)
 	if region == "" {
 		region = strings.TrimSpace(params.SSORegion)
@@ -169,7 +170,7 @@ func traceAWSConfigureSetPlan(ctx core.Context, params cloud.InitAWSCloudProvide
 	}
 }
 
-func traceAWSBearerTokenPlan(ctx core.Context, params cloud.InitAWSCloudProviderParams, audience string) {
+func traceAWSBearerTokenPlan(ctx core.Context, params model.InitAWSCloudProviderParams, audience string) {
 	profile := strings.TrimSpace(params.Profile)
 	if profile == "" {
 		profile = "erun-sso-<timestamp>"
@@ -226,7 +227,7 @@ func SelectCloudAliasPrompt(store cloud.CloudStore, selectRunner SelectRunner) (
 	return alias, err
 }
 
-func WriteCloudProviderSaved(ctx core.Context, provider configpkg.CloudProviderConfig) error {
+func WriteCloudProviderSaved(ctx core.Context, provider model.CloudProviderConfig) error {
 	_, err := fmt.Fprintf(ctx.Stdout, "Saved cloud provider alias %s\n", provider.Alias)
 	return err
 }

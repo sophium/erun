@@ -9,9 +9,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/internal"
 )
 
@@ -24,8 +24,8 @@ var ReattachMCPChannel = ReattachEnvironmentMCPChannel
 
 // CallMCPToolWithReattach calls an environment's MCP edge, reattaching once via
 // `erun open --reconnect` on a dropped channel; a bare `erun open` would restart a stopped env.
-func CallMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target McpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (mcp.MCPToolCallResult, error) {
-	call := func() (mcp.MCPToolCallResult, error) {
+func CallMCPToolWithReattach(ctx context.Context, commandCtx core.Context, target McpEdgeTarget, tool string, arguments map[string]any, idleProbe bool) (model.MCPToolCallResult, error) {
+	call := func() (model.MCPToolCallResult, error) {
 		return mcp.CallMCPTool(ctx, mcp.MCPToolCallParams{
 			Endpoint:      target.Endpoint,
 			MintToken:     McpEdgeTokenMinter(target),
@@ -65,7 +65,7 @@ type McpEdgeTarget struct {
 	Endpoint    string
 }
 
-func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params shared.OpenParams) (McpEdgeTarget, error) {
+func ResolveMCPEdgeTarget(ctx core.Context, resolveOpen OpenResolver, params model.OpenParams) (McpEdgeTarget, error) {
 	result, err := resolveOpen(params)
 	if err != nil {
 		return McpEdgeTarget{}, err

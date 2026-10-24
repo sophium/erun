@@ -5,6 +5,7 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
@@ -12,7 +13,7 @@ import (
 func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.EnvConfig) *App {
 	t.Helper()
 	config := configpkg.ERunConfig{
-		CloudContexts: []configpkg.CloudContextConfig{{
+		CloudContexts: []model.CloudContextConfig{{
 			Name:               "erun-node-1",
 			Provider:           "aws",
 			CloudProviderAlias: "acct",
@@ -27,7 +28,7 @@ func nodeTestApp(t *testing.T, contextStatus string, envs map[string]configpkg.E
 	app := &App{}
 	app.deps.store = stubUIStore{
 		config:  &config,
-		tenants: map[string]configpkg.TenantConfig{"petios": {Name: "petios"}},
+		tenants: map[string]model.TenantConfig{"petios": {Name: "petios"}},
 		envs:    stored,
 	}
 	if contextStatus != "" {
@@ -152,8 +153,8 @@ func TestRefreshEnvironmentNodeStatusesRepublishesOnlyOnChange(t *testing.T) {
 	if len(*events) != first {
 		t.Fatalf("an unchanged node reading must not re-publish: %d then %d events", first, len(*events))
 	}
-	app.applyCloudContextStatusesToCache([]configpkg.CloudContextStatus{{
-		CloudContextConfig: configpkg.CloudContextConfig{Name: "erun-node-1"},
+	app.applyCloudContextStatusesToCache([]model.CloudContextStatus{{
+		CloudContextConfig: model.CloudContextConfig{Name: "erun-node-1"},
 		Status:             cloud.CloudContextStatusRunning,
 	}})
 	app.refreshEnvironmentNodeStatuses()

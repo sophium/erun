@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -44,14 +44,14 @@ func DeployTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 			findProjectRoot := func() (string, string, error) {
 				return sharedpkg.RuntimeFindProjectRoot(runtime.Context, workDir)
 			}
-			resolveBuildContext := func() (shared.DockerBuildContext, error) {
+			resolveBuildContext := func() (model.DockerBuildContext, error) {
 				return shared.DockerBuildContextAtDir(workDir)
 			}
-			resolveDeployContext := func() (shared.KubernetesDeployContext, error) {
+			resolveDeployContext := func() (model.KubernetesDeployContext, error) {
 				return deploy.KubernetesDeployContextAtDir(workDir), nil
 			}
 
-			target := deploy.DeployTarget{
+			target := model.DeployTarget{
 				Tenant:               strings.TrimSpace(runtime.Context.Tenant),
 				Environment:          strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:             workDir,
@@ -63,7 +63,7 @@ func DeployTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Call
 				RolloutTimeout:       strings.TrimSpace(input.Timeout),
 				MCPAuthPublicKeyPath: strings.TrimSpace(input.MCPAuthPublicKey),
 				DisableMCPAuth:       input.NoMCPAuth,
-				NamespaceQuotaOverride: config.NamespaceResourceQuota{
+				NamespaceQuotaOverride: model.NamespaceResourceQuota{
 					CPU:     strings.TrimSpace(input.MaxCPU),
 					Memory:  strings.TrimSpace(input.MaxMemory),
 					Storage: strings.TrimSpace(input.MaxStorage),

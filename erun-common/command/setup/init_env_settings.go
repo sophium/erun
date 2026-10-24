@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
@@ -185,12 +186,12 @@ func describeEnvType(envType configpkg.EnvironmentType) string {
 	return `"` + string(envType) + `"`
 }
 
-func formatRuntimePodResources(resources configpkg.RuntimePodResources) string {
+func formatRuntimePodResources(resources model.RuntimePodResources) string {
 	resources = configpkg.NormalizeRuntimePodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }
 
-func formatRuntimeDindPodResources(resources configpkg.RuntimePodResources) string {
+func formatRuntimeDindPodResources(resources model.RuntimePodResources) string {
 	resources = configpkg.NormalizeRuntimeDindPodResources(resources)
 	return "cpu=" + resources.CPU + " memory=" + resources.Memory
 }

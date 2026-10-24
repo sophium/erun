@@ -7,21 +7,22 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
-func agentCredentialDiagnosis(state deploy.RuntimeAgentCredentialState) deploy.DeployDiagnosisResult {
-	status := deploy.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
-	if state == deploy.RuntimeAgentCredentialMissing || state == deploy.RuntimeAgentCredentialConfigured {
+func agentCredentialDiagnosis(state model.RuntimeAgentCredentialState) model.DeployDiagnosisResult {
+	status := model.RuntimeAgentCredentialStatus{State: state, Container: config.DevopsComponentName}
+	if state == model.RuntimeAgentCredentialMissing || state == model.RuntimeAgentCredentialConfigured {
 		status.GatewayBaseURL = "https://openrouter.ai/api"
 	}
-	if state == deploy.RuntimeAgentCredentialUnknown {
+	if state == model.RuntimeAgentCredentialUnknown {
 		status.ReadError = "read the runtime pod template: deployments.apps \"frs-devops\" is forbidden"
 	}
-	return deploy.DeployDiagnosisResult{AgentCredentials: status}
+	return model.DeployDiagnosisResult{AgentCredentials: status}
 }
 
-func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis deploy.DeployDiagnosisResult) string {
+func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis model.DeployDiagnosisResult) string {
 	t.Helper()
 	var out bytes.Buffer
 	ctx.Stdout = &out
@@ -33,7 +34,7 @@ func renderAgentCredentials(t *testing.T, ctx core.Context, diagnosis deploy.Dep
 }
 
 func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialMissing))
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialMissing))
 
 	for _, want := range []string{
 		"Agent capability",
@@ -57,18 +58,18 @@ func TestReportAgentCredentialsNamesTheCauseAndTheFix(t *testing.T) {
 
 func TestReportAgentCredentialsStaysSilentWhenTheCheckDoesNotApply(t *testing.T) {
 	ctx := core.Context{}
-	rendered := renderAgentCredentials(t, ctx, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialNotApplicable))
+	rendered := renderAgentCredentials(t, ctx, agentCredentialDiagnosis(model.RuntimeAgentCredentialNotApplicable))
 	if rendered != "" {
 		t.Fatalf("report printed %q for an environment no gateway routes, want nothing", rendered)
 	}
-	rendered = renderAgentCredentials(t, ctx, deploy.DeployDiagnosisResult{})
+	rendered = renderAgentCredentials(t, ctx, model.DeployDiagnosisResult{})
 	if rendered != "" {
 		t.Fatalf("report printed %q for an unset status, want nothing", rendered)
 	}
 }
 
 func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialUnknown))
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialUnknown))
 	if !strings.Contains(rendered, "unknown") || !strings.Contains(rendered, "forbidden") {
 		t.Fatalf("report does not name the unreadable template:\n%s", rendered)
 	}
@@ -78,7 +79,7 @@ func TestReportAgentCredentialsSaysSoWhenItCouldNotRead(t *testing.T) {
 }
 
 func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
-	diagnosis := agentCredentialDiagnosis(deploy.RuntimeAgentCredentialUnknown)
+	diagnosis := agentCredentialDiagnosis(model.RuntimeAgentCredentialUnknown)
 	diagnosis.ClusterUnreachable = true
 	rendered := renderAgentCredentials(t, core.Context{}, diagnosis)
 	if !strings.Contains(rendered, "skipped") {
@@ -87,14 +88,14 @@ func TestReportAgentCredentialsSkipsAnUnreachableCluster(t *testing.T) {
 }
 
 func TestReportAgentCredentialsIsSilentUnderDryRun(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{DryRun: true}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialMissing))
+	rendered := renderAgentCredentials(t, core.Context{DryRun: true}, agentCredentialDiagnosis(model.RuntimeAgentCredentialMissing))
 	if rendered != "" {
 		t.Fatalf("report printed %q under --dry-run, want nothing", rendered)
 	}
 }
 
 func TestReportAgentCredentialsConfirmsAHealthyEnvironment(t *testing.T) {
-	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(deploy.RuntimeAgentCredentialConfigured))
+	rendered := renderAgentCredentials(t, core.Context{}, agentCredentialDiagnosis(model.RuntimeAgentCredentialConfigured))
 	if !strings.Contains(rendered, "available") || !strings.Contains(rendered, deploy.GatewayBaseURLEnv) {
 		t.Fatalf("report does not confirm a routed environment:\n%s", rendered)
 	}

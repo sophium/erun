@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -36,8 +37,8 @@ const (
 // RenderPlatformAliasEntry renders the alias as a sequence item at indent 2:
 // older runtime images append it under a 2-indented block, and mixed indents
 // fail to parse.
-func RenderPlatformAliasEntry(provider config.CloudProviderConfig) (string, error) {
-	data, err := yaml.Marshal([]config.CloudProviderConfig{provider})
+func RenderPlatformAliasEntry(provider model.CloudProviderConfig) (string, error) {
+	data, err := yaml.Marshal([]model.CloudProviderConfig{provider})
 	if err != nil {
 		return "", fmt.Errorf("render platform alias entry: %w", err)
 	}
@@ -51,22 +52,22 @@ func RenderPlatformAliasEntry(provider config.CloudProviderConfig) (string, erro
 // ResolveHostPlatformAlias resolves the named alias, else the host's sole erun alias,
 // and its refresh token. err is set only for an unusable named alias or the unnamed
 // several-aliases ambiguity; other declines are silent.
-func ResolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDependencies, alias string) (config.CloudProviderConfig, string, bool, error) {
+func ResolveHostPlatformAlias(store config.CloudReadStore, deps cloud.CloudDependencies, alias string) (model.CloudProviderConfig, string, bool, error) {
 	explicit := HostAliasSelected(alias)
 	if store == nil || deps.CloudSecretStore == nil {
-		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(
+		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(
 			explicit, alias, errors.New("this host has no readable cloud secret store, so the alias's signed-in session cannot be delivered to the environment"))
 	}
 	provider, err := shared.ResolveERunPlatformAlias(store, alias)
 	if err != nil {
-		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
+		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, err)
 	}
 	if provider.ERun == nil || strings.TrimSpace(provider.ERun.RefreshTokenRef) == "" {
-		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
+		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
 	token, err := deps.CloudSecretStore.LoadCloudSecret(provider.ERun.RefreshTokenRef)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return config.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
+		return model.CloudProviderConfig{}, "", false, hostAliasUnusable(explicit, alias, noStoredSessionError(provider.Alias))
 	}
 	return provider, token, true, nil
 }

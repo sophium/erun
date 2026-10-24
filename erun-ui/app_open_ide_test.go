@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",
@@ -66,7 +67,7 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
@@ -133,7 +134,7 @@ func TestLocalOpenIDECommandBuildsDarwinCommands(t *testing.T) {
 func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",

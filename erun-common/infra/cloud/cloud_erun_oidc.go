@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -85,15 +86,15 @@ func isERunInvalidScopeError(err error) bool {
 	return err != nil && (errors.Is(err, errERunInvalidScope) || strings.Contains(err.Error(), "invalid_scope"))
 }
 
-func defaultFetchPlatformInfo(ctx core.Context, apiURL string) (platformclient.PlatformInfo, error) {
+func defaultFetchPlatformInfo(ctx core.Context, apiURL string) (model.PlatformInfo, error) {
 	target := strings.TrimRight(strings.TrimSpace(apiURL), "/")
 	ctx.Trace("GET " + target + "/v1/platform")
 	if ctx.DryRun {
-		return platformclient.PlatformInfo{}, nil
+		return model.PlatformInfo{}, nil
 	}
 	info, err := platformclient.NewPlatformClient(target, nil).Platform(context.Background())
 	if err != nil {
-		return platformclient.PlatformInfo{}, fmt.Errorf("fetch erun platform info: %w", err)
+		return model.PlatformInfo{}, fmt.Errorf("fetch erun platform info: %w", err)
 	}
 	return info, nil
 }
@@ -331,15 +332,15 @@ func awaitERunOIDCCallback(ctx core.Context, listener net.Listener, state string
 
 // erunLoginBrowserCommand returns the URL opener per OS; on windows the empty title
 // argument keeps start from treating the URL as the window title.
-func erunLoginBrowserCommand(hostOS core.HostOS, url string) (string, []string, error) {
+func erunLoginBrowserCommand(hostOS model.HostOS, url string) (string, []string, error) {
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return "open", []string{url}, nil
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		return "xdg-open", []string{url}, nil
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		return "cmd", []string{"/c", "start", "", url}, nil
-	case core.HostOSUnknown:
+	case model.HostOSUnknown:
 	}
 	return "", nil, fmt.Errorf("opening a browser is unsupported on %s", hostOS)
 }

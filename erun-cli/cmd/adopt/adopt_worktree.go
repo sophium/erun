@@ -3,6 +3,7 @@ package adopt
 import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +35,7 @@ func NewAdoptWorktreeCmd() *cobra.Command {
 }
 
 func runAdoptWorktreeCommand(ctx core.Context, legacyDir, claimDir string) error {
-	result, err := podruntime.AdoptWorktree(ctx, podruntime.WorktreeAdoptParams{LegacyDir: legacyDir, ClaimDir: claimDir})
+	result, err := podruntime.AdoptWorktree(ctx, model.WorktreeAdoptParams{LegacyDir: legacyDir, ClaimDir: claimDir})
 	if err != nil {
 		return err
 	}

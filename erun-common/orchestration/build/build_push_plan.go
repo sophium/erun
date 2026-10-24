@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -56,12 +57,12 @@ func componentChartRegistryAndRoot(builds []shared.DockerBuildSpec) (registry, p
 
 // publishDockerTarget pins a push to every supported platform: the
 // docker.platforms pin narrows local builds only, never what is published.
-func publishDockerTarget(target shared.DockerCommandTarget) shared.DockerCommandTarget {
+func publishDockerTarget(target model.DockerCommandTarget) model.DockerCommandTarget {
 	target.Platforms = slices.Clone(shared.MultiPlatformDockerBuilds)
 	return target
 }
 
-func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target shared.DockerCommandTarget) (shared.DockerPushExecutionSpec, error) {
+func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) (shared.DockerPushExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 
@@ -96,7 +97,7 @@ func ResolveDockerPushExecution(ctx core.Context, store shared.DockerStore, find
 	return shared.DockerPushExecutionSpec{Builds: builds, Pushes: pushes, ComponentCharts: charts}, nil
 }
 
-func ResolveDockerPushSpec(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target shared.DockerCommandTarget) (shared.DockerPushSpec, *shared.DockerBuildSpec, error) {
+func ResolveDockerPushSpec(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) (shared.DockerPushSpec, *shared.DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 	target = publishDockerTarget(target)
 

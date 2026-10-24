@@ -2,6 +2,8 @@ package config
 
 import (
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestLocalPortsForResultPrefersInjectedRuntimePorts(t *testing.T) {
@@ -38,8 +40,8 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 		env         map[string]string
 		tenant      string
 		environment string
-		ports       EnvironmentLocalPorts
-		want        EnvironmentLocalPorts
+		ports       model.EnvironmentLocalPorts
+		want        model.EnvironmentLocalPorts
 	}{
 		{
 			name:        "injected ports replace the defaulted 17000 block",
@@ -47,7 +49,7 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 			tenant:      "tenant-a",
 			environment: "dev",
 			ports:       EnvironmentLocalPortsFromRangeStart(LowerServicePort),
-			want:        EnvironmentLocalPorts{RangeStart: 17200, RangeEnd: 17299, MCP: 17200, API: 17233, SSH: 17222, ContributeApp: 17250},
+			want:        model.EnvironmentLocalPorts{RangeStart: 17200, RangeEnd: 17299, MCP: 17200, API: 17233, SSH: 17222, ContributeApp: 17250},
 		},
 		{
 			name:        "off-pod the config-derived block stands",
@@ -70,8 +72,8 @@ func TestOverlayInjectedRuntimeLocalPorts(t *testing.T) {
 			env:         map[string]string{"ERUN_TENANT": "tenant-a", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17200"},
 			tenant:      "tenant-a",
 			environment: "dev",
-			ports:       EnvironmentLocalPorts{RangeStart: 17000, RangeEnd: 17099, MCP: 17000, API: 17033, SSH: 17999},
-			want:        EnvironmentLocalPorts{RangeStart: 17200, RangeEnd: 17299, MCP: 17200, API: 17233, SSH: 17999, ContributeApp: 17250},
+			ports:       model.EnvironmentLocalPorts{RangeStart: 17000, RangeEnd: 17099, MCP: 17000, API: 17033, SSH: 17999},
+			want:        model.EnvironmentLocalPorts{RangeStart: 17200, RangeEnd: 17299, MCP: 17200, API: 17233, SSH: 17999, ContributeApp: 17250},
 		},
 		{
 			name:        "an injected mcp port that is not a range start is not used",

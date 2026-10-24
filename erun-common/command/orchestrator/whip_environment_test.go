@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type fakeWhipRunner struct {
@@ -94,7 +95,7 @@ func TestRunLocalEnvironmentWhipDryRunPushesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Decision != WhipDecisionNudge {
+	if result.Decision != model.WhipDecisionNudge {
 		t.Fatalf("expected a live, explicit call to decide nudge, got %v/%v", result.Decision, result.Reason)
 	}
 	if result.Pushed {
@@ -136,14 +137,14 @@ func TestRunLocalEnvironmentWhipCapsAfterMaxNudges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if second.Decision != WhipDecisionCap || second.Reason != WhipReasonCapCrossed {
+	if second.Decision != model.WhipDecisionCap || second.Reason != model.WhipReasonCapCrossed {
 		t.Fatalf("expected the second call to cross the cap, got decision=%v reason=%v", second.Decision, second.Reason)
 	}
 	third, err := RunLocalEnvironmentWhip(time.Now(), runner, "acme", "dev", cfg, true, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if third.Decision != WhipDecisionNone || third.Reason != WhipReasonAlreadyCapped {
+	if third.Decision != model.WhipDecisionNone || third.Reason != model.WhipReasonAlreadyCapped {
 		t.Fatalf("expected the third call to stay capped, got decision=%v reason=%v", third.Decision, third.Reason)
 	}
 }
@@ -156,7 +157,7 @@ func TestRunLocalEnvironmentWhipNotAliveWhenNoMaster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Decision != WhipDecisionNone || result.Reason != WhipReasonNotAlive {
+	if result.Decision != model.WhipDecisionNone || result.Reason != model.WhipReasonNotAlive {
 		t.Fatalf("expected none/not-alive, got %v/%v", result.Decision, result.Reason)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"gopkg.in/yaml.v3"
 )
@@ -104,7 +105,7 @@ func overrideHelmChartVersion(chartPath, version string) error {
 
 // DiscoverComponentChartDirs returns every <k8s>/<chart>/Chart.yaml in the tenant-scoped devops
 // k8s dir, image-less charts included; vendored subcharts are excluded.
-func DiscoverComponentChartDirs(projectRoot string) ([]shared.KubernetesDeployContext, error) {
+func DiscoverComponentChartDirs(projectRoot string) ([]model.KubernetesDeployContext, error) {
 	k8sDir, ok, err := componentChartsK8sDir(projectRoot)
 	if err != nil {
 		return nil, err
@@ -112,7 +113,7 @@ func DiscoverComponentChartDirs(projectRoot string) ([]shared.KubernetesDeployCo
 	if !ok {
 		return nil, nil
 	}
-	var contexts []shared.KubernetesDeployContext
+	var contexts []model.KubernetesDeployContext
 	err = filepath.WalkDir(k8sDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -130,7 +131,7 @@ func DiscoverComponentChartDirs(projectRoot string) ([]shared.KubernetesDeployCo
 		if filepath.Base(filepath.Dir(chartPath)) != "k8s" {
 			return nil
 		}
-		contexts = append(contexts, shared.KubernetesDeployContext{
+		contexts = append(contexts, model.KubernetesDeployContext{
 			Dir:           filepath.Dir(chartPath),
 			ComponentName: filepath.Base(chartPath),
 			ChartPath:     chartPath,

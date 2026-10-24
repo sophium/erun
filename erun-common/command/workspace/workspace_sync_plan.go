@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -56,16 +57,16 @@ func ResolveWorkspaceSyncParams(result config.OpenResult, findProjectRoot shared
 }
 
 // PreviewWorkspaceSync reports a pass's counts without writing anything.
-func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (WorkspaceSyncResult, error) {
+func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (model.WorkspaceSyncResult, error) {
 	if err := validateWorkspaceSyncParams(&params); err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	resolved, err := resolveWorkspaceSyncPaths(ctx, params)
 	if err != nil {
-		return WorkspaceSyncResult{}, err
+		return model.WorkspaceSyncResult{}, err
 	}
 	if resolved.notGitRepo {
-		return WorkspaceSyncResult{}, nil
+		return model.WorkspaceSyncResult{}, nil
 	}
 	remoteMeta := remoteWorkspaceFileMeta(ctx, params.HostAlias, params.RemotePath)
 	toFetch := changedWorkspaceSyncPaths(resolved.remote, remoteMeta, resolved.localMeta)
@@ -86,7 +87,7 @@ func PreviewWorkspaceSync(ctx context.Context, params WorkspaceSyncParams) (Work
 	artifactsToFetch := changedOutputsPaths(artifacts,
 		remoteOutputsFileHashes(ctx, params.HostAlias, core.DefaultRuntimeOutputsDir, artifacts),
 		localArtifactFileHashes(artifactsLocal, artifacts))
-	return WorkspaceSyncResult{
+	return model.WorkspaceSyncResult{
 		FilesCopied:     len(toFetch),
 		FilesDeleted:    deletions,
 		ArtifactsCopied: len(artifactsToFetch),

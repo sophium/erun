@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -33,7 +34,7 @@ func JobAttachTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 		}
 		trace := new(bytes.Buffer)
 		ctx := sharedpkg.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
-		job, err := jobspkg.AttachEnvironmentJob(ctx, jobspkg.AttachEnvironmentJobParams{
+		job, err := jobspkg.AttachEnvironmentJob(ctx, model.AttachEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Name:        input.Name,
@@ -134,7 +135,7 @@ func JobAwaitTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Ca
 		if err != nil {
 			return nil, jobspkg.AwaitEnvironmentJobResult{}, err
 		}
-		result, err := jobspkg.AwaitEnvironmentJob(jobspkg.AwaitEnvironmentJobParams{
+		result, err := jobspkg.AwaitEnvironmentJob(model.AwaitEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,
@@ -163,7 +164,7 @@ func JobOutputTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 		if err != nil {
 			return nil, jobspkg.EnvironmentJobOutput{}, err
 		}
-		output, err := jobspkg.ReadEnvironmentJobOutput(jobspkg.ReadEnvironmentJobOutputParams{
+		output, err := jobspkg.ReadEnvironmentJobOutput(model.ReadEnvironmentJobOutputParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,
@@ -202,7 +203,7 @@ func JobCancelTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.C
 		}
 		trace := new(bytes.Buffer)
 		ctx := sharedpkg.RuntimeCallContext(input.Preview, 0, nil, trace, trace)
-		cancel, err := jobspkg.CancelEnvironmentJob(ctx, jobspkg.CancelEnvironmentJobParams{
+		cancel, err := jobspkg.CancelEnvironmentJob(ctx, model.CancelEnvironmentJobParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          input.ID,

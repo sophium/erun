@@ -9,6 +9,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // pinLegacyUserConfigLayoutForTest makes os.UserConfigDir differ from the config home on every host.
@@ -164,7 +165,7 @@ func TestReclaimOrphanedPortForwardRecordsWalksTheUserConfigDirTree(t *testing.T
 	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
 		t.Fatalf("save tool config: %v", err)
 	}
-	if err := config.SaveTenantConfig(config.TenantConfig{Name: "acme"}); err != nil {
+	if err := config.SaveTenantConfig(model.TenantConfig{Name: "acme"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	if err := config.SaveEnvConfig("acme", config.EnvConfig{Name: "dev"}); err != nil {

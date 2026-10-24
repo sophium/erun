@@ -5,10 +5,9 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	reviewpkg "github.com/sophium/erun/erun-common/command/review"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +22,7 @@ func newReviewMergeQueueCmd(store config.CloudReadStore, alias *string, deps clo
 }
 
 func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
+	var params model.PlatformMergeQueueParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List a repository's merge queue for a target branch, in queue order",
@@ -47,7 +46,7 @@ func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewList(ctx, reviews); err != nil {
 					return err
 				}
@@ -62,7 +61,7 @@ func newReviewMergeQueueListCmd(store config.CloudReadStore, alias *string, deps
 }
 
 func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
+	var params model.PlatformMergeQueueParams
 	cmd := &cobra.Command{
 		Use:   "advance",
 		Short: "Advance a repository's merge queue head to MERGE",
@@ -89,7 +88,7 @@ func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, d
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue advance planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}
@@ -104,7 +103,7 @@ func newReviewMergeQueueAdvanceCmd(store config.CloudReadStore, alias *string, d
 }
 
 func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformMergeQueueParams
+	var params model.PlatformMergeQueueParams
 	var reason string
 	cmd := &cobra.Command{
 		Use:   "override-advance",
@@ -129,7 +128,7 @@ func newReviewMergeQueueOverrideAdvanceCmd(store config.CloudReadStore, alias *s
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun review queue override-advance planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writeReviewLine(ctx, review); err != nil {
 					return err
 				}

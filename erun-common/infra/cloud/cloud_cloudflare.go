@@ -15,6 +15,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // cloudflareAPIBaseURLEnv redirects Cloudflare API calls in tests; an env var because the
@@ -59,18 +60,10 @@ type CloudflareAccount struct {
 	Name string
 }
 
-// InitCloudflareCloudProviderParams adds a Cloudflare alias; APIToken needs Zone + DNS edit
-// plus any scopes it will use.
-type InitCloudflareCloudProviderParams struct {
-	AccountID string
-	TokenName string
-	APIToken  string
-}
-
 // InitCloudflareCloudProvider verifies and stores the token, then saves the alias by TokenRef.
-func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params InitCloudflareCloudProviderParams, deps CloudDependencies) (config.CloudProviderConfig, error) {
+func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params model.InitCloudflareCloudProviderParams, deps CloudDependencies) (model.CloudProviderConfig, error) {
 	if store == nil {
-		return config.CloudProviderConfig{}, fmt.Errorf("store is required")
+		return model.CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	deps = NormalizeCloudDependencies(deps)
 	accountID := strings.TrimSpace(params.AccountID)
@@ -79,16 +72,16 @@ func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params Init
 	ctx.Trace(fmt.Sprintf("cloud init cloudflare: account-id=%s token-name=%s api-token=%s",
 		accountID, tokenName, redactSecretPresence(apiToken)))
 	if err := validateCloudflareInitParams(accountID, tokenName, apiToken); err != nil {
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	alias := CloudProviderAlias(tokenName, accountID, config.CloudProviderCloudflare)
 	if alias == "" {
-		return config.CloudProviderConfig{}, fmt.Errorf("cloudflare cloud provider alias cannot be resolved")
+		return model.CloudProviderConfig{}, fmt.Errorf("cloudflare cloud provider alias cannot be resolved")
 	}
 	ctx.Trace("cloud init cloudflare: verifying scoped api token")
 	if _, err := deps.VerifyCloudflareToken(ctx, apiToken); err != nil {
 		ctx.Trace("cloud init cloudflare: token verification failed: " + err.Error())
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	tokenRef := cloudflareTokenRef(alias)
 	provider := cloudflareProviderConfig(alias, accountID, tokenName, tokenRef)
@@ -97,14 +90,14 @@ func InitCloudflareCloudProvider(ctx core.Context, store CloudStore, params Init
 		return provider, nil
 	}
 	if deps.CloudSecretStore == nil {
-		return config.CloudProviderConfig{}, fmt.Errorf("cloud secret store is not configured")
+		return model.CloudProviderConfig{}, fmt.Errorf("cloud secret store is not configured")
 	}
 	if err := deps.CloudSecretStore.SaveCloudSecret(tokenRef, apiToken); err != nil {
-		return config.CloudProviderConfig{}, fmt.Errorf("store cloudflare api token: %w", err)
+		return model.CloudProviderConfig{}, fmt.Errorf("store cloudflare api token: %w", err)
 	}
 	saved, err := SaveCloudProviderConfig(store, provider)
 	if err != nil {
-		return config.CloudProviderConfig{}, err
+		return model.CloudProviderConfig{}, err
 	}
 	return saved, nil
 }
@@ -142,13 +135,13 @@ func ResolveCloudflareAccounts(ctx core.Context, token string, deps CloudDepende
 }
 
 // Mirrors the identity into generic fields so listing needs no Cloudflare special case.
-func cloudflareProviderConfig(alias, accountID, tokenName, tokenRef string) config.CloudProviderConfig {
-	return NormalizeCloudProviderConfig(config.CloudProviderConfig{
+func cloudflareProviderConfig(alias, accountID, tokenName, tokenRef string) model.CloudProviderConfig {
+	return NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:     alias,
 		Provider:  config.CloudProviderCloudflare,
 		Username:  tokenName,
 		AccountID: accountID,
-		Cloudflare: &config.CloudflareProviderConfig{
+		Cloudflare: &model.CloudflareProviderConfig{
 			AccountID: accountID,
 			TokenName: tokenName,
 			TokenRef:  tokenRef,
@@ -156,25 +149,25 @@ func cloudflareProviderConfig(alias, accountID, tokenName, tokenRef string) conf
 	})
 }
 
-func cloudflareCloudProviderTokenStatus(provider config.CloudProviderConfig, deps CloudDependencies) CloudProviderStatus {
+func cloudflareCloudProviderTokenStatus(provider model.CloudProviderConfig, deps CloudDependencies) model.CloudProviderStatus {
 	if provider.Cloudflare == nil || strings.TrimSpace(provider.Cloudflare.TokenRef) == "" {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "cloudflare api token is not configured"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "cloudflare api token is not configured"}
 	}
 	if deps.CloudSecretStore == nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusUnknown, Message: "cloud secret store is not configured"}
 	}
 	token, err := deps.CloudSecretStore.LoadCloudSecret(provider.Cloudflare.TokenRef)
 	if err != nil || strings.TrimSpace(token) == "" {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "cloudflare api token is not available on this machine"}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusNotConfigured, Message: "cloudflare api token is not available on this machine"}
 	}
 	if _, err := deps.VerifyCloudflareToken(core.StderrOnlyContext(), token); err != nil {
-		return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusExpired, Message: err.Error()}
+		return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusExpired, Message: err.Error()}
 	}
-	return CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
+	return model.CloudProviderStatus{CloudProviderConfig: provider, Status: config.CloudTokenStatusActive}
 }
 
 // deleteCloudflareToken keeps the alias but drops its credential, like an SSO logout.
-func deleteCloudflareToken(ctx core.Context, provider config.CloudProviderConfig, deps CloudDependencies) error {
+func deleteCloudflareToken(ctx core.Context, provider model.CloudProviderConfig, deps CloudDependencies) error {
 	if provider.Cloudflare == nil || strings.TrimSpace(provider.Cloudflare.TokenRef) == "" {
 		return nil
 	}

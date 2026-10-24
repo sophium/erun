@@ -13,16 +13,9 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
-
-// UploadRuntimeInputParams selects the file `inputs upload` places in the runtime pod.
-type UploadRuntimeInputParams struct {
-	LocalPath string
-	// RemotePath is never defaulted, so a file cannot land somewhere a
-	// background sync reconciles away.
-	RemotePath string
-}
 
 // UploadRuntimeInputResult is the result of `inputs upload`.
 type UploadRuntimeInputResult struct {
@@ -37,7 +30,7 @@ type RuntimeInputUploadRunner func(req config.ShellLaunchParams, script string, 
 // UploadRuntimeInput streams a host file into the runtime pod over kubectl exec
 // stdin, so the bytes never touch the model's context or a command line.
 // It is host-only: the in-pod MCP edge has no path to the operator's filesystem.
-func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
+func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params model.UploadRuntimeInputParams, run RuntimeInputUploadRunner) (UploadRuntimeInputResult, error) {
 	dir, name, info, err := resolveRuntimeInputUpload(params)
 	if err != nil {
 		return UploadRuntimeInputResult{}, err
@@ -68,7 +61,7 @@ func UploadRuntimeInput(ctx core.Context, req config.ShellLaunchParams, params U
 	return UploadRuntimeInputResult{RemotePath: target, Bytes: info.Size(), SHA256: localSHA}, nil
 }
 
-func resolveRuntimeInputUpload(params UploadRuntimeInputParams) (dir, name string, info os.FileInfo, err error) {
+func resolveRuntimeInputUpload(params model.UploadRuntimeInputParams) (dir, name string, info os.FileInfo, err error) {
 	localPath := strings.TrimSpace(params.LocalPath)
 	if localPath == "" {
 		return "", "", nil, fmt.Errorf("local path is required")

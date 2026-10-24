@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // terraformLockPlatforms match erun's deploy targets so one committed lock
@@ -17,12 +18,12 @@ type terraformStep struct {
 	confirm bool
 }
 
-func executeTerraformSteps(ctx core.Context, result TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
+func executeTerraformSteps(ctx core.Context, result model.TerraformResult, steps []terraformStep, confirm TerraformConfirmFunc, rfc2136Secret string) error {
 	if err := os.MkdirAll(result.WorkDir, 0o755); err != nil {
 		return fmt.Errorf("creating terraform state dir %s: %w", result.WorkDir, err)
 	}
 	// Fail with a recovery path when a lock-generating init meets a read-only tree.
-	if result.Operation == string(TerraformInit) && !result.LockReadonly {
+	if result.Operation == string(model.TerraformInit) && !result.LockReadonly {
 		if err := ensureTerraformTreeWritable(result.Directory); err != nil {
 			return err
 		}
@@ -46,21 +47,21 @@ func executeTerraformSteps(ctx core.Context, result TerraformResult, steps []ter
 
 // buildTerraformSteps does not run init; the operator runs `erun terraform init`
 // so plan/apply/destroy never write the lock into a read-only tree.
-func buildTerraformSteps(op TerraformOperation, varFile, stateFile, planFile string, lockReadonly bool, extraArgs []string) []terraformStep {
+func buildTerraformSteps(op model.TerraformOperation, varFile, stateFile, planFile string, lockReadonly bool, extraArgs []string) []terraformStep {
 	switch op {
-	case TerraformInit:
+	case model.TerraformInit:
 		return buildTerraformInitSteps(stateFile, lockReadonly)
-	case TerraformPlan:
+	case model.TerraformPlan:
 		plan := append([]string{"plan", "-input=false"}, terraformVarFileArgs(varFile)...)
 		plan = append(plan, extraArgs...)
 		return []terraformStep{{args: plan}}
-	case TerraformDestroy:
+	case model.TerraformDestroy:
 		plan := append([]string{"plan", "-destroy", "-input=false"}, terraformVarFileArgs(varFile)...)
 		plan = append(plan, extraArgs...)
 		plan = append(plan, "-out", planFile)
 		apply := terraformStep{args: []string{"apply", "-input=false", planFile}, confirm: true}
 		return []terraformStep{{args: plan}, apply}
-	case TerraformApply:
+	case model.TerraformApply:
 	}
 	return buildTerraformApplySteps(varFile, planFile, extraArgs)
 }

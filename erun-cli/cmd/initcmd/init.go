@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -372,7 +373,7 @@ func TenantSelectionUnavailable() bool {
 	return !shared.StdinIsTerminal() && !tenantPromptHasAnswer()
 }
 
-func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) (setup.TenantSelectionResult, error) {
+func SelectTenantPrompt(run shared.SelectRunner, tenants []model.TenantConfig) (model.TenantSelectionResult, error) {
 	items := make([]string, 0, len(tenants)+1)
 	for _, tenant := range tenants {
 		items = append(items, tenant.Name)
@@ -387,17 +388,17 @@ func SelectTenantPrompt(run shared.SelectRunner, tenants []config.TenantConfig) 
 	_, result, err := run(prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
-			return setup.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
+			return model.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
 		}
 		if errors.Is(err, promptui.ErrAbort) {
-			return setup.TenantSelectionResult{}, nil
+			return model.TenantSelectionResult{}, nil
 		}
-		return setup.TenantSelectionResult{}, err
+		return model.TenantSelectionResult{}, err
 	}
 
 	if result == initializeCurrentProjectOption {
-		return setup.TenantSelectionResult{Initialize: true}, nil
+		return model.TenantSelectionResult{Initialize: true}, nil
 	}
 
-	return setup.TenantSelectionResult{Tenant: result}, nil
+	return model.TenantSelectionResult{Tenant: result}, nil
 }

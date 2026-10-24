@@ -3,10 +3,10 @@ package shared
 import (
 	"fmt"
 
-	"github.com/sophium/erun/erun-common/command/workspace"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
-func SshdSyncSummary(dryRun bool, synced workspace.WorkspaceSyncResult) string {
+func SshdSyncSummary(dryRun bool, synced model.WorkspaceSyncResult) string {
 	if dryRun {
 		return fmt.Sprintf("workspace sync would copy %d files, delete %d, and deliver %d artifacts", synced.FilesCopied, synced.FilesDeleted, synced.ArtifactsCopied)
 	}

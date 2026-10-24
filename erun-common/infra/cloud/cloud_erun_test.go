@@ -12,7 +12,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // erunTestCloudStore records saves, unlike stubCloudContextStore's no-op SaveERunConfig.
@@ -29,8 +29,8 @@ func (s *erunTestCloudStore) SaveERunConfig(config configpkg.ERunConfig) error {
 	return nil
 }
 
-func fetchPlatformInfoExpecting(t *testing.T, wantAPIURL string, info platformclient.PlatformInfo) func(core.Context, string) (platformclient.PlatformInfo, error) {
-	return func(_ core.Context, apiURL string) (platformclient.PlatformInfo, error) {
+func fetchPlatformInfoExpecting(t *testing.T, wantAPIURL string, info model.PlatformInfo) func(core.Context, string) (model.PlatformInfo, error) {
+	return func(_ core.Context, apiURL string) (model.PlatformInfo, error) {
 		if apiURL != wantAPIURL {
 			t.Fatalf("apiURL = %q, want %q", apiURL, wantAPIURL)
 		}
@@ -50,15 +50,15 @@ func fetchOIDCDiscoveryExpecting(t *testing.T, wantIssuer string) func(core.Cont
 func TestInitERunCloudProviderRecordsAliasIssuerAndClientID(t *testing.T) {
 	store := erunTestCloudStore{}
 	deps := CloudDependencies{
-		FetchPlatformInfo:  fetchPlatformInfoExpecting(t, "https://api.example.test", platformclient.PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-client-1"}),
+		FetchPlatformInfo:  fetchPlatformInfoExpecting(t, "https://api.example.test", model.PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-client-1"}),
 		FetchOIDCDiscovery: fetchOIDCDiscoveryExpecting(t, "https://auth.example.test"),
 	}
 
-	provider, err := InitERunCloudProvider(core.Context{}, &store, InitERunCloudProviderParams{APIURL: "https://api.example.test/"}, deps)
+	provider, err := InitERunCloudProvider(core.Context{}, &store, model.InitERunCloudProviderParams{APIURL: "https://api.example.test/"}, deps)
 	if err != nil {
 		t.Fatalf("InitERunCloudProvider: %v", err)
 	}
-	wantERun := &configpkg.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"}
+	wantERun := &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"}
 	if provider.Provider != configpkg.CloudProviderERun || provider.OIDCIssuerURL != "https://auth.example.test" || *provider.ERun != *wantERun {
 		t.Fatalf("provider = %+v (ERun=%+v), want Provider=%s OIDCIssuerURL=https://auth.example.test ERun=%+v",
 			provider, provider.ERun, configpkg.CloudProviderERun, wantERun)
@@ -74,12 +74,12 @@ func TestInitERunCloudProviderRecordsAliasIssuerAndClientID(t *testing.T) {
 func TestInitERunCloudProviderDryRunPerformsNoWrite(t *testing.T) {
 	store := erunTestCloudStore{}
 	deps := CloudDependencies{
-		FetchPlatformInfo: func(core.Context, string) (platformclient.PlatformInfo, error) {
+		FetchPlatformInfo: func(core.Context, string) (model.PlatformInfo, error) {
 			t.Fatal("dry run must not fetch platform info for real")
-			return platformclient.PlatformInfo{}, nil
+			return model.PlatformInfo{}, nil
 		},
 	}
-	provider, err := InitERunCloudProvider(core.Context{DryRun: true}, &store, InitERunCloudProviderParams{APIURL: "https://api.example.test"}, deps)
+	provider, err := InitERunCloudProvider(core.Context{DryRun: true}, &store, model.InitERunCloudProviderParams{APIURL: "https://api.example.test"}, deps)
 	if err != nil {
 		t.Fatalf("InitERunCloudProvider dry run: %v", err)
 	}
@@ -93,33 +93,33 @@ func TestInitERunCloudProviderDryRunPerformsNoWrite(t *testing.T) {
 
 func TestInitERunCloudProviderRequiresAPIURL(t *testing.T) {
 	store := erunTestCloudStore{}
-	if _, err := InitERunCloudProvider(core.Context{}, &store, InitERunCloudProviderParams{}, CloudDependencies{}); err == nil {
+	if _, err := InitERunCloudProvider(core.Context{}, &store, model.InitERunCloudProviderParams{}, CloudDependencies{}); err == nil {
 		t.Fatal("expected an error for a missing api url")
 	}
 }
 
 func TestInitERunCloudProviderRejectsMissingIssuerOrClientID(t *testing.T) {
-	cases := map[string]platformclient.PlatformInfo{
+	cases := map[string]model.PlatformInfo{
 		"missing issuer":    {CLIClientID: "cli-1"},
 		"missing client id": {Issuer: "https://auth.example.test"},
 	}
 	for name, info := range cases {
 		t.Run(name, func(t *testing.T) {
 			store := erunTestCloudStore{}
-			deps := CloudDependencies{FetchPlatformInfo: func(core.Context, string) (platformclient.PlatformInfo, error) { return info, nil }}
-			if _, err := InitERunCloudProvider(core.Context{}, &store, InitERunCloudProviderParams{APIURL: "https://api.example.test"}, deps); err == nil {
+			deps := CloudDependencies{FetchPlatformInfo: func(core.Context, string) (model.PlatformInfo, error) { return info, nil }}
+			if _, err := InitERunCloudProvider(core.Context{}, &store, model.InitERunCloudProviderParams{APIURL: "https://api.example.test"}, deps); err == nil {
 				t.Fatal("expected an error")
 			}
 		})
 	}
 }
 
-func erunTestProvider() configpkg.CloudProviderConfig {
-	return NormalizeCloudProviderConfig(configpkg.CloudProviderConfig{
+func erunTestProvider() model.CloudProviderConfig {
+	return NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:         "erun+api.example.test@erun",
 		Provider:      configpkg.CloudProviderERun,
 		OIDCIssuerURL: "https://auth.example.test",
-		ERun:          &configpkg.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
+		ERun:          &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
 	})
 }
 
@@ -306,7 +306,7 @@ func TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout(t *testing.T) {
 }
 
 func TestCloudProviderBearerTokenERunDryRunPerformsNoNetworkCall(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
+	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()
 	deps := CloudDependencies{
 		RefreshERunTokens: func(core.Context, OIDCDiscovery, string, string) (ERunTokens, error) {
@@ -314,7 +314,7 @@ func TestCloudProviderBearerTokenERunDryRunPerformsNoNetworkCall(t *testing.T) {
 			return ERunTokens{}, nil
 		},
 	}
-	token, err := CloudProviderBearerToken(core.Context{DryRun: true}, &store, CloudBearerParams{Alias: provider.Alias}, deps)
+	token, err := CloudProviderBearerToken(core.Context{DryRun: true}, &store, model.CloudBearerParams{Alias: provider.Alias}, deps)
 	if err != nil {
 		t.Fatalf("CloudProviderBearerToken dry run: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestERunProviderSupportsOIDCIssuerAggregation(t *testing.T) {
 }
 
 func TestERunCloudProviderBearerTokenRequiresConfiguration(t *testing.T) {
-	provider := NormalizeCloudProviderConfig(configpkg.CloudProviderConfig{Alias: "erun+x@erun", Provider: configpkg.CloudProviderERun})
+	provider := NormalizeCloudProviderConfig(model.CloudProviderConfig{Alias: "erun+x@erun", Provider: configpkg.CloudProviderERun})
 	if _, err := erunCloudProviderBearerToken(core.Context{}, provider, CloudDependencies{CloudSecretStore: NewFileCloudSecretStore(t.TempDir())}); err == nil {
 		t.Fatal("expected an error for a provider missing its ERun client id")
 	}

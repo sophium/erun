@@ -10,8 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/infra/registry"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The desktop shells `erun pin` so CLI, MCP and UI share one re-pin engine.
@@ -100,7 +99,7 @@ func runPinCLI(ctx context.Context, cliPath string, args []string) (uiPinPlan, e
 		return uiPinPlan{}, err
 	}
 
-	var resolved lifecycle.PinPlan
+	var resolved model.PinPlan
 	if unmarshalErr := json.Unmarshal(stdout, &resolved); unmarshalErr != nil {
 		return uiPinPlan{}, fmt.Errorf("read the pin result: %w", unmarshalErr)
 	}
@@ -119,7 +118,7 @@ func lastMeaningfulLine(detail string) string {
 	return strings.TrimSpace(detail)
 }
 
-func toUIPinPlan(plan lifecycle.PinPlan) uiPinPlan {
+func toUIPinPlan(plan model.PinPlan) uiPinPlan {
 	out := uiPinPlan{
 		Tenant:      plan.Tenant,
 		Environment: plan.Environment,
@@ -145,7 +144,7 @@ func toUIPinPlan(plan lifecycle.PinPlan) uiPinPlan {
 }
 
 // pinSiteLabel names a site by its repo path.
-func pinSiteLabel(site lifecycle.PinSite) string {
+func pinSiteLabel(site model.PinSite) string {
 	path := strings.TrimSpace(site.Path)
 	detail := strings.TrimSpace(site.Detail)
 	switch {
@@ -180,7 +179,7 @@ func (a *App) ListPinnableVersions(selection uiSelection) ([]string, error) {
 		}
 		return nil, err
 	}
-	var versions registry.RuntimeRegistryVersions
+	var versions model.RuntimeRegistryVersions
 	if unmarshalErr := json.Unmarshal(stdout, &versions); unmarshalErr != nil {
 		return nil, fmt.Errorf("read the published versions: %w", unmarshalErr)
 	}

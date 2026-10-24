@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
@@ -80,8 +81,8 @@ func githubNextPageLink(linkHeader string) string {
 
 // resolveBypassedPushesForRuleset keeps pushes where rulesetID's own rule
 // failed and needed the bypass.
-func resolveBypassedPushesForRuleset(ctx context.Context, client *http.Client, token, owner, repo string, rulesetID int64, suites []githubRuleSuiteSummary) ([]BypassedPush, error) {
-	pushes := make([]BypassedPush, 0, len(suites))
+func resolveBypassedPushesForRuleset(ctx context.Context, client *http.Client, token, owner, repo string, rulesetID int64, suites []githubRuleSuiteSummary) ([]model.BypassedPush, error) {
+	pushes := make([]model.BypassedPush, 0, len(suites))
 	for _, suite := range suites {
 		if suite.Result != "bypass" {
 			continue
@@ -94,7 +95,7 @@ func resolveBypassedPushesForRuleset(ctx context.Context, client *http.Client, t
 		if !ok {
 			continue
 		}
-		pushes = append(pushes, BypassedPush{
+		pushes = append(pushes, model.BypassedPush{
 			RuleSuiteID: suite.ID, Actor: suite.ActorName, Commit: suite.AfterSHA,
 			BeforeCommit: suite.BeforeSHA, PushedAt: suite.PushedAt, BypassedRule: rule,
 		})

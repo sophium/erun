@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -28,7 +29,7 @@ func TestEnvironmentJobThatBackgroundsWorkIntoAFreshProcessGroupIsNotReportedAsS
 	backgroundLog := filepath.Join(t.TempDir(), "background.log")
 	marker := filepath.Join(t.TempDir(), "background-marker")
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -67,7 +68,7 @@ func TestEnvironmentJobThatBackgroundsWorkIntoItsOwnSessionIsNotReportedAsSucces
 	backgroundLog := filepath.Join(t.TempDir(), "background.log")
 	marker := filepath.Join(t.TempDir(), "background-marker")
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,

@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/orchestration/clusterread"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // computeObserveDrift diffs the live release and its pods against the env config. It returns
 // non-nil (possibly empty) after a read and nil in dry-run; see ObserveResult.Drift.
-func computeObserveDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
+func computeObserveDrift(req config.ShellLaunchParams, release *model.ObservedHelmRelease, pods []model.ObservedPod) []string {
 	if release == nil {
 		return nil
 	}
@@ -36,7 +36,7 @@ func computeObserveDrift(req config.ShellLaunchParams, release *clusterread.Obse
 	return findings
 }
 
-func unreadableReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
+func unreadableReleaseDrift(req config.ShellLaunchParams, release *model.ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -45,7 +45,7 @@ func unreadableReleaseDrift(req config.ShellLaunchParams, release *clusterread.O
 		recordedVersion, release.Name, req.Namespace, release.Error)}
 }
 
-func missingReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
+func missingReleaseDrift(req config.ShellLaunchParams, release *model.ObservedHelmRelease, recordedVersion string) []string {
 	if recordedVersion == "" {
 		return nil
 	}
@@ -54,7 +54,7 @@ func missingReleaseDrift(req config.ShellLaunchParams, release *clusterread.Obse
 		recordedVersion, release.Name, req.Namespace)}
 }
 
-func foundReleaseDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease, recordedVersion string) []string {
+func foundReleaseDrift(req config.ShellLaunchParams, release *model.ObservedHelmRelease, recordedVersion string) []string {
 	var findings []string
 	if recordedVersion != "" && release.AppVersion != "" && recordedVersion != release.AppVersion {
 		findings = append(findings, fmt.Sprintf(
@@ -73,7 +73,7 @@ func foundReleaseDrift(req config.ShellLaunchParams, release *clusterread.Observ
 }
 
 // runningImageDrift flags an imageOverrides entry whose same-named container runs another image.
-func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []ObservedPod) []string {
+func runningImageDrift(release *model.ObservedHelmRelease, pods []model.ObservedPod) []string {
 	if len(release.ImageOverrides) == 0 {
 		return nil
 	}
@@ -107,8 +107,8 @@ func runningImageDrift(release *clusterread.ObservedHelmRelease, pods []Observed
 }
 
 // runtimePodDrift compares only fields the env config recorded, never a manufactured default.
-func runtimePodDrift(req config.ShellLaunchParams, release *clusterread.ObservedHelmRelease) []string {
-	if release.RuntimePod == (config.RuntimePodResources{}) {
+func runtimePodDrift(req config.ShellLaunchParams, release *model.ObservedHelmRelease) []string {
+	if release.RuntimePod == (model.RuntimePodResources{}) {
 		return nil
 	}
 	recorded := req.RuntimePod

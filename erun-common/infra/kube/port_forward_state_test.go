@@ -9,6 +9,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // seedPortForwardStateFileForTest writes a state file without touching the env config.
@@ -21,7 +22,7 @@ func seedPortForwardStateFileForTest(t *testing.T, tenant, environment string, p
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	data, err := json.Marshal(PortForwardState{Tenant: tenant, Environment: environment, LocalPort: port})
+	data, err := json.Marshal(model.PortForwardState{Tenant: tenant, Environment: environment, LocalPort: port})
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}

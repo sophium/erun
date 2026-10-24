@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/setup"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -187,7 +187,7 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	if output.Interaction == nil {
 		t.Fatalf("expected interaction output, got %+v", output)
 	}
-	if output.Interaction.Type != setup.BootstrapInitInteractionConfirmTenant {
+	if output.Interaction.Type != model.BootstrapInitInteractionConfirmTenant {
 		t.Fatalf("unexpected interaction: %+v", output.Interaction)
 	}
 	if output.Executed {
@@ -264,7 +264,7 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	if output.Interaction == nil {
 		t.Fatalf("expected interaction output, got %+v", output)
 	}
-	if output.Interaction.Type != setup.BootstrapInitInteractionRemoteRepository {
+	if output.Interaction.Type != model.BootstrapInitInteractionRemoteRepository {
 		t.Fatalf("unexpected interaction: %+v", output.Interaction)
 	}
 }

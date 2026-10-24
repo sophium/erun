@@ -83,7 +83,7 @@ func TestJobEnvelopeMirrorsTheWorksOutputIntoTheJobsLog(t *testing.T) {
 	if job.Succeeded {
 		t.Fatalf("job = %+v, want a failure", job)
 	}
-	output, err := jobs.ReadEnvironmentJobOutput(jobs.ReadEnvironmentJobOutputParams{
+	output, err := jobs.ReadEnvironmentJobOutput(model.ReadEnvironmentJobOutputParams{
 		Tenant: "acme", Environment: "dev", ID: job.ID,
 	})
 	if err != nil {

@@ -11,8 +11,8 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
 type pushNoticeStore struct {
@@ -42,10 +42,10 @@ func (s pushNoticeSecrets) DeleteCloudSecret(ref string) error { delete(s.secret
 const pushNoticeAlias = "dev@erun"
 
 func pushNoticeStoreWithAlias(apiURL string) pushNoticeStore {
-	return pushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{{
+	return pushNoticeStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{{
 		Alias:    pushNoticeAlias,
 		Provider: configpkg.CloudProviderERun,
-		ERun:     &configpkg.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
+		ERun:     &model.ERunProviderConfig{APIURL: apiURL, ClientID: "cli-client-1"},
 	}}}}
 }
 
@@ -69,8 +69,8 @@ func pushNoticeContext(out *bytes.Buffer) core.Context {
 	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, out, out)}
 }
 
-func pushNoticeParams(branch string) PushedBranchReviewNoticeParams {
-	return PushedBranchReviewNoticeParams{Branch: branch, Remote: "origin"}
+func pushNoticeParams(branch string) model.PushedBranchReviewNoticeParams {
+	return model.PushedBranchReviewNoticeParams{Branch: branch, Remote: "origin"}
 }
 
 // pushNoticeWarningNeedle separates the warning from the command's trace lines.
@@ -83,7 +83,7 @@ func TestWarnPushedBranchWithoutReviewWarnsWhenNoReviewReferencesTheBranch(t *te
 			t.Errorf("Authorization = %q, want the cached bearer token", r.Header.Get("Authorization"))
 		}
 		requestedQuery = r.URL.RawQuery
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{})
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{})
 	}))
 	defer srv.Close()
 
@@ -103,7 +103,7 @@ func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *te
 	for _, status := range []string{"OPEN", "READY", "MERGE", "MERGED", "FAILED"} {
 		t.Run(status, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
+				_ = json.NewEncoder(w).Encode([]model.PlatformReview{{ReviewID: "r1", Name: "Add widget", SourceBranch: "feature/2204-queued", Status: status}})
 			}))
 			defer srv.Close()
 
@@ -118,7 +118,7 @@ func TestWarnPushedBranchWithoutReviewSilentWhenAReviewReferencesTheBranch(t *te
 
 func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{{ReviewID: "r1", SourceBranch: "feature/2204-closed", Status: "CLOSED"}})
 	}))
 	defer srv.Close()
 
@@ -132,7 +132,7 @@ func TestWarnPushedBranchWithoutReviewTreatsAClosedReviewAsNoReview(t *testing.T
 // Reviews are named after the squash message, so only sourceBranch identifies one.
 func TestWarnPushedBranchWithoutReviewMatchesTheSourceBranch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]platformclient.PlatformReview{
+		_ = json.NewEncoder(w).Encode([]model.PlatformReview{
 			{ReviewID: "r1", Name: "feature/2204-orphan", SourceBranch: "feature/2204-other", Status: "OPEN"},
 		})
 	}))

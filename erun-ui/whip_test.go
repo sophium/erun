@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	orchestratorpkg "github.com/sophium/erun/erun-common/command/orchestrator"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func whipTestStore(t *testing.T) stubUIStore {
 	t.Helper()
 	return stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "ux"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -38,9 +38,9 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 		canConnectLocalPort: func(int) bool {
 			return false
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
 			called = true
-			return orchestratorpkg.WhipResult{}, nil
+			return model.WhipResult{}, nil
 		},
 	})
 
@@ -48,7 +48,7 @@ func TestWhipOneEnvironmentNowNotOpenReportsNotAlive(t *testing.T) {
 	if called {
 		t.Fatal("expected the MCP call to be skipped for an environment with no reachable edge")
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNone || result.Reason != orchestratorpkg.WhipReasonNotAlive {
+	if result.Decision != model.WhipDecisionNone || result.Reason != model.WhipReasonNotAlive {
 		t.Fatalf("got decision=%v reason=%v, want none/not-alive", result.Decision, result.Reason)
 	}
 	if result.Candidate.ID != "erun/ux" {
@@ -68,7 +68,7 @@ func TestWhipOneEnvironmentNowStaleForwardReportsUnreachableNotNotAlive(t *testi
 	})
 
 	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
-	if result.Reason != orchestratorpkg.WhipReasonUnreachable {
+	if result.Reason != model.WhipReasonUnreachable {
 		t.Fatalf("got reason=%v, want unreachable", result.Reason)
 	}
 	if result.Error == "" {
@@ -83,12 +83,12 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (model.WhipResult, error) {
 			gotEndpoint = endpoint
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
-				Reason:    orchestratorpkg.WhipReasonNudge,
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
+				Reason:    model.WhipReasonNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -98,7 +98,7 @@ func TestWhipOneEnvironmentNowPushesThroughAReachableEdge(t *testing.T) {
 	if gotEndpoint == "" {
 		t.Fatal("expected the pod-backed whip call to be used")
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNudge || !result.Pushed {
+	if result.Decision != model.WhipDecisionNudge || !result.Pushed {
 		t.Fatalf("expected the pod's own decision to pass through untouched, got %+v", result)
 	}
 }
@@ -109,10 +109,10 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Decision: orchestratorpkg.WhipDecisionNudge,
-				Reason:   orchestratorpkg.WhipReasonNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Decision: model.WhipDecisionNudge,
+				Reason:   model.WhipReasonNudge,
 				Pushed:   true,
 			}, nil
 		},
@@ -122,7 +122,7 @@ func TestWhipOneEnvironmentNowStampsIdentityOnSuccessEvenIfThePodDidNot(t *testi
 	if result.Candidate.ID != "erun/ux" || result.Candidate.Name != "erun/ux" {
 		t.Fatalf("expected the host-resolved id to be stamped regardless of the pod's payload, got %+v", result.Candidate)
 	}
-	if result.Decision != orchestratorpkg.WhipDecisionNudge || !result.Pushed {
+	if result.Decision != model.WhipDecisionNudge || !result.Pushed {
 		t.Fatalf("expected the pod's own decision to still pass through, got %+v", result)
 	}
 }
@@ -133,16 +133,16 @@ func TestWhipOneEnvironmentNowSurfacesACallFailureAsFailedNotNotAlive(t *testing
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{}, errors.New("tool not found")
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{}, errors.New("tool not found")
 		},
 	})
 
 	result := app.whipOneEnvironmentNow(context.Background(), "erun", "ux")
-	if result.Reason != orchestratorpkg.WhipReasonCallFailed || result.Error == "" {
+	if result.Reason != model.WhipReasonCallFailed || result.Error == "" {
 		t.Fatalf("expected a call-failed result naming the failure, got %+v", result)
 	}
-	if result.Reason == orchestratorpkg.WhipReasonNotAlive {
+	if result.Reason == model.WhipReasonNotAlive {
 		t.Fatal("a call-level failure must never be reported as not-alive")
 	}
 }
@@ -154,9 +154,9 @@ func TestWhipOneEnvironmentNowForwardsTheResolvedTarget(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, tenant, environment, _, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, tenant, environment, _, _ string) (model.WhipResult, error) {
 			gotTenant, gotEnvironment = tenant, environment
-			return orchestratorpkg.WhipResult{Decision: orchestratorpkg.WhipDecisionNudge, Pushed: true}, nil
+			return model.WhipResult{Decision: model.WhipDecisionNudge, Pushed: true}, nil
 		},
 	})
 
@@ -175,11 +175,11 @@ func TestWhipNowFoldsEnvironmentsAndOrchestratorsIntoOneReport(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
-				Reason:    orchestratorpkg.WhipReasonNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
+				Reason:    model.WhipReasonNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -227,10 +227,10 @@ func TestWhipEnvironmentsNowSkipsHostEnvs(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(context.Context, string, string, string, string) (orchestratorpkg.WhipResult, error) {
-			return orchestratorpkg.WhipResult{
-				Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
-				Decision:  orchestratorpkg.WhipDecisionNudge,
+		whipEnvironment: func(context.Context, string, string, string, string) (model.WhipResult, error) {
+			return model.WhipResult{
+				Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux", Reachable: true, Alive: true},
+				Decision:  model.WhipDecisionNudge,
 				Pushed:    true,
 			}, nil
 		},
@@ -263,9 +263,9 @@ func TestWhipEnvironmentsNowOnlyPushesRequestedEnvironments(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return true
 		},
-		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (orchestratorpkg.WhipResult, error) {
+		whipEnvironment: func(_ context.Context, _, _, endpoint, _ string) (model.WhipResult, error) {
 			pushedEndpoints = append(pushedEndpoints, endpoint)
-			return orchestratorpkg.WhipResult{Decision: orchestratorpkg.WhipDecisionNudge, Pushed: true}, nil
+			return model.WhipResult{Decision: model.WhipDecisionNudge, Pushed: true}, nil
 		},
 	})
 
@@ -341,14 +341,14 @@ func TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision(t *testing.T) {
 	cases := []struct {
 		decision orchestratorPacingDecision
 		reason   orchestratorPacingReason
-		want     orchestratorpkg.WhipDecision
+		want     model.WhipDecision
 		alive    bool
 		pushed   bool
 	}{
-		{orchestratorPacingNudge, orchestratorPacingReasonNudge, orchestratorpkg.WhipDecisionNudge, true, true},
-		{orchestratorPacingCap, orchestratorPacingReasonCapCrossed, orchestratorpkg.WhipDecisionCap, true, false},
-		{orchestratorPacingNone, orchestratorPacingReasonNotAlive, orchestratorpkg.WhipDecisionNone, false, false},
-		{orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped, orchestratorpkg.WhipDecisionNone, true, false},
+		{orchestratorPacingNudge, orchestratorPacingReasonNudge, model.WhipDecisionNudge, true, true},
+		{orchestratorPacingCap, orchestratorPacingReasonCapCrossed, model.WhipDecisionCap, true, false},
+		{orchestratorPacingNone, orchestratorPacingReasonNotAlive, model.WhipDecisionNone, false, false},
+		{orchestratorPacingNone, orchestratorPacingReasonAlreadyCapped, model.WhipDecisionNone, true, false},
 	}
 	for _, tc := range cases {
 		result := orchestratorWhipOutcomeToResult(orchestratorWhipOutcome{id: "o1", name: "One", decision: tc.decision, reason: tc.reason})
@@ -365,35 +365,35 @@ func TestOrchestratorWhipOutcomeToResultRoundTripsEveryDecision(t *testing.T) {
 }
 
 func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
-	pushed := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux"},
-		Decision:  orchestratorpkg.WhipDecisionNudge,
+	pushed := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/ux", Name: "erun/ux"},
+		Decision:  model.WhipDecisionNudge,
 		Pushed:    true,
 	})
 	if pushed.Outcome != "pushed" || pushed.Kind != "environment" {
 		t.Fatalf("got %+v, want pushed/environment", pushed)
 	}
 
-	capped := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetOrchestrator, ID: "o1", Name: "One"},
-		Decision:  orchestratorpkg.WhipDecisionCap,
+	capped := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetOrchestrator, ID: "o1", Name: "One"},
+		Decision:  model.WhipDecisionCap,
 	})
 	if capped.Outcome != "capped" || capped.Reason == "" {
 		t.Fatalf("got %+v, want capped with a non-empty reason", capped)
 	}
 
-	skipped := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNone,
-		Reason:    orchestratorpkg.WhipReasonNotAlive,
+	skipped := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNone,
+		Reason:    model.WhipReasonNotAlive,
 	})
 	if skipped.Outcome != "skipped" || !strings.Contains(skipped.Reason, "not alive") {
 		t.Fatalf("got %+v, want skipped naming not-alive", skipped)
 	}
 
-	failedPush := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNudge,
+	failedPush := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNudge,
 		Pushed:    false,
 		Error:     "writing nudge text: boom",
 	})
@@ -403,10 +403,10 @@ func TestWhipResultToUIRendersEveryOutcome(t *testing.T) {
 }
 
 func TestWhipResultToUIRendersACallFailureAsFailed(t *testing.T) {
-	failedCall := whipResultToUI(orchestratorpkg.WhipResult{
-		Candidate: orchestratorpkg.WhipCandidate{Kind: orchestratorpkg.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
-		Decision:  orchestratorpkg.WhipDecisionNone,
-		Reason:    orchestratorpkg.WhipReasonCallFailed,
+	failedCall := whipResultToUI(model.WhipResult{
+		Candidate: model.WhipCandidate{Kind: model.WhipTargetEnvironment, ID: "erun/dev", Name: "erun/dev"},
+		Decision:  model.WhipDecisionNone,
+		Reason:    model.WhipReasonCallFailed,
 		Error:     "tenant/environment not resolved",
 	})
 	if failedCall.Outcome != "failed" || failedCall.Error == "" {

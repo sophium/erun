@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // seedPortForwardLogForTest writes a log and its rotated generation.
@@ -89,7 +90,7 @@ func writePortForwardStateProcessID(t *testing.T, statePath string, processID in
 	if err != nil {
 		t.Fatalf("read state: %v", err)
 	}
-	var state PortForwardState
+	var state model.PortForwardState
 	if err := json.Unmarshal(data, &state); err != nil {
 		t.Fatalf("unmarshal state: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestReclaimOrphanedPortForwardRecordsRemovesEnvironmentsThatNoLongerExist(t
 	if err := config.SaveERunConfig(config.ERunConfig{}); err != nil {
 		t.Fatalf("save tool config: %v", err)
 	}
-	if err := config.SaveTenantConfig(config.TenantConfig{Name: "acme"}); err != nil {
+	if err := config.SaveTenantConfig(model.TenantConfig{Name: "acme"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	if err := config.SaveEnvConfig("acme", config.EnvConfig{Name: "dev"}); err != nil {

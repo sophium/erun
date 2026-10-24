@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // ghcrStub mints a readable "scoped" bearer for Basic auth and an "anon" one
@@ -80,12 +82,12 @@ func (fakeNetError) Temporary() bool { return true }
 func TestResolveRegistryVersionsRetriesTransportBlipThenSucceeds(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	got, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	got, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
 		if calls < 2 {
-			return RuntimeRegistryVersions{}, fakeNetError{} // momentary transport blip
+			return model.RuntimeRegistryVersions{}, fakeNetError{} // momentary transport blip
 		}
-		return RuntimeRegistryVersions{LatestStable: "1.0.18"}, nil
+		return model.RuntimeRegistryVersions{LatestStable: "1.0.18"}, nil
 	})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
@@ -101,9 +103,9 @@ func TestResolveRegistryVersionsRetriesTransportBlipThenSucceeds(t *testing.T) {
 func TestResolveRegistryVersionsDoesNotRetryAuth(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fmt.Errorf("no: %w", ErrRegistryAuthRequired)
+		return model.RuntimeRegistryVersions{}, fmt.Errorf("no: %w", ErrRegistryAuthRequired)
 	})
 	if !errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatalf("err = %v, want auth", err)
@@ -116,9 +118,9 @@ func TestResolveRegistryVersionsDoesNotRetryAuth(t *testing.T) {
 func TestResolveRegistryVersionsDoesNotRetryTimeout(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fakeNetError{timeout: true}
+		return model.RuntimeRegistryVersions{}, fakeNetError{timeout: true}
 	})
 	if err == nil {
 		t.Fatal("expected the timeout error to surface")
@@ -131,9 +133,9 @@ func TestResolveRegistryVersionsDoesNotRetryTimeout(t *testing.T) {
 func TestResolveRegistryVersionsExhaustsTransportRetries(t *testing.T) {
 	withZeroRegistryRetryBackoff(t)
 	calls := 0
-	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (RuntimeRegistryVersions, error) {
+	_, err := resolveRegistryVersionsWithRetry(context.Background(), func() (model.RuntimeRegistryVersions, error) {
 		calls++
-		return RuntimeRegistryVersions{}, fakeNetError{}
+		return model.RuntimeRegistryVersions{}, fakeNetError{}
 	})
 	if !isTransientRegistryError(err) {
 		t.Fatalf("err = %v, want a transient transport error", err)

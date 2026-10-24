@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -30,10 +31,10 @@ type ActivityLeaseTakeInput struct {
 
 // ActivityLeaseResult reports the lease state after the call.
 type ActivityLeaseResult struct {
-	Tenant      string                              `json:"tenant"`
-	Environment string                              `json:"environment"`
-	Lease       *activity.EnvironmentActivityLease  `json:"lease,omitempty"`
-	Held        []activity.EnvironmentActivityLease `json:"held"`
+	Tenant      string                           `json:"tenant"`
+	Environment string                           `json:"environment"`
+	Lease       *model.EnvironmentActivityLease  `json:"lease,omitempty"`
+	Held        []model.EnvironmentActivityLease `json:"held"`
 	// Released is set only by release: false means nothing was held (still a success).
 	Released *bool `json:"released,omitempty"`
 }
@@ -59,7 +60,7 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 			Scope:       input.Scope,
 			Exclusive:   input.Exclusive,
 			// Tenant and User come from the auth identity, never caller input.
-			Holder: activity.EnvironmentActivityLeaseHolder{
+			Holder: model.EnvironmentActivityLeaseHolder{
 				Orchestrator: input.Orchestrator,
 				Tenant:       identity.Tenant,
 				User:         identity.User,
@@ -71,7 +72,7 @@ func ActivityLeaseTakeTool(runtime shared.RuntimeConfig) func(context.Context, *
 			status, statusErr := activity.ResolveStoredEnvironmentIdleStatus(runtime.Store, tenant, environment, time.Now())
 			if statusErr == nil {
 				if reason, present := activity.EnvironmentOperatorPresenceReason(status); present {
-					return nil, ActivityLeaseResult{}, &activity.EnvironmentOperatorPresentError{Reason: reason}
+					return nil, ActivityLeaseResult{}, &model.EnvironmentOperatorPresentError{Reason: reason}
 				}
 			}
 		}
@@ -124,7 +125,7 @@ func ActivityLeaseReleaseTool(runtime shared.RuntimeConfig) func(context.Context
 		if strings.TrimSpace(input.ID) == "" {
 			return nil, ActivityLeaseResult{}, fmt.Errorf("lease id is required")
 		}
-		var outcome activity.EnvironmentActivityLeaseReleaseOutcome
+		var outcome model.EnvironmentActivityLeaseReleaseOutcome
 		if input.Exclusive {
 			outcome, err = activity.ReleaseExclusiveEnvironmentActivityLease(tenant, environment, input.Scope, input.ID)
 			if err != nil {
@@ -136,19 +137,19 @@ func ActivityLeaseReleaseTool(runtime shared.RuntimeConfig) func(context.Context
 				return nil, ActivityLeaseResult{}, err
 			}
 		}
-		released := outcome == activity.EnvironmentActivityLeaseReleased
+		released := outcome == model.EnvironmentActivityLeaseReleased
 		return activityLeaseResult(tenant, environment, nil, &released)
 	}
 }
 
 // activityLeaseResult returns every claim still held; released is nil except on release.
-func activityLeaseResult(tenant, environment string, lease *activity.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
+func activityLeaseResult(tenant, environment string, lease *model.EnvironmentActivityLease, released *bool) (*mcp.CallToolResult, ActivityLeaseResult, error) {
 	held, err := activity.LoadEnvironmentActivityLeases(tenant, environment, time.Now())
 	if err != nil {
 		return nil, ActivityLeaseResult{}, err
 	}
 	if held == nil {
-		held = []activity.EnvironmentActivityLease{}
+		held = []model.EnvironmentActivityLease{}
 	}
 	return nil, ActivityLeaseResult{Tenant: tenant, Environment: environment, Lease: lease, Held: held, Released: released}, nil
 }

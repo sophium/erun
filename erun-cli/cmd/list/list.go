@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
@@ -70,7 +71,7 @@ func runListCommand(ctx core.Context, store lifecycle.ListStore, findProjectRoot
 		return err
 	}
 
-	result, err := lifecycle.ResolveListResult(store, findProjectRoot, sharedpkg.OpenParams{
+	result, err := lifecycle.ResolveListResult(store, findProjectRoot, model.OpenParams{
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
@@ -93,7 +94,7 @@ func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return nil
 	}
 	if err := writeListHeaderSections(ctx, result); err != nil {
@@ -113,7 +114,7 @@ func WriteListResult(ctx core.Context, result lifecycle.ListResult) error {
 
 // writeOrphanedSSHAliases reports unclaimed erun-named ssh Host blocks. Removal stays
 // manual: erun cannot tell its own blocks from hand-maintained ones.
-func writeOrphanedSSHAliases(ctx core.Context, orphans []lifecycle.SSHOrphanedAlias) error {
+func writeOrphanedSSHAliases(ctx core.Context, orphans []model.SSHOrphanedAlias) error {
 	if len(orphans) == 0 {
 		return nil
 	}
@@ -133,7 +134,7 @@ func sshConfigLocationLabel() string {
 	return "~/.ssh/config"
 }
 
-func orphanedSSHAliasLine(orphan lifecycle.SSHOrphanedAlias) string {
+func orphanedSSHAliasLine(orphan model.SSHOrphanedAlias) string {
 	line := orphan.Alias + ": no environment claims it"
 	if orphan.ReachesEnvironment != "" {
 		target := orphan.ReachesTenant + "/" + orphan.ReachesEnvironment
@@ -163,7 +164,7 @@ func writeListConfigurationSection(ctx core.Context, configDirectory string) err
 	return shared.WriteLabeledValue(ctx, "directory", shared.ValueOrNone(configDirectory))
 }
 
-func writeListDefaultsSection(ctx core.Context, defaults lifecycle.ListDefaultsResult) error {
+func writeListDefaultsSection(ctx core.Context, defaults model.ListDefaultsResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Defaults:"); err != nil {
 		return err
 	}

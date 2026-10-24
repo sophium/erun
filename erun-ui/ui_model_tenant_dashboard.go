@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -204,18 +204,18 @@ type uiTenantDashboardReview struct {
 }
 
 type uiTenantDashboardBuild struct {
-	BuildID         string                    `json:"buildId"`
-	TenantID        string                    `json:"tenantId"`
-	ReviewID        string                    `json:"reviewId,omitempty"`
-	ReviewName      string                    `json:"reviewName,omitempty"`
-	EnvironmentID   string                    `json:"environmentId,omitempty"`
-	EnvironmentName string                    `json:"environmentName,omitempty"`
-	Successful      bool                      `json:"successful"`
-	CommitID        string                    `json:"commitId"`
-	Version         string                    `json:"version"`
-	Profile         *core.BuildProfileSummary `json:"profile,omitempty"`
-	CreatedAt       string                    `json:"createdAt,omitempty"`
-	UpdatedAt       string                    `json:"updatedAt,omitempty"`
+	BuildID         string                     `json:"buildId"`
+	TenantID        string                     `json:"tenantId"`
+	ReviewID        string                     `json:"reviewId,omitempty"`
+	ReviewName      string                     `json:"reviewName,omitempty"`
+	EnvironmentID   string                     `json:"environmentId,omitempty"`
+	EnvironmentName string                     `json:"environmentName,omitempty"`
+	Successful      bool                       `json:"successful"`
+	CommitID        string                     `json:"commitId"`
+	Version         string                     `json:"version"`
+	Profile         *model.BuildProfileSummary `json:"profile,omitempty"`
+	CreatedAt       string                     `json:"createdAt,omitempty"`
+	UpdatedAt       string                     `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardAudit struct {

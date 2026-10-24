@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -61,7 +62,7 @@ func TestAgentJobWithADirtyWorkingTreeOnAProtectedBranchIsReportedButNotCheckpoi
 	const environment = "protected-branch"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -117,7 +118,7 @@ func TestAgentJobFinishingWhileASiblingIsStillLiveOnTheSameWorktreeIsNotCheckpoi
 		t.Fatalf("writeEnvironmentJob (sibling): %v", err)
 	}
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -161,7 +162,7 @@ func TestCommandJobIgnoresItsWorkingTreeState(t *testing.T) {
 	const environment = "command-kind"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -230,7 +231,7 @@ func TestAgentJobCheckpointCommitSurvivesARepositoryPreCommitHookThatRejectsIt(t
 	const environment = "hostile-pre-commit"
 	const id = "job"
 
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -288,7 +289,7 @@ func TestCommitWorkingTreeStillHonorsRepositoryHooksWhenNotSkipped(t *testing.T)
 	marker := rejectCommitsWithAHook(t, repo)
 	dirtyWorkingTree(t, repo)
 
-	_, err := gitx.CommitWorkingTree(testContext(), repo, gitx.CommitWorkingTreeParams{
+	_, err := gitx.CommitWorkingTree(testContext(), repo, model.CommitWorkingTreeParams{
 		Branch:  "feature/lane",
 		Message: "a person's own commit",
 	}, gitx.CommitWorkingTreeDependencies{})

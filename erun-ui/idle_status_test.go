@@ -4,12 +4,12 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/infra/activity"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestIdleStatusToUICarriesFromPodProvenance(t *testing.T) {
 	app := &App{}
-	status := activity.EnvironmentIdleStatus{StopEligible: true}
+	status := model.EnvironmentIdleStatus{StopEligible: true}
 	result := config.OpenResult{}
 
 	if ui := app.idleStatusToUI(result, status, true); !ui.FromPod {

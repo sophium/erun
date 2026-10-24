@@ -9,6 +9,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/spf13/cobra"
 )
@@ -47,11 +48,11 @@ func runContextListCommand(ctx core.Context, store cloud.CloudContextStore, deps
 	return WriteCloudContextList(ctx, result)
 }
 
-func WriteCloudContextList(ctx core.Context, result cloud.CloudContextListResult) error {
+func WriteCloudContextList(ctx core.Context, result model.CloudContextListResult) error {
 	if err := ctx.WriteResult(result); err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		return nil
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Contexts:"); err != nil {
@@ -78,7 +79,7 @@ func WriteCloudContextList(ctx core.Context, result cloud.CloudContextListResult
 }
 
 func newContextInitCmd(store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, deps cloud.CloudContextDependencies) *cobra.Command {
-	var params cloud.InitCloudContextParams
+	var params model.InitCloudContextParams
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create a managed cloud context",
@@ -105,7 +106,7 @@ func newContextInitCmd(store cloud.CloudContextStore, promptRunner shared.Prompt
 	return cmd
 }
 
-func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
+func runContextInitCommand(ctx core.Context, store cloud.CloudContextStore, promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudContextParams, deps cloud.CloudContextDependencies) error {
 	var err error
 	params.CloudProviderAlias, err = contextProviderAlias(store, selectRunner, params.CloudProviderAlias)
 	if err != nil {
@@ -163,7 +164,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.Cl
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.CommandContext(cmd)
-			status, err := cloud.SetCloudContextStopProtection(ctx, store, cloud.CloudContextStopProtectionParams{
+			status, err := cloud.SetCloudContextStopProtection(ctx, store, model.CloudContextStopProtectionParams{
 				Name:    args[0],
 				Enabled: enabled,
 			}, deps)
@@ -177,7 +178,7 @@ func newContextStopProtectionCmd(use, short string, enabled bool, store cloud.Cl
 	return cmd
 }
 
-func newContextPowerCmd(use, short string, supportsForce bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, cloud.CloudContextStore, cloud.CloudContextParams, cloud.CloudContextDependencies) (config.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store cloud.CloudContextStore, deps cloud.CloudContextDependencies, run func(core.Context, cloud.CloudContextStore, model.CloudContextParams, cloud.CloudContextDependencies) (model.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
@@ -186,7 +187,7 @@ func newContextPowerCmd(use, short string, supportsForce bool, store cloud.Cloud
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := shared.CommandContext(cmd)
-			status, err := run(ctx, store, cloud.CloudContextParams{Name: args[0], Force: force}, deps)
+			status, err := run(ctx, store, model.CloudContextParams{Name: args[0], Force: force}, deps)
 			if err != nil {
 				return err
 			}
@@ -208,7 +209,7 @@ func contextProviderAlias(store cloud.CloudContextStore, selectRunner shared.Sel
 	return shared.SelectCloudAliasPrompt(store, selectRunner)
 }
 
-func promptContextInitParams(promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params cloud.InitCloudContextParams) (cloud.InitCloudContextParams, error) {
+func promptContextInitParams(promptRunner shared.PromptRunner, selectRunner shared.SelectRunner, params model.InitCloudContextParams) (model.InitCloudContextParams, error) {
 	var err error
 	if strings.TrimSpace(params.Region) == "" {
 		params.Region, err = selectOrKeepString(selectRunner, "Cloud region", cloud.CloudContextRegions(), params.Region)
@@ -251,7 +252,7 @@ func selectOrKeepInt(selectRunner shared.SelectRunner, label string, options []i
 	return strconv.Atoi(value)
 }
 
-func writeCloudContext(ctx core.Context, status config.CloudContextStatus) error {
+func writeCloudContext(ctx core.Context, status model.CloudContextStatus) error {
 	context := status.CloudContextConfig
 	line := "  - " + context.Name
 	line += " provider=" + shared.QuotedValueOrNone(context.Provider)

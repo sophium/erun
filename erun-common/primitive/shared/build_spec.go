@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -34,23 +35,23 @@ func ParseDockerImageReference(image string) (registry, imageName, version strin
 	return registry, imageName, version, true
 }
 
-func ResolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (helm.DockerImageReference, error) {
+func ResolveDockerImageReferenceForProject(ctx core.Context, now NowFunc, projectRoot, environment, buildDir, versionOverride, selectedComponent string) (model.DockerImageReference, error) {
 	registry, insecure, err := resolveDockerBuildRegistryForEnvironment(ctx, projectRoot, environment)
 	if err != nil {
-		return helm.DockerImageReference{}, err
+		return model.DockerImageReference{}, err
 	}
 
 	imageName := strings.TrimSpace(filepath.Base(buildDir))
 	if imageName == "" || imageName == "." || imageName == string(filepath.Separator) {
-		return helm.DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
+		return model.DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
 	}
 
 	version, baseVersion, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, buildDir, versionOverride, selectedComponent)
 	if err != nil {
-		return helm.DockerImageReference{}, err
+		return model.DockerImageReference{}, err
 	}
 
-	ref := helm.DockerImageReference{
+	ref := model.DockerImageReference{
 		ProjectRoot:         projectRoot,
 		Environment:         strings.TrimSpace(environment),
 		Registry:            registry,
@@ -88,7 +89,7 @@ func resolveDockerImageVersion(now NowFunc, projectRoot, buildDir, versionOverri
 	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
-func NewDockerBuildSpec(ctx core.Context, store DockerStore, now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
+func NewDockerBuildSpec(ctx core.Context, store DockerStore, now NowFunc, projectRoot, environment string, buildContext model.DockerBuildContext, versionOverride string, platformOverride []string, selectedComponent string) (DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = DockerBuildContextAtDir(buildContext.Dir)

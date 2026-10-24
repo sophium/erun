@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -19,16 +20,16 @@ func (s openGatewayStore) LoadERunConfig() (config.ERunConfig, string, error) {
 	return config.ERunConfig{DefaultTenant: "team", OpenRouter: s.catalog}, "", nil
 }
 
-func (s openGatewayStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
-	return config.TenantConfig{Name: name, DefaultEnvironment: "dev"}, "", nil
+func (s openGatewayStore) LoadTenantConfig(name string) (modelpkg.TenantConfig, string, error) {
+	return modelpkg.TenantConfig{Name: name, DefaultEnvironment: "dev"}, "", nil
 }
 
 func (s openGatewayStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
 	return s.env(environment), "", nil
 }
 
-func (s openGatewayStore) ListTenantConfigs() ([]config.TenantConfig, error) {
-	return []config.TenantConfig{{Name: "team", DefaultEnvironment: "dev"}}, nil
+func (s openGatewayStore) ListTenantConfigs() ([]modelpkg.TenantConfig, error) {
+	return []modelpkg.TenantConfig{{Name: "team", DefaultEnvironment: "dev"}}, nil
 }
 
 func (s openGatewayStore) ListEnvConfigs(string) ([]config.EnvConfig, error) {
@@ -60,7 +61,7 @@ func TestOpenAILaunchHonoursTheEnvironmentsGateway(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result, err := ResolveOpen(openGatewayStore{catalog: catalog, claude: tc.claude, repoPath: t.TempDir()}, shared.OpenParams{Tenant: "team", Environment: "dev"})
+			result, err := ResolveOpen(openGatewayStore{catalog: catalog, claude: tc.claude, repoPath: t.TempDir()}, modelpkg.OpenParams{Tenant: "team", Environment: "dev"})
 			if err != nil {
 				t.Fatalf("resolve open: %v", err)
 			}

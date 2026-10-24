@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/e2e"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
@@ -14,7 +15,7 @@ import (
 )
 
 func NewDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
-	target := deploy.DeployTarget{}
+	target := model.DeployTarget{}
 	var components []string
 	var useCurrent bool
 	var erunAlias string
@@ -95,7 +96,7 @@ func deployFailedTrace(tenant, environment string, err error) string {
 	return fmt.Sprintf("==> Deploy failed: %s", err.Error())
 }
 
-func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget deploy.DeployTarget) error {
+func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, deployHelmChart deploy.HelmChartDeployerFunc, deployTarget model.DeployTarget) error {
 	deploySpecs, err := deploy.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 	if err != nil {
 		ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -113,7 +114,7 @@ func runDeploy(ctx core.Context, store deploy.DeployStore, saveEnvConfig deploy.
 }
 
 func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSaver, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, resolveDeployContext deploy.DeployContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage build.DockerImageBuilderFunc, push build.DockerPushFunc, deployHelmChart deploy.HelmChartDeployerFunc) *cobra.Command {
-	target := deploy.DeployTarget{}
+	target := model.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
 		Short:         "Deploy a component Helm chart",
@@ -137,7 +138,7 @@ func NewK8sDeployCmd(store deploy.DeployStore, saveEnvConfig deploy.EnvConfigSav
 	return cmd
 }
 
-func addDeployCommandTargetFlags(cmd *cobra.Command, target *deploy.DeployTarget) {
+func addDeployCommandTargetFlags(cmd *cobra.Command, target *model.DeployTarget) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Version to install by reference (produced by `erun build`/`erun push`); fails if that version's image is absent")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")

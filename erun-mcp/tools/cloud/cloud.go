@@ -7,6 +7,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -65,13 +66,13 @@ type CloudSetInput struct {
 
 // CloudListResult omits omitempty on CloudProviders so "no aliases" answers [] rather than {}.
 type CloudListResult struct {
-	CloudProviders []cloud.CloudProviderStatus `json:"cloudProviders"`
+	CloudProviders []model.CloudProviderStatus `json:"cloudProviders"`
 }
 
 type CloudActionResult struct {
 	Preview  bool                      `json:"preview"`
 	Alias    string                    `json:"alias,omitempty"`
-	Provider cloud.CloudProviderStatus `json:"provider,omitempty"`
+	Provider model.CloudProviderStatus `json:"provider,omitempty"`
 	Trace    []string                  `json:"trace,omitempty"`
 	Plan     []string                  `json:"plan,omitempty"`
 }
@@ -98,7 +99,7 @@ func CloudInitAWSTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.C
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitAWSInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := cloud.InitAWSCloudProviderParams{
+		params := model.InitAWSCloudProviderParams{
 			SSOStartURL:   input.SSOStartURL,
 			SSORegion:     input.SSORegion,
 			AccountID:     input.AccountID,
@@ -134,7 +135,7 @@ func CloudInitCloudflareTool(runtime shared.RuntimeConfig) func(context.Context,
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitCloudflareInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := cloud.InitCloudflareCloudProviderParams{
+		params := model.InitCloudflareCloudProviderParams{
 			AccountID: input.AccountID,
 			TokenName: input.TokenName,
 			APIToken:  input.APIToken,
@@ -160,7 +161,7 @@ func CloudInitERunTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudInitERunInput) (*mcp.CallToolResult, CloudActionResult, error) {
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		params := cloud.InitERunCloudProviderParams{APIURL: input.APIURL}
+		params := model.InitERunCloudProviderParams{APIURL: input.APIURL}
 		if input.Preview {
 			plan := []string{
 				"GET " + strings.TrimRight(strings.TrimSpace(input.APIURL), "/") + "/v1/platform",
@@ -189,7 +190,7 @@ func CloudLoginTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Cal
 		if input.Preview {
 			return nil, CloudActionResult{Preview: true, Alias: alias, Plan: []string{"check cloud provider token status", "run provider login if token is expired"}}, nil
 		}
-		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, cloud.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, shared.CloudDependencies())
+		status, err := cloud.LoginCloudProviderAlias(ctx, runtime.Store, model.CloudLoginParams{Alias: alias, Flow: input.Flow, Scopes: input.Scopes}, shared.CloudDependencies())
 		if err != nil {
 			return nil, CloudActionResult{}, err
 		}
@@ -218,7 +219,7 @@ func CloudOIDCTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.Call
 				},
 			}, nil
 		}
-		status, _, err := cloud.SetupCloudProviderOIDC(ctx, runtime.Store, cloud.CloudBearerParams{
+		status, _, err := cloud.SetupCloudProviderOIDC(ctx, runtime.Store, model.CloudBearerParams{
 			Alias:    alias,
 			Audience: input.Audience,
 		}, cloud.CloudDependencies{})
@@ -237,7 +238,7 @@ func CloudSetTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallT
 		}
 		traceOutput := strings.Builder{}
 		ctx := shared.RuntimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
-		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, cloud.SetEnvironmentCloudAliasParams{
+		config, err := cloud.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, model.SetEnvironmentCloudAliasParams{
 			Tenant:      tenant,
 			Environment: environment,
 			Alias:       input.Alias,

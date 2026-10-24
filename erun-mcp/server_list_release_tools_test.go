@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/erun-mcp/tools/build"
 	"github.com/sophium/erun/erun-mcp/tools/cloud"
 	"github.com/sophium/erun/erun-mcp/tools/list"
@@ -20,7 +20,7 @@ import (
 func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := &listToolStore{
-		tenantConfigs: map[string]configpkg.TenantConfig{
+		tenantConfigs: map[string]model.TenantConfig{
 			"frs": {Name: "frs", DefaultEnvironment: "dev"},
 		},
 		envConfigs: map[string]configpkg.EnvConfig{
@@ -59,7 +59,7 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 		},
 		Store: listToolStore{
 			toolConfig: configpkg.ERunConfig{DefaultTenant: "tenant-a"},
-			tenantConfigs: map[string]configpkg.TenantConfig{
+			tenantConfigs: map[string]model.TenantConfig{
 				"tenant-a": {
 					Name:               "tenant-a",
 					DefaultEnvironment: "dev",
@@ -141,7 +141,7 @@ func TestReleaseToolPreview(t *testing.T) {
 	if output.Executed {
 		t.Fatalf("expected preview output, got %+v", output)
 	}
-	if output.Spec.Mode != shared.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
+	if output.Spec.Mode != model.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
 		t.Fatalf("unexpected release output: %+v", output)
 	}
 	if len(output.Spec.DockerImages) != 1 || output.Spec.DockerImages[0].Tag == "" {

@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func inPodProjection(values map[string]string) func(string) string {
@@ -88,12 +88,12 @@ func TestInPodProjectionResolvesDeployValuesTheGuardRefuses(t *testing.T) {
 	t.Setenv("ERUN_ENV_TYPE", "")
 
 	chartPath := inPodProjectionRuntimeChart(t)
-	deployContext := shared.KubernetesDeployContext{ComponentName: "tenant-a-devops", ChartPath: chartPath}
+	deployContext := model.KubernetesDeployContext{ComponentName: "tenant-a-devops", ChartPath: chartPath}
 	target := func(config configpkg.EnvConfig) configpkg.OpenResult {
 		config.Name, config.Type = "dev", configpkg.EnvironmentTypeRemoteAgent
 		return configpkg.OpenResult{Tenant: "tenant-a", Environment: "dev", EnvConfig: config}
 	}
-	hostStore := configpkg.EnvConfig{SSHD: configpkg.SSHDConfig{Enabled: true}, RuntimePod: configpkg.RuntimePodResources{CPU: "4", Memory: "8192Mi"}}
+	hostStore := configpkg.EnvConfig{SSHD: configpkg.SSHDConfig{Enabled: true}, RuntimePod: model.RuntimePodResources{CPU: "4", Memory: "8192Mi"}}
 	projection := configpkg.EnvConfig{}
 
 	for _, tc := range []struct {

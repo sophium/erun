@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	modelpkg "github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/ai"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/spf13/cobra"
@@ -50,7 +50,7 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetGatewayCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorGatewayParams{
+			return runOrchestratorSetGatewayCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorGatewayParams{
 				OrchestratorID: args[0],
 				UseGateway:     useGateway,
 			})
@@ -64,7 +64,7 @@ func newOrchestratorSetGatewayCmd(store orchestrator.OrchestratorAliasStore) *co
 	return cmd
 }
 
-func runOrchestratorSetGatewayCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorGatewayParams) error {
+func runOrchestratorSetGatewayCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params modelpkg.SetOrchestratorGatewayParams) error {
 	if _, err := orchestrator.SetOrchestratorGateway(ctx, store, params); err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetModelCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorModelParams{
+			return runOrchestratorSetModelCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorModelParams{
 				OrchestratorID: args[0],
 				Model:          parsedModel,
 			})
@@ -116,7 +116,7 @@ func newOrchestratorSetModelCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	return cmd
 }
 
-func runOrchestratorSetModelCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorModelParams) error {
+func runOrchestratorSetModelCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params modelpkg.SetOrchestratorModelParams) error {
 	if _, err := orchestrator.SetOrchestratorModel(ctx, store, params); err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetEffortCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorEffortParams{
+			return runOrchestratorSetEffortCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorEffortParams{
 				OrchestratorID: args[0],
 				Effort:         parsedEffort,
 			})
@@ -162,7 +162,7 @@ func newOrchestratorSetEffortCmd(store orchestrator.OrchestratorAliasStore) *cob
 	return cmd
 }
 
-func runOrchestratorSetEffortCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorEffortParams) error {
+func runOrchestratorSetEffortCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params modelpkg.SetOrchestratorEffortParams) error {
 	if _, err := orchestrator.SetOrchestratorEffort(ctx, store, params); err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetAliasCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorAliasParams{
+			return runOrchestratorSetAliasCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorAliasParams{
 				OrchestratorID: args[0],
 				Alias:          parsedAlias,
 			})
@@ -219,7 +219,7 @@ func newOrchestratorSetAliasCmd(store orchestrator.OrchestratorAliasStore) *cobr
 	return cmd
 }
 
-func runOrchestratorSetAliasCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params orchestrator.SetOrchestratorAliasParams) error {
+func runOrchestratorSetAliasCommand(ctx core.Context, store orchestrator.OrchestratorAliasStore, params modelpkg.SetOrchestratorAliasParams) error {
 	if _, err := orchestrator.SetOrchestratorAlias(ctx, store, params); err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 			if err != nil {
 				return err
 			}
-			return runOrchestratorSetRoleCommand(shared.CommandContext(cmd), store, orchestrator.SetOrchestratorEnvRoleParams{
+			return runOrchestratorSetRoleCommand(shared.CommandContext(cmd), store, modelpkg.SetOrchestratorEnvRoleParams{
 				OrchestratorID: args[0],
 				Tenant:         args[1],
 				Environment:    args[2],
@@ -269,7 +269,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "", fmt.Sprintf("Role to set: %q, %q, %q, or %q for undeclared",
-		config.OrchestratorEnvRoleCode, config.OrchestratorEnvRoleBuild, config.OrchestratorEnvRoleRuntime, orchestrator.OrchestratorEnvRoleNone))
+		modelpkg.OrchestratorEnvRoleCode, modelpkg.OrchestratorEnvRoleBuild, modelpkg.OrchestratorEnvRoleRuntime, orchestrator.OrchestratorEnvRoleNone))
 	if err := cmd.MarkFlagRequired("role"); err != nil {
 		panic(err)
 	}
@@ -277,7 +277,7 @@ func newOrchestratorSetRoleCmd(store orchestrator.OrchestratorRoleStore) *cobra.
 	return cmd
 }
 
-func runOrchestratorSetRoleCommand(ctx core.Context, store orchestrator.OrchestratorRoleStore, params orchestrator.SetOrchestratorEnvRoleParams) error {
+func runOrchestratorSetRoleCommand(ctx core.Context, store orchestrator.OrchestratorRoleStore, params modelpkg.SetOrchestratorEnvRoleParams) error {
 	if _, err := orchestrator.SetOrchestratorEnvRole(ctx, store, params); err != nil {
 		return err
 	}

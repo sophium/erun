@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,7 +36,7 @@ func discoverReleaseArtifacts(ctx core.Context, inputs releaseInputs) (releaseAr
 }
 
 func discoverStableReleaseArtifacts(ctx core.Context, inputs releaseInputs, artifacts *releaseArtifacts) error {
-	if inputs.Mode != ReleaseModeStable {
+	if inputs.Mode != model.ReleaseModeStable {
 		return nil
 	}
 	if err := validateStableScoopManifest(ctx, inputs.ProjectRoot); err != nil {
@@ -70,7 +71,7 @@ func releaseChartSearchRoot(projectRoot string) (string, error) {
 	return projectRoot, nil
 }
 
-func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []ReleaseFileUpdate, error) {
+func discoverReleaseCharts(projectRoot, version string) ([]model.ReleaseChartSpec, []model.ReleaseFileUpdate, error) {
 	searchRoot, err := releaseChartSearchRoot(projectRoot)
 	if err != nil {
 		return nil, nil, err
@@ -80,8 +81,8 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 		return nil, nil, err
 	}
 
-	charts := make([]ReleaseChartSpec, 0, len(chartPaths))
-	updates := make([]ReleaseFileUpdate, 0, len(chartPaths))
+	charts := make([]model.ReleaseChartSpec, 0, len(chartPaths))
+	updates := make([]model.ReleaseFileUpdate, 0, len(chartPaths))
 	for _, chartPath := range chartPaths {
 		content, changed, chartSpec, err := updateHelmChartReleaseVersion(filepath.Join(chartPath, "Chart.yaml"), version)
 		if err != nil {
@@ -89,7 +90,7 @@ func discoverReleaseCharts(projectRoot, version string) ([]ReleaseChartSpec, []R
 		}
 		charts = append(charts, chartSpec)
 		if changed {
-			updates = append(updates, ReleaseFileUpdate{
+			updates = append(updates, model.ReleaseFileUpdate{
 				Path:    filepath.Join(chartPath, "Chart.yaml"),
 				Content: content,
 			})
@@ -123,7 +124,7 @@ func versionFileIdentity(path string) string {
 	return cleaned
 }
 
-func discoverReleaseDockerImages(ctx core.Context, projectRoot, releaseRoot, versionFilePath, version string) ([]ReleaseDockerImageSpec, error) {
+func discoverReleaseDockerImages(ctx core.Context, projectRoot, releaseRoot, versionFilePath, version string) ([]model.ReleaseDockerImageSpec, error) {
 	dockerDir, err := releaseDockerDir(projectRoot, releaseRoot)
 	if err != nil {
 		return nil, err
@@ -144,7 +145,7 @@ func discoverReleaseDockerImages(ctx core.Context, projectRoot, releaseRoot, ver
 		return nil, err
 	}
 
-	images := make([]ReleaseDockerImageSpec, 0, len(buildContexts))
+	images := make([]model.ReleaseDockerImageSpec, 0, len(buildContexts))
 	for _, buildContext := range buildContexts {
 		image, included, err := releaseDockerImageForContext(buildContext, releaseRoot, versionFilePath, version, registry)
 		if err != nil {
@@ -158,13 +159,13 @@ func discoverReleaseDockerImages(ctx core.Context, projectRoot, releaseRoot, ver
 }
 
 // releaseDockerImageForContext excludes a context versioned by a different VERSION file.
-func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (ReleaseDockerImageSpec, bool, error) {
+func releaseDockerImageForContext(buildContext model.DockerBuildContext, releaseRoot, versionFilePath, version, registry string) (model.ReleaseDockerImageSpec, bool, error) {
 	_, _, candidateVersionFilePath, err := ResolveDockerBuildVersion(buildContext.Dir, releaseRoot, "")
 	if err != nil {
-		return ReleaseDockerImageSpec{}, false, err
+		return model.ReleaseDockerImageSpec{}, false, err
 	}
 	if !sameVersionFile(candidateVersionFilePath, versionFilePath) {
-		return ReleaseDockerImageSpec{}, false, nil
+		return model.ReleaseDockerImageSpec{}, false, nil
 	}
 
 	imageName := strings.TrimSpace(filepath.Base(buildContext.Dir))
@@ -174,9 +175,9 @@ func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, 
 	}
 	contextDir, err := ResolveDockerBuildContextDirForProject(buildContext.Dir, releaseRoot, "")
 	if err != nil {
-		return ReleaseDockerImageSpec{}, false, err
+		return model.ReleaseDockerImageSpec{}, false, err
 	}
-	return ReleaseDockerImageSpec{
+	return model.ReleaseDockerImageSpec{
 		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		ImageName:      imageName,
@@ -187,7 +188,7 @@ func releaseDockerImageForContext(buildContext DockerBuildContext, releaseRoot, 
 }
 
 // DiscoverReleaseLinuxPackages resolves <release root>/linux components; each must declare a dist stage.
-func DiscoverReleaseLinuxPackages(projectRoot, releaseRoot string) ([]LinuxPackageSpec, error) {
+func DiscoverReleaseLinuxPackages(projectRoot, releaseRoot string) ([]model.LinuxPackageSpec, error) {
 	contexts, err := ResolveLinuxPackageContextsAtDir(filepath.Join(releaseRoot, "linux"))
 	if err != nil {
 		if errors.Is(err, ErrLinuxPackageBuildNotFound) {
@@ -202,25 +203,25 @@ func DiscoverReleaseLinuxPackages(projectRoot, releaseRoot string) ([]LinuxPacka
 	return packages, nil
 }
 
-func linuxPackageDirForRelease(inputs releaseInputs, packages []LinuxPackageSpec) string {
+func linuxPackageDirForRelease(inputs releaseInputs, packages []model.LinuxPackageSpec) string {
 	if len(packages) == 0 {
 		return ""
 	}
 	return releaseLinuxPackageDir(inputs.ProjectRoot, inputs.Version)
 }
 
-func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, ReleaseChartSpec, error) {
+func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, model.ReleaseChartSpec, error) {
 	data, err := os.ReadFile(chartFilePath)
 	if err != nil {
-		return "", false, ReleaseChartSpec{}, err
+		return "", false, model.ReleaseChartSpec{}, err
 	}
 
 	var chart map[string]interface{}
 	if err := yaml.Unmarshal(data, &chart); err != nil {
-		return "", false, ReleaseChartSpec{}, err
+		return "", false, model.ReleaseChartSpec{}, err
 	}
 	if chart == nil {
-		return "", false, ReleaseChartSpec{}, errors.New("chart.yaml is empty")
+		return "", false, model.ReleaseChartSpec{}, errors.New("chart.yaml is empty")
 	}
 
 	changed := false
@@ -235,10 +236,10 @@ func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool,
 
 	updated, err := yaml.Marshal(chart)
 	if err != nil {
-		return "", false, ReleaseChartSpec{}, err
+		return "", false, model.ReleaseChartSpec{}, err
 	}
 
-	return string(updated), changed, ReleaseChartSpec{
+	return string(updated), changed, model.ReleaseChartSpec{
 		ChartPath:  filepath.Dir(chartFilePath),
 		Version:    version,
 		AppVersion: version,

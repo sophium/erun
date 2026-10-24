@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // EnvironmentType classifies an environment by where its worktree lives and whether it builds.
@@ -87,19 +89,19 @@ type EnvConfig struct {
 	RegistryCredentialSecretName string `yaml:"registrycredentialsecretname,omitempty" json:"registryCredentialSecretName,omitempty"`
 	// PlatformAliasSecretName is the Secret `erun init` minted from the host's platform alias.
 	// Only init mints or rotates it.
-	PlatformAliasSecretName string              `yaml:"platformaliassecretname,omitempty" json:"platformAliasSecretName,omitempty"`
-	RuntimePod              RuntimePodResources `yaml:"runtimepod,omitempty"`
+	PlatformAliasSecretName string                    `yaml:"platformaliassecretname,omitempty" json:"platformAliasSecretName,omitempty"`
+	RuntimePod              model.RuntimePodResources `yaml:"runtimepod,omitempty"`
 	// RuntimeDindPod sizes the dind sidecar; zero uses the defaults.
-	RuntimeDindPod RuntimePodResources `yaml:"runtimedindpod,omitempty"`
+	RuntimeDindPod model.RuntimePodResources `yaml:"runtimedindpod,omitempty"`
 	// NamespaceQuota is a hard per-namespace ceiling, distinct from RuntimePod sizing.
-	NamespaceQuota      NamespaceResourceQuota  `yaml:"namespacequota,omitempty" json:"namespaceQuota,omitempty"`
-	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
-	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
-	Deploy              EnvironmentDeployConfig `yaml:"deploy,omitempty" json:"deploy,omitempty"`
-	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
-	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
-	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
+	NamespaceQuota      model.NamespaceResourceQuota `yaml:"namespacequota,omitempty" json:"namespaceQuota,omitempty"`
+	SSHD                SSHDConfig                   `yaml:"sshd,omitempty"`
+	Idle                EnvironmentIdleConfig        `yaml:"idle,omitempty"`
+	Deploy              EnvironmentDeployConfig      `yaml:"deploy,omitempty" json:"deploy,omitempty"`
+	Claude              EnvironmentClaudeConfig      `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool              string                       `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	LocalPortRangeStart int                          `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
+	AutoStart           *bool                        `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 	// Deprecated: no effect; AWS credential delivery follows HasAWSCloudAlias.
 	RemoteHostCredentials bool `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
 	// AutoUpgrade opts this env into "Upgrade all".

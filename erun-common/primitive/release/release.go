@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -42,6 +43,6 @@ func TraceReleaseUmbrella(ctx core.Context, version string) (core.Context, func(
 
 // RunReleaseSpec marks a release in source control and never builds or
 // publishes; a tag without artifacts is a dead, undeployable version.
-func RunReleaseSpec(ctx core.Context, spec shared.ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
+func RunReleaseSpec(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc) error {
 	return shared.RunReleaseSpec(ctx, spec, runGit, nil, nil)
 }

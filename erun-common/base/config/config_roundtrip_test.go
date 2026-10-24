@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -120,13 +121,13 @@ type staleERunConfig struct {
 func TestMarshalConfigPreservingUnknownFieldsSurvivesNestedUnknownBlock(t *testing.T) {
 	existing, err := yaml.Marshal(ERunConfig{
 		DefaultTenant: "frs",
-		CloudProviders: []CloudProviderConfig{{
+		CloudProviders: []model.CloudProviderConfig{{
 			Alias:         "erun+api.frs-prod.services.erunpaas.com@erun",
 			Provider:      CloudProviderERun,
 			Username:      "erun",
 			AccountID:     "api.frs-prod.services.erunpaas.com",
 			OIDCIssuerURL: "https://auth.example.test",
-			ERun: &ERunProviderConfig{
+			ERun: &model.ERunProviderConfig{
 				APIURL:          "https://api.frs-prod.services.erunpaas.com",
 				ClientID:        "386994662461735100",
 				RefreshTokenRef: "keychain:erun/frs-prod",

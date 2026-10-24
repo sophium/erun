@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type desktopAppLayout struct {
@@ -20,9 +20,9 @@ type desktopAppLayout struct {
 }
 
 // DesktopAppLayouts lists, in preference order, where a desktop app copy can sit: beside the CLI, then in erun-ui/bin.
-func DesktopAppLayouts(executableDir, executableName string, hostOS core.HostOS) []desktopAppLayout {
+func DesktopAppLayouts(executableDir, executableName string, hostOS model.HostOS) []desktopAppLayout {
 	checkoutBin := filepath.Clean(filepath.Join(executableDir, "..", "..", "erun-ui", "bin"))
-	if hostOS == core.HostOSDarwin {
+	if hostOS == model.HostOSDarwin {
 		bundleBinary := filepath.Join("Contents", "MacOS", executableName)
 		return []desktopAppLayout{
 			{Launch: filepath.Join(executableDir, DesktopAppBundleName), Bundle: true, Binary: bundleBinary},
@@ -43,7 +43,7 @@ type presentDesktopApp struct {
 // ResolveAppExecutableNear picks the desktop app copy to launch and the line reporting it.
 // The most recently written copy wins so a stale copy cannot shadow a fresh rebuild;
 // ties keep layout order.
-func ResolveAppExecutableNear(executable, executableName string, hostOS core.HostOS) (string, string) {
+func ResolveAppExecutableNear(executable, executableName string, hostOS model.HostOS) (string, string) {
 	var present []presentDesktopApp
 	for _, layout := range DesktopAppLayouts(filepath.Dir(executable), executableName, hostOS) {
 		info, err := os.Stat(layout.Launch)

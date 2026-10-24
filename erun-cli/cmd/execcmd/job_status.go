@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
@@ -73,14 +74,14 @@ func runJobStatus(cmd *cobra.Command, resolveOpen shared.OpenResolver, tenant, e
 		return nil
 	}
 	if single {
-		if ctx.Output != core.OutputJSON {
+		if ctx.Output != model.OutputJSON {
 			if _, err := fmt.Fprintln(ctx.Stdout, jobStatusLine(job)); err != nil {
 				return err
 			}
 		}
 		return ctx.WriteResult(job)
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if err := writeJobList(ctx, jobs); err != nil {
 			return err
 		}

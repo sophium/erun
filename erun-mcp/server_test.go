@@ -30,15 +30,15 @@ func (initInteractionStore) SaveERunConfig(configpkg.ERunConfig) error {
 	return nil
 }
 
-func (initInteractionStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
+func (initInteractionStore) ListTenantConfigs() ([]model.TenantConfig, error) {
 	return nil, nil
 }
 
-func (initInteractionStore) LoadTenantConfig(string) (configpkg.TenantConfig, string, error) {
-	return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
+func (initInteractionStore) LoadTenantConfig(string) (model.TenantConfig, string, error) {
+	return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 }
 
-func (initInteractionStore) SaveTenantConfig(configpkg.TenantConfig) error {
+func (initInteractionStore) SaveTenantConfig(model.TenantConfig) error {
 	return nil
 }
 
@@ -57,7 +57,7 @@ func (initInteractionStore) SaveEnvConfig(string, configpkg.EnvConfig) error {
 type listToolStore struct {
 	initInteractionStore
 	toolConfig    configpkg.ERunConfig
-	tenantConfigs map[string]configpkg.TenantConfig
+	tenantConfigs map[string]model.TenantConfig
 	envConfigs    map[string]configpkg.EnvConfig
 	envsByTenant  map[string][]configpkg.EnvConfig
 }
@@ -66,16 +66,16 @@ func (s listToolStore) LoadERunConfig() (configpkg.ERunConfig, string, error) {
 	return s.toolConfig, "", nil
 }
 
-func (s listToolStore) LoadTenantConfig(tenant string) (configpkg.TenantConfig, string, error) {
+func (s listToolStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
 	config, ok := s.tenantConfigs[tenant]
 	if !ok {
-		return configpkg.TenantConfig{}, "", configpkg.ErrNotInitialized
+		return model.TenantConfig{}, "", configpkg.ErrNotInitialized
 	}
 	return config, "", nil
 }
 
-func (s listToolStore) ListTenantConfigs() ([]configpkg.TenantConfig, error) {
-	tenants := make([]configpkg.TenantConfig, 0, len(s.tenantConfigs))
+func (s listToolStore) ListTenantConfigs() ([]model.TenantConfig, error) {
+	tenants := make([]model.TenantConfig, 0, len(s.tenantConfigs))
 	for _, tenant := range s.tenantConfigs {
 		tenants = append(tenants, tenant)
 	}

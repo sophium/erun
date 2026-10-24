@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/registry"
@@ -16,7 +17,7 @@ func runListVersionDrift(ctx core.Context, result lifecycle.ListResult, versionD
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		if err := ctx.WriteResult(drift); err != nil {
 			return err
 		}
@@ -34,7 +35,7 @@ func runListControlPlanes(ctx core.Context, result lifecycle.ListResult, erunAli
 	if err != nil {
 		return err
 	}
-	if ctx.Output == core.OutputJSON {
+	if ctx.Output == model.OutputJSON {
 		if err := ctx.WriteResult(drift); err != nil {
 			return err
 		}
@@ -48,7 +49,7 @@ func runListControlPlanes(ctx core.Context, result lifecycle.ListResult, erunAli
 }
 
 // versionDriftExitError fails --fail-on-drift for behind, undeterminable, or unresolved/behind gate envs.
-func versionDriftExitError(drift lifecycle.TenantVersionDrift) error {
+func versionDriftExitError(drift model.TenantVersionDrift) error {
 	var problems []string
 	var behind []string
 	var unresolved []string
@@ -81,7 +82,7 @@ func versionDriftExitError(drift lifecycle.TenantVersionDrift) error {
 }
 
 // controlPlaneVersionDriftExitError fails for any plane not confirmed to run the published version.
-func controlPlaneVersionDriftExitError(drift lifecycle.ControlPlaneVersionDrift) error {
+func controlPlaneVersionDriftExitError(drift model.ControlPlaneVersionDrift) error {
 	var problems []string
 	if drift.PublishedVersionError != "" {
 		problems = append(problems, "the published version could not be resolved: "+drift.PublishedVersionError)
@@ -106,7 +107,7 @@ func controlPlaneVersionDriftExitError(drift lifecycle.ControlPlaneVersionDrift)
 }
 
 // controlPlaneAPIURLMismatches is never routine drift, so it is reported separately.
-func controlPlaneAPIURLMismatches(planes []lifecycle.ControlPlaneVersionStatus) []string {
+func controlPlaneAPIURLMismatches(planes []model.ControlPlaneVersionStatus) []string {
 	var mismatched []string
 	for _, plane := range planes {
 		if plane.AdvertisedAPIURLMismatch != "" {
@@ -117,7 +118,7 @@ func controlPlaneAPIURLMismatches(planes []lifecycle.ControlPlaneVersionStatus) 
 }
 
 // classifyControlPlaneVersionDrift ignores surfaces a plane never advertised.
-func classifyControlPlaneVersionDrift(planes []lifecycle.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
+func classifyControlPlaneVersionDrift(planes []model.ControlPlaneVersionStatus) (unreachable, behind, ahead []string) {
 	for _, plane := range planes {
 		unreachable, behind, ahead = appendControlPlaneVersionVerdict(unreachable, behind, ahead, plane.Alias, plane.Reachable, plane.Behind, plane.Ahead)
 		for _, surface := range linkedVersionSurfaces(plane) {
@@ -139,7 +140,7 @@ func appendControlPlaneVersionVerdict(unreachable, behind, ahead []string, label
 	return unreachable, behind, ahead
 }
 
-func writeVersionDriftReport(ctx core.Context, drift lifecycle.TenantVersionDrift) error {
+func writeVersionDriftReport(ctx core.Context, drift model.TenantVersionDrift) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Version drift for tenant %s:\n", drift.Tenant); err != nil {
 		return err
 	}
@@ -155,7 +156,7 @@ func writeVersionDriftReport(ctx core.Context, drift lifecycle.TenantVersionDrif
 	return writeVersionDriftGate(ctx, drift)
 }
 
-func writeVersionDriftEnvironments(ctx core.Context, environments []lifecycle.EnvironmentVersionStatus) error {
+func writeVersionDriftEnvironments(ctx core.Context, environments []model.EnvironmentVersionStatus) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "  environments:"); err != nil {
 		return err
 	}
@@ -178,14 +179,14 @@ func writeVersionDriftEnvironments(ctx core.Context, environments []lifecycle.En
 }
 
 // versionDriftVersionValue distinguishes "none" (nothing deployed) from "undetermined".
-func versionDriftVersionValue(env lifecycle.EnvironmentVersionStatus) string {
+func versionDriftVersionValue(env model.EnvironmentVersionStatus) string {
 	if env.VersionUnresolved {
 		return "undetermined"
 	}
 	return shared.QuotedValueOrNone(env.Version)
 }
 
-func writeVersionDriftGate(ctx core.Context, drift lifecycle.TenantVersionDrift) error {
+func writeVersionDriftGate(ctx core.Context, drift model.TenantVersionDrift) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "  gate:"); err != nil {
 		return err
 	}
@@ -216,7 +217,7 @@ func gateVersionUnresolvedMessage(reason string) string {
 	return "gate's own erun version could not be resolved: " + reason
 }
 
-func writeControlPlaneVersionReport(ctx core.Context, drift lifecycle.ControlPlaneVersionDrift) error {
+func writeControlPlaneVersionReport(ctx core.Context, drift model.ControlPlaneVersionDrift) error {
 	if ctx.DryRun {
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: control plane version check planned; see trace for the planes and registry lookup that would be probed.")
 		return err
@@ -246,7 +247,7 @@ func writeControlPlaneVersionReport(ctx core.Context, drift lifecycle.ControlPla
 }
 
 // controlPlanesSectionHeader shows both backend and alias counts; a gap means collapsed aliases.
-func controlPlanesSectionHeader(planes []lifecycle.ControlPlaneVersionStatus) string {
+func controlPlanesSectionHeader(planes []model.ControlPlaneVersionStatus) string {
 	if len(planes) == 0 {
 		return "Control planes:"
 	}
@@ -264,7 +265,7 @@ func pluralCount(n int, singular, plural string) string {
 	return fmt.Sprintf("%d %s", n, plural)
 }
 
-func writeControlPlaneVersionEntry(ctx core.Context, plane lifecycle.ControlPlaneVersionStatus) error {
+func writeControlPlaneVersionEntry(ctx core.Context, plane model.ControlPlaneVersionStatus) error {
 	line := "  - " + plane.Alias + " api-url=" + shared.QuotedValueOrNone(plane.APIURL)
 	if !plane.Reachable {
 		line += " reachable=no reason=" + shared.QuotedValueOrNone(plane.UnreachableReason)
@@ -289,7 +290,7 @@ func writeControlPlaneVersionEntry(ctx core.Context, plane lifecycle.ControlPlan
 	return writeControlPlaneLinkedSurfaces(ctx, plane)
 }
 
-func writeControlPlaneLinkedSurfaces(ctx core.Context, plane lifecycle.ControlPlaneVersionStatus) error {
+func writeControlPlaneLinkedSurfaces(ctx core.Context, plane model.ControlPlaneVersionStatus) error {
 	if plane.AdvertisedAPIURLMismatch != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, "    [advertised apiUrl mismatch: "+plane.AdvertisedAPIURLMismatch+"]"); err != nil {
 			return err
@@ -305,11 +306,11 @@ func writeControlPlaneLinkedSurfaces(ctx core.Context, plane lifecycle.ControlPl
 
 type linkedVersionSurface struct {
 	label  string
-	status *lifecycle.VersionSurfaceStatus
+	status *model.VersionSurfaceStatus
 }
 
 // linkedVersionSurfaces feeds both the report and the classifier so they cannot disagree.
-func linkedVersionSurfaces(plane lifecycle.ControlPlaneVersionStatus) []linkedVersionSurface {
+func linkedVersionSurfaces(plane model.ControlPlaneVersionStatus) []linkedVersionSurface {
 	surfaces := make([]linkedVersionSurface, 0, 2)
 	for _, candidate := range []linkedVersionSurface{
 		{"console", plane.Console},
@@ -322,7 +323,7 @@ func linkedVersionSurfaces(plane lifecycle.ControlPlaneVersionStatus) []linkedVe
 	return surfaces
 }
 
-func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []lifecycle.ControlPlaneAliasRef) error {
+func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []model.ControlPlaneAliasRef) error {
 	for _, alias := range aliases {
 		if _, err := fmt.Fprintf(ctx.Stdout, "      also reachable as: %s api-url=%s\n", alias.Alias, shared.QuotedValueOrNone(alias.APIURL)); err != nil {
 			return err
@@ -331,7 +332,7 @@ func writeControlPlaneAdditionalAliases(ctx core.Context, aliases []lifecycle.Co
 	return nil
 }
 
-func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface lifecycle.VersionSurfaceStatus) error {
+func writeControlPlaneVersionSurfaceEntry(ctx core.Context, label string, surface model.VersionSurfaceStatus) error {
 	line := "    " + label + ": url=" + shared.QuotedValueOrNone(surface.URL)
 	if !surface.Reachable {
 		line += " reachable=no reason=" + shared.QuotedValueOrNone(surface.UnreachableReason)

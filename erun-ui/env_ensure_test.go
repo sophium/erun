@@ -11,6 +11,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
@@ -25,7 +26,7 @@ func envEnsureTestApp(t *testing.T, ensures *int32, ensuresMu *sync.Mutex) *App 
 	t.Helper()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -122,7 +123,7 @@ func TestEnsureFailureNotificationDedupesPerEpisode(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -199,7 +200,7 @@ func capturedEnsureApp(
 	emits := newCapturedEmits()
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{

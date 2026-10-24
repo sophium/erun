@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -15,7 +16,7 @@ func shouldSkipExistingReleaseTag(args []string) bool {
 	return len(args) >= 3 && args[0] == "tag" && args[1] == "-a" && strings.TrimSpace(args[2]) != ""
 }
 
-func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit gitx.GitCommandRunnerFunc, command ReleaseCommandSpec) (bool, error) {
+func prepareReleaseTag(ctx core.Context, spec model.ReleaseSpec, runGit gitx.GitCommandRunnerFunc, command model.ReleaseCommandSpec) (bool, error) {
 	tag := strings.TrimSpace(command.Args[2])
 	if tag == "" {
 		return false, nil
@@ -29,7 +30,7 @@ func prepareReleaseTag(ctx core.Context, spec ReleaseSpec, runGit gitx.GitComman
 	return CanSkipExistingReleaseTag(ctx, spec, command.Dir, tag, runGit)
 }
 
-func CanSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
+func CanSkipExistingReleaseTag(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag string, runGit gitx.GitCommandRunnerFunc) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
@@ -60,7 +61,7 @@ func CanSkipExistingReleaseTag(ctx core.Context, spec ReleaseSpec, projectRoot, 
 // releaseTagMismatchError diagnoses a tag not at HEAD. An unpushed tag origin never
 // incorporated is an interrupted release's leftover; the refusal names the remedy rather
 // than reclaiming it automatically.
-func releaseTagMismatchError(ctx core.Context, spec ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit gitx.GitCommandRunnerFunc) error {
+func releaseTagMismatchError(ctx core.Context, spec model.ReleaseSpec, projectRoot, tag, tagCommit, headCommit string, runGit gitx.GitCommandRunnerFunc) error {
 	base := fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
 	pushed, err := GitRemoteTagExists(ctx, projectRoot, "origin", tag)
 	if err != nil || pushed {

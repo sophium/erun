@@ -7,21 +7,8 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
-
-// PushWorkingTreeBranchParams names the intended branch; it is verified before pushing.
-type PushWorkingTreeBranchParams struct {
-	Branch string
-	// Remote defaults to "origin".
-	Remote string
-}
-
-// PushWorkingTreeBranchResult is what actually landed.
-type PushWorkingTreeBranchResult struct {
-	Branch string `json:"branch"`
-	Remote string `json:"remote"`
-	Commit string `json:"commit"`
-}
 
 // PushWorkingTreeBranchDependencies lets tests replace the git plumbing.
 type PushWorkingTreeBranchDependencies struct {
@@ -44,10 +31,10 @@ func normalizePushWorkingTreeBranchDependencies(deps PushWorkingTreeBranchDepend
 }
 
 // PushWorkingTreeBranch pushes the current branch to remote, refusing a branch mismatch first.
-func PushWorkingTreeBranch(ctx core.Context, root string, params PushWorkingTreeBranchParams, deps PushWorkingTreeBranchDependencies) (PushWorkingTreeBranchResult, error) {
+func PushWorkingTreeBranch(ctx core.Context, root string, params model.PushWorkingTreeBranchParams, deps PushWorkingTreeBranchDependencies) (model.PushWorkingTreeBranchResult, error) {
 	branch := strings.TrimSpace(params.Branch)
 	if branch == "" {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("branch is required")
 	}
 	remote := strings.TrimSpace(params.Remote)
 	if remote == "" {
@@ -57,16 +44,16 @@ func PushWorkingTreeBranch(ctx core.Context, root string, params PushWorkingTree
 
 	current, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("resolve current branch: %w", err)
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("resolve current branch: %w", err)
 	}
 	if current != branch {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("refusing to push: working tree is on branch %q, not the declared %q", current, branch)
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("refusing to push: working tree is on branch %q, not the declared %q", current, branch)
 	}
 
 	refspec := branch + ":" + branch
 	ctx.TraceCommand(root, "git", "push", remote, refspec)
 	if ctx.DryRun {
-		return PushWorkingTreeBranchResult{Branch: branch, Remote: remote}, nil
+		return model.PushWorkingTreeBranchResult{Branch: branch, Remote: remote}, nil
 	}
 
 	var stderr bytes.Buffer
@@ -77,17 +64,17 @@ func PushWorkingTreeBranch(ctx core.Context, root string, params PushWorkingTree
 		reportRulesetBypass(ctx, remote, notice)
 	}
 	if pushErr != nil {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("git push: %w: %s", pushErr, strings.TrimSpace(stderr.String()))
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("git push: %w: %s", pushErr, strings.TrimSpace(stderr.String()))
 	}
 
 	commit, err := deps.CurrentCommit(ctx, root)
 	if err != nil {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("resolve pushed commit: %w", err)
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("resolve pushed commit: %w", err)
 	}
 	landedBranch, err := deps.CurrentBranch(ctx, root)
 	if err != nil {
-		return PushWorkingTreeBranchResult{}, fmt.Errorf("resolve pushed branch: %w", err)
+		return model.PushWorkingTreeBranchResult{}, fmt.Errorf("resolve pushed branch: %w", err)
 	}
 
-	return PushWorkingTreeBranchResult{Branch: landedBranch, Remote: remote, Commit: commit}, nil
+	return model.PushWorkingTreeBranchResult{Branch: landedBranch, Remote: remote, Commit: commit}, nil
 }

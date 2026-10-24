@@ -13,6 +13,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/open"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 )
@@ -69,7 +70,7 @@ func runJetBrainsBootstrapAttempt(ctx core.Context, attempt jetbrainsBootstrapAt
 	return nil
 }
 
-func openInstalledIntelliJApp(ctx core.Context, _ config.OpenResult, hostOS core.HostOS) error {
+func openInstalledIntelliJApp(ctx core.Context, _ config.OpenResult, hostOS model.HostOS) error {
 	attempt, ok := resolveInstalledIntelliJAttempt(hostOS)
 	if !ok {
 		return fmt.Errorf("IntelliJ IDEA is not available on this host")
@@ -77,7 +78,7 @@ func openInstalledIntelliJApp(ctx core.Context, _ config.OpenResult, hostOS core
 	return runJetBrainsBootstrapAttemptFunc(ctx, attempt)
 }
 
-func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, hostOS core.HostOS) (bool, error) {
+func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, hostOS model.HostOS) (bool, error) {
 	optionsDir, ok := resolvableIntelliJOptionsDir(hostOS)
 	if !ok {
 		return false, nil
@@ -106,15 +107,15 @@ func openIntelliJGatewayProject(ctx core.Context, result config.OpenResult, host
 	return true, nil
 }
 
-func intelliJGatewayLaunchCommand(ctx core.Context, hostOS core.HostOS, optionsDir string, uri string) (string, []string, error) {
-	if hostOS == core.HostOSDarwin {
+func intelliJGatewayLaunchCommand(ctx core.Context, hostOS model.HostOS, optionsDir string, uri string) (string, []string, error) {
+	if hostOS == model.HostOSDarwin {
 		return intelliJGatewayDarwinLaunchCommand(ctx, optionsDir, uri)
 	}
 	return ideLaunchCommand(hostOS, uri)
 }
 
 func intelliJGatewayDarwinLaunchCommand(ctx core.Context, optionsDir string, uri string) (string, []string, error) {
-	contentsDir, err := resolveInstalledIntelliJContentsDir(core.HostOSDarwin)
+	contentsDir, err := resolveInstalledIntelliJContentsDir(model.HostOSDarwin)
 	if err != nil {
 		return "", nil, err
 	}
@@ -239,7 +240,7 @@ func intelliJGatewayProjectURI(recent jetbrainsconfig.RecentProject) (string, bo
 	return "jetbrains-gateway://connect#" + values.Encode(), true
 }
 
-func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS core.HostOS) error {
+func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS model.HostOS) error {
 	optionsDir, ok := resolvableIntelliJOptionsDir(hostOS)
 	if !ok {
 		return nil
@@ -262,7 +263,7 @@ func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS 
 	if err := jetbrainsconfig.UpsertOptionsFiles(optionsDir, entry); err != nil {
 		return err
 	}
-	if hostOS == core.HostOSDarwin {
+	if hostOS == model.HostOSDarwin {
 		gatewayOptionsDir, err := resolveIntelliJGatewayOptionsDir(optionsDir)
 		if err == nil {
 			if err := jetbrainsconfig.UpsertOptionsFiles(gatewayOptionsDir, entry); err != nil {
@@ -273,36 +274,36 @@ func registerIntelliJProject(ctx core.Context, result config.OpenResult, hostOS 
 	return nil
 }
 
-func resolveInstalledIntelliJAttempt(hostOS core.HostOS) (jetbrainsBootstrapAttempt, bool) {
+func resolveInstalledIntelliJAttempt(hostOS model.HostOS) (jetbrainsBootstrapAttempt, bool) {
 	switch hostOS {
-	case core.HostOSDarwin:
+	case model.HostOSDarwin:
 		return jetbrainsBootstrapAttempt{
 			command: "open",
 			args:    []string{"-a", "IntelliJ IDEA"},
 			runSync: true,
 		}, true
-	case core.HostOSLinux:
+	case model.HostOSLinux:
 		attempts := lookPathBootstrapAttempts([]string{"idea", "idea64", "intellij-idea-ultimate"})
 		if len(attempts) > 0 {
 			return attempts[0], true
 		}
-	case core.HostOSWindows:
+	case model.HostOSWindows:
 		attempts := lookPathBootstrapAttempts([]string{"idea64.exe", "idea.exe"})
 		if len(attempts) > 0 {
 			return attempts[0], true
 		}
-	case core.HostOSUnknown:
+	case model.HostOSUnknown:
 	}
 	return jetbrainsBootstrapAttempt{}, false
 }
 
-func resolvableIntelliJOptionsDir(hostOS core.HostOS) (string, bool) {
+func resolvableIntelliJOptionsDir(hostOS model.HostOS) (string, bool) {
 	optionsDir, err := shared.ResolveIntelliJOptionsDir(hostOS)
 	return optionsDir, err == nil
 }
 
-func resolveInstalledIntelliJContentsDir(hostOS core.HostOS) (string, error) {
-	if hostOS != core.HostOSDarwin {
+func resolveInstalledIntelliJContentsDir(hostOS model.HostOS) (string, error) {
+	if hostOS != model.HostOSDarwin {
 		return "", fmt.Errorf("IntelliJ IDEA app discovery is unsupported on %s", hostOS)
 	}
 	// ~/Applications shadows /Applications.

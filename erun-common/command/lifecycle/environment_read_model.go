@@ -12,19 +12,6 @@ import (
 	diagnosispkg "github.com/sophium/erun/erun-common/orchestration/diagnosis"
 	deploypkg "github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
-)
-
-// EnvironmentLifecycleState combines power state, deploy health, and idle eligibility.
-type EnvironmentLifecycleState string
-
-const (
-	EnvironmentLifecycleRunning      EnvironmentLifecycleState = "running"
-	EnvironmentLifecycleIdle         EnvironmentLifecycleState = "idle"
-	EnvironmentLifecycleDeployFailed EnvironmentLifecycleState = "deploy-failed"
-	EnvironmentLifecycleStopped      EnvironmentLifecycleState = "stopped"
-	// EnvironmentLifecycleUnknown is reported when a signal the state depends on was not observed.
-	EnvironmentLifecycleUnknown EnvironmentLifecycleState = "unknown"
 )
 
 // EnvironmentLifecycleInputs carries an explicit observed bit per signal so a zero value is
@@ -44,7 +31,7 @@ type EnvironmentLifecycleInputs struct {
 }
 
 // ResolveEnvironmentLifecycleState never uses an unobserved input to tell Stopped or Idle from Unknown.
-func ResolveEnvironmentLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLifecycleState {
+func ResolveEnvironmentLifecycleState(in EnvironmentLifecycleInputs) model.EnvironmentLifecycleState {
 	if in.ManagedCloud {
 		if state, resolved := resolveManagedCloudLifecycleState(in); resolved {
 			return state
@@ -55,59 +42,52 @@ func ResolveEnvironmentLifecycleState(in EnvironmentLifecycleInputs) Environment
 }
 
 // resolved is false only when the instance is confirmed running.
-func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state EnvironmentLifecycleState, resolved bool) {
+func resolveManagedCloudLifecycleState(in EnvironmentLifecycleInputs) (state model.EnvironmentLifecycleState, resolved bool) {
 	if !in.CloudContextObserved {
-		return EnvironmentLifecycleUnknown, true
+		return model.EnvironmentLifecycleUnknown, true
 	}
 	switch in.CloudContextStatus {
 	case cloud.CloudContextStatusStopped:
-		return EnvironmentLifecycleStopped, true
+		return model.EnvironmentLifecycleStopped, true
 	case cloud.CloudContextStatusRunning:
 		return "", false
 	default:
-		return EnvironmentLifecycleUnknown, true
+		return model.EnvironmentLifecycleUnknown, true
 	}
 }
 
-func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) EnvironmentLifecycleState {
+func resolveWorkloadLifecycleState(in EnvironmentLifecycleInputs) model.EnvironmentLifecycleState {
 	switch {
 	case in.DeployHealthObserved && !in.DeployHealthy:
-		return EnvironmentLifecycleDeployFailed
+		return model.EnvironmentLifecycleDeployFailed
 	case in.IdleStatusObserved && in.StopEligible:
-		return EnvironmentLifecycleIdle
+		return model.EnvironmentLifecycleIdle
 	case in.IdleStatusObserved || in.DeployHealthObserved || in.ManagedCloud:
-		return EnvironmentLifecycleRunning
+		return model.EnvironmentLifecycleRunning
 	default:
 		// Nothing observed: Running would be a guess.
-		return EnvironmentLifecycleUnknown
+		return model.EnvironmentLifecycleUnknown
 	}
-}
-
-// EnvironmentHealth is the root config gate and deploy diagnosis with its recommended recovery.
-type EnvironmentHealth struct {
-	RootConfig          config.RootConfigInspection     `json:"rootConfig"`
-	Deploy              deploypkg.DeployDiagnosisResult `json:"deploy"`
-	RecommendedRecovery deploypkg.DeployRecoveryAction  `json:"recommendedRecovery,omitempty"`
 }
 
 // ResolveEnvironmentHealth runs no commands; the caller supplies a real diagnosis.
-func ResolveEnvironmentHealth(rootConfig config.RootConfigInspection, deploy deploypkg.DeployDiagnosisResult) EnvironmentHealth {
+func ResolveEnvironmentHealth(rootConfig model.RootConfigInspection, deploy model.DeployDiagnosisResult) model.EnvironmentHealth {
 	recovery, _ := deploypkg.RecommendedDeployRecovery(deploy)
-	return EnvironmentHealth{RootConfig: rootConfig, Deploy: deploy, RecommendedRecovery: recovery}
+	return model.EnvironmentHealth{RootConfig: rootConfig, Deploy: deploy, RecommendedRecovery: recovery}
 }
 
 // EnvironmentReadModel is an environment's summary and detail with one resolved lifecycle state.
 type EnvironmentReadModel struct {
 	Tenant       string                          `json:"tenant"`
 	Environment  ListEnvironmentResult           `json:"environment"`
-	State        EnvironmentLifecycleState       `json:"state"`
-	CloudContext *config.CloudContextStatus      `json:"cloudContext,omitempty"`
-	Idle         *activity.EnvironmentIdleStatus `json:"idle,omitempty"`
-	Health       *EnvironmentHealth              `json:"health,omitempty"`
+	State        model.EnvironmentLifecycleState `json:"state"`
+	CloudContext *model.CloudContextStatus       `json:"cloudContext,omitempty"`
+	Idle         *model.EnvironmentIdleStatus    `json:"idle,omitempty"`
+	Health       *model.EnvironmentHealth        `json:"health,omitempty"`
 }
 
 // AssembleEnvironmentReadModel treats a nil cloudContext, idle, or health as unobserved.
-func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResult, cloudContext *config.CloudContextStatus, idle *activity.EnvironmentIdleStatus, health *EnvironmentHealth) EnvironmentReadModel {
+func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResult, cloudContext *model.CloudContextStatus, idle *model.EnvironmentIdleStatus, health *model.EnvironmentHealth) EnvironmentReadModel {
 	inputs := EnvironmentLifecycleInputs{}
 	if idle != nil {
 		inputs.ManagedCloud = idle.ManagedCloud
@@ -139,7 +119,7 @@ func AssembleEnvironmentReadModel(tenant string, environment ListEnvironmentResu
 func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (ListEnvironmentResult, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := model.ErrMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve environment detail", tenant, environment); err != nil {
 		return ListEnvironmentResult{}, err
 	}
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
@@ -150,7 +130,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 	if err != nil {
 		return ListEnvironmentResult{}, err
 	}
-	effective, effectiveErr := open.ResolveOpen(store, shared.OpenParams{Tenant: tenant, Environment: environment})
+	effective, effectiveErr := open.ResolveOpen(store, model.OpenParams{Tenant: tenant, Environment: environment})
 	portAllocations, err := config.ResolveAllEnvironmentLocalPorts(store)
 	if err != nil {
 		return ListEnvironmentResult{}, err
@@ -162,7 +142,7 @@ func ResolveEnvironmentDetail(store ListStore, tenant, environment string) (List
 func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, environment string, now time.Time) (EnvironmentReadModel, error) {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
-	if err := model.ErrMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("resolve environment read model", tenant, environment); err != nil {
 		return EnvironmentReadModel{}, err
 	}
 
@@ -176,20 +156,20 @@ func ResolveEnvironmentReadModel(ctx core.Context, store ListStore, tenant, envi
 		return EnvironmentReadModel{}, err
 	}
 
-	var cloudContext *config.CloudContextStatus
+	var cloudContext *model.CloudContextStatus
 	if status, ok, err := config.FindCloudContextForKubernetesContext(store, entry.KubernetesContext); err != nil {
 		return EnvironmentReadModel{}, err
 	} else if ok {
 		cloudContext = &status
 	}
 
-	var health *EnvironmentHealth
+	var health *model.EnvironmentHealth
 	if !ctx.DryRun {
 		rootConfig, err := config.InspectRootConfig(store)
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}
-		openResult, err := diagnosispkg.ResolveDoctorTarget(store, shared.OpenParams{Tenant: tenant, Environment: environment})
+		openResult, err := diagnosispkg.ResolveDoctorTarget(store, model.OpenParams{Tenant: tenant, Environment: environment})
 		if err != nil {
 			return EnvironmentReadModel{}, err
 		}

@@ -7,24 +7,22 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-common/infra/activity"
-	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // wireTimeOmitzeroRoots are the JSON roots machine consumers read.
 var wireTimeOmitzeroRoots = []any{
-	activity.EnvironmentIdleStatus{},
-	activity.EnvironmentActivitySnapshot{},
-	activity.EnvironmentIdleMarkerClient{},
-	activity.EnvironmentActivityLease{},
-	activity.EnvironmentStopPending{},
-	activity.EnvironmentStopHistoryEntry{},
+	model.EnvironmentIdleStatus{},
+	model.EnvironmentActivitySnapshot{},
+	model.EnvironmentIdleMarkerClient{},
+	model.EnvironmentActivityLease{},
+	model.EnvironmentStopPending{},
+	model.EnvironmentStopHistoryEntry{},
 	shared.EnvironmentJob{},
 	model.AISessionStatus{},
 	RuntimeUsageHistory{},
-	cloud.HostCredentialsRefresh{},
-	cloud.HostCredentialsStatus{},
+	model.HostCredentialsRefresh{},
+	model.HostCredentialsStatus{},
 }
 
 // omitempty never fires on a value time.Time, so an unset one would publish

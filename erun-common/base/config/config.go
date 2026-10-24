@@ -2,7 +2,8 @@ package config
 
 import (
 	"errors"
-	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 const (
@@ -13,9 +14,9 @@ const (
 
 type ERunConfig struct {
 	DefaultTenant   string
-	CloudProviders  []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
-	CloudContexts   []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
-	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
+	CloudProviders  []model.CloudProviderConfig `yaml:"cloudproviders,omitempty"`
+	CloudContexts   []model.CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
+	RuntimeRegistry RuntimeRegistryConfig       `yaml:"runtimeregistry,omitempty"`
 	// Orchestrators are the persisted host-side AI orchestrator definitions.
 	Orchestrators []OrchestratorConfig `yaml:"orchestrators,omitempty" json:"orchestrators,omitempty"`
 	// Whip overrides the pacing nudge defaults; nil keeps the defaults.
@@ -39,19 +40,10 @@ type RuntimeRegistryConfig struct {
 }
 
 type SSHDConfig struct {
-	Enabled       bool                    `yaml:"enabled,omitempty"`
-	LocalPort     int                     `yaml:"localport,omitempty"`
-	PublicKeyPath string                  `yaml:"publickeypath,omitempty"`
-	WorkspaceSync SSHDWorkspaceSyncConfig `yaml:"workspacesync,omitempty"`
-}
-
-type SSHDWorkspaceSyncConfig struct {
-	Enabled   bool   `yaml:"enabled,omitempty"`
-	LocalPath string `yaml:"localpath,omitempty"`
-}
-
-func (c SSHDWorkspaceSyncConfig) IsZero() bool {
-	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
+	Enabled       bool                          `yaml:"enabled,omitempty"`
+	LocalPort     int                           `yaml:"localport,omitempty"`
+	PublicKeyPath string                        `yaml:"publickeypath,omitempty"`
+	WorkspaceSync model.SSHDWorkspaceSyncConfig `yaml:"workspacesync,omitempty"`
 }
 
 func (c SSHDConfig) ResolvedLocalPort() int {
@@ -59,14 +51,6 @@ func (c SSHDConfig) ResolvedLocalPort() int {
 		return c.LocalPort
 	}
 	return DefaultSSHLocalPort
-}
-
-type TenantConfig struct {
-	Name                      string
-	DefaultEnvironment        string
-	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
-	CloudProviderAliases      []string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
-	PrimaryCloudProviderAlias string   `yaml:"primarycloudprovideralias,omitempty" json:"primaryCloudProviderAlias,omitempty"`
 }
 
 var (

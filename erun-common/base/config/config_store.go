@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 type ConfigStore struct{}
@@ -18,15 +20,15 @@ func (ConfigStore) SaveERunConfig(config ERunConfig) error {
 	return SaveERunConfig(config)
 }
 
-func (ConfigStore) ListTenantConfigs() ([]TenantConfig, error) {
+func (ConfigStore) ListTenantConfigs() ([]model.TenantConfig, error) {
 	return ListTenantConfigs()
 }
 
-func (ConfigStore) LoadTenantConfig(tenant string) (TenantConfig, string, error) {
+func (ConfigStore) LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
 	return LoadTenantConfig(tenant)
 }
 
-func (ConfigStore) SaveTenantConfig(config TenantConfig) error {
+func (ConfigStore) SaveTenantConfig(config model.TenantConfig) error {
 	return SaveTenantConfig(config)
 }
 
@@ -108,7 +110,7 @@ func LoadERunConfig() (ERunConfig, string, error) {
 	return config, configFilePath, nil
 }
 
-func SaveTenantConfig(config TenantConfig) error {
+func SaveTenantConfig(config model.TenantConfig) error {
 	config = NormalizeTenantConfig(config)
 	if err := ValidateStatePathSegment("tenant", config.Name); err != nil {
 		return err
@@ -135,7 +137,7 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-func NormalizeTenantConfig(config TenantConfig) TenantConfig {
+func NormalizeTenantConfig(config model.TenantConfig) model.TenantConfig {
 	config.Name = strings.TrimSpace(config.Name)
 	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
 	config.APIURL = strings.TrimSpace(config.APIURL)
@@ -158,8 +160,8 @@ func DeleteTenantConfig(tenant string) error {
 	return nil
 }
 
-func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
-	config := TenantConfig{}
+func LoadTenantConfig(tenant string) (model.TenantConfig, string, error) {
+	config := model.TenantConfig{}
 	if err := validateReadableStatePathSegment("tenant", tenant); err != nil {
 		return config, "", err
 	}
@@ -175,7 +177,7 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	return NormalizeTenantConfig(config), configFilePath, nil
 }
 
-func ListTenantConfigs() ([]TenantConfig, error) {
+func ListTenantConfigs() ([]model.TenantConfig, error) {
 	configFilePath, err := ResolveConfigFilePath(filepath.Join(ConfigRoot, ConfigFile))
 	if err != nil {
 		return nil, ErrNoUserDataFolder
@@ -189,7 +191,7 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 		return nil, err
 	}
 
-	tenants := make([]TenantConfig, 0, len(entries))
+	tenants := make([]model.TenantConfig, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue

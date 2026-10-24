@@ -6,11 +6,12 @@ import (
 	"path/filepath"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func ResolveBuildExecution(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target shared.DockerCommandTarget) (shared.BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx core.Context, store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, now shared.NowFunc, target model.DockerCommandTarget) (shared.BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = shared.NormalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildpkg.RecommendBuildEnvIfMissing(ctx, findProjectRoot, target)
@@ -75,25 +76,25 @@ func finalizeBuildExecution(ctx core.Context, execution shared.BuildExecutionSpe
 	return execution, nil
 }
 
-func resolveBuildExecutionTargetAndScript(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (shared.DockerCommandTarget, *shared.ReleaseSpec, *shared.ScriptSpec, error) {
+func resolveBuildExecutionTargetAndScript(findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (model.DockerCommandTarget, *model.ReleaseSpec, *shared.ScriptSpec, error) {
 	target, releaseSpec, err := buildpkg.ResolveDockerBuildTarget(findProjectRoot, target)
 	if err != nil {
-		return shared.DockerCommandTarget{}, nil, nil, err
+		return model.DockerCommandTarget{}, nil, nil, err
 	}
 	script, err := buildpkg.ResolveProjectRootBuildScript(findProjectRoot, target)
 	if err != nil {
-		return shared.DockerCommandTarget{}, nil, nil, err
+		return model.DockerCommandTarget{}, nil, nil, err
 	}
 	return target, releaseSpec, script, nil
 }
 
-func buildExecutionHasNoBuilds(linuxPackages []shared.LinuxPackageSpec, builds []shared.DockerBuildSpec, releaseSpec *shared.ReleaseSpec) bool {
+func buildExecutionHasNoBuilds(linuxPackages []model.LinuxPackageSpec, builds []shared.DockerBuildSpec, releaseSpec *model.ReleaseSpec) bool {
 	return len(linuxPackages) == 0 && len(builds) == 0 && releaseSpec == nil
 }
 
 // resolveLinuxPackagesForExecution resolves a plain build's packages and which
 // reuse a recorded pass; releases export theirs instead.
-func resolveLinuxPackagesForExecution(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target shared.DockerCommandTarget, releaseSpec *shared.ReleaseSpec) ([]shared.LinuxPackageSpec, error) {
+func resolveLinuxPackagesForExecution(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target model.DockerCommandTarget, releaseSpec *model.ReleaseSpec) ([]model.LinuxPackageSpec, error) {
 	if releaseSpec != nil {
 		return nil, nil
 	}
@@ -118,7 +119,7 @@ func resolveLinuxPackagesForExecution(findProjectRoot shared.ProjectFinderFunc, 
 	return buildpkg.ApplyLinuxPackageReuse(packages), nil
 }
 
-func resolveBuildExecutionWithoutBuilds(findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) (shared.BuildExecutionSpec, error) {
+func resolveBuildExecutionWithoutBuilds(findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) (shared.BuildExecutionSpec, error) {
 	script, err := buildpkg.ResolveNestedProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return shared.BuildExecutionSpec{}, err
@@ -139,7 +140,7 @@ func resolveBuildExecutionWithoutBuilds(findProjectRoot shared.ProjectFinderFunc
 	return shared.BuildExecutionSpec{Script: script}, nil
 }
 
-func BuildExecutionSpecWithRelease(execution shared.BuildExecutionSpec, release shared.ReleaseSpec) shared.BuildExecutionSpec {
+func BuildExecutionSpecWithRelease(execution shared.BuildExecutionSpec, release model.ReleaseSpec) shared.BuildExecutionSpec {
 	execution.Release = &release
 	if len(execution.DockerBuilds) > 0 && len(execution.DockerPushes) == 0 {
 		execution.DockerPushes = releaseDockerPushSpecs(execution.DockerBuilds)

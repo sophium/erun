@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/jobs"
-	"github.com/sophium/erun/erun-common/infra/codesign"
 )
 
 type OutputsListInput struct {
@@ -32,17 +32,17 @@ type OutputsDownloadResult struct {
 	SHA256        string `json:"sha256,omitempty"`
 	Content       string `json:"content,omitempty"`
 	// Signing is reported because macOS SIGKILLs an unsigned Mach-O silently.
-	Signing *codesign.HostArtifactSigning `json:"signing,omitempty"`
+	Signing *model.HostArtifactSigning `json:"signing,omitempty"`
 }
 
-func OutputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, jobs.RuntimeOutputsListResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsListInput) (*mcp.CallToolResult, jobs.RuntimeOutputsListResult, error) {
-		result, err := jobs.ResolveLocalOutputs(jobs.RuntimeOutputsParams{
+func OutputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListInput) (*mcp.CallToolResult, model.RuntimeOutputsListResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsListInput) (*mcp.CallToolResult, model.RuntimeOutputsListResult, error) {
+		result, err := jobs.ResolveLocalOutputs(model.RuntimeOutputsParams{
 			Dir:   outputsDirInput(input.Path),
 			Limit: input.Limit,
 		})
 		if err != nil {
-			return nil, jobs.RuntimeOutputsListResult{}, err
+			return nil, model.RuntimeOutputsListResult{}, err
 		}
 		return nil, result, nil
 	}
@@ -50,7 +50,7 @@ func OutputsListTool() func(context.Context, *mcp.CallToolRequest, OutputsListIn
 
 func OutputsDownloadTool() func(context.Context, *mcp.CallToolRequest, OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input OutputsDownloadInput) (*mcp.CallToolResult, OutputsDownloadResult, error) {
-		params := jobs.RuntimeOutputDownloadParams{
+		params := model.RuntimeOutputDownloadParams{
 			Dir:  outputsDirInput(input.Path),
 			Name: input.Name,
 		}
@@ -69,7 +69,7 @@ func OutputsDownloadTool() func(context.Context, *mcp.CallToolRequest, OutputsDo
 	}
 }
 
-func outputsDownloadResult(out jobs.RuntimeOutputResult, withContent bool) OutputsDownloadResult {
+func outputsDownloadResult(out model.RuntimeOutputResult, withContent bool) OutputsDownloadResult {
 	result := OutputsDownloadResult{
 		Name:          out.Name,
 		IsArchive:     out.IsArchive,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -205,7 +206,7 @@ func runJobStart(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job started: %s (id %s), output at %s\n", job.Name, job.ID, job.LogPath); err != nil {
 			return err
 		}
@@ -250,7 +251,7 @@ func newJobAttachCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 		Example: "  erun exec job attach --tenant team --environment dev --name overnight-index --pid 4242",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAttach(cmd, resolveOpen, jobspkg.AttachEnvironmentJobParams{
+			return runJobAttach(cmd, resolveOpen, model.AttachEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Name:        name,
@@ -271,7 +272,7 @@ func newJobAttachCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jobspkg.AttachEnvironmentJobParams) error {
+func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.AttachEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -283,7 +284,7 @@ func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if _, err := fmt.Fprintf(ctx.Stdout, "job attached: %s (id %s), tracking pid %d\n", job.Name, job.ID, job.PID); err != nil {
 			return err
 		}
@@ -291,7 +292,7 @@ func runJobAttach(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jo
 	return ctx.WriteResult(job)
 }
 
-func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
+func attachJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AttachEnvironmentJobParams) (sharedpkg.EnvironmentJob, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return attachJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}
@@ -327,7 +328,7 @@ func newJobSuperviseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return jobspkg.RunEnvironmentJobSupervisor(jobspkg.EnvironmentJobSupervisorParams{
+			return jobspkg.RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 				Tenant:         tenant,
 				Environment:    environment,
 				ID:             id,

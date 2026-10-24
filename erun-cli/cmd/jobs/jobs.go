@@ -7,9 +7,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +29,7 @@ func NewJobsCmd(store config.CloudReadStore, deps cloud.CloudDependencies) *cobr
 }
 
 func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobListParams
+	var params model.JobListParams
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List jobs: what is being worked on now, and what recently finished",
@@ -50,7 +50,7 @@ func newJobsListCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformJobList(ctx, jobs); err != nil {
 					return err
 				}
@@ -84,7 +84,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs show planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformJobDetail(ctx, job); err != nil {
 					return err
 				}
@@ -97,7 +97,7 @@ func newJobsShowCmd(store config.CloudReadStore, alias *string, deps cloud.Cloud
 }
 
 func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobClaimParams
+	var params model.JobClaimParams
 	cmd := &cobra.Command{
 		Use:   "start",
 		Short: "Record that this actor is starting a piece of work",
@@ -126,7 +126,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs start planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Started job %s (%s, %s).\n", job.JobID, job.JobType, job.Status); err != nil {
 					return err
 				}
@@ -148,7 +148,7 @@ func newJobsStartCmd(store config.CloudReadStore, alias *string, deps cloud.Clou
 }
 
 func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params jobspkg.JobUpdateParams
+	var params model.JobUpdateParams
 	cmd := &cobra.Command{
 		Use:   "finish <job-id>",
 		Short: "Report a job's progress or its outcome",
@@ -172,7 +172,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun jobs finish planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if _, err := fmt.Fprintf(ctx.Stdout, "Updated job %s (%s).\n", job.JobID, job.Status); err != nil {
 					return err
 				}
@@ -187,7 +187,7 @@ func newJobsFinishCmd(store config.CloudReadStore, alias *string, deps cloud.Clo
 	return cmd
 }
 
-func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) error {
+func writePlatformJobList(ctx core.Context, jobs []model.PlatformJob) error {
 	if len(jobs) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no jobs")
 		return err
@@ -200,7 +200,7 @@ func writePlatformJobList(ctx core.Context, jobs []platformclient.PlatformJob) e
 	return nil
 }
 
-func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) error {
+func writePlatformJobLine(ctx core.Context, job model.PlatformJob) error {
 	suffix := ""
 	if strings.TrimSpace(job.IssueRef) != "" {
 		suffix += " issue=" + job.IssueRef
@@ -213,7 +213,7 @@ func writePlatformJobLine(ctx core.Context, job platformclient.PlatformJob) erro
 	return err
 }
 
-func writePlatformJobDetail(ctx core.Context, job platformclient.PlatformJob) error {
+func writePlatformJobDetail(ctx core.Context, job model.PlatformJob) error {
 	ended := "-"
 	if job.EndedAt != nil {
 		ended = job.EndedAt.UTC().Format("2006-01-02T15:04:05Z")

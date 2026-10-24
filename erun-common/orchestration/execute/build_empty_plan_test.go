@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
@@ -29,7 +30,7 @@ func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {
 	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{Script: &shared.ScriptSpec{Path: "./build.sh"}}) {
 		t.Error("a project build script is work")
 	}
-	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{LinuxPackages: []shared.LinuxPackageSpec{{Name: "erun-ui"}}}) {
+	if !buildrun.BuildExecutionPlansWork(shared.BuildExecutionSpec{LinuxPackages: []model.LinuxPackageSpec{{Name: "erun-ui"}}}) {
 		t.Error("a linux package is work")
 	}
 }

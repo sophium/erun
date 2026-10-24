@@ -8,8 +8,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
-	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // doctorResourceInterval is the CPU sample window; utilisation is a rate.
@@ -17,11 +17,11 @@ const doctorResourceInterval = time.Second
 
 // reportDoctorResources prints live CPU/memory pressure and the sizing verdict via
 // `erun usage`'s renderer. It never resizes: that rolls the pod and kills its work.
-func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis deploy.DeployDiagnosisResult) error {
+func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, result config.OpenResult, diagnosis model.DeployDiagnosisResult) error {
 	if diagnosis.ClusterUnreachable {
 		return reportPodSkippedUnreachable(ctx, "Resources")
 	}
-	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, podruntime.RuntimeUsageParams{Interval: doctorResourceInterval})
+	usage, err := podruntime.RunRuntimeUsage(ctx, nil, nil, req, model.RuntimeUsageParams{Interval: doctorResourceInterval})
 	if err != nil {
 		return reportPodUnreachable(ctx, "Resources", err)
 	}
@@ -43,7 +43,7 @@ func reportDoctorResources(ctx core.Context, req config.ShellLaunchParams, resul
 }
 
 // writeDoctorResourcesNotObserved reports missing counters as not observed, never as healthy.
-func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage) error {
+func writeDoctorResourcesNotObserved(ctx core.Context, usage model.RuntimeUsage) error {
 	reason := strings.TrimSpace(usage.Memory.Unavailable)
 	if reason == "" {
 		reason = strings.TrimSpace(usage.CPU.Unavailable)
@@ -60,13 +60,13 @@ func writeDoctorResourcesNotObserved(ctx core.Context, usage config.RuntimeUsage
 
 // writeDoctorResizeNextAction names the resize command with explicit values, which
 // work from anywhere (--apply-recommendation only works in-pod).
-func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *deploy.RuntimeSizingRecommendation) error {
+func writeDoctorResizeNextAction(ctx core.Context, result config.OpenResult, sizing *model.RuntimeSizingRecommendation) error {
 	if sizing == nil {
 		return nil
 	}
 	flags := make([]string, 0, 2)
 	for _, verdict := range sizing.Verdicts {
-		if verdict.Action != deploy.RuntimeSizingRaise && verdict.Action != deploy.RuntimeSizingLower {
+		if verdict.Action != model.RuntimeSizingRaise && verdict.Action != model.RuntimeSizingLower {
 			continue
 		}
 		switch verdict.Resource {

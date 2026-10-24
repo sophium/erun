@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/helm"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func newHelmDeploySpec(target configpkg.OpenResult, deployContext shared.KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {
+func newHelmDeploySpec(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {
 	valuesFilePath, err := resolveKubernetesDeployValuesFile(deployContext.ChartPath, target.Environment)
 	if err != nil {
 		return HelmDeploySpec{}, err
@@ -22,7 +22,7 @@ func newHelmDeploySpec(target configpkg.OpenResult, deployContext shared.Kuberne
 	return newHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
 }
 
-func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext shared.KubernetesDeployContext, versionOverride, valuesFilePath string) (HelmDeploySpec, error) {
+func newHelmDeploySpecWithValues(target configpkg.OpenResult, deployContext model.KubernetesDeployContext, versionOverride, valuesFilePath string) (HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
 	ports := configpkg.LocalPortsForResult(target)
 

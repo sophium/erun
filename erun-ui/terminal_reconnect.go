@@ -8,10 +8,10 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // classifyMCPUnreachable reports the locally observable kind of unreachability.
@@ -44,7 +44,7 @@ func (a *App) ReconnectMCP(selection uiSelection) error {
 	if err := errMissingTenantOrEnvironment("reconnect MCP", selection.Tenant, selection.Environment); err != nil {
 		return err
 	}
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

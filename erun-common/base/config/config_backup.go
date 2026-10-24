@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,12 +19,6 @@ const configBackupSuffix = ".bak"
 const configBackupKeep = 5
 
 var TimeNow = time.Now
-
-// ConfigBackup is one dated backup file; Date comes from the filename, not mtime.
-type ConfigBackup struct {
-	Path string
-	Date time.Time
-}
 
 // writeConfigBackupIfDue snapshots the live config at most once per UTC day, best-effort.
 func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) error {
@@ -54,7 +49,7 @@ func writeConfigBackupIfDue(livePath string, keep int, now func() time.Time) err
 	return pruneOldConfigBackups(dir, base, keep)
 }
 
-func listConfigBackups(livePath string) ([]ConfigBackup, error) {
+func listConfigBackups(livePath string) ([]model.ConfigBackup, error) {
 	if strings.TrimSpace(livePath) == "" {
 		return nil, errors.New("live path is required")
 	}
@@ -63,25 +58,25 @@ func listConfigBackups(livePath string) ([]ConfigBackup, error) {
 	return listManagedConfigBackups(dir, base)
 }
 
-func findConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
+func findConfigBackupByDate(livePath, date string) (model.ConfigBackup, bool, error) {
 	date = strings.TrimSpace(date)
 	if date == "" {
-		return ConfigBackup{}, false, errors.New("date is required")
+		return model.ConfigBackup{}, false, errors.New("date is required")
 	}
 	parsed, err := time.Parse("2006-01-02", date)
 	if err != nil {
-		return ConfigBackup{}, false, fmt.Errorf("invalid backup date %q: %w", date, err)
+		return model.ConfigBackup{}, false, fmt.Errorf("invalid backup date %q: %w", date, err)
 	}
 	backups, err := listConfigBackups(livePath)
 	if err != nil {
-		return ConfigBackup{}, false, err
+		return model.ConfigBackup{}, false, err
 	}
 	for _, backup := range backups {
 		if backup.Date.Equal(parsed) {
 			return backup, true, nil
 		}
 	}
-	return ConfigBackup{}, false, nil
+	return model.ConfigBackup{}, false, nil
 }
 
 // restoreConfigFromBackup validates a backup before it overwrites the live config.
@@ -128,7 +123,7 @@ func pruneOldConfigBackups(dir, base string, keep int) error {
 	return nil
 }
 
-func listManagedConfigBackups(dir, base string) ([]ConfigBackup, error) {
+func listManagedConfigBackups(dir, base string) ([]model.ConfigBackup, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -136,7 +131,7 @@ func listManagedConfigBackups(dir, base string) ([]ConfigBackup, error) {
 		}
 		return nil, err
 	}
-	backups := make([]ConfigBackup, 0, len(entries))
+	backups := make([]model.ConfigBackup, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -145,7 +140,7 @@ func listManagedConfigBackups(dir, base string) ([]ConfigBackup, error) {
 		if !ok {
 			continue
 		}
-		backups = append(backups, ConfigBackup{
+		backups = append(backups, model.ConfigBackup{
 			Path: filepath.Join(dir, entry.Name()),
 			Date: date,
 		})
@@ -181,12 +176,12 @@ func WriteRootConfigBackupIfDue(livePath string, now func() time.Time) error {
 }
 
 // ListRootConfigBackups returns the root config's backups, newest first.
-func ListRootConfigBackups(livePath string) ([]ConfigBackup, error) {
+func ListRootConfigBackups(livePath string) ([]model.ConfigBackup, error) {
 	return listConfigBackups(livePath)
 }
 
 // FindRootConfigBackupByDate resolves a root-config backup by its YYYY-MM-DD stamp.
-func FindRootConfigBackupByDate(livePath, date string) (ConfigBackup, bool, error) {
+func FindRootConfigBackupByDate(livePath, date string) (model.ConfigBackup, bool, error) {
 	return findConfigBackupByDate(livePath, date)
 }
 
@@ -206,7 +201,7 @@ func WriteEnvConfigBackupIfDue(livePath string, now func() time.Time) error {
 }
 
 // ListEnvConfigBackups returns one environment config's backups, newest first.
-func ListEnvConfigBackups(tenant, environment string) ([]ConfigBackup, error) {
+func ListEnvConfigBackups(tenant, environment string) ([]model.ConfigBackup, error) {
 	livePath, err := EnvConfigPath(tenant, environment)
 	if err != nil {
 		return nil, err
@@ -215,10 +210,10 @@ func ListEnvConfigBackups(tenant, environment string) ([]ConfigBackup, error) {
 }
 
 // FindEnvConfigBackupByDate resolves an environment-config backup by its YYYY-MM-DD stamp.
-func FindEnvConfigBackupByDate(tenant, environment, date string) (ConfigBackup, bool, error) {
+func FindEnvConfigBackupByDate(tenant, environment, date string) (model.ConfigBackup, bool, error) {
 	livePath, err := EnvConfigPath(tenant, environment)
 	if err != nil {
-		return ConfigBackup{}, false, err
+		return model.ConfigBackup{}, false, err
 	}
 	return findConfigBackupByDate(livePath, date)
 }

@@ -7,6 +7,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 )
 
@@ -15,7 +16,7 @@ func orchestratorAliasTestApp(t *testing.T) *App {
 	t.Helper()
 	app := orchestratorTestApp(t)
 	store := stubStore(app)
-	store.config.CloudProviders = []configpkg.CloudProviderConfig{
+	store.config.CloudProviders = []model.CloudProviderConfig{
 		{Alias: "erun+erunpaas.com@erun", Provider: configpkg.CloudProviderERun},
 		{Alias: "aws-prod", Provider: configpkg.CloudProviderAWS},
 	}
@@ -76,7 +77,7 @@ func mustUpdateOrchestrator(t *testing.T, app *App, id, name string, envs []orch
 
 func mustSetOrchestratorAlias(t *testing.T, app *App, id, alias string) {
 	t.Helper()
-	if _, err := orchestrator.SetOrchestratorAlias(core.Context{}, app.deps.store, orchestrator.SetOrchestratorAliasParams{
+	if _, err := orchestrator.SetOrchestratorAlias(core.Context{}, app.deps.store, model.SetOrchestratorAliasParams{
 		OrchestratorID: id,
 		Alias:          alias,
 	}); err != nil {

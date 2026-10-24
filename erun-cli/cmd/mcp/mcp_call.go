@@ -11,10 +11,10 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/mcp"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -105,7 +105,7 @@ type mcpTokenResult struct {
 	Token       string `json:"token"`
 }
 
-func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams, tool, arguments string) error {
+func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams, tool, arguments string) error {
 	tool = strings.TrimSpace(tool)
 	if tool == "" {
 		return fmt.Errorf("--tool is required; run `erun mcp tools` to list the environment's tools")
@@ -133,13 +133,13 @@ func runMCPCallCommand(ctx context.Context, commandCtx core.Context, resolveOpen
 		}
 		return shared.McpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(result)
 	}
 	return writeMCPCallText(commandCtx, result)
 }
 
-func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
+func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -154,15 +154,15 @@ func runMCPToolsCommand(ctx context.Context, commandCtx core.Context, resolveOpe
 	if err != nil {
 		return shared.McpEdgeErrorWithExitCode(target, err)
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(list)
 	}
 	return writeMCPToolsText(commandCtx, target, list)
 }
 
 // listMCPToolsWithReattach reattaches once on a dropped or stale channel.
-func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target shared.McpEdgeTarget) (mcp.MCPToolListResult, error) {
-	list := func() (mcp.MCPToolListResult, error) {
+func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, target shared.McpEdgeTarget) (model.MCPToolListResult, error) {
+	list := func() (model.MCPToolListResult, error) {
 		return mcp.ListMCPTools(ctx, mcp.MCPToolListParams{
 			Endpoint:      target.Endpoint,
 			MintToken:     shared.McpEdgeTokenMinter(target),
@@ -179,7 +179,7 @@ func listMCPToolsWithReattach(ctx context.Context, commandCtx core.Context, targ
 	return result, err
 }
 
-func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
+func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func runMCPTokenCommand(commandCtx core.Context, resolveOpen shared.OpenResolver
 	if err != nil {
 		return err
 	}
-	if commandCtx.Output == core.OutputJSON {
+	if commandCtx.Output == model.OutputJSON {
 		return commandCtx.WriteResult(mcpTokenResult{
 			Tenant:      target.Tenant,
 			Environment: target.Environment,
@@ -225,7 +225,7 @@ func parseMCPToolArguments(raw string) (map[string]any, error) {
 	return arguments, nil
 }
 
-func writeMCPCallText(ctx core.Context, result mcp.MCPToolCallResult) error {
+func writeMCPCallText(ctx core.Context, result model.MCPToolCallResult) error {
 	if text := strings.TrimRight(result.Text, "\n"); text != "" {
 		if _, err := fmt.Fprintln(ctx.Stdout, text); err != nil {
 			return err
@@ -240,7 +240,7 @@ func writeMCPCallText(ctx core.Context, result mcp.MCPToolCallResult) error {
 	return err
 }
 
-func writeMCPToolsText(ctx core.Context, target shared.McpEdgeTarget, list mcp.MCPToolListResult) error {
+func writeMCPToolsText(ctx core.Context, target shared.McpEdgeTarget, list model.MCPToolListResult) error {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Tools on %s/%s (%s):\n", target.Tenant, target.Environment, target.Endpoint); err != nil {
 		return err
 	}

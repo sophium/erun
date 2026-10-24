@@ -6,9 +6,9 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/platform"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ func newPlatformUserCmd(store config.CloudReadStore, alias *string, deps cloud.C
 }
 
 func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformGrantUserRoleParams
+	var params model.PlatformGrantUserRoleParams
 	cmd := &cobra.Command{
 		Use:   "grant-role",
 		Short: "Grant a role to an already-enrolled user on the erun platform",
@@ -47,7 +47,7 @@ func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, dep
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user role grant planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				_, err := fmt.Fprintf(ctx.Stdout, "granted role %s to user %s\n", params.RoleID, params.UserID)
 				return err
 			}
@@ -63,7 +63,7 @@ func newPlatformUserGrantRoleCmd(store config.CloudReadStore, alias *string, dep
 }
 
 func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformCreateUserParams
+	var params model.PlatformCreateUserParams
 	cmd := &cobra.Command{
 		Use:   "enroll",
 		Short: "Enroll a user in a tenant on the erun platform",
@@ -89,7 +89,7 @@ func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps c
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user enrollment planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				message := fmt.Sprintf("enrolled user %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
 				if user.AlreadyEnrolled {
 					message = fmt.Sprintf("this identity is already enrolled, as %s (%s) in tenant %s\n", user.Username, user.UserID, user.TenantID)
@@ -111,7 +111,7 @@ func newPlatformUserEnrollCmd(store config.CloudReadStore, alias *string, deps c
 }
 
 func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps cloud.CloudDependencies) *cobra.Command {
-	var params platformclient.PlatformListUsersParams
+	var params model.PlatformListUsersParams
 	cmd := &cobra.Command{
 		Use:          "list",
 		Short:        "List a tenant's users on the erun platform",
@@ -128,7 +128,7 @@ func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps clo
 				_, err := fmt.Fprintln(ctx.Stdout, "Dry run: erun platform user list planned.")
 				return err
 			}
-			if ctx.Output != core.OutputJSON {
+			if ctx.Output != model.OutputJSON {
 				if err := writePlatformUserList(ctx, users); err != nil {
 					return err
 				}
@@ -141,7 +141,7 @@ func newPlatformUserListCmd(store config.CloudReadStore, alias *string, deps clo
 	return cmd
 }
 
-func writePlatformUserList(ctx core.Context, users []platformclient.PlatformUser) error {
+func writePlatformUserList(ctx core.Context, users []model.PlatformUser) error {
 	if len(users) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "no users")
 		return err

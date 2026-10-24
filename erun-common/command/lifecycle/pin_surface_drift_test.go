@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // repinSurfaces are the descriptions that enumerate what a re-pin rewrites. Each words it
@@ -33,15 +35,15 @@ func normalizeRepinSurfaceText(raw string) string {
 }
 
 func TestPinSiteSummariesCoverEveryDeclaredKind(t *testing.T) {
-	source, err := os.ReadFile("pin.go")
+	source, err := os.ReadFile("../../base/model/pin.go")
 	if err != nil {
-		t.Fatalf("read pin.go: %v", err)
+		t.Fatalf("read base/model/pin.go: %v", err)
 	}
 	declared := pinKindDeclarationPattern.FindAllStringSubmatch(string(source), -1)
 	if len(declared) == 0 {
-		t.Fatal("no PinSiteKind declarations found in pin.go -- this guard is no longer reading what it thinks it is")
+		t.Fatal("no PinSiteKind declarations found in base/model/pin.go -- this guard is no longer reading what it thinks it is")
 	}
-	summarized := map[PinSiteKind]bool{}
+	summarized := map[model.PinSiteKind]bool{}
 	for _, summary := range PinSiteSummaries {
 		if strings.TrimSpace(summary.Phrase) == "" {
 			t.Errorf("pin site kind %q has an empty surface phrase, so no surface is required to name it", summary.Kind)
@@ -52,7 +54,7 @@ func TestPinSiteSummariesCoverEveryDeclaredKind(t *testing.T) {
 		summarized[summary.Kind] = true
 	}
 	for _, match := range declared {
-		if !summarized[PinSiteKind(match[1])] {
+		if !summarized[model.PinSiteKind(match[1])] {
 			t.Errorf("PinSiteKind %q is declared in pin.go but has no PinSiteSummaries phrase -- add one, then name that kind on every surface that enumerates re-pin sites", match[1])
 		}
 	}

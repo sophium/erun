@@ -18,19 +18,14 @@ type (
 )
 
 type DeleteStore interface {
-	LoadTenantConfig(string) (config.TenantConfig, string, error)
-	SaveTenantConfig(config.TenantConfig) error
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
+	SaveTenantConfig(model.TenantConfig) error
 	DeleteTenantConfig(string) error
 	LoadERunConfig() (config.ERunConfig, string, error)
 	SaveERunConfig(config.ERunConfig) error
 	LoadEnvConfig(string, string) (config.EnvConfig, string, error)
 	ListEnvConfigs(string) ([]config.EnvConfig, error)
 	DeleteEnvConfig(string, string) error
-}
-
-type DeleteEnvironmentParams struct {
-	Tenant      string
-	Environment string
 }
 
 type DeleteEnvironmentResult struct {
@@ -54,12 +49,12 @@ func DeleteEnvironmentConfirmation(tenant, environment string) string {
 	return tenant + "-" + environment
 }
 
-func RunDeleteEnvironment(ctx core.Context, params DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
+func RunDeleteEnvironment(ctx core.Context, params model.DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
 	store, deleteNamespace = normalizeDeleteEnvironmentDependencies(store, deleteNamespace)
 
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
-	if err := model.ErrMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
+	if err := core.ErrMissingTenantOrEnvironment("delete environment", tenant, environment); err != nil {
 		return DeleteEnvironmentResult{}, err
 	}
 

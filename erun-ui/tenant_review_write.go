@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
 
@@ -43,7 +44,7 @@ func (a *App) CreateReview(input uiCreateReviewInput) (uiTenantDashboardReview, 
 	}
 	defer cancel()
 
-	review, err := client.CreateReview(requestCtx, platformclient.PlatformCreateReviewParams{
+	review, err := client.CreateReview(requestCtx, model.PlatformCreateReviewParams{
 		Repository: strings.TrimSpace(input.Repository),
 		Name:       name, TargetBranch: targetBranch, SourceBranch: sourceBranch,
 	})
@@ -83,13 +84,13 @@ func (a *App) CloseReview(input uiCloseReviewInput) (uiTenantDashboardReview, er
 
 // mergeQueueAddress passes an empty repository through as every repository's
 // queue; the platform refuses it only when genuinely ambiguous.
-func mergeQueueAddress(repository, targetBranch string) (platformclient.PlatformMergeQueueParams, error) {
-	queue := platformclient.PlatformMergeQueueParams{
+func mergeQueueAddress(repository, targetBranch string) (model.PlatformMergeQueueParams, error) {
+	queue := model.PlatformMergeQueueParams{
 		Repository:   strings.TrimSpace(repository),
 		TargetBranch: strings.TrimSpace(targetBranch),
 	}
 	if queue.TargetBranch == "" {
-		return platformclient.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
+		return model.PlatformMergeQueueParams{}, fmt.Errorf("target branch is required")
 	}
 	return queue, nil
 }

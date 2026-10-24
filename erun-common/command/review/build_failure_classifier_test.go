@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A Docker daemon startup failure says nothing about the change, so it must not
@@ -25,7 +26,7 @@ func TestRunReviewRecordBuildRefusesADockerDaemonStartupFailure(t *testing.T) {
 			`reaper: new reaper: wait for reaper 1a2b3c4d: unexpected container status "created"`,
 		`testpg: start postgres:18.3: reaper: Error response from daemon: context deadline exceeded: failed to create network`,
 	} {
-		_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", ReviewRecordBuildParams{
+		_, err := RunReviewRecordBuild(core.Context{}, pushNoticeStoreWithAlias(srv.URL), "", model.ReviewRecordBuildParams{
 			ReviewID: "review-1", CommitID: "abc", Version: "1.0.0", Successful: false, FailureDetail: detail,
 		}, pushNoticeDeps(t))
 		if err == nil || !strings.Contains(err.Error(), "re-run the build") {

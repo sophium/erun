@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	"github.com/sophium/erun/erun-common/primitive/open"
-	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
 // envEnsureTTL lets one reconnect cover the burst of spawns an env (re)start produces.
@@ -117,7 +117,7 @@ func (a *App) runEnvRuntimeEnsure(selection uiSelection, key string, run *envEns
 			a.emitClearEnvNotification(selection.Tenant, selection.Environment, "")
 		}
 	}()
-	result, err := open.ResolveOpen(a.deps.store, shared.OpenParams{
+	result, err := open.ResolveOpen(a.deps.store, model.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	})

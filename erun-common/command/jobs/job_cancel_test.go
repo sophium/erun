@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -39,7 +40,7 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 	t.Setenv(shared.EnvironmentJobIDEnvVar, parentID)
 	done := make(chan error, 1)
 	go func() {
-		done <- RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+		done <- RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 			Tenant:      tenant,
 			Environment: environment,
 			ID:          innerID,
@@ -62,7 +63,7 @@ func startCancelTestInnerJob(t *testing.T, tenant, environment, parentID, innerI
 
 func cancelCancelTestInnerJob(t *testing.T, tenant, environment, innerID string, done <-chan error) {
 	t.Helper()
-	result, err := CancelEnvironmentJob(core.Context{}, CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
+	result, err := CancelEnvironmentJob(core.Context{}, model.CancelEnvironmentJobParams{Tenant: tenant, Environment: environment, ID: innerID})
 	if err != nil {
 		t.Fatalf("CancelEnvironmentJob: %v", err)
 	}
@@ -89,7 +90,7 @@ func runCancelTestOuterJob(t *testing.T, tenant, environment, parentID string) s
 	t.Helper()
 	// Clear the env so the outer record claims no parent.
 	t.Setenv(shared.EnvironmentJobIDEnvVar, "")
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
+	if err := RunEnvironmentJobSupervisor(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          parentID,

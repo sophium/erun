@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -20,25 +21,6 @@ import (
 // output when it dies before registering.
 func environmentJobLogPath(dir, id string) string {
 	return filepath.Join(dir, id+".log")
-}
-
-// EnvironmentJobSupervisorParams is what the supervisor process is handed.
-type EnvironmentJobSupervisorParams struct {
-	Tenant      string
-	Environment string
-	ID          string
-	Name        string
-	Dir         string
-	// Agent is the AI tool whose stream is folded into progress; empty for a command job.
-	Agent          string
-	Command        []string
-	Env            map[string]string
-	MaxOutputBytes int64
-	LeaseTTL       time.Duration
-	Handoff        bool
-	// Exclusive means the start already took the claim; the supervisor only renews and drops it.
-	Exclusive      bool
-	StartedByJobID string
 }
 
 // jobRecorder is the single writer of the job record, so a progress tick can
@@ -64,7 +46,7 @@ func (r *jobRecorder) snapshot() shared.EnvironmentJob {
 
 // resolveSupervisorJobIdentity validates the supervisor's params; it never
 // rebuilds the argv.
-func resolveSupervisorJobIdentity(params EnvironmentJobSupervisorParams) (string, string, string, error) {
+func resolveSupervisorJobIdentity(params model.EnvironmentJobSupervisorParams) (string, string, string, error) {
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
 		name = strings.TrimSpace(params.ID)
@@ -87,7 +69,7 @@ func resolveSupervisorJobIdentity(params EnvironmentJobSupervisorParams) (string
 }
 
 // registerEnvironmentJob writes the running record before any work starts.
-func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder, error) {
+func registerEnvironmentJob(params model.EnvironmentJobSupervisorParams) (*jobRecorder, error) {
 	id, name, agent, err := resolveSupervisorJobIdentity(params)
 	if err != nil {
 		return nil, err
@@ -133,7 +115,7 @@ func registerEnvironmentJob(params EnvironmentJobSupervisorParams) (*jobRecorder
 
 // RunEnvironmentJobSupervisor runs and records a job, returning once its outcome
 // is durable. After registration every exit, including a panic, records an outcome.
-func RunEnvironmentJobSupervisor(params EnvironmentJobSupervisorParams) error {
+func RunEnvironmentJobSupervisor(params model.EnvironmentJobSupervisorParams) error {
 	// Must precede the work: the kernel decides reparenting when the spawner exits.
 	core.EnableEnvironmentJobSubreaper()
 	adoptedBaseline := core.EnvironmentJobDescendantBaseline(os.Getpid())
@@ -181,7 +163,7 @@ func recordEnvironmentJobSupervisorFailure(recorder *jobRecorder, err error, pan
 	})
 }
 
-func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params EnvironmentJobSupervisorParams, adoptedBaseline map[int]struct{}) error {
+func runRegisteredEnvironmentJobSupervisor(recorder *jobRecorder, params model.EnvironmentJobSupervisorParams, adoptedBaseline map[int]struct{}) error {
 	job := recorder.snapshot()
 	log, err := os.OpenFile(job.LogPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {

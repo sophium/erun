@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 )
 
@@ -16,7 +17,7 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 	const environment = "build"
 	const id = "rel-erun-248"
 
-	recorder, err := registerEnvironmentJob(EnvironmentJobSupervisorParams{
+	recorder, err := registerEnvironmentJob(model.EnvironmentJobSupervisorParams{
 		Tenant:      tenant,
 		Environment: environment,
 		ID:          id,
@@ -34,7 +35,7 @@ func TestJobPresenceLeaseRecordsInitiator(t *testing.T) {
 		t.Fatalf("load leases: %v", err)
 	}
 	leaseID := environmentJobLeaseID(id)
-	var found activity.EnvironmentActivityLease
+	var found model.EnvironmentActivityLease
 	var ok bool
 	for _, lease := range leases {
 		if lease.ID == leaseID {

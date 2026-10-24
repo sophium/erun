@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
@@ -25,13 +26,13 @@ func (s *reconcileBypassStub) server(t *testing.T) *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/builds", func(w http.ResponseWriter, r *http.Request) {
 		s.queries = append(s.queries, r.URL.RawQuery)
-		page := platformclient.PlatformBuildPage{Builds: []platformclient.PlatformBuild{}}
+		page := platformclient.PlatformBuildPage{Builds: []model.PlatformBuild{}}
 		commit := r.URL.Query().Get("commit")
 		switch {
 		case !s.honourFilters:
-			page.Builds = append(page.Builds, platformclient.PlatformBuild{BuildID: "newest", CommitID: "something-else", Successful: true})
+			page.Builds = append(page.Builds, model.PlatformBuild{BuildID: "newest", CommitID: "something-else", Successful: true})
 		case s.successfulBuilds[commit] != "" && r.URL.Query().Get("successful") == "true":
-			page.Builds = append(page.Builds, platformclient.PlatformBuild{BuildID: s.successfulBuilds[commit], CommitID: commit, Successful: true})
+			page.Builds = append(page.Builds, model.PlatformBuild{BuildID: s.successfulBuilds[commit], CommitID: commit, Successful: true})
 		}
 		_ = json.NewEncoder(w).Encode(page)
 	})
@@ -57,15 +58,15 @@ func (s *reconcileBypassStub) server(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func reconcileBypassTestPushes() []BypassedPush {
-	return []BypassedPush{
+func reconcileBypassTestPushes() []model.BypassedPush {
+	return []model.BypassedPush{
 		{RuleSuiteID: 1, Actor: "erun-merge-queue", Commit: "merge-tip", BeforeCommit: "before-merge"},
 		{RuleSuiteID: 2, Actor: "erun-merge-queue", Commit: "stamp-tip", BeforeCommit: "before-release"},
 		{RuleSuiteID: 3, Actor: "a-human", Commit: "ungated-tip", BeforeCommit: "before-ungated"},
 	}
 }
 
-func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes []BypassedPush) (int, int, error) {
+func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes []model.BypassedPush) (int, int, error) {
 	t.Helper()
 	srv := stub.server(t)
 	client := platformclient.NewPlatformClient(srv.URL, func() (string, error) { return "token", nil })
@@ -75,7 +76,7 @@ func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes
 
 func TestReconcileBypassAsksThePlatformOncePerCommit(t *testing.T) {
 	stub := &reconcileBypassStub{honourFilters: true}
-	pushes := []BypassedPush{
+	pushes := []model.BypassedPush{
 		{RuleSuiteID: 3, Actor: "a", Commit: "ungated-tip", BeforeCommit: "before-ungated"},
 		{RuleSuiteID: 4, Actor: "a", Commit: "ungated-tip", BeforeCommit: "before-ungated"},
 	}

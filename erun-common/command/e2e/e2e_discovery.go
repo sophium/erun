@@ -10,22 +10,9 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
-
-// E2ESuite is one suite under <tenant>-devops/e2e/<component>/; Component is
-// also the exposed service it targets.
-type E2ESuite struct {
-	Component  string `json:"component"`
-	Dir        string `json:"dir"`
-	Dockerfile string `json:"dockerfile"`
-}
-
-// E2EPlan is the project root (every suite's build context) and the suites to run.
-type E2EPlan struct {
-	ProjectRoot string     `json:"projectRoot"`
-	Suites      []E2ESuite `json:"suites"`
-}
 
 // Only an exact `AS e2e` counts: erun builds `--target e2e`, so `e2e-deps` must not match.
 var dockerfileE2EStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+e2e(?:\s|$)`)
@@ -33,60 +20,60 @@ var dockerfileE2EStagePattern = regexp.MustCompile(`(?im)^\s*FROM\s+.*\bAS\s+e2e
 const e2eMigrationRemedy = "move each suite to <tenant>-devops/e2e/<component>/Dockerfile, whose `AS e2e` stage installs the suite's dependencies and runs it (for example `npx playwright test`) against the ERUN_E2E_BASE_URL build arg"
 
 // ResolveE2EPlan discovers the suites to run; an empty component runs them all.
-func ResolveE2EPlan(findProjectRoot shared.ProjectFinderFunc, component string) (E2EPlan, error) {
+func ResolveE2EPlan(findProjectRoot shared.ProjectFinderFunc, component string) (model.E2EPlan, error) {
 	component = strings.TrimSpace(component)
-	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, shared.DockerCommandTarget{})
+	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, model.DockerCommandTarget{})
 	if err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 	if projectRoot == "" {
-		return E2EPlan{}, e2eComponentNotFound(component, nil)
+		return model.E2EPlan{}, e2eComponentNotFound(component, nil)
 	}
 	projectRoot = filepath.Clean(projectRoot)
 
 	cfg, _, err := shared.LoadProjectConfigForDockerSecrets(projectRoot)
 	if err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 	if err := refuseRetiredE2EConfig(cfg); err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 	if err := refuseHostRunPlaywrightSuites(projectRoot); err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 
 	e2eDir, err := resolveE2EDir(projectRoot, cfg.Paths.E2E)
 	if err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
-	plan := E2EPlan{ProjectRoot: projectRoot}
+	plan := model.E2EPlan{ProjectRoot: projectRoot}
 	if e2eDir == "" {
 		return plan, e2eComponentNotFound(component, nil)
 	}
 	suites, err := e2eSuitesUnderDir(e2eDir)
 	if err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 	plan.Suites, err = selectE2ESuites(suites, component)
 	if err != nil {
-		return E2EPlan{}, err
+		return model.E2EPlan{}, err
 	}
 	return plan, nil
 }
 
-func selectE2ESuites(suites []E2ESuite, component string) ([]E2ESuite, error) {
+func selectE2ESuites(suites []model.E2ESuite, component string) ([]model.E2ESuite, error) {
 	if component == "" {
 		return suites, nil
 	}
 	for _, suite := range suites {
 		if suite.Component == component {
-			return []E2ESuite{suite}, nil
+			return []model.E2ESuite{suite}, nil
 		}
 	}
 	return nil, e2eComponentNotFound(component, suites)
 }
 
-func e2eComponentNotFound(component string, suites []E2ESuite) error {
+func e2eComponentNotFound(component string, suites []model.E2ESuite) error {
 	if component == "" {
 		return nil
 	}
@@ -190,12 +177,12 @@ func devopsE2EDirs(projectRoot string) ([]string, error) {
 
 // A Dockerfile without an `e2e` stage is refused now rather than failing at
 // `--target e2e` later.
-func e2eSuitesUnderDir(dir string) ([]E2ESuite, error) {
+func e2eSuitesUnderDir(dir string) ([]model.E2ESuite, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	suites := make([]E2ESuite, 0, len(entries))
+	suites := make([]model.E2ESuite, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -212,7 +199,7 @@ func e2eSuitesUnderDir(dir string) ([]E2ESuite, error) {
 		if !dockerfileE2EStagePattern.Match(data) {
 			return nil, fmt.Errorf("erun e2e: %s declares no `e2e` stage: erun e2e builds `--target e2e`, so the stage that runs the suite must be named exactly e2e (`FROM <base> AS e2e`)", dockerfile)
 		}
-		suites = append(suites, E2ESuite{Component: entry.Name(), Dir: suiteDir, Dockerfile: dockerfile})
+		suites = append(suites, model.E2ESuite{Component: entry.Name(), Dir: suiteDir, Dockerfile: dockerfile})
 	}
 	return suites, nil
 }

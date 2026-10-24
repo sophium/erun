@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
@@ -79,8 +80,8 @@ func TestResolveErunVersion(t *testing.T) {
 	cases := []struct {
 		name        string
 		env         config.EnvConfig
-		runtimeLine *deploy.RuntimeVersionLine
-		want        *deploy.ErunVersion
+		runtimeLine *model.RuntimeVersionLine
+		want        *model.ErunVersion
 	}{
 		{
 			name: "never deployed: no runtime version to annotate",
@@ -90,19 +91,19 @@ func TestResolveErunVersion(t *testing.T) {
 		{
 			name:        "stock image confirmed on erun's own line, no chart override: coincides with runtime version",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.239"},
-			runtimeLine: &deploy.RuntimeVersionLine{Line: "erun"},
-			want:        &deploy.ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
+			runtimeLine: &model.RuntimeVersionLine{Line: "erun"},
+			want:        &model.ErunVersion{Version: "1.0.239", SameAsRuntimeVersion: true},
 		},
 		{
 			name:        "tenant's own line, chart explicitly states erun's version",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops:1.0.239"},
-			runtimeLine: &deploy.RuntimeVersionLine{Line: "petios"},
-			want:        &deploy.ErunVersion{Version: "1.0.239"},
+			runtimeLine: &model.RuntimeVersionLine{Line: "petios"},
+			want:        &model.ErunVersion{Version: "1.0.239"},
 		},
 		{
 			name:        "no resolved image recorded, chart empty: never guess the pairing",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350"},
-			runtimeLine: &deploy.RuntimeVersionLine{Undetermined: true},
+			runtimeLine: &model.RuntimeVersionLine{Undetermined: true},
 			want:        nil,
 		},
 		{
@@ -113,7 +114,7 @@ func TestResolveErunVersion(t *testing.T) {
 		{
 			name:        "chart stated with no version of its own: cannot read a number from config alone",
 			env:         config.EnvConfig{RuntimeVersion: "1.0.356-snapshot-20260827091350", RuntimeChart: "oci://ghcr.io/sophium/erun-devops"},
-			runtimeLine: &deploy.RuntimeVersionLine{Line: "petios"},
+			runtimeLine: &model.RuntimeVersionLine{Line: "petios"},
 			want:        nil,
 		},
 	}

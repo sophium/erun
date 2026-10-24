@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -18,26 +19,21 @@ var (
 )
 
 type (
-	BuildContextResolverFunc func() (DockerBuildContext, error)
+	BuildContextResolverFunc func() (model.DockerBuildContext, error)
 	NowFunc                  func() time.Time
 	DockerImagePusherFunc    func(string, int, io.Writer, io.Writer) error
 )
 
 type DockerStore interface {
-	ListTenantConfigs() ([]config.TenantConfig, error)
-	LoadTenantConfig(string) (config.TenantConfig, string, error)
+	ListTenantConfigs() ([]model.TenantConfig, error)
+	LoadTenantConfig(string) (model.TenantConfig, string, error)
 	ListEnvConfigs(string) ([]config.EnvConfig, error)
-}
-
-type DockerBuildContext struct {
-	Dir            string
-	DockerfilePath string
 }
 
 type DockerBuildSpec struct {
 	ContextDir     string
 	DockerfilePath string
-	Image          helm.DockerImageReference
+	Image          model.DockerImageReference
 	Platforms      []string
 	Push           bool
 	Verbosity      int
@@ -64,7 +60,7 @@ type DockerBuildSpec struct {
 	DockerSecrets []config.DockerBuildSecret
 	// PlatformObserver reports per-platform timing without changing
 	// DockerImageBuilderFunc's signature.
-	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *core.BuildCgroupMetrics, buildOutput string) `json:"-"`
+	PlatformObserver func(platform string, elapsed time.Duration, err error, cgroup *model.BuildCgroupMetrics, buildOutput string) `json:"-"`
 	// Cache lets the builder correct a "cache hit" when a promote falls back to
 	// a real build; nil without a timing root.
 	Cache *core.CacheDecision
@@ -72,7 +68,7 @@ type DockerBuildSpec struct {
 
 type DockerPushSpec struct {
 	Dir       string
-	Image     helm.DockerImageReference
+	Image     model.DockerImageReference
 	Verbosity int
 }
 
@@ -83,9 +79,9 @@ type ScriptSpec struct {
 }
 
 type BuildExecutionSpec struct {
-	Release       *ReleaseSpec
+	Release       *model.ReleaseSpec
 	Script        *ScriptSpec
-	LinuxPackages []LinuxPackageSpec
+	LinuxPackages []model.LinuxPackageSpec
 	DockerBuilds  []DockerBuildSpec
 	DockerPushes  []DockerPushSpec
 	// ComponentCharts are build sources independent of images.
@@ -96,30 +92,6 @@ type DockerPushExecutionSpec struct {
 	Builds          []DockerBuildSpec
 	Pushes          []DockerPushSpec
 	ComponentCharts []helm.HelmChartPublishSpec
-}
-
-type DockerCommandTarget struct {
-	ProjectRoot     string
-	Environment     string
-	VersionOverride string
-	Release         bool
-	Force           bool
-	Deploy          bool
-	// Build is CLI orchestration policy; the shared resolvers never read it.
-	Build                       bool
-	NoIncremental               bool
-	DisableBuildScriptDiscovery bool
-	// Platforms must be empty for a release, which always publishes every platform.
-	Platforms []string
-	// Component selects a components: entry; empty auto-selects a lone entry.
-	Component string
-}
-
-type DockerRegistryAuthError struct {
-	Tag      string
-	Registry string
-	Message  string
-	Err      error
 }
 
 type LinuxPackageContext struct {

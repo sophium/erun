@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // Tab presence alone is not running-ness.
@@ -16,12 +17,12 @@ func envStatusTestApp(t *testing.T, emits *capturedEmits, sessionsMu *sync.Mutex
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &config.ERunConfig{
-			CloudContexts: []config.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{

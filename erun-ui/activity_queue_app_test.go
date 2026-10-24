@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func newTestAppForActivityQueue(t *testing.T) *App {
@@ -324,7 +325,7 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 // With a separately stated chart, appVersion is the chart's version, not the runtime's.
 func TestObservedRuntimeVersionPrefersTheRecordedVersionWhenTheChartIsStated(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]config.TenantConfig{"petios": {Name: "petios"}},
+		tenants: map[string]model.TenantConfig{"petios": {Name: "petios"}},
 		envs: map[string]config.EnvConfig{
 			"petios/develop": {
 				Name:           "develop",

@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/jobs"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "local"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -20,12 +20,12 @@ func TestListAgentOutputsResolvesEnvAndLists(t *testing.T) {
 	var gotResult configpkg.OpenResult
 	app := NewApp(erunUIDeps{
 		store: store,
-		listAgentOutputs: func(result configpkg.OpenResult, _ jobs.RuntimeOutputsParams) (jobs.RuntimeOutputsListResult, error) {
+		listAgentOutputs: func(result configpkg.OpenResult, _ model.RuntimeOutputsParams) (model.RuntimeOutputsListResult, error) {
 			gotResult = result
-			return jobs.RuntimeOutputsListResult{
+			return model.RuntimeOutputsListResult{
 				Dir:     "/home/erun/.erun/outputs",
 				Total:   1,
-				Entries: []jobs.OutputEntry{{Name: "report.pdf", Size: 10}},
+				Entries: []model.OutputEntry{{Name: "report.pdf", Size: 10}},
 			}, nil
 		},
 	})

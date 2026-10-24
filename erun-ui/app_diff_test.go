@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/command/lifecycle"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "local",
@@ -41,12 +41,12 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (lifecycle.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint, _ string, options uiDiffOptions) (model.DiffResult, error) {
 			gotEndpoint = endpoint
 			if options.Scope != "commit" || options.SelectedCommit != "abc123" {
 				t.Fatalf("unexpected diff options: %+v", options)
 			}
-			return lifecycle.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
+			return model.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
 		},
 	})
 
@@ -68,7 +68,7 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
@@ -96,9 +96,9 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
 			loadCalls++
-			return lifecycle.DiffResult{}, nil
+			return model.DiffResult{}, nil
 		},
 	})
 
@@ -121,7 +121,7 @@ func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
@@ -143,8 +143,8 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 		canReachMCPEndpoint: func(int) bool {
 			return false
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
-			return lifecycle.DiffResult{}, nil
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
+			return model.DiffResult{}, nil
 		},
 	})
 
@@ -163,7 +163,7 @@ func TestLoadDiffReturnsStaleForwardKindWhenPortHeldButEdgeDead(t *testing.T) {
 func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",
@@ -190,8 +190,8 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 			ensureCalls++
 			return nil
 		},
-		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (lifecycle.DiffResult, error) {
-			return lifecycle.DiffResult{}, errors.New("EOF")
+		loadDiff: func(_ context.Context, _, _ string, _ uiDiffOptions) (model.DiffResult, error) {
+			return model.DiffResult{}, errors.New("EOF")
 		},
 	})
 
@@ -214,7 +214,7 @@ func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
 func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "test",

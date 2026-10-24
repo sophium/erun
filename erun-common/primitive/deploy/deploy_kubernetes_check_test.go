@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
@@ -24,7 +26,7 @@ func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 
 func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
 	writeKubectlStub(t, "", 0)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
+	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
 	if err != nil {
 		t.Fatalf("unexpected error for a running deployment: %v", err)
 	}
@@ -35,7 +37,7 @@ func TestCheckKubernetesDeploymentWithContextPresent(t *testing.T) {
 
 func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	writeKubectlStub(t, `error: context "frs-prod" does not exist`, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "frs-prod")
+	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "frs-prod")
 	if deployed {
 		t.Fatalf("deployed = true, want false when the check could not resolve an answer")
 	}
@@ -55,7 +57,7 @@ func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 
 func TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectlWroteNothing(t *testing.T) {
 	writeKubectlStub(t, "", 1)
-	_, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
+	_, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
 	if err == nil {
 		t.Fatalf("expected an error, got nil")
 	}
@@ -80,7 +82,7 @@ func TestSanitizeKubectlFailureOutputReturnsEmptyForBlankInput(t *testing.T) {
 
 func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 	writeKubectlStub(t, `Error from server (NotFound): deployments.apps "frs-devops" not found`, 1)
-	_, err := deploymentMatchesExpectedSettings(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"})
+	_, err := deploymentMatchesExpectedSettings(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"})
 	if err == nil {
 		t.Fatal("expected an error for a failing kubectl invocation")
 	}
@@ -91,7 +93,7 @@ func TestDeploymentMatchesExpectedSettingsIncludesKubectlOutput(t *testing.T) {
 
 func TestCheckKubernetesDeploymentWithContextRBACDenied(t *testing.T) {
 	writeKubectlStub(t, `Error from server (Forbidden): deployments.apps "frs-devops" is forbidden: User "jane" cannot get resource "deployments" in API group "apps"`, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
+	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
 	if deployed {
 		t.Fatalf("deployed = true, want false when RBAC refuses the request")
 	}
@@ -108,7 +110,7 @@ func TestCheckKubernetesDeploymentWithContextRBACDenied(t *testing.T) {
 
 func TestCheckKubernetesDeploymentWithContextUnclassified(t *testing.T) {
 	writeKubectlStub(t, `Error from server: etcdserver: request timed out`, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
+	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), model.KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
 	if deployed {
 		t.Fatalf("deployed = true, want false for an unrecognized kubectl error")
 	}

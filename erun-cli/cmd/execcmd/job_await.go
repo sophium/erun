@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	jobspkg "github.com/sophium/erun/erun-common/command/jobs"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/internal"
@@ -57,7 +58,7 @@ func newJobAwaitCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 			"  erun exec job await --tenant team --environment dev --id suite --timeout 10m",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runJobAwait(cmd, resolveOpen, jobspkg.AwaitEnvironmentJobParams{
+			return runJobAwait(cmd, resolveOpen, model.AwaitEnvironmentJobParams{
 				Tenant:      tenant,
 				Environment: environment,
 				ID:          id,
@@ -72,7 +73,7 @@ func newJobAwaitCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params jobspkg.AwaitEnvironmentJobParams) error {
+func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params model.AwaitEnvironmentJobParams) error {
 	if err := validateJobTarget(params.Tenant, params.Environment); err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	if !resolved {
 		return nil
 	}
-	if ctx.Output != core.OutputJSON {
+	if ctx.Output != model.OutputJSON {
 		if _, err := fmt.Fprintln(ctx.Stdout, jobAwaitLine(result)); err != nil {
 			return err
 		}
@@ -95,7 +96,7 @@ func runJobAwait(cmd *cobra.Command, resolveOpen shared.OpenResolver, params job
 	return jobAwaitExit(result)
 }
 
-func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params jobspkg.AwaitEnvironmentJobParams) (jobspkg.AwaitEnvironmentJobResult, bool, error) {
+func awaitJob(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.AwaitEnvironmentJobParams) (jobspkg.AwaitEnvironmentJobResult, bool, error) {
 	if !shared.EnvironmentTargetsItself() {
 		return awaitJobInEnvironment(ctx, commandCtx, resolveOpen, params)
 	}

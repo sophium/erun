@@ -9,13 +9,13 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
-	modelpkg "github.com/sophium/erun/erun-common/base/model"
+	"github.com/sophium/erun/erun-common/base/core"
 )
 
 // resolveReportedRepository refuses a remoteURL that contradicts the review's
 // recorded repository, so a commit elsewhere cannot verify this review.
 func resolveReportedRepository(review model.Review, remoteURL string) (string, error) {
-	reported, err := modelpkg.RepositoryIdentity(remoteURL)
+	reported, err := core.RepositoryIdentity(remoteURL)
 	if err != nil {
 		return "", &MergeNotVerifiedError{Reason: err.Error()}
 	}

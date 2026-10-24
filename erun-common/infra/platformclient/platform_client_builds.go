@@ -8,22 +8,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // PlatformCreateUnattachedBuildParams records a build with no review; EnvironmentID is required.
 type PlatformCreateUnattachedBuildParams struct {
-	EnvironmentID string                    `json:"environmentId"`
-	CommitID      string                    `json:"commitId"`
-	Version       string                    `json:"version"`
-	Successful    bool                      `json:"successful"`
-	FailureDetail string                    `json:"failureDetail,omitempty"`
-	Profile       *core.BuildProfileSummary `json:"profile,omitempty"`
+	EnvironmentID string                     `json:"environmentId"`
+	CommitID      string                     `json:"commitId"`
+	Version       string                     `json:"version"`
+	Successful    bool                       `json:"successful"`
+	FailureDetail string                     `json:"failureDetail,omitempty"`
+	Profile       *model.BuildProfileSummary `json:"profile,omitempty"`
 }
 
 // CreateUnattachedBuild records a build against an environment with no review.
-func (c *PlatformClient) CreateUnattachedBuild(ctx context.Context, params PlatformCreateUnattachedBuildParams) (PlatformBuild, error) {
-	var build PlatformBuild
+func (c *PlatformClient) CreateUnattachedBuild(ctx context.Context, params PlatformCreateUnattachedBuildParams) (model.PlatformBuild, error) {
+	var build model.PlatformBuild
 	err := c.do(ctx, http.MethodPost, "/v1/builds", params, true, &build)
 	return build, err
 }
@@ -73,8 +73,8 @@ func (f PlatformBuildListFilter) queryString() string {
 
 // PlatformBuildPage is one newest-first page; NextCursor is empty at the end.
 type PlatformBuildPage struct {
-	Builds     []PlatformBuild `json:"builds"`
-	NextCursor string          `json:"nextCursor,omitempty"`
+	Builds     []model.PlatformBuild `json:"builds"`
+	NextCursor string                `json:"nextCursor,omitempty"`
 }
 
 // ListAllBuilds lists the tenant's builds, newest first, across all reviews.

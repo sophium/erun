@@ -10,6 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 )
 
@@ -133,28 +134,28 @@ func resolveReleaseProjectRoot(findProjectRoot ProjectFinderFunc, params Release
 	return filepath.Clean(projectRoot), nil
 }
 
-func classifyReleaseMode(branch string, config configpkg.ReleaseConfig) ReleaseMode {
+func classifyReleaseMode(branch string, config configpkg.ReleaseConfig) model.ReleaseMode {
 	branch = strings.TrimSpace(branch)
 	switch branch {
 	case strings.TrimSpace(config.MainBranch):
-		return ReleaseModeStable
+		return model.ReleaseModeStable
 	case strings.TrimSpace(config.DevelopBranch):
-		return ReleaseModeCandidate
+		return model.ReleaseModeCandidate
 	default:
-		return ReleaseModePrerelease
+		return model.ReleaseModePrerelease
 	}
 }
 
-func ResolveReleaseVersion(baseVersion, commit string, mode ReleaseMode) string {
+func ResolveReleaseVersion(baseVersion, commit string, mode model.ReleaseMode) string {
 	baseVersion = strings.TrimSpace(baseVersion)
 	commit = strings.TrimSpace(commit)
 
 	switch mode {
-	case ReleaseModeStable:
+	case model.ReleaseModeStable:
 		return baseVersion
-	case ReleaseModeCandidate:
+	case model.ReleaseModeCandidate:
 		return fmt.Sprintf("%s-rc.%s", baseVersion, commit)
-	case ReleaseModePrerelease:
+	case model.ReleaseModePrerelease:
 	}
 	return fmt.Sprintf("%s-pr.%s", baseVersion, commit)
 }

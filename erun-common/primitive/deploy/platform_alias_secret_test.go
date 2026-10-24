@@ -9,18 +9,19 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"gopkg.in/yaml.v3"
 )
 
-func testPlatformAliasProvider() configpkg.CloudProviderConfig {
-	return configpkg.CloudProviderConfig{
+func testPlatformAliasProvider() model.CloudProviderConfig {
+	return model.CloudProviderConfig{
 		Alias:         "erun+api.erunpaas.com@erun",
 		Provider:      configpkg.CloudProviderERun,
 		Username:      "erun",
 		AccountID:     "api.erunpaas.com",
 		OIDCIssuerURL: "https://api.erunpaas.com",
-		ERun: &configpkg.ERunProviderConfig{
+		ERun: &model.ERunProviderConfig{
 			APIURL:          cloud.HostedPlatformAPIURL,
 			ClientID:        "erun-cli",
 			RefreshTokenRef: cloud.ErunRefreshTokenRef("erun+api.erunpaas.com@erun"),
@@ -37,7 +38,7 @@ func (s staticCloudStore) LoadERunConfig() (configpkg.ERunConfig, string, error)
 }
 
 func signedInHostStore() staticCloudStore {
-	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{testPlatformAliasProvider()}}}
+	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{testPlatformAliasProvider()}}}
 }
 
 // A second `cloudproviders:` key is a duplicate mapping the reader refuses, so the
@@ -149,7 +150,7 @@ func assertNoAliasToGive(t *testing.T, store configpkg.CloudReadStore, deps clou
 
 func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
-	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{
+	store := staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []model.CloudProviderConfig{
 		{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS},
 	}}}
 	if _, _, ok, _ := ResolveHostPlatformAlias(store, deps, ""); ok {

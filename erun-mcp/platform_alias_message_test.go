@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/sophium/erun/erun-mcp/tools/platform"
@@ -13,7 +14,7 @@ import (
 )
 
 // MCP callers have no --erun-alias flag, so the remedy must name the `alias` input.
-func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) string {
+func mcpAliasMessageFor(t *testing.T, providers ...model.CloudProviderConfig) string {
 	t.Helper()
 	runtime := sharedpkg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
 	_, _, err := platform.PlatformEnvListTool(runtime)(context.Background(), nil, platform.PlatformEnvListInput{})
@@ -23,11 +24,11 @@ func mcpAliasMessageFor(t *testing.T, providers ...config.CloudProviderConfig) s
 	return err.Error()
 }
 
-func erunTypeProvider(alias string) config.CloudProviderConfig {
-	return cloud.NormalizeCloudProviderConfig(config.CloudProviderConfig{
+func erunTypeProvider(alias string) model.CloudProviderConfig {
+	return cloud.NormalizeCloudProviderConfig(model.CloudProviderConfig{
 		Alias:    alias,
 		Provider: config.CloudProviderERun,
-		ERun:     &config.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
+		ERun:     &model.ERunProviderConfig{APIURL: "https://api.example.test", ClientID: "cli-client-1"},
 	})
 }
 
@@ -61,7 +62,7 @@ func TestMCPPlatformEnvListDoesNotAssertASingleCauseWhenNoneIsSelected(t *testin
 func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		providers []config.CloudProviderConfig
+		providers []model.CloudProviderConfig
 		want      string
 	}{
 		{
@@ -70,7 +71,7 @@ func TestCLIKeepsItsAliasRemedyWording(t *testing.T) {
 		},
 		{
 			name:      "several configured",
-			providers: []config.CloudProviderConfig{erunTypeProvider("one@erun"), erunTypeProvider("two@erun")},
+			providers: []model.CloudProviderConfig{erunTypeProvider("one@erun"), erunTypeProvider("two@erun")},
 			want:      "multiple erun platform cloud provider aliases are configured; pass --erun-alias to choose one",
 		},
 	} {

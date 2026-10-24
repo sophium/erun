@@ -6,7 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/primitive/shared"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // A cached no-op must not persist the freshly minted, never-pushed version.
@@ -237,7 +237,7 @@ func TestCachedDeployRunThenPersistHealsToRunningVersion(t *testing.T) {
 
 	spec := DeploySpec{
 		Target:        config.OpenResult{Tenant: tenant, EnvConfig: config.EnvConfig{Name: "local"}},
-		DeployContext: shared.KubernetesDeployContext{ComponentName: config.RuntimeReleaseName(tenant)},
+		DeployContext: model.KubernetesDeployContext{ComponentName: config.RuntimeReleaseName(tenant)},
 		Deploy: HelmDeploySpec{
 			ReleaseName:       config.RuntimeReleaseName(tenant),
 			Version:           mintedVersion,

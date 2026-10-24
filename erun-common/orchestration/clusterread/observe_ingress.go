@@ -4,27 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
-
-// ObservedIngress is one Ingress's routed hosts and TLS secrets.
-type ObservedIngress struct {
-	Name  string               `json:"name"`
-	Hosts []string             `json:"hosts,omitempty"`
-	TLS   []ObservedIngressTLS `json:"tls,omitempty"`
-	// Backends avoids re-deriving Service names from a convention repo-native charts break.
-	Backends []ObservedIngressBackend `json:"backends,omitempty"`
-}
-
-type ObservedIngressBackend struct {
-	Service string `json:"service"`
-	Port    int    `json:"port,omitempty"`
-}
-
-type ObservedIngressTLS struct {
-	Hosts      []string `json:"hosts,omitempty"`
-	SecretName string   `json:"secretName,omitempty"`
-}
 
 type ingressList struct {
 	Items []ingressItem `json:"items"`
@@ -58,7 +40,7 @@ type ingressItem struct {
 }
 
 // FetchObservedIngresses errors name the read, not "observe:": callers other than observe use it.
-func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
+func FetchObservedIngresses(args []string) ([]model.ObservedIngress, error) {
 	raw, stderr, err := deploy.RunObserveKubectl(args)
 	if err != nil {
 		return nil, fmt.Errorf("get ingress: %w", deploy.KubectlErrorMessage(err, stderr))
@@ -67,16 +49,16 @@ func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 	if err := json.Unmarshal(raw, &list); err != nil {
 		return nil, fmt.Errorf("parse ingress: %w", err)
 	}
-	ingresses := make([]ObservedIngress, 0, len(list.Items))
+	ingresses := make([]model.ObservedIngress, 0, len(list.Items))
 	for _, item := range list.Items {
-		ing := ObservedIngress{Name: item.Metadata.Name}
+		ing := model.ObservedIngress{Name: item.Metadata.Name}
 		for _, rule := range item.Spec.Rules {
 			if rule.Host != "" {
 				ing.Hosts = append(ing.Hosts, rule.Host)
 			}
 			for _, path := range rule.HTTP.Paths {
 				if name := path.Backend.Service.Name; name != "" {
-					ing.Backends = appendUniqueIngressBackend(ing.Backends, ObservedIngressBackend{
+					ing.Backends = appendUniqueIngressBackend(ing.Backends, model.ObservedIngressBackend{
 						Service: name,
 						Port:    path.Backend.Service.Port.Number,
 					})
@@ -84,14 +66,14 @@ func FetchObservedIngresses(args []string) ([]ObservedIngress, error) {
 			}
 		}
 		for _, tls := range item.Spec.TLS {
-			ing.TLS = append(ing.TLS, ObservedIngressTLS{Hosts: tls.Hosts, SecretName: tls.SecretName})
+			ing.TLS = append(ing.TLS, model.ObservedIngressTLS{Hosts: tls.Hosts, SecretName: tls.SecretName})
 		}
 		ingresses = append(ingresses, ing)
 	}
 	return ingresses, nil
 }
 
-func appendUniqueIngressBackend(backends []ObservedIngressBackend, backend ObservedIngressBackend) []ObservedIngressBackend {
+func appendUniqueIngressBackend(backends []model.ObservedIngressBackend, backend model.ObservedIngressBackend) []model.ObservedIngressBackend {
 	for _, existing := range backends {
 		if existing == backend {
 			return backends

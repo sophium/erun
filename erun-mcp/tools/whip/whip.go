@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/orchestrator"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -18,18 +19,18 @@ type WhipInput struct {
 
 // whipTool nudges this environment's AI session now. It ignores staleness but
 // respects the consecutive-nudge cap.
-func whipTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, orchestrator.WhipResult, error) {
-	return func(_ context.Context, _ *mcp.CallToolRequest, input WhipInput) (*mcp.CallToolResult, orchestrator.WhipResult, error) {
+func whipTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, WhipInput) (*mcp.CallToolResult, model.WhipResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input WhipInput) (*mcp.CallToolResult, model.WhipResult, error) {
 		tenant, environment, err := shared.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
-			return nil, orchestrator.WhipResult{}, err
+			return nil, model.WhipResult{}, err
 		}
 		// Best-effort: an unreadable root config falls back to default whip settings.
 		globalConfig, _, _ := runtime.Store.LoadERunConfig()
 		cfg := orchestrator.ResolveWhipConfig(globalConfig.Whip)
 		result, err := orchestrator.RunLocalEnvironmentWhip(time.Now(), orchestrator.RunWhipCommand, tenant, environment, cfg, true, input.Preview)
 		if err != nil {
-			return nil, orchestrator.WhipResult{}, err
+			return nil, model.WhipResult{}, err
 		}
 		return nil, result, nil
 	}

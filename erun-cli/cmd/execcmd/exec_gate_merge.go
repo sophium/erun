@@ -8,6 +8,7 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/mergequeue"
 	"github.com/sophium/erun/erun-common/command/review"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -98,7 +99,7 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot sharedpkg.Project
 	if err != nil {
 		return err
 	}
-	result, err := mergequeue.GateMergeWorkingTree(ctx, projectRoot, mergequeue.GateMergeWorkingTreeParams{
+	result, err := mergequeue.GateMergeWorkingTree(ctx, projectRoot, model.GateMergeWorkingTreeParams{
 		Sources:      sources,
 		TargetBranch: targetBranch,
 		Remote:       remote,
@@ -114,7 +115,7 @@ func runExecGateMergeCommand(ctx core.Context, findProjectRoot sharedpkg.Project
 }
 
 // readGateMergeSources reads NUL-separated commit messages from stdin in --source order.
-func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]mergequeue.GateMergeSource, error) {
+func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]model.GateMergeSource, error) {
 	stdin, err := io.ReadAll(ctx.Stdin)
 	if err != nil {
 		return nil, fmt.Errorf("read commit message(s) from stdin: %w", err)
@@ -123,9 +124,9 @@ func readGateMergeSources(ctx core.Context, sourceBranches []string) ([]mergeque
 	if len(messages) != len(sourceBranches) {
 		return nil, fmt.Errorf("expected %d NUL-separated commit message(s) on stdin (one per --source), got %d", len(sourceBranches), len(messages))
 	}
-	sources := make([]mergequeue.GateMergeSource, len(sourceBranches))
+	sources := make([]model.GateMergeSource, len(sourceBranches))
 	for i, branch := range sourceBranches {
-		sources[i] = mergequeue.GateMergeSource{Branch: branch, Message: messages[i]}
+		sources[i] = model.GateMergeSource{Branch: branch, Message: messages[i]}
 	}
 	return sources, nil
 }
@@ -139,7 +140,7 @@ func gateMergeCarriedTrailerSummary(trailers []string) string {
 }
 
 // reportGateMergeResult refuses when the batch landed nothing.
-func reportGateMergeResult(ctx core.Context, result mergequeue.GateMergeWorkingTreeResult) error {
+func reportGateMergeResult(ctx core.Context, result model.GateMergeWorkingTreeResult) error {
 	for _, landed := range result.Landed {
 		ctx.Info(fmt.Sprintf("Squash-merged %s/%s onto %s (%s), carrying %s.",
 			result.Remote, landed.SourceBranch, result.TargetBranch, landed.Commit,
@@ -196,10 +197,10 @@ func newExecReportCommitStatusCmd() *cobra.Command {
 }
 
 func runExecReportCommitStatusCommand(ctx core.Context, commit, state, statusCtx, description, targetURL, remoteURL string) error {
-	result, err := review.ReportCommitStatus(ctx, review.ReportCommitStatusParams{
+	result, err := review.ReportCommitStatus(ctx, model.ReportCommitStatusParams{
 		RemoteURL:   remoteURL,
 		Commit:      commit,
-		State:       review.ReportCommitStatusState(state),
+		State:       model.ReportCommitStatusState(state),
 		Context:     statusCtx,
 		Description: description,
 		TargetURL:   targetURL,
@@ -251,7 +252,7 @@ func newExecClosePRCmd() *cobra.Command {
 }
 
 func runExecClosePRCommand(ctx core.Context, branch, target, remoteURL, gatedCommit, landingCommit string) error {
-	result, err := review.ClosePullRequest(ctx, review.ClosePullRequestParams{
+	result, err := review.ClosePullRequest(ctx, model.ClosePullRequestParams{
 		RemoteURL:     remoteURL,
 		Branch:        branch,
 		TargetBranch:  target,

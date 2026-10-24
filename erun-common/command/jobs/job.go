@@ -12,6 +12,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -419,15 +420,6 @@ func pruneEnvironmentJobs(dir string, jobs []shared.EnvironmentJob, now time.Tim
 	return kept
 }
 
-// AwaitEnvironmentJobParams bounds one wait; it never holds a connection open.
-type AwaitEnvironmentJobParams struct {
-	Tenant      string
-	Environment string
-	ID          string
-	Timeout     time.Duration
-	Poll        time.Duration
-}
-
 // AwaitEnvironmentJobResult separates "not finished yet" from every outcome.
 type AwaitEnvironmentJobResult struct {
 	Job shared.EnvironmentJob `json:"job"`
@@ -438,7 +430,7 @@ type AwaitEnvironmentJobResult struct {
 }
 
 // AwaitEnvironmentJob waits for a terminal state, bounded by the caller's timeout.
-func AwaitEnvironmentJob(params AwaitEnvironmentJobParams) (AwaitEnvironmentJobResult, error) {
+func AwaitEnvironmentJob(params model.AwaitEnvironmentJobParams) (AwaitEnvironmentJobResult, error) {
 	timeout, err := normalizeEnvironmentJobAwaitTimeout(params.Timeout)
 	if err != nil {
 		return AwaitEnvironmentJobResult{}, err

@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 )
 
 // RuntimeSizingLines renders the sizing recommendation as two lines: verdicts, then their evidence.
-func RuntimeSizingLines(sizing *deploy.RuntimeSizingRecommendation, indent string) []string {
+func RuntimeSizingLines(sizing *model.RuntimeSizingRecommendation, indent string) []string {
 	if sizing == nil {
 		return nil
 	}

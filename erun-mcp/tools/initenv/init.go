@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/setup"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/primitive/open"
@@ -86,11 +87,11 @@ func initToolExecute(runtime shared.RuntimeConfig, input InitInput) (func(bool, 
 			Environment:              environment,
 			RuntimeVersion:           strings.TrimSpace(input.Version),
 			RuntimeVersionDefault:    shared.CurrentBuildInfo().Version,
-			RuntimePod: config.RuntimePodResources{
+			RuntimePod: model.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeCPU),
 				Memory: strings.TrimSpace(input.RuntimeMemory),
 			},
-			RuntimeDindPod: config.RuntimePodResources{
+			RuntimeDindPod: model.RuntimePodResources{
 				CPU:    strings.TrimSpace(input.RuntimeDindCPU),
 				Memory: strings.TrimSpace(input.RuntimeDindMemory),
 			},

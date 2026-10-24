@@ -3,7 +3,7 @@ package model
 import (
 	"time"
 
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/uptrace/bun"
 )
 
@@ -36,7 +36,7 @@ type Build struct {
 	Version       string `json:"version,omitempty" bun:"version,nullzero"`
 	FailureDetail string `json:"failureDetail,omitempty" bun:"failure_detail,nullzero"`
 	// Profile is a bounded summary plus the costliest steps, never the full step tree.
-	Profile   *core.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
-	CreatedAt time.Time                 `json:"createdAt" bun:"created_at,scanonly"`
-	UpdatedAt time.Time                 `json:"updatedAt" bun:"updated_at,scanonly"`
+	Profile   *model.BuildProfileSummary `json:"profile,omitempty" bun:"profile,type:jsonb,nullzero"`
+	CreatedAt time.Time                  `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt time.Time                  `json:"updatedAt" bun:"updated_at,scanonly"`
 }

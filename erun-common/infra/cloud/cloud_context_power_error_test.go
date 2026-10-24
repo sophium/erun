@@ -8,12 +8,13 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 // The dry-run harness cannot produce these AWS errors, so the contract is tested here.
 func TestCloudContextPowerErrorClassification(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
-	params := CloudContextParams{Name: "petios-ctx"}
+	params := model.CloudContextParams{Name: "petios-ctx"}
 
 	t.Run("stop with an expired AWS session names the login lever", func(t *testing.T) {
 		raw := "aws ec2 stop-instances --instance-ids i-0abc123: Error when retrieving token from sso: Token has expired and refresh failed"
@@ -68,8 +69,8 @@ func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...str
 
 func powerErrorTestStore() CloudContextStore {
 	return stubCloudContextStore{config: configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
-		CloudContexts: []configpkg.CloudContextConfig{{
+		CloudProviders: []model.CloudProviderConfig{{Alias: "dev-aws", Provider: configpkg.CloudProviderAWS, Profile: "dev-profile"}},
+		CloudContexts: []model.CloudContextConfig{{
 			Name:               "petios-ctx",
 			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: "dev-aws",
@@ -86,8 +87,8 @@ func (s stubCloudContextStore) LoadERunConfig() (configpkg.ERunConfig, string, e
 }
 func (s stubCloudContextStore) SaveERunConfig(configpkg.ERunConfig) error { return nil }
 
-func failingRunAWS(action, message string) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
+func failingRunAWS(action, message string) func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 		if strings.Contains(strings.Join(args, " "), action) {
 			return "", fmt.Errorf("%s", message)
 		}

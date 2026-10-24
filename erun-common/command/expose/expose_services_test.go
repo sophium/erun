@@ -3,6 +3,7 @@ package expose
 import (
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/orchestration/clusterread"
 )
 
@@ -36,11 +37,11 @@ func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 
 func TestMergeServicesWithExposuresReportsHTTPWithoutTLS(t *testing.T) {
 	merged := mergeServicesWithExposures(
-		[]clusterread.ObservedService{{Name: "frs-api"}},
-		[]clusterread.ObservedIngress{{
+		[]model.ObservedService{{Name: "frs-api"}},
+		[]model.ObservedIngress{{
 			Name:     "expose-api",
 			Hosts:    []string{"api.frs-dev.services.example.com"},
-			Backends: []clusterread.ObservedIngressBackend{{Service: "frs-api", Port: 80}},
+			Backends: []model.ObservedIngressBackend{{Service: "frs-api", Port: 80}},
 		}},
 	)
 	if merged[0].Exposure == nil || merged[0].Exposure.Scheme != "http" {

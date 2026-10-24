@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -27,18 +28,6 @@ type effectiveKubernetesContextResolver interface {
 	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
 
-type OpenParams struct {
-	Tenant                string
-	Environment           string
-	UseDefaultTenant      bool
-	UseDefaultEnvironment bool
-	// Command is the operator-facing invocation named in a resolution failure's recovery;
-	// empty falls back to command-free wording.
-	Command string
-	// CommandScopesTenantByFlag gates whether the recovery may name Command's --tenant flag.
-	CommandScopesTenantByFlag bool
-}
-
 func LoadOpenDefaultTenant(store configpkg.OpenStore) (string, error) {
 	toolConfig, _, err := store.LoadERunConfig()
 	if errors.Is(err, configpkg.ErrNotInitialized) {
@@ -53,7 +42,7 @@ func LoadOpenDefaultTenant(store configpkg.OpenStore) (string, error) {
 	return toolConfig.DefaultTenant, nil
 }
 
-func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (configpkg.OpenResult, error) {
+func ResolveOpenWithFinder(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params model.OpenParams) (configpkg.OpenResult, error) {
 	if store == nil {
 		return configpkg.OpenResult{}, fmt.Errorf("store is required")
 	}
@@ -123,7 +112,7 @@ func tenantResolutionRemedy(command string, scopesTenantByFlag bool) string {
 	return fmt.Sprintf("%s — pass a tenant explicitly with `%s --tenant <name>`, %s", cause, command, setState)
 }
 
-func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
+func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc, params model.OpenParams) (string, error) {
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
 		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
@@ -150,13 +139,13 @@ func ResolveOpenTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderF
 	return tenant, nil
 }
 
-func loadOpenTenantConfig(store configpkg.OpenStore, tenant string) (configpkg.TenantConfig, error) {
+func loadOpenTenantConfig(store configpkg.OpenStore, tenant string) (model.TenantConfig, error) {
 	tenantConfig, _, err := store.LoadTenantConfig(tenant)
 	if errors.Is(err, configpkg.ErrNotInitialized) {
-		return configpkg.TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
+		return model.TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
 	}
 	if err != nil {
-		return configpkg.TenantConfig{}, err
+		return model.TenantConfig{}, err
 	}
 	if tenantConfig.Name == "" {
 		tenantConfig.Name = tenant
@@ -164,7 +153,7 @@ func loadOpenTenantConfig(store configpkg.OpenStore, tenant string) (configpkg.T
 	return tenantConfig, nil
 }
 
-func resolveOpenEnvironment(params OpenParams, tenantConfig configpkg.TenantConfig) (string, error) {
+func resolveOpenEnvironment(params model.OpenParams, tenantConfig model.TenantConfig) (string, error) {
 	environment := params.Environment
 	if environment == "" && params.UseDefaultEnvironment {
 		environment = tenantConfig.DefaultEnvironment
@@ -233,7 +222,7 @@ func validateOpenTarget(tenant, environment, repoPath string, envConfig configpk
 
 func loadCurrentDirectoryTenant(store configpkg.OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
 	tenantLister, ok := store.(interface {
-		ListTenantConfigs() ([]configpkg.TenantConfig, error)
+		ListTenantConfigs() ([]model.TenantConfig, error)
 	})
 	if !ok {
 		return "", false, nil

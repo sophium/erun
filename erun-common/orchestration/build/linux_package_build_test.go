@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -56,7 +57,7 @@ func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	return projectRoot, uiDir, cliDir
 }
 
-func linuxPackageNames(packages []shared.LinuxPackageSpec) []string {
+func linuxPackageNames(packages []model.LinuxPackageSpec) []string {
 	names := make([]string, 0, len(packages))
 	for _, pkg := range packages {
 		names = append(names, pkg.Name)

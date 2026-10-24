@@ -8,11 +8,11 @@ import (
 
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/inputs"
 	"github.com/sophium/erun/erun-common/command/workspace"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/mcp"
-	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
 	"github.com/spf13/cobra"
 )
 
@@ -46,7 +46,7 @@ func newMCPProxyCmd(resolveOpen shared.OpenResolver) *cobra.Command {
 	return cmd
 }
 
-func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) error {
+func runMCPProxyCommand(ctx context.Context, commandCtx core.Context, resolveOpen shared.OpenResolver, params model.OpenParams) error {
 	target, err := shared.ResolveMCPEdgeTarget(commandCtx, resolveOpen, params)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func deprecatedAlias(tool mcp.MCPLocalTool, retired, replacement string) mcp.MCP
 }
 
 // inputsUploadLocalTool is host-served: the source file is on this host, out of the edge's reach.
-func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
+func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "inputs_upload",
 		Description: "Stream a local file on this host into the environment's runtime pod at an explicit destination, byte-identical, without the bytes passing through this call's arguments or your context. " +
@@ -110,7 +110,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.Ope
 				Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace),
 				DryRun: call.Preview,
 			}
-			out, err := inputs.UploadRuntimeInput(toolCtx, req, inputs.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, inputs.RunRemoteCommandWithStdin)
+			out, err := inputs.UploadRuntimeInput(toolCtx, req, model.UploadRuntimeInputParams{LocalPath: call.LocalPath, RemotePath: call.RemotePath}, inputs.RunRemoteCommandWithStdin)
 			if err != nil {
 				return "", err
 			}
@@ -124,7 +124,7 @@ func inputsUploadLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.Ope
 
 // sshdSyncLocalTool is host-served because the mirror is on this host; the env
 // resolves per call so a mid-session enable is picked up.
-func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params sharedpkg.OpenParams) mcp.MCPLocalTool {
+func sshdSyncLocalTool(resolveOpen shared.OpenResolver, params model.OpenParams) mcp.MCPLocalTool {
 	return mcp.MCPLocalTool{
 		Name: "sshd_sync",
 		Description: "Run one workspace-sync pass for this environment: mirror the pod's git-visible worktree into the host review directory, delete what the pod no longer has, and deliver the pod's cross-built artifacts. " +

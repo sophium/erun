@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -158,7 +158,7 @@ func TestProbeAnonymousManifestPullAtSendsNoCredentials(t *testing.T) {
 func fakeExecutionForImage(imageName, tag, version string) shared.BuildExecutionSpec {
 	return shared.BuildExecutionSpec{
 		DockerPushes: []shared.DockerPushSpec{
-			{Image: helm.DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
+			{Image: model.DockerImageReference{ImageName: imageName, Tag: tag, Version: version}},
 		},
 	}
 }

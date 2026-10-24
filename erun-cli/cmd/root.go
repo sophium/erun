@@ -45,6 +45,7 @@ import (
 	"github.com/sophium/erun/cmd/version"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	"github.com/sophium/erun/erun-common/infra/gitx"
 	"github.com/sophium/erun/erun-common/infra/kube"
@@ -76,10 +77,10 @@ type rootDependencies struct {
 	recoveringDeployHelmChart deploypkg.HelmChartDeployerFunc
 	runInit                   func(core.Context, openpkg.BootstrapInitParams) error
 	runInitForArgs            func(core.Context, []string) error
-	runInitForOpen            func(core.Context, sharedpkg.OpenParams) error
+	runInitForOpen            func(core.Context, model.OpenParams) error
 	dockerRegistryLogin       buildpkg.DockerRegistryLoginFunc
 	push                      buildpkg.DockerPushFunc
-	resolveOpen               func(sharedpkg.OpenParams) (config.OpenResult, error)
+	resolveOpen               func(model.OpenParams) (config.OpenResult, error)
 	resolveRuntimeDeploySpec  func(core.Context, config.OpenResult, bool) (deploypkg.DeploySpec, error)
 	activateMCP               shared.MCPForwarder
 	activateAPI               shared.APIForwarder
@@ -114,7 +115,7 @@ func newRootDependencies() rootDependencies {
 	return deps
 }
 
-func (d rootDependencies) resolveOpenResult(params sharedpkg.OpenParams) (config.OpenResult, error) {
+func (d rootDependencies) resolveOpenResult(params model.OpenParams) (config.OpenResult, error) {
 	return openpkg.ResolveOpen(d.store, params)
 }
 
@@ -131,7 +132,7 @@ func (d rootDependencies) runManagedDeployForOpen(ctx core.Context, target confi
 		sharedpkg.ResolveDockerBuildContext,
 		deploypkg.ResolveKubernetesDeployContext,
 		time.Now,
-		deploypkg.DeployTarget{
+		model.DeployTarget{
 			Tenant:      target.Tenant,
 			Environment: target.Environment,
 			RepoPath:    target.RepoPath,

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -58,7 +59,7 @@ func linuxPackageProject(t *testing.T) (projectRoot, uiDir, cliDir string) {
 	return projectRoot, uiDir, cliDir
 }
 
-func linuxPackageNames(packages []shared.LinuxPackageSpec) []string {
+func linuxPackageNames(packages []model.LinuxPackageSpec) []string {
 	names := make([]string, 0, len(packages))
 	for _, pkg := range packages {
 		names = append(names, pkg.Name)
@@ -152,7 +153,7 @@ func TestLinuxPackageCheckFailureReportsNoOutcome(t *testing.T) {
 	}
 }
 
-func linuxPackageReleaseSpec(t *testing.T, version string) shared.ReleaseSpec {
+func linuxPackageReleaseSpec(t *testing.T, version string) model.ReleaseSpec {
 	t.Helper()
 	projectRoot, uiDir, cliDir := linuxPackageProject(t)
 	packages, err := shared.DiscoverReleaseLinuxPackages(projectRoot, filepath.Join(projectRoot, "team-devops"))
@@ -162,7 +163,7 @@ func linuxPackageReleaseSpec(t *testing.T, version string) shared.ReleaseSpec {
 	if got := linuxPackageNames(packages); !slices.Equal(got, []string{"erun-cli", "erun-ui"}) {
 		t.Fatalf("release packages = %v (%s, %s)", got, uiDir, cliDir)
 	}
-	return shared.ReleaseSpec{ProjectRoot: projectRoot, Version: version, LinuxPackages: packages, LinuxPackageDir: filepath.Join(t.TempDir(), "linux")}
+	return model.ReleaseSpec{ProjectRoot: projectRoot, Version: version, LinuxPackages: packages, LinuxPackageDir: filepath.Join(t.TempDir(), "linux")}
 }
 
 func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
@@ -197,7 +198,7 @@ func TestReleaseExportsDistAndCreatesTheGitHubRelease(t *testing.T) {
 	assertGitHubReleaseCreated(t, ctx, spec, ghLog)
 }
 
-func assertGitHubReleaseCreated(t *testing.T, ctx core.Context, spec shared.ReleaseSpec, ghLog string) {
+func assertGitHubReleaseCreated(t *testing.T, ctx core.Context, spec model.ReleaseSpec, ghLog string) {
 	t.Helper()
 	if err := shared.UploadReleaseLinuxPackages(ctx, spec); err != nil {
 		t.Fatal(err)

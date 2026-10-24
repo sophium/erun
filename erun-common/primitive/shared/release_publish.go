@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/helm"
 )
 
@@ -24,7 +25,7 @@ type ReleasePublisher struct {
 }
 
 // ensureReleasePublishesResolvedImages refuses a version whose images nothing publishes, before the first stage.
-func ensureReleasePublishesResolvedImages(spec ReleaseSpec, publisher ReleasePublisher) error {
+func ensureReleasePublishesResolvedImages(spec model.ReleaseSpec, publisher ReleasePublisher) error {
 	if len(spec.DockerImages) == 0 {
 		return nil
 	}

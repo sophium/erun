@@ -10,6 +10,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
@@ -30,9 +31,9 @@ const (
 )
 
 func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
-	contexts := make([]configpkg.CloudContextConfig, 0, len(instanceIDs))
+	contexts := make([]model.CloudContextConfig, 0, len(instanceIDs))
 	for i, instanceID := range instanceIDs {
-		contexts = append(contexts, configpkg.CloudContextConfig{
+		contexts = append(contexts, model.CloudContextConfig{
 			Name:               fmt.Sprintf("erun-%03d", i+1),
 			Provider:           configpkg.CloudProviderAWS,
 			CloudProviderAlias: listRefreshTestAlias,
@@ -45,7 +46,7 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 		})
 	}
 	return listRefreshTestStore{config: configpkg.ERunConfig{
-		CloudProviders: []configpkg.CloudProviderConfig{{
+		CloudProviders: []model.CloudProviderConfig{{
 			Alias:    listRefreshTestAlias,
 			Provider: configpkg.CloudProviderAWS,
 		}},
@@ -54,8 +55,8 @@ func listRefreshTestStoreWithIDs(instanceIDs ...string) listRefreshTestStore {
 }
 
 // The aws CLI echoes the whole command, instance IDs included, before the error.
-func listRefreshTestFailingRunAWS() func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
+func listRefreshTestFailingRunAWS() func(core.Context, model.CloudProviderConfig, string, []string) (string, error) {
+	return func(_ core.Context, _ model.CloudProviderConfig, _ string, args []string) (string, error) {
 		command := "aws " + strings.Join(args, " ")
 		return "", fmt.Errorf("%s: aws: [ERROR]: The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.", command)
 	}
@@ -68,7 +69,7 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 
 	var buf bytes.Buffer
 	ctx := core.Context{
-		Output: core.OutputJSON,
+		Output: model.OutputJSON,
 		Stdout: &buf,
 		Stderr: &buf,
 		Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard),
@@ -77,7 +78,7 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 		t.Fatalf("context list: %v", err)
 	}
 
-	var result cloud.CloudContextListResult
+	var result model.CloudContextListResult
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode %q: %v", buf.String(), err)
 	}
@@ -99,7 +100,7 @@ func TestContextListJSONCarriesTheBatchFailureOnce(t *testing.T) {
 	}
 }
 
-func requireUnknownWithoutSharedCause(t *testing.T, context configpkg.CloudContextStatus) {
+func requireUnknownWithoutSharedCause(t *testing.T, context model.CloudContextStatus) {
 	t.Helper()
 	if context.Message != "" {
 		t.Fatalf("context %s repeats the shared cause: %q", context.Name, context.Message)

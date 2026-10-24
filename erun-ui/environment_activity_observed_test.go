@@ -11,6 +11,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/activity"
 	"github.com/sophium/erun/erun-common/infra/kube"
 )
@@ -38,7 +39,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	data, err := json.Marshal(kube.PortForwardState{
+	data, err := json.Marshal(model.PortForwardState{
 		Tenant: tenant, Environment: environment, LocalPort: port,
 	})
 	if err != nil {
@@ -52,7 +53,7 @@ func seedMCPForward(t *testing.T, tenant, environment string, port int) {
 func observeWith(
 	t *testing.T,
 	canConnect bool,
-	load func(context.Context, string, string) (activity.EnvironmentIdleStatus, error),
+	load func(context.Context, string, string) (model.EnvironmentIdleStatus, error),
 ) environmentActivityState {
 	t.Helper()
 	seedMCPForward(t, "acme", "dev", 17500)
@@ -66,8 +67,8 @@ func observeWith(
 }
 
 func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
-	got := observeWith(t, true, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-		return activity.EnvironmentIdleStatus{}, errors.New("edge did not answer")
+	got := observeWith(t, true, func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+		return model.EnvironmentIdleStatus{}, errors.New("edge did not answer")
 	})
 	if !got.reachable {
 		t.Fatal("a port that accepts connections is still reachable")
@@ -81,9 +82,9 @@ func TestObserveEnvironmentActivityWedgedEdgeGivesNoVerdict(t *testing.T) {
 }
 
 func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
-	got := observeWith(t, true, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
-		return activity.EnvironmentIdleStatus{
-			Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+	got := observeWith(t, true, func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
+		return model.EnvironmentIdleStatus{
+			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		}, nil
 	})
 	if !got.reachable || !got.observed {
@@ -95,9 +96,9 @@ func TestObserveEnvironmentActivityIdleEnvironmentAnswers(t *testing.T) {
 }
 
 func TestObserveEnvironmentActivityUnreachableGivesNoVerdict(t *testing.T) {
-	got := observeWith(t, false, func(context.Context, string, string) (activity.EnvironmentIdleStatus, error) {
+	got := observeWith(t, false, func(context.Context, string, string) (model.EnvironmentIdleStatus, error) {
 		t.Fatal("the idle question must not be asked when the port does not answer")
-		return activity.EnvironmentIdleStatus{}, nil
+		return model.EnvironmentIdleStatus{}, nil
 	})
 	if got.reachable || got.observed || got.busy {
 		t.Fatalf("an unreachable environment reports nothing, got %+v", got)
@@ -131,11 +132,11 @@ func observeViaPodWith(
 
 func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
-		status := activity.EnvironmentIdleStatus{
-			Leases: []activity.EnvironmentActivityLease{
+		status := model.EnvironmentIdleStatus{
+			Leases: []model.EnvironmentActivityLease{
 				{ID: "job-fix-1570", Name: "job-fix-1570", ExpiresAt: time.Now().Add(time.Hour)},
 			},
-			Markers: []activity.EnvironmentIdleMarker{{Name: "lease", Idle: false}},
+			Markers: []model.EnvironmentIdleMarker{{Name: "lease", Idle: false}},
 		}
 		data, err := json.Marshal(status)
 		if err != nil {
@@ -156,8 +157,8 @@ func TestObserveEnvironmentActivityViaPodReportsAHeldLease(t *testing.T) {
 
 func TestObserveEnvironmentActivityViaPodReportsIdle(t *testing.T) {
 	got := observeViaPodWith(t, "ctx", func(context.Context, uiSelection, string) (string, error) {
-		data, err := json.Marshal(activity.EnvironmentIdleStatus{
-			Markers: []activity.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
+		data, err := json.Marshal(model.EnvironmentIdleStatus{
+			Markers: []model.EnvironmentIdleMarker{{Name: activity.ActivityKindProcess, Idle: true}},
 		})
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)

@@ -8,13 +8,14 @@ import (
 	"time"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 )
 
 func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -56,7 +57,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -109,7 +110,7 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun", DefaultEnvironment: "remote"}},
 		envs:    map[string]configpkg.EnvConfig{"erun/remote": {Name: "remote", LocalRepoPath: projectRoot, KubernetesContext: "ctx"}},
 	}
 	session := newStubTerminalSession()
@@ -168,7 +169,7 @@ func TestAISessionRepaintNudgeFiresOnAttachMarker(t *testing.T) {
 func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -224,12 +225,12 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -286,12 +287,12 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		config: &configpkg.ERunConfig{
-			CloudContexts: []configpkg.CloudContextConfig{{
+			CloudContexts: []model.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
 			}},
 		},
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -369,7 +370,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -420,7 +421,7 @@ func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -446,7 +447,7 @@ func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
 func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{

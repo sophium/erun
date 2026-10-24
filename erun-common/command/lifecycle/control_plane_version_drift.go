@@ -10,82 +10,27 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 	"github.com/sophium/erun/erun-common/infra/registry"
 )
 
-// Compares each deployed erun-hosted control plane, and the console and docs site it
-// links, against the newest version erun's registry has published.
-
-// VersionSurfaceStatus is a console or docs site's deployed version (GET /version.json).
-type VersionSurfaceStatus struct {
-	URL string `json:"url,omitempty"`
-	// An unreachable surface is never reported current; Version/Behind/Ahead stay unset.
-	Reachable         bool   `json:"reachable"`
-	UnreachableReason string `json:"unreachableReason,omitempty"`
-	Version           string `json:"version,omitempty"`
-	// Reason explains a Version of "unknown": the surface answered, but not with the
-	// expected JSON (often an SPA index.html fallback). It is never Reachable=false.
-	Reason string `json:"reason,omitempty"`
-	Behind bool   `json:"behind,omitempty"`
-	Ahead  bool   `json:"ahead,omitempty"`
-}
-
-// ControlPlaneAliasRef is a configured alias that resolved to an already-reported backend.
-type ControlPlaneAliasRef struct {
-	Alias  string `json:"alias"`
-	APIURL string `json:"apiUrl,omitempty"`
-}
-
-// ControlPlaneVersionStatus is one control plane's deployed version against the published one.
-type ControlPlaneVersionStatus struct {
-	Alias  string `json:"alias"`
-	APIURL string `json:"apiUrl,omitempty"`
-	// AdditionalAliases are other aliases on the same backend, collapsed so drift is not double-counted.
-	AdditionalAliases []ControlPlaneAliasRef `json:"additionalAliases,omitempty"`
-	// An unreachable plane is never reported current; Version/Behind/Ahead stay unset.
-	Reachable         bool   `json:"reachable"`
-	UnreachableReason string `json:"unreachableReason,omitempty"`
-	Version           string `json:"version,omitempty"`
-	// Behind and Ahead are set only when both versions parse as plain semver.
-	Behind bool `json:"behind,omitempty"`
-	// Ahead means the plane runs a build the registry never published.
-	Ahead bool `json:"ahead,omitempty"`
-	// Console is nil when the plane reported no consoleUrl.
-	Console *VersionSurfaceStatus `json:"console,omitempty"`
-	// Docs is nil when the plane reported no docsUrl.
-	Docs *VersionSurfaceStatus `json:"docs,omitempty"`
-	// AdvertisedAPIURLMismatch is the plane's advertised apiUrl when it resolves to no address
-	// the dialed host shares; a host unresolvable on either side yields no verdict.
-	AdvertisedAPIURLMismatch string `json:"advertisedApiUrlMismatch,omitempty"`
-}
-
-// ControlPlaneVersionDrift is every configured control plane's version status.
-type ControlPlaneVersionDrift struct {
-	Planes []ControlPlaneVersionStatus `json:"planes,omitempty"`
-	// PublishedVersion is read from the registry on every run.
-	PublishedVersion string `json:"publishedVersion,omitempty"`
-	// PublishedVersionError leaves every plane without a behind/ahead verdict.
-	PublishedVersionError string `json:"publishedVersionError,omitempty"`
-}
-
 // ResolveControlPlaneVersionDrift compares each erun-hosted plane (or only alias) against the
 // published version; under DryRun it makes no network calls.
-func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished registry.RuntimeRegistryVersionResolverFunc) (ControlPlaneVersionDrift, error) {
+func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias string, deps cloud.CloudDependencies, resolvePublished registry.RuntimeRegistryVersionResolverFunc) (model.ControlPlaneVersionDrift, error) {
 	deps = cloud.NormalizeCloudDependencies(deps)
 	planes, err := selectControlPlaneProviders(result.CloudProviders, alias)
 	if err != nil {
-		return ControlPlaneVersionDrift{}, err
+		return model.ControlPlaneVersionDrift{}, err
 	}
 
 	if ctx.DryRun {
 		traceControlPlaneVersionDriftDryRun(ctx, planes)
-		return ControlPlaneVersionDrift{}, nil
+		return model.ControlPlaneVersionDrift{}, nil
 	}
 
 	ctx.Trace("list: resolving the published version from erun's own registry")
-	drift := ControlPlaneVersionDrift{}
+	drift := model.ControlPlaneVersionDrift{}
 	published, err := resolvePublished(context.Background())
 	if err != nil {
 		drift.PublishedVersionError = err.Error()
@@ -104,17 +49,17 @@ func ResolveControlPlaneVersionDrift(ctx core.Context, result ListResult, alias 
 }
 
 // appendControlPlaneAlias keeps one plane entry per backend identity.
-func appendControlPlaneAlias(drift *ControlPlaneVersionDrift, byIdentity map[string]int, identity string, status ControlPlaneVersionStatus) {
+func appendControlPlaneAlias(drift *model.ControlPlaneVersionDrift, byIdentity map[string]int, identity string, status model.ControlPlaneVersionStatus) {
 	if idx, ok := byIdentity[identity]; ok {
-		drift.Planes[idx].AdditionalAliases = append(drift.Planes[idx].AdditionalAliases, ControlPlaneAliasRef{Alias: status.Alias, APIURL: status.APIURL})
+		drift.Planes[idx].AdditionalAliases = append(drift.Planes[idx].AdditionalAliases, model.ControlPlaneAliasRef{Alias: status.Alias, APIURL: status.APIURL})
 		return
 	}
 	byIdentity[identity] = len(drift.Planes)
 	drift.Planes = append(drift.Planes, status)
 }
 
-func controlPlaneProviders(providers []cloud.CloudProviderStatus) []cloud.CloudProviderStatus {
-	planes := make([]cloud.CloudProviderStatus, 0, len(providers))
+func controlPlaneProviders(providers []model.CloudProviderStatus) []model.CloudProviderStatus {
+	planes := make([]model.CloudProviderStatus, 0, len(providers))
 	for _, provider := range providers {
 		if provider.Provider == config.CloudProviderERun {
 			planes = append(planes, provider)
@@ -124,7 +69,7 @@ func controlPlaneProviders(providers []cloud.CloudProviderStatus) []cloud.CloudP
 }
 
 // Error text matches ResolveCloudProvider so a bad --erun-alias reads the same everywhere.
-func selectControlPlaneProviders(providers []cloud.CloudProviderStatus, alias string) ([]cloud.CloudProviderStatus, error) {
+func selectControlPlaneProviders(providers []model.CloudProviderStatus, alias string) ([]model.CloudProviderStatus, error) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return controlPlaneProviders(providers), nil
@@ -136,19 +81,19 @@ func selectControlPlaneProviders(providers []cloud.CloudProviderStatus, alias st
 		if provider.Provider != config.CloudProviderERun {
 			return nil, fmt.Errorf("cloud provider alias %q is a %q-type alias, not an erun platform alias", provider.Alias, provider.Provider)
 		}
-		return []cloud.CloudProviderStatus{provider}, nil
+		return []model.CloudProviderStatus{provider}, nil
 	}
 	return nil, fmt.Errorf("cloud provider alias %q is not configured", alias)
 }
 
-func controlPlaneAPIURL(provider cloud.CloudProviderStatus) string {
+func controlPlaneAPIURL(provider model.CloudProviderStatus) string {
 	if provider.ERun == nil {
 		return ""
 	}
 	return strings.TrimSpace(provider.ERun.APIURL)
 }
 
-func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []cloud.CloudProviderStatus) {
+func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []model.CloudProviderStatus) {
 	ctx.Trace("list: would resolve the published version from erun's own registry")
 	for _, provider := range planes {
 		ctx.Trace("list: would GET " + controlPlaneAPIURL(provider) + "/v1/platform for control plane " + provider.Alias)
@@ -157,10 +102,10 @@ func traceControlPlaneVersionDriftDryRun(ctx core.Context, planes []cloud.CloudP
 }
 
 // The identity check runs before probing the console so a duplicate alias costs no extra probe.
-func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVersionDrift, byIdentity map[string]int, provider cloud.CloudProviderStatus, fetchPlatformInfo func(core.Context, string) (platformclient.PlatformInfo, error), fetchVersionJSON func(core.Context, string) (string, error), resolveHostAddrs func(core.Context, string) ([]string, error), publishedSemver registry.Semver, publishedOK bool) {
+func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *model.ControlPlaneVersionDrift, byIdentity map[string]int, provider model.CloudProviderStatus, fetchPlatformInfo func(core.Context, string) (model.PlatformInfo, error), fetchVersionJSON func(core.Context, string) (string, error), resolveHostAddrs func(core.Context, string) ([]string, error), publishedSemver registry.Semver, publishedOK bool) {
 	apiURL := controlPlaneAPIURL(provider)
 	if apiURL == "" {
-		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, ControlPlaneVersionStatus{
+		appendControlPlaneAlias(drift, byIdentity, "no-api-url:"+provider.Alias, model.ControlPlaneVersionStatus{
 			Alias:             provider.Alias,
 			UnreachableReason: "control plane alias has no configured api url",
 		})
@@ -172,7 +117,7 @@ func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVe
 	if err != nil {
 		ctx.Trace("list: control plane " + provider.Alias + " unreachable: " + err.Error())
 		identity := controlPlaneBackendIdentity(apiURL, "")
-		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{
+		appendControlPlaneAlias(drift, byIdentity, identity, model.ControlPlaneVersionStatus{
 			Alias:             provider.Alias,
 			APIURL:            apiURL,
 			UnreachableReason: err.Error(),
@@ -182,11 +127,11 @@ func resolveOneControlPlaneVersionStatus(ctx core.Context, drift *ControlPlaneVe
 
 	identity := controlPlaneBackendIdentity(apiURL, info.APIURL)
 	if _, alreadySeen := byIdentity[identity]; alreadySeen {
-		appendControlPlaneAlias(drift, byIdentity, identity, ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL})
+		appendControlPlaneAlias(drift, byIdentity, identity, model.ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL})
 		return
 	}
 
-	status := ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL, Reachable: true}
+	status := model.ControlPlaneVersionStatus{Alias: provider.Alias, APIURL: apiURL, Reachable: true}
 	status.Version = strings.TrimSpace(info.Version)
 	status.Behind, status.Ahead = versionVerdict(status.Version, publishedSemver, publishedOK)
 	status.AdvertisedAPIURLMismatch = detectAdvertisedAPIURLMismatch(ctx, provider.Alias, apiURL, info.APIURL, resolveHostAddrs)
@@ -296,8 +241,8 @@ const (
 	versionSurfaceDocs    = "docs site"
 )
 
-func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL string, fetchVersionJSON func(core.Context, string) (string, error), publishedSemver registry.Semver, publishedOK bool) VersionSurfaceStatus {
-	status := VersionSurfaceStatus{URL: surfaceURL}
+func resolveVersionSurfaceStatus(ctx core.Context, alias, surface, surfaceURL string, fetchVersionJSON func(core.Context, string) (string, error), publishedSemver registry.Semver, publishedOK bool) model.VersionSurfaceStatus {
+	status := model.VersionSurfaceStatus{URL: surfaceURL}
 	ctx.Trace("list: GET " + surfaceURL + "/version.json (" + surface + " version check for " + alias + ")")
 	version, err := fetchVersionJSON(ctx, surfaceURL)
 	if err != nil {

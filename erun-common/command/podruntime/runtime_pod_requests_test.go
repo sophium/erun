@@ -8,6 +8,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/kube"
 	"github.com/sophium/erun/erun-common/primitive/build"
 )
@@ -142,7 +143,7 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 	t.Run("unreadable pod spec", func(t *testing.T) {
 		usage, err := RunRuntimeUsage(core.Context{}, containerRunner, func([]string) ([]byte, error) {
 			return nil, errors.New("kubectl get pods: connection refused")
-		}, req, RuntimeUsageParams{Interval: time.Second})
+		}, req, model.RuntimeUsageParams{Interval: time.Second})
 		if err != nil {
 			t.Fatalf("an unreadable pod spec must not fail the usage call, got: %v", err)
 		}

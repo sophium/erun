@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
@@ -43,7 +44,7 @@ func TestLoadGatewayRoutingDriftNamesPodsStillOnASwitchedOffGateway(t *testing.T
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		// Switched off the way the settings dialog does: base URL cleared, models kept.
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{Models: []config.OpenRouterModel{{ID: "deepseek/deepseek-v4.1-flash"}}}},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
 			"erun/ux":    {Name: "ux", KubernetesContext: "erun", Claude: config.EnvironmentClaudeConfig{UseGateway: &no}},
@@ -77,7 +78,7 @@ func TestLoadGatewayRoutingDriftNamesPodsNotYetOnASwitchedOnGateway(t *testing.T
 	stubGatewayRouting(t, map[string]string{"erun/build": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		config:  &config.ERunConfig{OpenRouter: &config.OpenRouterConfig{BaseURL: gateway}},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs:    map[string]config.EnvConfig{"erun/build": {Name: "build", KubernetesContext: "erun-build"}},
 	}})
 
@@ -95,7 +96,7 @@ func TestLoadEnvironmentGatewayRouting(t *testing.T) {
 	stubGatewayRouting(t, map[string]string{"erun/build": gateway, "erun/ux": ""}, nil)
 	app := NewApp(erunUIDeps{store: stubUIStore{
 		config:  &config.ERunConfig{},
-		tenants: map[string]config.TenantConfig{"erun": {Name: "erun"}},
+		tenants: map[string]model.TenantConfig{"erun": {Name: "erun"}},
 		envs: map[string]config.EnvConfig{
 			"erun/build": {Name: "build", KubernetesContext: "erun-build"},
 			"erun/ux":    {Name: "ux", KubernetesContext: "erun"},

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 func TestClaimDesktopControlMarker_RefusesToClobberALiveOwnersRecord(t *testing.T) {
@@ -199,7 +200,7 @@ func assertCrashedRecordReadsAsStale(t *testing.T, path string) {
 	if posted {
 		t.Fatal("must not post a restart to a dead desktop's record")
 	}
-	if outcome.Status != core.DesktopRestartRefused || !strings.Contains(outcome.Reason, "stale") {
+	if outcome.Status != model.DesktopRestartRefused || !strings.Contains(outcome.Reason, "stale") {
 		t.Fatalf("outcome = %+v, want the dead desktop's record refused as stale", outcome)
 	}
 }

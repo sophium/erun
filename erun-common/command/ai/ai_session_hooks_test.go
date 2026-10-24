@@ -3,6 +3,7 @@ package ai
 import (
 	"testing"
 
+	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/podruntime"
 )
@@ -22,7 +23,7 @@ func TestAISessionHookBindingsResolveToTheStateTheyClaim(t *testing.T) {
 			t.Fatalf("binding %s reports %q, which no hook can produce a state for", binding.ToolEvent, binding.ModelEvent)
 		}
 		reported[binding.ModelEvent] = true
-		got := model.ResolveAISessionStatus(model.AISessionRecord{SessionID: "s", Event: binding.ModelEvent})
+		got := core.ResolveAISessionStatus(model.AISessionRecord{SessionID: "s", Event: binding.ModelEvent})
 		if got.State != state {
 			t.Fatalf("binding %s reports %q, which resolves to %s, want %s", binding.ToolEvent, binding.ModelEvent, got.State, state)
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
+	"github.com/sophium/erun/erun-common/base/core"
 	modelpkg "github.com/sophium/erun/erun-common/base/model"
 )
 
@@ -117,12 +118,12 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 			Review: &review,
 		}
 		// Same resolver as the review routes, so both agree on what is declared.
-		if resolved, ok := modelpkg.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch); ok {
+		if resolved, ok := core.ResolveIssueReference(review.DeclaredIssueRef, review.SourceBranch); ok {
 			item.IssueRef = resolved.Ref
 			item.IssueRefSource = resolved.Source
 		}
 		// Same key as jobs.issue_ref, which is what joins the two.
-		item.IssueKey, _ = modelpkg.CanonicalIssueKey(item.IssueRef, review.Repository)
+		item.IssueKey, _ = core.CanonicalIssueKey(item.IssueRef, review.Repository)
 		add(item.IssueKey, item)
 	}
 
@@ -145,7 +146,7 @@ func GroupPipeline(jobs []model.Job, reviews []model.Review) []PipelineIssue {
 
 // A bare number in a job has no repository, so it yields no key.
 func canonicalJobIssueKey(issueRef string) string {
-	key, ok := modelpkg.CanonicalIssueKey(issueRef, "")
+	key, ok := core.CanonicalIssueKey(issueRef, "")
 	if !ok {
 		return ""
 	}

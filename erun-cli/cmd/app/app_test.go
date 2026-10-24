@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/cmd/shared"
-	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var (
@@ -21,8 +21,8 @@ func cliBinDir(root string) string { return filepath.Join(root, "erun-cli", "bin
 func checkoutBinDir(root string) string { return filepath.Join(root, "erun-ui", "bin") }
 
 // appCopyPath is the .app bundle on macOS, the binary elsewhere.
-func appCopyPath(dir string, hostOS core.HostOS, executableName string) string {
-	if hostOS == core.HostOSDarwin {
+func appCopyPath(dir string, hostOS model.HostOS, executableName string) string {
+	if hostOS == model.HostOSDarwin {
 		return filepath.Join(dir, shared.DesktopAppBundleName)
 	}
 	return filepath.Join(dir, executableName)
@@ -44,10 +44,10 @@ func cliExecutable(t *testing.T, root string) string {
 	return path
 }
 
-func stageAppCopy(t *testing.T, dir string, hostOS core.HostOS, executableName string, builtAt time.Time) string {
+func stageAppCopy(t *testing.T, dir string, hostOS model.HostOS, executableName string, builtAt time.Time) string {
 	t.Helper()
 	launch := appCopyPath(dir, hostOS, executableName)
-	if hostOS == core.HostOSDarwin {
+	if hostOS == model.HostOSDarwin {
 		stageAppBundleExecutable(t, launch, executableName, builtAt)
 	} else {
 		stagePlainAppExecutable(t, dir, launch)
@@ -91,7 +91,7 @@ func TestResolveAppExecutableNearLaunchesTheFreshRebuildOverTheStaleCopy(t *test
 
 	const executableName = "erun-app"
 
-	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux} {
+	for _, hostOS := range []model.HostOS{model.HostOSDarwin, model.HostOSLinux} {
 		t.Run(string(hostOS), func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
@@ -125,14 +125,14 @@ type desktopAppCopyCase struct {
 	name string
 	// darwinOnly: a rebuild can replace the bundle's executable without recreating it.
 	darwinOnly bool
-	stage      func(t *testing.T, root string, hostOS core.HostOS, executableName string)
+	stage      func(t *testing.T, root string, hostOS model.HostOS, executableName string)
 	want       copyLocation
 }
 
 var desktopAppCopyCases = []desktopAppCopyCase{
 	{
 		name: "a_newer_copy_beside_the_cli_wins",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, freshAppBuiltAt)
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
@@ -141,7 +141,7 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	{
 		name:       "a_rebuild_that_replaces_the_bundle_executable_in_place_wins",
 		darwinOnly: true,
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			bundle := stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			setAppModTime(t, bundleExecutablePath(bundle, executableName), freshAppBuiltAt)
@@ -150,7 +150,7 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 	{
 		name: "equal_timestamps_keep_the_copy_nearest_the_cli",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
@@ -158,31 +158,31 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 	{
 		name: "only_the_checkout_rebuild_present",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, checkoutBinDir(root), hostOS, executableName, freshAppBuiltAt)
 		},
 		want: inCheckout,
 	},
 	{
 		name: "only_the_copy_beside_the_cli_present",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			stageAppCopy(t, cliBinDir(root), hostOS, executableName, staleAppBuiltAt)
 		},
 		want: besideCLI,
 	},
 	{
 		name:  "no_copy_anywhere_resolves_nothing",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {},
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {},
 		want:  noCopy,
 	},
 	{
 		name: "a_layout_of_the_wrong_shape_is_not_a_copy",
-		stage: func(t *testing.T, root string, hostOS core.HostOS, executableName string) {
+		stage: func(t *testing.T, root string, hostOS model.HostOS, executableName string) {
 			path := appCopyPath(cliBinDir(root), hostOS, executableName)
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("create %s: %v", filepath.Dir(path), err)
 			}
-			if hostOS == core.HostOSDarwin {
+			if hostOS == model.HostOSDarwin {
 				if err := os.WriteFile(path, []byte("placeholder"), 0o644); err != nil {
 					t.Fatalf("stage %s: %v", path, err)
 				}
@@ -196,7 +196,7 @@ var desktopAppCopyCases = []desktopAppCopyCase{
 	},
 }
 
-func expectedAppCopyPath(root string, hostOS core.HostOS, executableName string, location copyLocation) string {
+func expectedAppCopyPath(root string, hostOS model.HostOS, executableName string, location copyLocation) string {
 	switch location {
 	case besideCLI:
 		return appCopyPath(cliBinDir(root), hostOS, executableName)
@@ -212,11 +212,11 @@ func TestResolveAppExecutableNearChoosesAmongCopies(t *testing.T) {
 
 	const executableName = "erun-app"
 
-	for _, hostOS := range []core.HostOS{core.HostOSDarwin, core.HostOSLinux} {
+	for _, hostOS := range []model.HostOS{model.HostOSDarwin, model.HostOSLinux} {
 		t.Run(string(hostOS), func(t *testing.T) {
 			t.Parallel()
 			for _, tc := range desktopAppCopyCases {
-				if tc.darwinOnly && hostOS != core.HostOSDarwin {
+				if tc.darwinOnly && hostOS != model.HostOSDarwin {
 					continue
 				}
 				t.Run(tc.name, func(t *testing.T) {

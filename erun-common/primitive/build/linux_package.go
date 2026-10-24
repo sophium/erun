@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -15,7 +16,7 @@ import (
 // output, and only `erun build --release` exports and uploads its `dist` .deb files.
 
 // ResolveCurrentLinuxPackageContexts resolves the linux package components the current directory scopes a build to.
-func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target shared.DockerCommandTarget) ([]shared.LinuxPackageContext, error) {
+func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target model.DockerCommandTarget) ([]shared.LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = shared.ResolveDockerBuildContext
 	}
@@ -48,7 +49,7 @@ func ResolveCurrentLinuxPackageContexts(findProjectRoot shared.ProjectFinderFunc
 	return nil, shared.ErrLinuxPackageBuildNotFound
 }
 
-func resolveCurrentDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, dir string, target shared.DockerCommandTarget) (string, bool, error) {
+func resolveCurrentDevopsLinuxDir(findProjectRoot shared.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil

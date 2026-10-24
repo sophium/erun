@@ -10,6 +10,7 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 )
 
@@ -19,7 +20,7 @@ func stopTestApp(t *testing.T, emits *capturedEmits, deps erunUIDeps) *App {
 	t.Helper()
 	projectRoot := t.TempDir()
 	deps.store = stubUIStore{
-		tenants: map[string]config.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]config.EnvConfig{
@@ -116,9 +117,9 @@ func TestStopEnvironmentFlagsTheRowStoppedAndTargetsTheRuntimeDeployment(t *test
 	emits := newCapturedEmits()
 	var captured lifecycle.StopEnvironmentParams
 	app := stopTestApp(t, emits, erunUIDeps{
-		stopEnvironmentRuntime: func(_ core.Context, params lifecycle.StopEnvironmentParams) (lifecycle.StopEnvironmentResult, error) {
+		stopEnvironmentRuntime: func(_ core.Context, params lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
 			captured = params
-			return lifecycle.StopEnvironmentResult{
+			return model.StopEnvironmentResult{
 				Tenant:      params.Result.Tenant,
 				Environment: params.Result.Environment,
 				Release:     config.RuntimeReleaseName(params.Result.Tenant),
@@ -229,7 +230,7 @@ func TestLoadRuntimeRunStateAnswersFromTheStopLatchBeforeTheClusterCatchesUp(t *
 }
 
 func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
-	notice := stopEnvironmentNotice(lifecycle.StopEnvironmentResult{
+	notice := stopEnvironmentNotice(model.StopEnvironmentResult{
 		Tenant:        "erun",
 		Environment:   "remote",
 		EndedSessions: []string{"open-0", "ai"},
@@ -240,7 +241,7 @@ func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
 		}
 	}
 
-	quiet := stopEnvironmentNotice(lifecycle.StopEnvironmentResult{Tenant: "erun", Environment: "remote"})
+	quiet := stopEnvironmentNotice(model.StopEnvironmentResult{Tenant: "erun", Environment: "remote"})
 	if strings.Contains(quiet, "session") {
 		t.Fatalf("an environment nobody had open must not mention sessions: %q", quiet)
 	}
@@ -250,7 +251,7 @@ func TestStopEnvironmentNoticeNamesTheEndedSessionsAndTheWayBack(t *testing.T) {
 }
 
 func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
-	result := lifecycle.StopEnvironmentResult{
+	result := model.StopEnvironmentResult{
 		Tenant:              "erun",
 		Environment:         "local",
 		RemainingComponents: []string{"erun-backend-api", "erun-backend-postgres"},
@@ -268,7 +269,7 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 		t.Fatalf("the notice must not claim the whole environment's capacity came back: %q", notice)
 	}
 
-	alreadyStopped := stopEnvironmentNotice(lifecycle.StopEnvironmentResult{
+	alreadyStopped := stopEnvironmentNotice(model.StopEnvironmentResult{
 		Tenant:              "erun",
 		Environment:         "local",
 		AlreadyStopped:      true,
@@ -282,8 +283,8 @@ func TestStopEnvironmentNoticeNamesTheComponentsItLeftRunning(t *testing.T) {
 func TestStopEnvironmentClearsTheLatchWhenTheStopFails(t *testing.T) {
 	emits := newCapturedEmits()
 	app := stopTestApp(t, emits, erunUIDeps{
-		stopEnvironmentRuntime: func(core.Context, lifecycle.StopEnvironmentParams) (lifecycle.StopEnvironmentResult, error) {
-			return lifecycle.StopEnvironmentResult{}, errors.New("forbidden")
+		stopEnvironmentRuntime: func(core.Context, lifecycle.StopEnvironmentParams) (model.StopEnvironmentResult, error) {
+			return model.StopEnvironmentResult{}, errors.New("forbidden")
 		},
 	})
 

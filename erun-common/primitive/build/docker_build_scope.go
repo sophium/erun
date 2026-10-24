@@ -7,10 +7,11 @@ import (
 	"strings"
 
 	"github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-func ResolveCurrentDockerBuildContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target shared.DockerCommandTarget) ([]shared.DockerBuildContext, error) {
+func ResolveCurrentDockerBuildContexts(findProjectRoot shared.ProjectFinderFunc, resolveBuildContext shared.BuildContextResolverFunc, target model.DockerCommandTarget) ([]model.DockerBuildContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = shared.ResolveDockerBuildContext
 	}
@@ -24,7 +25,7 @@ func ResolveCurrentDockerBuildContexts(findProjectRoot shared.ProjectFinderFunc,
 		return nil, shared.ErrDockerBuildContextNotFound
 	}
 	if strings.TrimSpace(buildContext.DockerfilePath) != "" {
-		return []shared.DockerBuildContext{buildContext}, nil
+		return []model.DockerBuildContext{buildContext}, nil
 	}
 
 	if buildContexts, err := shared.ResolveDockerBuildContextsAtDir(buildContext.Dir); err == nil {
@@ -42,7 +43,7 @@ func ResolveCurrentDockerBuildContexts(findProjectRoot shared.ProjectFinderFunc,
 	return nil, shared.ErrDockerBuildContextNotFound
 }
 
-func resolveCurrentDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, dir string, target shared.DockerCommandTarget) (string, bool, error) {
+func resolveCurrentDevopsDockerDir(findProjectRoot shared.ProjectFinderFunc, dir string, target model.DockerCommandTarget) (string, bool, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" {
 		return "", false, nil
@@ -176,7 +177,7 @@ func projectHasDevopsFolder(projectRoot string) (bool, error) {
 }
 
 // ResolveDockerBuildEnvConfig returns the saved EnvConfig a build resolves to, or nil on any miss or error.
-func ResolveDockerBuildEnvConfig(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target shared.DockerCommandTarget) *config.EnvConfig {
+func ResolveDockerBuildEnvConfig(store shared.DockerStore, findProjectRoot shared.ProjectFinderFunc, target model.DockerCommandTarget) *config.EnvConfig {
 	projectRoot, err := shared.ResolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil || strings.TrimSpace(projectRoot) == "" {
 		return shared.InjectedDockerBuildEnvConfig(nil)

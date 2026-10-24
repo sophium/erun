@@ -8,6 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
 	"github.com/sophium/erun/erun-mcp/tools/shared"
 )
@@ -41,7 +42,7 @@ func DeleteTool(runtime shared.RuntimeConfig) func(context.Context, *mcp.CallToo
 		}
 
 		execute := shared.SimpleJobExecute(runtime, input.Verbosity, func(runCtx core.Context, _ string) error {
-			result, err := lifecycle.RunDeleteEnvironment(runCtx, lifecycle.DeleteEnvironmentParams{
+			result, err := lifecycle.RunDeleteEnvironment(runCtx, model.DeleteEnvironmentParams{
 				Tenant:      tenant,
 				Environment: environment,
 			}, deleteStore, runtime.DeleteKubernetesNamespace)

@@ -6,18 +6,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/sophium/erun/erun-common/base/model"
 )
 
 var userHomeDir = os.UserHomeDir
-
-type SSHHostEntry struct {
-	Alias        string
-	HostKeyAlias string
-	HostName     string
-	Port         int
-	User         string
-	IdentityFile string
-}
 
 func DefaultSSHConfigPath() (string, error) {
 	homeDir, err := userHomeDir()
@@ -27,7 +20,7 @@ func DefaultSSHConfigPath() (string, error) {
 	return filepath.Join(homeDir, ".ssh", "config"), nil
 }
 
-func UpsertDefaultSSHConfig(entry SSHHostEntry) (string, error) {
+func UpsertDefaultSSHConfig(entry model.SSHHostEntry) (string, error) {
 	path, err := DefaultSSHConfigPath()
 	if err != nil {
 		return "", err
@@ -46,15 +39,15 @@ func DefaultSSHConfigHasAlias(alias string) (bool, error) {
 
 // ParseSSHHostEntries reads every Host block in file order, one entry per alias.
 // Directives erun does not write are ignored.
-func ParseSSHHostEntries(content string) []SSHHostEntry {
+func ParseSSHHostEntries(content string) []model.SSHHostEntry {
 	lines := splitConfigLines(content)
-	entries := make([]SSHHostEntry, 0, 4)
-	var block []*SSHHostEntry
+	entries := make([]model.SSHHostEntry, 0, 4)
+	var block []*model.SSHHostEntry
 	for _, line := range lines {
 		if isHostDirective(line) {
 			block = block[:0]
 			for _, alias := range hostDirectiveAliases(line) {
-				entries = append(entries, SSHHostEntry{Alias: alias})
+				entries = append(entries, model.SSHHostEntry{Alias: alias})
 				block = append(block, &entries[len(entries)-1])
 			}
 			continue
@@ -73,7 +66,7 @@ func ParseSSHHostEntries(content string) []SSHHostEntry {
 	return entries
 }
 
-func applySSHHostDirective(entry *SSHHostEntry, key, value string) {
+func applySSHHostDirective(entry *model.SSHHostEntry, key, value string) {
 	switch strings.ToLower(key) {
 	case "hostname":
 		entry.HostName = value
@@ -125,7 +118,7 @@ func splitDirective(line string) (key, value string, ok bool) {
 }
 
 // ReadDefaultSSHHostEntries parses the default ssh config; a missing file yields no entries.
-func ReadDefaultSSHHostEntries() ([]SSHHostEntry, error) {
+func ReadDefaultSSHHostEntries() ([]model.SSHHostEntry, error) {
 	path, err := DefaultSSHConfigPath()
 	if err != nil {
 		return nil, err
@@ -156,7 +149,7 @@ func SSHConfigHasAlias(path, alias string) (bool, error) {
 	return false, nil
 }
 
-func UpsertSSHConfig(path string, entry SSHHostEntry) error {
+func UpsertSSHConfig(path string, entry model.SSHHostEntry) error {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" {
 		return fmt.Errorf("ssh config path is required")
@@ -176,7 +169,7 @@ func UpsertSSHConfig(path string, entry SSHHostEntry) error {
 	return os.WriteFile(path, []byte(updated), 0o600)
 }
 
-func UpsertSSHConfigContent(existing string, entry SSHHostEntry) string {
+func UpsertSSHConfigContent(existing string, entry model.SSHHostEntry) string {
 	lines := splitConfigLines(existing)
 	updated, replaced := replaceExistingHostEntries(lines, entry)
 	if !replaced {
@@ -249,7 +242,7 @@ func RemoveSSHConfigAliasContent(existing, alias string) (string, bool) {
 	return joined + "\n", true
 }
 
-func replaceExistingHostEntries(lines []string, entry SSHHostEntry) ([]string, bool) {
+func replaceExistingHostEntries(lines []string, entry model.SSHHostEntry) ([]string, bool) {
 	replaced := false
 	updated := make([]string, 0, len(lines)+8)
 	for i := 0; i < len(lines); {
@@ -266,7 +259,7 @@ func replaceExistingHostEntries(lines []string, entry SSHHostEntry) ([]string, b
 	return updated, replaced
 }
 
-func appendFirstReplacement(lines []string, entry SSHHostEntry, replaced bool) []string {
+func appendFirstReplacement(lines []string, entry model.SSHHostEntry, replaced bool) []string {
 	if replaced {
 		return lines
 	}
@@ -294,7 +287,7 @@ func appendBlankBeforeEntry(lines []string) []string {
 	return lines
 }
 
-func RenderSSHHostEntry(entry SSHHostEntry) string {
+func RenderSSHHostEntry(entry model.SSHHostEntry) string {
 	lines := []string{
 		"Host " + entry.Alias,
 		"  HostName " + entry.HostName,
@@ -310,7 +303,7 @@ func RenderSSHHostEntry(entry SSHHostEntry) string {
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func appendEntryLines(lines []string, entry SSHHostEntry) []string {
+func appendEntryLines(lines []string, entry model.SSHHostEntry) []string {
 	return append(lines, splitConfigLines(RenderSSHHostEntry(entry))...)
 }
 

@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
+	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/mcpauth"
 )
 
 func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -63,7 +64,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {
 				Name:               "erun",
 				DefaultEnvironment: "remote",
@@ -104,7 +105,7 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -147,7 +148,7 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -186,7 +187,7 @@ func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -224,7 +225,7 @@ func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -265,7 +266,7 @@ func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -306,7 +307,7 @@ func TestStartDeploySessionInjectsMCPAuthPublicKey(t *testing.T) {
 func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
@@ -346,7 +347,7 @@ func TestStartInitSessionInjectsMCPAuthPublicKey(t *testing.T) {
 func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
-		tenants: map[string]configpkg.TenantConfig{
+		tenants: map[string]model.TenantConfig{
 			"erun": {Name: "erun", DefaultEnvironment: "remote"},
 		},
 		envs: map[string]configpkg.EnvConfig{
