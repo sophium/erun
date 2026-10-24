@@ -1,29 +1,17 @@
-package erunmcp
+package build
 
 import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-mcp/tools/build"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
-
-func runGitTestCommand(t *testing.T, dir string, args ...string) {
-	t.Helper()
-
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, output)
-	}
-}
 
 func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 	projectRoot := t.TempDir()
@@ -36,7 +24,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 		t.Fatalf("write Dockerfile: %v", err)
 	}
 
-	handler := build.PushTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := PushTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    projectRoot,
@@ -44,7 +32,7 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 	}))
 
 	// A version gets past the version gate to the rejection under test.
-	_, _, err := handler(context.Background(), nil, build.PushInput{Version: "1.0.0"})
+	_, _, err := handler(context.Background(), nil, PushInput{Version: "1.0.0"})
 	if err == nil {
 		t.Fatal("expected missing Dockerfile error")
 	}
@@ -55,14 +43,14 @@ func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
 
 // push publishes a built version and never mints one (erun-mcp/AGENTS.md).
 func TestPushToolRequiresVersion(t *testing.T) {
-	handler := build.PushTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := PushTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{
 			Environment: configpkg.DefaultEnvironment,
 			RepoPath:    t.TempDir(),
 		},
 	}))
 
-	if _, _, err := handler(context.Background(), nil, build.PushInput{}); !errors.Is(err, build.ErrMissingPushVersion) {
+	if _, _, err := handler(context.Background(), nil, PushInput{}); !errors.Is(err, ErrMissingPushVersion) {
 		t.Fatalf("expected errMissingPushVersion, got %v", err)
 	}
 }

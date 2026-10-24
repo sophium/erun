@@ -46,11 +46,11 @@ func registerCloudTools(reg registrar.ToolRegistrar, runtime runtimecfg.RuntimeC
 			"credential refresher, which holds the values in memory. To refresh an environment's host credentials from a " +
 			"script, an agent, or a terminal, run `erun cloud refresh <tenant> <environment>` instead: it reads the " +
 			"operator's own profile and streams the secret to the pod on stdin, so nothing sensitive passes through the caller.",
-	}, CloudInjectAWSCredentialsTool())
+	}, cloud.CloudInjectAWSCredentialsTool())
 	registrar.AddTool(reg, &mcp.Tool{
 		Name:        "cloud_clear_aws_credentials",
 		Description: "Remove the erun-host profile from the runtime pod's ~/.aws/credentials",
-	}, CloudClearAWSCredentialsTool())
+	}, cloud.CloudClearAWSCredentialsTool())
 }
 
 func registerContextTools(reg registrar.ToolRegistrar, runtime runtimecfg.RuntimeConfig) {

@@ -8,8 +8,10 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/activity"
 	"github.com/sophium/erun/erun-mcp/tools/agent"
 	"github.com/sophium/erun/erun-mcp/tools/exectool"
+	"github.com/sophium/erun/erun-mcp/tools/idle"
 	"github.com/sophium/erun/erun-mcp/tools/jobs"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
 
@@ -28,7 +30,7 @@ func TestJobLeaseAndIdleToolsRefuseAForeignEnvironment(t *testing.T) {
 	_, _, err = activity.ActivityLeaseTakeTool(runtime)(ctx, nil, activity.ActivityLeaseTakeInput{Tenant: "tenant-b", Environment: "prod", Name: "x"})
 	assertRefusedForeignTarget(t, "activity_lease_take", err)
 
-	_, _, err = idleStopHistoryTool(runtime)(ctx, nil, IdleStopHistoryInput{Tenant: "tenant-b", Environment: "prod"})
+	_, _, err = idle.IdleStopHistoryTool(runtime)(ctx, nil, idle.IdleStopHistoryInput{Tenant: "tenant-b", Environment: "prod"})
 	assertRefusedForeignTarget(t, "idle_stop_history", err)
 
 	_, _, err = exectool.RawTool(runtime)(ctx, nil, exectool.RawInput{
@@ -60,7 +62,7 @@ func TestExecRawBackgroundAndExecAgentResolveTenantEnvironmentLikeOtherJobTools(
 	t.Setenv("ERUN_ERUN_BIN", "erun-test-supervisor-stub")
 	// ensureAgentJobToolAvailable resolves "claude" before the preview short-circuit.
 	t.Setenv("ERUN_CLAUDE_BIN", "true")
-	runtime := normalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
+	runtime := runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev", RepoPath: t.TempDir()}})
 	ctx := context.Background()
 
 	for _, tc := range []struct {

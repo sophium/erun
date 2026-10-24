@@ -1,4 +1,4 @@
-package erunmcp
+package idle
 
 import (
 	"context"
@@ -24,7 +24,7 @@ type IdleStopCancelResult struct {
 	Cleared     bool   `json:"cleared"`
 }
 
-func idleStopCancelTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
+func IdleStopCancelTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopCancelInput) (*mcp.CallToolResult, IdleStopCancelResult, error) {
 		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
@@ -54,7 +54,7 @@ type IdleStopHistoryResult struct {
 	Entries     []model.EnvironmentStopHistoryEntry `json:"entries"`
 }
 
-func idleStopHistoryTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
+func IdleStopHistoryTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopHistoryInput) (*mcp.CallToolResult, IdleStopHistoryResult, error) {
 		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {
@@ -87,7 +87,7 @@ type IdleStopRecordResult struct {
 	StoppedAt   time.Time `json:"stoppedAt"`
 }
 
-func idleStopRecordTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
+func IdleStopRecordTool(runtime runtimecfg.RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
 		tenant, environment, err := runtimecfg.ResolveLocalTarget(runtime, input.Tenant, input.Environment)
 		if err != nil {

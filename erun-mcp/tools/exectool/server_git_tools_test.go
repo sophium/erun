@@ -1,4 +1,4 @@
-package erunmcp
+package exectool
 
 import (
 	"context"
@@ -8,55 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/diff"
-	"github.com/sophium/erun/erun-mcp/tools/exectool"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
+	"github.com/sophium/erun/erun-mcp/tools/shared/runtimedefaults"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
-
-func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
-	projectRoot := t.TempDir()
-	runGitTestCommand(t, projectRoot, "init", "-b", "main")
-	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
-	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
-	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("old\nsame\n"), 0o644); err != nil {
-		t.Fatalf("write app.txt: %v", err)
-	}
-	runGitTestCommand(t, projectRoot, "add", ".")
-	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
-	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("new\nsame\nadded\n"), 0o644); err != nil {
-		t.Fatalf("write app.txt: %v", err)
-	}
-
-	handler := diff.DiffTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
-		Context: toolio.RuntimeContext{RepoPath: projectRoot},
-	}))
-	_, output, err := handler(context.Background(), nil, diff.DiffInput{})
-	if err != nil {
-		t.Fatalf("diffTool failed: %v", err)
-	}
-
-	assertStructuredDiffOutput(t, output, projectRoot)
-}
-
-func assertStructuredDiffOutput(t *testing.T, output model.DiffResult, projectRoot string) {
-	t.Helper()
-
-	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {
-		t.Fatalf("unexpected output: %+v", output)
-	}
-	if output.Summary.FileCount != 1 || output.Summary.Additions != 2 || output.Summary.Deletions != 1 {
-		t.Fatalf("unexpected summary: %+v", output.Summary)
-	}
-	if len(output.Files) != 1 || output.Files[0].Path != "app.txt" {
-		t.Fatalf("unexpected files: %+v", output.Files)
-	}
-	if len(output.Tree) != 1 || output.Tree[0].Name != "app.txt" {
-		t.Fatalf("unexpected tree: %+v", output.Tree)
-	}
-}
 
 // dangerousExecContent would be reinterpreted by a shell; write/commit must never shell-parse it.
 const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'quoted'\ntrailing\n\n"
@@ -64,10 +20,10 @@ const dangerousExecContent = "line one\n`echo pwned` $(echo pwned) \"quoted\" 'q
 func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 
-	handler := exectool.WriteTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := WriteTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
-	_, output, err := handler(context.Background(), nil, exectool.WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
+	_, output, err := handler(context.Background(), nil, WriteInput{Path: "config/values.yaml", Content: dangerousExecContent})
 	if err != nil {
 		t.Fatalf("writeTool failed: %v", err)
 	}
@@ -93,7 +49,7 @@ func TestWriteToolWritesContentByteIdenticallyAndRefusesOutsideRoot(t *testing.T
 		t.Fatalf("written content = %q, want byte-identical %q", got, dangerousExecContent)
 	}
 
-	_, _, err = handler(context.Background(), nil, exectool.WriteInput{Path: "../escape.txt", Content: "x"})
+	_, _, err = handler(context.Background(), nil, WriteInput{Path: "../escape.txt", Content: "x"})
 	if err == nil {
 		t.Fatalf("expected refusal for a path outside the repo root")
 	}
@@ -111,10 +67,10 @@ func TestWriteToolRefusesWriteThroughInTreeSymlink(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	handler := exectool.WriteTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := WriteTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
-	_, _, err := handler(context.Background(), nil, exectool.WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
+	_, _, err := handler(context.Background(), nil, WriteInput{Path: "escape/pwned.txt", Content: "pwned"})
 	if err == nil {
 		t.Fatalf("expected refusal writing through a symlinked directory component")
 	}
@@ -133,16 +89,16 @@ func TestCommitToolCommitsAndRefusesBranchMismatch(t *testing.T) {
 		t.Fatalf("write app.txt: %v", err)
 	}
 
-	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := CommitTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "not-main", Message: dangerousExecContent})
+	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "not-main", Message: dangerousExecContent})
 	if err == nil {
 		t.Fatalf("expected refusal when the declared branch does not match the current branch")
 	}
 
-	_, output, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: dangerousExecContent})
+	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: dangerousExecContent})
 	if err != nil {
 		t.Fatalf("commitTool failed: %v", err)
 	}
@@ -209,11 +165,11 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 	if err := os.Remove(filepath.Join(projectRoot, "unrelated.txt")); err != nil {
 		t.Fatalf("remove unrelated.txt: %v", err)
 	}
-	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := CommitTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, output, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
+	_, output, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"values.yaml"}})
 	if err != nil {
 		t.Fatalf("commitTool failed: %v", err)
 	}
@@ -228,11 +184,11 @@ func TestCommitToolScopedPathsCommitsOnlyTheDeclaredFile(t *testing.T) {
 // Blank-only Paths must not degrade to committing everything.
 func TestCommitToolRejectsBlankPathEntries(t *testing.T) {
 	projectRoot := seedCommitToolScopedPathsRepo(t)
-	handler := exectool.CommitTool(normalizeRuntimeConfig(runtimecfg.RuntimeConfig{
+	handler := CommitTool(runtimedefaults.NormalizeRuntimeConfig(runtimecfg.RuntimeConfig{
 		Context: toolio.RuntimeContext{RepoPath: projectRoot},
 	}))
 
-	_, _, err := handler(context.Background(), nil, exectool.CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
+	_, _, err := handler(context.Background(), nil, CommitInput{Branch: "main", Message: "fix the values typo", Paths: []string{"", ""}})
 	if err == nil {
 		t.Fatalf("expected refusal for a paths list of blank entries")
 	}

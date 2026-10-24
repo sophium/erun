@@ -1,4 +1,4 @@
-package erunmcp
+package environment
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
-	"github.com/sophium/erun/erun-mcp/tools/environment"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
 )
@@ -21,7 +20,7 @@ func TestEnvironmentToolResolvesAgainstServerContext(t *testing.T) {
 		},
 	}
 
-	_, result, err := environment.EnvironmentTool(runtime)(context.Background(), nil, environment.EnvironmentInput{Preview: true})
+	_, result, err := EnvironmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
@@ -52,7 +51,7 @@ func TestEnvironmentToolPrefersInjectedPortsOverADefaultedRange(t *testing.T) {
 		},
 	}
 
-	_, result, err := environment.EnvironmentTool(runtime)(context.Background(), nil, environment.EnvironmentInput{Preview: true})
+	_, result, err := EnvironmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}
@@ -84,7 +83,7 @@ func TestEnvironmentToolManagedCloudWithoutObservedPowerStateReadsUnknown(t *tes
 		},
 	}
 
-	_, result, err := environment.EnvironmentTool(runtime)(context.Background(), nil, environment.EnvironmentInput{Preview: true})
+	_, result, err := EnvironmentTool(runtime)(context.Background(), nil, EnvironmentInput{Preview: true})
 	if err != nil {
 		t.Fatalf("resolve environment read model: %v", err)
 	}

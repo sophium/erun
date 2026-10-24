@@ -1,4 +1,4 @@
-package erunmcp
+package platform
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/infra/cloud"
-	"github.com/sophium/erun/erun-mcp/tools/platform"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
@@ -16,7 +15,7 @@ import (
 func mcpAliasMessageFor(t *testing.T, providers ...model.CloudProviderConfig) string {
 	t.Helper()
 	runtime := runtimecfg.RuntimeConfig{Store: listToolStore{toolConfig: config.ERunConfig{CloudProviders: providers}}}
-	_, _, err := platform.PlatformEnvListTool(runtime)(context.Background(), nil, platform.PlatformEnvListInput{})
+	_, _, err := PlatformEnvListTool(runtime)(context.Background(), nil, PlatformEnvListInput{})
 	if err == nil {
 		t.Fatal("expected the unresolvable-alias error, got none")
 	}

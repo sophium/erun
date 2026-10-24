@@ -34,15 +34,15 @@ func registerIdleStopTools(reg registrar.ToolRegistrar, runtime runtimecfg.Runti
 	registrar.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_cancel",
 		Description: "Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed.",
-	}, idleStopCancelTool(runtime))
+	}, idle.IdleStopCancelTool(runtime))
 	registrar.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_history",
 		Description: "Return the last N (cap 10) auto-stop audit entries for the env, newest first. Each row carries the per-marker idle/active breakdown captured when the auto-stop grace was armed.",
-	}, idleStopHistoryTool(runtime))
+	}, idle.IdleStopHistoryTool(runtime))
 	registrar.AddTool(reg, &mcp.Tool{
 		Name:        "idle_stop_record",
 		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
-	}, idleStopRecordTool(runtime))
+	}, idle.IdleStopRecordTool(runtime))
 	registrar.AddTool(reg, &mcp.Tool{
 		Name: "ai_sessions",
 		Description: "Return the structured status (idle, busy, awaiting-input, exited, or oom-killed) of AI tool sessions in this environment, resolved from each session's own last reported turn-boundary event -- never from PTY output volume or silence. " +

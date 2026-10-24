@@ -1,4 +1,4 @@
-package erunmcp
+package pin
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-common/command/lifecycle"
-	"github.com/sophium/erun/erun-mcp/tools/pin"
 	"github.com/sophium/erun/erun-mcp/tools/shared/jobenvelope"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 	"github.com/sophium/erun/erun-mcp/tools/shared/toolio"
@@ -35,7 +34,7 @@ func TestPinToolRefusesWhenNoProjectRootIsResolvable(t *testing.T) {
 			},
 		},
 	}
-	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Version: "1.0.175"})
+	_, output, err := PinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Version: "1.0.175"})
 	if err == nil {
 		t.Fatalf("expected a refusal, got %+v", output)
 	}
@@ -60,7 +59,7 @@ func TestPinToolAcceptsAnExplicitProjectRoot(t *testing.T) {
 			},
 		},
 	}
-	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Revert: true, ProjectRoot: root})
+	_, output, err := PinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Revert: true, ProjectRoot: root})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
@@ -74,7 +73,7 @@ func TestPinToolRefusesWhenTenantAndEnvironmentAreUnresolved(t *testing.T) {
 		Context: toolio.RuntimeContext{RepoPath: t.TempDir()},
 		Store:   listToolStore{},
 	}
-	_, _, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Version: "1.0.175"})
+	_, _, err := PinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Version: "1.0.175"})
 	if err == nil {
 		t.Fatal("expected a refusal when neither the server nor the caller names a tenant/environment")
 	}
@@ -110,7 +109,7 @@ func TestPinToolNeverScansOutsideTheResolvedProjectRoot(t *testing.T) {
 			},
 		},
 	}
-	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Preview: true, Revert: true})
+	_, output, err := PinTool(runtime)(context.Background(), nil, PinInput{Preview: true, Revert: true})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}
@@ -136,7 +135,7 @@ func TestPinToolRealRunPersistsTheEnvConfigCoordinate(t *testing.T) {
 			return model.RuntimeRegistryVersions{Tags: []string{"1.0.228"}, LatestStable: "1.0.228"}, nil
 		},
 	}
-	_, output, err := pin.PinTool(runtime)(context.Background(), nil, pin.PinInput{Version: "1.0.228"})
+	_, output, err := PinTool(runtime)(context.Background(), nil, PinInput{Version: "1.0.228"})
 	if err != nil {
 		t.Fatalf("pin: %v", err)
 	}

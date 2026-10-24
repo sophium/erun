@@ -1,4 +1,4 @@
-package erunmcp
+package idle
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func TestIdleStopRecordToolWritesHostManualEntry(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	handler := idleStopRecordTool(runtime)
+	handler := IdleStopRecordTool(runtime)
 
 	_, result, err := handler(context.Background(), nil, IdleStopRecordInput{
 		Reason:           "Manual stop via desktop",
@@ -71,7 +71,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 	}
 
 	runtime := runtimecfg.RuntimeConfig{Context: toolio.RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
-	handler := idleStopRecordTool(runtime)
+	handler := IdleStopRecordTool(runtime)
 
 	if _, _, err := handler(context.Background(), nil, IdleStopRecordInput{
 		Reason: "Manual stop via desktop",
@@ -104,7 +104,7 @@ func TestIdleStopRecordToolFoldsPendingArmedGrace(t *testing.T) {
 
 func TestIdleStopRecordToolRequiresTenantAndEnvironment(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	handler := idleStopRecordTool(runtimecfg.RuntimeConfig{})
+	handler := IdleStopRecordTool(runtimecfg.RuntimeConfig{})
 	if _, _, err := handler(context.Background(), nil, IdleStopRecordInput{}); err == nil {
 		t.Fatal("expected error when tenant and environment are both empty")
 	}

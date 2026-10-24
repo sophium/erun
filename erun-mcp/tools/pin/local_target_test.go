@@ -1,4 +1,4 @@
-package erunmcp
+package pin
 
 import (
 	"strings"

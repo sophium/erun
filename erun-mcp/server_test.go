@@ -18,7 +18,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/model"
 	"github.com/sophium/erun/erun-mcp/tools/shared/edgeauth"
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
-	versionpkg "github.com/sophium/erun/erun-mcp/tools/version"
 )
 
 type initInteractionStore struct{}
@@ -101,24 +100,6 @@ func (s listToolStore) SaveEnvConfig(tenant string, config configpkg.EnvConfig) 
 
 func (s listToolStore) ListEnvConfigs(tenant string) ([]configpkg.EnvConfig, error) {
 	return s.envsByTenant[tenant], nil
-}
-
-func TestBuildVersionOutputDefaultsVersion(t *testing.T) {
-	got := versionpkg.BuildVersionOutput(model.BuildInfo{})
-	if got.Version != "dev" || got.Commit != "" || got.Date != "" {
-		t.Fatalf("unexpected defaults: %+v", got)
-	}
-}
-
-func TestBuildVersionOutput(t *testing.T) {
-	got := versionpkg.BuildVersionOutput(model.BuildInfo{
-		Version: "1.2.3",
-		Commit:  "abcdef",
-		Date:    "2024-01-01",
-	})
-	if got.Version != "1.2.3" || got.Commit != "abcdef" || got.Date != "2024-01-01" {
-		t.Fatalf("unexpected version output: %+v", got)
-	}
 }
 
 func TestNormalizeHTTPConfigDefaults(t *testing.T) {

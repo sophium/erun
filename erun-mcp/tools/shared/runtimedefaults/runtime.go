@@ -1,4 +1,4 @@
-package erunmcp
+package runtimedefaults
 
 import (
 	"github.com/sophium/erun/erun-common/base/config"
@@ -11,7 +11,7 @@ import (
 	"github.com/sophium/erun/erun-mcp/tools/shared/runtimecfg"
 )
 
-func normalizeRuntimeConfig(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
+func NormalizeRuntimeConfig(cfg runtimecfg.RuntimeConfig) runtimecfg.RuntimeConfig {
 	cfg = normalizeRuntimeConfigBuildDefaults(cfg)
 	return normalizeRuntimeConfigRemoteDefaults(cfg)
 }

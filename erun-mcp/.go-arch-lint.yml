@@ -105,6 +105,8 @@ components:
     in: "tools/shared/runcmd"
   tools-shared-runtimecfg:
     in: "tools/shared/runtimecfg"
+  tools-shared-runtimedefaults:
+    in: "tools/shared/runtimedefaults"
   tools-shared-toolio:
     in: "tools/shared/toolio"
   tools-shared-toolmetrics:
@@ -161,9 +163,9 @@ deps:
       - tools-shared-activityrec
       - tools-shared-callerid
       - tools-shared-edgeauth
-      - tools-shared-jobenvelope
       - tools-shared-registrar
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
       - tools-shared-toolmetrics
       - tools-terraform
@@ -221,6 +223,7 @@ deps:
       - tools-shared-jobenvelope
       - tools-shared-runcmd
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
     canUse:
       - github-com-modelcontextprotocol-go-sdk
@@ -253,6 +256,7 @@ deps:
   tools-diff:
     mayDependOn:
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
     canUse:
       - github-com-modelcontextprotocol-go-sdk
@@ -287,6 +291,7 @@ deps:
       - tools-shared-runtimecfg
       - tools-shared-toolio
     canUse:
+      - github-com-adrg-xdg
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common
   tools-exectool:
@@ -295,6 +300,7 @@ deps:
       - tools-shared-jobenvelope
       - tools-shared-runcmd
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
     canUse:
       - github-com-modelcontextprotocol-go-sdk
@@ -312,6 +318,7 @@ deps:
   tools-idle:
     mayDependOn:
       - tools-shared-runtimecfg
+      - tools-shared-toolio
     canUse:
       - github-com-modelcontextprotocol-go-sdk
       - github-com-sophium-erun-erun-common
@@ -320,6 +327,7 @@ deps:
       - tools-shared-buildinfo
       - tools-shared-jobenvelope
       - tools-shared-runtimecfg
+      - tools-shared-runtimedefaults
       - tools-shared-toolio
     canUse:
       - github-com-modelcontextprotocol-go-sdk
@@ -440,6 +448,9 @@ deps:
     canUse:
       - github-com-google-jsonschema-go
       - github-com-modelcontextprotocol-go-sdk
+      - github-com-prometheus-client_golang
+      - github-com-prometheus-client_model
+      - github-com-prometheus-common
       - github-com-sophium-erun-erun-common
   tools-shared-runcmd:
     mayDependOn:
@@ -452,12 +463,19 @@ deps:
       - tools-shared-toolio
     canUse:
       - github-com-sophium-erun-erun-common
+  tools-shared-runtimedefaults:
+    mayDependOn:
+      - tools-shared-runtimecfg
+    canUse:
+      - github-com-sophium-erun-erun-common
   tools-shared-toolio:
     canUse:
       - github-com-sophium-erun-erun-common
   tools-shared-toolmetrics:
     canUse:
       - github-com-prometheus-client_golang
+      - github-com-prometheus-client_model
+      - github-com-prometheus-common
   tools-terraform:
     mayDependOn:
       - tools-shared-jobenvelope
