@@ -146,6 +146,7 @@ func (w *world) visibleDir(key, from string, d decisions) string {
 // package refers to into that package, together with what the copy refers to
 // in turn and the methods of a copied type, until nothing more is needed.
 func (w *world) duplicateTestHelpers(d decisions) {
+	w.initsFollowTheirFile(d)
 	for changed := true; changed; {
 		changed = false
 		for _, s := range w.sites {
@@ -176,6 +177,50 @@ func (w *world) debugDecls(d decisions) {
 	}
 }
 
+// initsFollowTheirFile copies a test file's init into every package that
+// receives part of that file. An init refers to nothing the tests in its file
+// name, so no reference carries it; but those tests rely on what it sets up,
+// wherever they end up.
+func (w *world) initsFollowTheirFile(d decisions) {
+	for file, decls := range d.decls {
+		sf := w.files[file]
+		if sf == nil || !strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		dirs := map[string]bool{}
+		var inits []*declTarget
+		for i := range decls {
+			if w.isInit(sf, &decls[i]) {
+				inits = append(inits, &decls[i])
+				continue
+			}
+			dirs[decls[i].dir] = true
+		}
+		for _, od := range inits {
+			for dir := range dirs {
+				if dir == od.dir {
+					continue
+				}
+				if od.dups == nil {
+					od.dups = map[string]bool{}
+				}
+				od.dups[dir] = true
+			}
+		}
+	}
+}
+
+// isInit says whether a declaration is a package init function.
+func (w *world) isInit(sf *sourceFile, decl *declTarget) bool {
+	for _, astDecl := range sf.ast.Decls {
+		fn, ok := astDecl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && fn.Name.Name == "init" && sf.fset.Position(fn.Pos()).Offset >= decl.start && sf.fset.Position(fn.Pos()).Offset < decl.end {
+			return true
+		}
+	}
+	return false
+}
+
 // relocateUnusedTestHelpers moves, rather than copies, a test-only helper its
 // own package no longer uses: every test that used it went elsewhere, so the
 // original would be left behind unused.
@@ -183,10 +228,10 @@ func (w *world) relocateUnusedTestHelpers(d decisions) {
 	for moved := true; moved; {
 		moved = false
 		usedAtHome := w.testHelpersUsedAtHome(d)
-		for _, decls := range d.decls {
+		for file, decls := range d.decls {
 			for i := range decls {
 				od := &decls[i]
-				if len(od.dups) == 0 || usedAtHome[od] || od.method != "" {
+				if len(od.dups) == 0 || usedAtHome[od] || od.method != "" || w.isInit(w.files[file], od) {
 					continue
 				}
 				home := sortedKeys(od.dups)[0]

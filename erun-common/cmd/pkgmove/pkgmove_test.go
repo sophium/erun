@@ -361,3 +361,25 @@ func TestApplyMovesAStubTypeOnlyAMovedTestUses(t *testing.T) {
 	goIn(t, dir, "vet", "./...")
 	goIn(t, dir, "test", "./...")
 }
+
+// TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto is the
+// reproduction of root tests that lost their setup: a test file's init pinned
+// a seam for every test in the binary, the file was split between two
+// packages, and the init went with one half. An init is referred to by
+// nothing, so it is copied to every package that receives part of its file.
+func TestApplyCopiesATestInitIntoEveryPackageItsFileSplitsInto(t *testing.T) {
+	dir := writeFixture(t, map[string]string{
+		"seam.go":       "package fixture\n\nvar Platform = func() string { return \"real\" }\n\nfunc Stays() string { return Platform() }\n",
+		"moves.go":      "package fixture\n\nfunc Moves() int { return 1 }\n",
+		"split_test.go": "package fixture\n\nimport \"testing\"\n\nfunc init() { Platform = func() string { return \"pinned\" } }\n\nfunc TestStays(t *testing.T) {\n\tif Stays() != \"pinned\" {\n\t\tt.Fatal(\"the init that pins the seam did not run here\")\n\t}\n}\n\nfunc TestMoves(t *testing.T) {\n\tif Moves() != 1 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"packages.map":  "sub moves.go\nsub split_test.go\n. split_test.go:TestStays\n",
+	})
+	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
+		t.Fatalf("apply: %v\n%s", err, out)
+	}
+	if !strings.Contains(readFile(t, filepath.Join(dir, "split_test.go")), "func init()") {
+		t.Error("the half that stays keeps its init")
+	}
+	goIn(t, dir, "vet", "./...")
+	goIn(t, dir, "test", "./...")
+}
