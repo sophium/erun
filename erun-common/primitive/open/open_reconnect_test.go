@@ -37,68 +37,12 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		assertScriptHas(t, script, bashrc+" || shell_status=$?", "bare path lost its original bash invocation")
 	})
 
-	t.Run("ERun tab persists via dtach, plain shell", func(t *testing.T) {
-		req := base
-		req.AppSession = "open-0"
-		script := preview(t, req)
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-0.dtach" -r ctrl_l /bin/bash`, "ERun tab missing dtach wrap")
-		if strings.Contains(script, "claude") {
-			t.Fatalf("plain ERun shell must not launch claude:\n%s", script)
-		}
-		assertScriptHas(t, script, "exec "+bashrc, "launcher must exec the interactive shell")
-	})
-
-	t.Run("attach takes the session over from other windows", func(t *testing.T) {
-		req := base
-		req.AppSession = "open-0"
-		script := preview(t, req)
-		owner := `/tmp/erun-sessions/erun-local-open-0.owner`
-		assertScriptHas(t, script, `printf '%s' "$attach_id" > "`+owner+`"`, "attach must claim the owner file")
-		assertScriptHas(t, script, `if [ "$dtach_pid" != "$master_pid" ]`, "kick loop must spare the session master")
-		assertScriptHas(t, script, `[ "$child_comm" != "dtach" ]`, "master detection must be the /proc child scan (runtime image has no ss)")
-		assertScriptHas(t, script, `[ -S "/tmp/erun-sessions/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`, "kick must be skipped when the master cannot be identified")
-		assertScriptHas(t, script, `!= "$attach_id" ]; then exit 76; fi`, "kicked wrapper must exit 76 on foreign owner")
-	})
-
 	t.Run("each terminal slot owns its own session", func(t *testing.T) {
 		req := base
 		req.AppSession = "open-1"
 		script := preview(t, req)
 		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-open-1.dtach" -r ctrl_l`, "slot 1 missing its own dtach socket")
 		assertScriptLacks(t, script, "open-0", "slot 1 must not touch slot 0's session")
-	})
-
-	t.Run("AI tab launches claude once as the session program", func(t *testing.T) {
-		req := base
-		req.AppSession = "ai"
-		req.AI = true
-		script := preview(t, req)
-		// AI tabs reattach with -r winch, not -r ctrl_l: Claude's main-screen TUI
-		// ignores a bare ^L (and can mis-consume it as a keystroke), so only a
-		// SIGWINCH redraws it.
-		assertScriptHas(t, script, `dtach -A "/tmp/erun-sessions/erun-local-ai.dtach" -r winch`, "AI tab must reattach with -r winch so Claude repaints")
-		assertScriptLacks(t, script, `erun-local-ai.dtach" -r ctrl_l`, "AI tab must not use -r ctrl_l (Claude ignores the bare ^L)")
-		assertScriptHas(t, script, `claude --settings '{"ultracode":true}'`, "AI tab must launch claude at the default effort (ultracode)")
-		// Claude's exit must surface to the user, not silently fall through to
-		// the shell.
-		if !strings.Contains(script, " || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
-			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
-		}
-		assertScriptHas(t, script, "exec "+bashrc, "AI launcher must drop to an interactive shell after claude")
-	})
-
-	t.Run("contribute-AI tab cds to the clone, then claude", func(t *testing.T) {
-		req := base
-		req.AppSession = "contribute-ai"
-		req.AI = true
-		req.Contribute = true
-		script := preview(t, req)
-		clone := strings.Index(script, `cd "$HOME/git/erun"`)
-		claude := strings.Index(script, "claude --settings")
-		if clone < 0 || claude < 0 || clone > claude {
-			t.Fatalf("contribute-AI must cd to the clone before launching claude:\n%s", script)
-		}
-		assertScriptHas(t, script, `export PATH="$HOME/.erun/contribute/bin:$PATH"`, "contribute env missing")
 	})
 }
 

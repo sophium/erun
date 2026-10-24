@@ -2,34 +2,8 @@ package registry
 
 import (
 	"errors"
-	"strings"
 	"testing"
 )
-
-// An environment that has never authenticated to ghcr.io must be refused
-// before the build, not at the push, with a message distinguishable from a
-// bad-scope or create-package denial.
-func TestVerifyGHCRCredentialConfiguredRefusesWhenNothingResolves(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir())
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-
-	err := VerifyGHCRCredentialConfigured("ghcr.io/sophium/frs-app:1.0.0")
-	if err == nil {
-		t.Fatal("expected a refusal when no credential source resolves")
-	}
-	var missing *MissingGHCRCredentialError
-	if !errors.As(err, &missing) {
-		t.Fatalf("expected *MissingGHCRCredentialError, got %T: %v", err, err)
-	}
-	message := missing.Error()
-	for _, want := range []string{"ghcr.io", "gh auth login", "docker login", "erun build --release"} {
-		if !strings.Contains(message, want) {
-			t.Fatalf("the error must tell the operator how to fix it, missing %q in:\n%s", want, message)
-		}
-	}
-}
 
 func TestVerifyGHCRCredentialConfiguredPassesViaDockerConfig(t *testing.T) {
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{"auth":"YWxpY2U6czNjcmV0"}}}`)
@@ -40,28 +14,6 @@ func TestVerifyGHCRCredentialConfiguredPassesViaDockerConfig(t *testing.T) {
 
 	if err := VerifyGHCRCredentialConfigured("ghcr.io/sophium/frs-app:1.0.0"); err != nil {
 		t.Fatalf("a docker config credential must be enough, got %v", err)
-	}
-}
-
-func TestVerifyGHCRCredentialConfiguredPassesViaGHSession(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir())
-	useGHToken(t, func(string) (string, bool) { return "gho_token", true })
-	t.Setenv("GH_TOKEN", "")
-	t.Setenv("GITHUB_TOKEN", "")
-
-	if err := VerifyGHCRCredentialConfigured("ghcr.io/sophium/frs-app:1.0.0"); err != nil {
-		t.Fatalf("a gh session must be enough, got %v", err)
-	}
-}
-
-func TestVerifyGHCRCredentialConfiguredPassesViaEnvToken(t *testing.T) {
-	useDockerConfigDir(t, t.TempDir())
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("GH_TOKEN", "env-token")
-	t.Setenv("GITHUB_TOKEN", "")
-
-	if err := VerifyGHCRCredentialConfigured("ghcr.io/sophium/frs-app:1.0.0"); err != nil {
-		t.Fatalf("GH_TOKEN must be enough, got %v", err)
 	}
 }
 

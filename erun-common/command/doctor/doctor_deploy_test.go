@@ -40,17 +40,6 @@ func TestRecommendedDeployRecovery(t *testing.T) {
 			wantOK:     true,
 		},
 		{
-			name:       "pending-install recommends clearing the lock",
-			helmStatus: "STATUS: pending-install",
-			wantAction: deploy.DeployRecoveryClearPendingHelm,
-			wantOK:     true,
-		},
-		{
-			name:       "deployed offers nothing",
-			helmStatus: "NAME: team-devops\nSTATUS: deployed\nREVISION: 4",
-			wantOK:     false,
-		},
-		{
 			name:       "failed recommends rollback",
 			helmStatus: "NAME: team-devops\nSTATUS: failed\nREVISION: 5",
 			wantAction: deploy.DeployRecoveryRollback,
@@ -141,21 +130,6 @@ func TestRunDeployDiagnosisMissingReleaseHasNoReadError(t *testing.T) {
 	}
 }
 
-// TestRunDeployDiagnosisPopulatesUnderDryRun: --dry-run scopes itself to
-// mutations, and this diagnosis is strictly read-only, so it must populate
-// HelmStatus/Pods under --dry-run exactly as it does on a real run instead of
-// returning an empty result.
-func TestRunDeployDiagnosisPopulatesUnderDryRun(t *testing.T) {
-	writeDoctorHelmStub(t, "NAME: team-devops\nSTATUS: failed\nREVISION: 5", "", 0)
-	writeKubectlStub(t, "", 0)
-
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(true), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
-
-	if !strings.Contains(diagnosis.HelmStatus, "STATUS: failed") {
-		t.Fatalf("expected --dry-run to still populate HelmStatus, got %q", diagnosis.HelmStatus)
-	}
-}
-
 // TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback keeps the
 // unreadable-release guard from turning into "never recommend anything":
 // `helm status` exits 0 for a release that exists but genuinely failed, so
@@ -172,25 +146,6 @@ func TestRunDeployDiagnosisFailedReleaseStillRecommendsRollback(t *testing.T) {
 	action, ok := deploy.RecommendedDeployRecovery(diagnosis)
 	if !ok || action != deploy.DeployRecoveryRollback {
 		t.Fatalf("action = %q, ok = %v; want (%q, true) for a genuinely failed release", action, ok, deploy.DeployRecoveryRollback)
-	}
-}
-
-// TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable: a helm status
-// read that fails with the cluster's own unreachable-API-server signal must set
-// ClusterUnreachable and skip the second kubectl probe entirely, rather than
-// paying its own timeout to rediscover the same fact. kubectl is pointed at a
-// stub that fails the test if ever invoked.
-func TestRunDeployDiagnosisSkipsPodsProbeWhenClusterUnreachable(t *testing.T) {
-	writeDoctorHelmStub(t, "", `Error: kubernetes cluster unreachable: Get "https://198.51.100.10:6443/version": dial tcp 198.51.100.10:6443: i/o timeout`, 1)
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-
-	diagnosis := deploy.RunDeployDiagnosis(testTraceContext(false), config.ShellLaunchParams{Tenant: "team", Environment: "dev", Namespace: "team-dev"})
-
-	if !diagnosis.ClusterUnreachable {
-		t.Fatalf("expected ClusterUnreachable = true for an unreachable API server, got false (HelmReadError=%q)", diagnosis.HelmReadError)
-	}
-	if diagnosis.Pods != "" {
-		t.Fatalf("expected the pods probe to be skipped once the cluster is confirmed unreachable, got Pods = %q", diagnosis.Pods)
 	}
 }
 

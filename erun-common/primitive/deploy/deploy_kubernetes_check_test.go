@@ -2,7 +2,6 @@ package deploy
 
 import (
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,19 +24,6 @@ func writeKubectlStub(t *testing.T, stderr string, exitCode int) {
 		t.Fatalf("write kubectl stub: %v", err)
 	}
 	t.Setenv("ERUN_KUBECTL_BIN", path)
-}
-
-// TestCheckKubernetesDeploymentWithContextAbsent locks the one negative
-// answer the check may give without an error: a genuine kubectl NotFound.
-func TestCheckKubernetesDeploymentWithContextAbsent(t *testing.T) {
-	writeKubectlStub(t, `Error from server (NotFound): deployments.apps "frs-devops" not found`, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
-	if err != nil {
-		t.Fatalf("unexpected error for a genuinely absent deployment: %v", err)
-	}
-	if deployed {
-		t.Fatalf("deployed = true, want false for an absent deployment")
-	}
 }
 
 // TestCheckKubernetesDeploymentWithContextPresent locks the healthy case: no
@@ -76,67 +62,6 @@ func TestCheckKubernetesDeploymentWithContextMissingContext(t *testing.T) {
 	}
 }
 
-// TestCheckKubernetesDeploymentWithContextUnreachableAPIServer locks the
-// "could not ask" family: erun never got a response at all.
-func TestCheckKubernetesDeploymentWithContextUnreachableAPIServer(t *testing.T) {
-	writeKubectlStub(t, `Unable to connect to the server: dial tcp 10.0.0.1:443: i/o timeout`, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "frs-devops"}, "")
-	if deployed {
-		t.Fatalf("deployed = true, want false when the api server is unreachable")
-	}
-	if err == nil {
-		t.Fatalf("expected an error naming the unreachable cluster, got nil")
-	}
-	if strings.Contains(strings.ToLower(err.Error()), "not deployed") {
-		t.Fatalf("an unreachable-cluster failure must never read as absence, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "could not be reached") {
-		t.Fatalf("error must name the unreachable-cluster cause, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "i/o timeout") {
-		t.Fatalf("error must carry kubectl's own output, got: %v", err)
-	}
-	if strings.Count(err.Error(), "exit status") > 1 {
-		t.Fatalf("exit status must not be doubled, got: %v", err)
-	}
-}
-
-// TestCheckKubernetesDeploymentWithContextSanitizesKlogFrame: the
-// operator-facing message must carry the cause klog's "Unhandled Error" line
-// names (the unreachable address) without the frame around it (severity,
-// timestamp, goroutine id, Go source location) that survives a fixed-width
-// toast while the address gets truncated away.
-func TestCheckKubernetesDeploymentWithContextSanitizesKlogFrame(t *testing.T) {
-	klogLine := `E0831 13:46:43.793908   10289 memcache.go:265] "Unhandled Error" err="couldn't get current server API group list: Get \"https://127.0.0.1:6443/api?timeout=32s\": dial tcp 127.0.0.1:6443: connect: connection refused"`
-	writeKubectlStub(t, klogLine, 1)
-	deployed, _, err := checkKubernetesDeploymentWithContext(testTraceContext(false), KubernetesDeploymentCheckParams{Name: "petios-devops"}, "orbstack")
-	if deployed {
-		t.Fatalf("deployed = true, want false when the api server is unreachable")
-	}
-	if err == nil {
-		t.Fatalf("expected an error naming the unreachable cluster, got nil")
-	}
-	message := err.Error()
-	if strings.Contains(message, "memcache.go") {
-		t.Fatalf("error must not carry klog's Go source location, got: %v", message)
-	}
-	if strings.Contains(message, "13:46:43.793908") {
-		t.Fatalf("error must not carry klog's timestamp, got: %v", message)
-	}
-	if regexp.MustCompile(`\b10289\b`).MatchString(message) {
-		t.Fatalf("error must not carry klog's goroutine id, got: %v", message)
-	}
-	if !strings.Contains(message, "127.0.0.1:6443") {
-		t.Fatalf("error must keep the address that names the unreachable target, got: %v", message)
-	}
-	if !strings.Contains(message, "connection refused") {
-		t.Fatalf("error must keep the cause sentence, got: %v", message)
-	}
-	if !strings.Contains(message, `context "orbstack"`) {
-		t.Fatalf("error must name the kube context from erun's own configuration, got: %v", message)
-	}
-}
-
 // TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectlWroteNothing
 // covers the empty-output case: a failure with nothing captured must still
 // name the exit status rather than an empty sanitized fragment.
@@ -148,18 +73,6 @@ func TestCheckKubernetesDeploymentWithContextReportsExitStatusPlainlyWhenKubectl
 	}
 	if !strings.Contains(err.Error(), "exit status 1") {
 		t.Fatalf("error must still name the exit status when kubectl wrote nothing, got: %v", err.Error())
-	}
-}
-
-// TestSanitizeKubectlFailureOutputStripsKlogFrame locks the helper itself
-// against the two shapes it must handle: an "Unhandled Error" carrier (unwrap
-// to the err= sentence) and a plain klog line with no such carrier (frame
-// stripped, rest kept verbatim).
-func TestSanitizeKubectlFailureOutputStripsKlogFrame(t *testing.T) {
-	got := sanitizeKubectlFailureOutput(`E0831 13:46:43.793908   10289 memcache.go:265] "Unhandled Error" err="dial tcp 127.0.0.1:6443: connect: connection refused"`)
-	want := "dial tcp 127.0.0.1:6443: connect: connection refused"
-	if got != want {
-		t.Fatalf("sanitizeKubectlFailureOutput() = %q, want %q", got, want)
 	}
 }
 

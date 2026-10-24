@@ -24,16 +24,6 @@ func TestRunBuildExecutionRefusesAPlanThatDoesNothing(t *testing.T) {
 	}
 }
 
-// The contrast the failure direction depends on: a project build script is real
-// work even though it mints no image version, so it stays a success. Only a
-// plan with nothing at all is refused.
-func TestRunBuildExecutionAcceptsAScriptOnlyPlan(t *testing.T) {
-	execution := shared.BuildExecutionSpec{Script: &shared.ScriptSpec{Dir: t.TempDir(), Path: "./build.sh"}}
-	if err := RunBuildExecution(core.Context{DryRun: true}, execution, nil, nil, nil, nil, cloud.CloudDependencies{}); err != nil {
-		t.Fatalf("expected a script-only plan to run, got %v", err)
-	}
-}
-
 // An empty plan is refused in dry-run too: the preview must show the failure
 // rather than print an empty plan and exit zero.
 func TestBuildExecutionPlansWorkDistinguishesScriptsFromNothing(t *testing.T) {

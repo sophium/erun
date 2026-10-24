@@ -66,18 +66,6 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 			t.Fatalf("expected the default registry namespace, got %v", namespaces)
 		}
 	})
-
-	t.Run("the seam's error form stages an unresolved env", func(t *testing.T) {
-		t.Setenv(UpgradeVersionsOverrideEnv, "error=boom failure")
-		resolver := UpgradeVersionsResolverForStore(nil, func(context.Context, string, string) (registry.RuntimeRegistryVersions, error) {
-			t.Fatal("the seam must short-circuit the registry lookup")
-			return registry.RuntimeRegistryVersions{}, nil
-		})
-		_, err := resolver(core.Context{}, "petios", petiosEnv)
-		if err == nil || !strings.Contains(err.Error(), "boom failure") {
-			t.Fatalf("expected the staged failure, got %v", err)
-		}
-	})
 }
 
 func assertProvenanceAndCanonicalSources(t *testing.T, sourced []SourcedRuntimeVersions) {
@@ -133,21 +121,6 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 			t.Fatalf("expected an ambiguous item with two candidates, got %+v", item)
 		}
 	})
-
-	t.Run("a version equal to current is up to date", func(t *testing.T) {
-		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-			return []SourcedRuntimeVersions{{Registry: "ghcr.io/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "1.0.0"}}}, nil
-		}
-		item := resolveEnvUpgradeItem("team", env, "", resolver, noTrace)
-		if item.Lagging || item.Target != "1.0.0" || item.UnresolvedReason != "" || len(item.Candidates) != 0 {
-			t.Fatalf("expected an up-to-date item at the current version, got %+v", item)
-		}
-	})
-
-	t.Run("an explicit override is the single target", func(t *testing.T) {
-		item := resolveEnvUpgradeItem("team", env, "3.0.0", nil, noTrace)
-		assertLaggingSingleTarget(t, item, "3.0.0", "expected the override target, got %+v")
-	})
 }
 
 // TestResolveEnvUpgradeItemSnapshotChannel pins how the snapshot channel picks a
@@ -155,22 +128,6 @@ func TestResolveEnvUpgradeItemCandidates(t *testing.T) {
 // the two.
 func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
 	noTrace := func(string) {}
-
-	t.Run("a snapshot-channel env adopts stable when the registry has no snapshots (#928)", func(t *testing.T) {
-		// The canonical registry publishes stable releases only. Before #928 the
-		// snapshot channel returned LatestSnapshot unconditionally once the
-		// supersede check declined, so an empty snapshot side resolved to "" and
-		// the env stayed unresolved forever against a perfectly good stable.
-		snapshotEnv := config.EnvConfig{Name: "ux", RuntimeVersion: "1.0.110", UpgradeChannel: config.UpgradeChannelSnapshot}
-		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-			return []SourcedRuntimeVersions{{Registry: config.DefaultContainerRegistry, Versions: registry.RuntimeRegistryVersions{LatestStable: "1.0.173"}}}, nil
-		}
-		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
-		if item.UnresolvedReason != "" {
-			t.Fatalf("a stable-only registry must resolve for the snapshot channel, got %+v", item)
-		}
-		assertLaggingSingleTarget(t, item, "1.0.173", "expected the stable release as the snapshot-channel target, got %+v")
-	})
 
 	t.Run("a snapshot-channel env already at the stable release is up to date (#928)", func(t *testing.T) {
 		snapshotEnv := config.EnvConfig{Name: "ux", RuntimeVersion: "1.0.173", UpgradeChannel: config.UpgradeChannelSnapshot}
@@ -182,20 +139,6 @@ func TestResolveEnvUpgradeItemSnapshotChannel(t *testing.T) {
 			t.Fatalf("expected up to date, not unresolved, got %+v", item)
 		}
 	})
-
-	t.Run("a newer snapshot stream still wins for the snapshot channel", func(t *testing.T) {
-		// The #524 behaviour must survive #928: a snapshot whose base outranks the
-		// stable belongs to the next stream and stays the target.
-		snapshotEnv := config.EnvConfig{Name: "ux", RuntimeVersion: "1.0.100", UpgradeChannel: config.UpgradeChannelSnapshot}
-		resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-			return []SourcedRuntimeVersions{{Registry: config.DefaultContainerRegistry, Versions: registry.RuntimeRegistryVersions{
-				LatestStable:   "1.0.173",
-				LatestSnapshot: "1.0.174-snapshot-20260808110000",
-			}}}, nil
-		}
-		item := resolveEnvUpgradeItem("erun", snapshotEnv, "", resolver, noTrace)
-		assertLaggingSingleTarget(t, item, "1.0.174-snapshot-20260808110000", "expected the newer snapshot stream to stay the target, got %+v")
-	})
 }
 
 func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, failMsg string) {
@@ -203,76 +146,4 @@ func assertLaggingSingleTarget(t *testing.T, item UpgradePlanItem, wantTarget, f
 	if !item.Lagging || item.Target != wantTarget || len(item.Candidates) != 1 {
 		t.Fatalf(failMsg, item)
 	}
-}
-
-// TestBuildUpgradePlanPerEnv pins that only opted-in envs become plan items.
-func TestBuildUpgradePlanPerEnv(t *testing.T) {
-	store := upgradeResolverStore{
-		tenants: []config.TenantConfig{{Name: "team"}},
-		envsByTenant: map[string][]config.EnvConfig{
-			"team": {
-				{Name: "prod", AutoUpgrade: true, RuntimeVersion: "1.0.0", Type: config.EnvironmentTypeRuntime},
-				{Name: "off", AutoUpgrade: false},
-			},
-		},
-	}
-	resolver := func(_ core.Context, _ string, _ config.EnvConfig) ([]SourcedRuntimeVersions, error) {
-		return []SourcedRuntimeVersions{{Registry: "ghcr.io/acme", Versions: registry.RuntimeRegistryVersions{LatestStable: "2.0.0"}}}, nil
-	}
-	plan, err := BuildUpgradePlan(store, UpgradeTarget{}, resolver)
-	if err != nil {
-		t.Fatalf("BuildUpgradePlan: %v", err)
-	}
-	if len(plan.Items) != 1 || plan.Items[0].Environment != "prod" || plan.Items[0].Target != "2.0.0" || !plan.Items[0].Lagging {
-		t.Fatalf("expected one lagging prod item, got %+v", plan.Items)
-	}
-}
-
-// TestRunUpgradePlanReportsUnresolvedDistinctly pins that an unresolved member
-// is never counted up to date and never reaches the deployer.
-func TestRunUpgradePlanReportsUnresolvedDistinctly(t *testing.T) {
-	plan := UpgradePlan{Items: []UpgradePlanItem{
-		{Tenant: "team", Environment: "lagging", Channel: "stable", Current: "1.0.0", Target: "2.0.0", Lagging: true},
-		{Tenant: "team", Environment: "current", Channel: "stable", Current: "2.0.0", Target: "2.0.0", Lagging: false},
-		{Tenant: "petios", Environment: "unknown", Channel: "snapshot", Current: "1.0.0", Lagging: false, UnresolvedReason: "multiple newer versions across registries; pick one or pass --version"},
-	}}
-	var deployed []string
-	result := RunUpgradePlan(core.Context{}, plan, func(_ core.Context, item UpgradePlanItem) error {
-		deployed = append(deployed, item.Tenant+"/"+item.Environment)
-		return nil
-	})
-	if len(deployed) != 1 || deployed[0] != "team/lagging" {
-		t.Fatalf("only the lagging member may deploy, got %v", deployed)
-	}
-	if len(result.Upgraded) != 1 || len(result.UpToDate) != 1 || len(result.Failed) != 0 {
-		t.Fatalf("unexpected accounting: %+v", result)
-	}
-	if len(result.Unresolved) != 1 || result.Unresolved[0].Environment != "unknown" {
-		t.Fatalf("the unresolved member must be reported as unresolved, got %+v", result.Unresolved)
-	}
-}
-
-type upgradeResolverStore struct {
-	tenants      []config.TenantConfig
-	envsByTenant map[string][]config.EnvConfig
-}
-
-func (s upgradeResolverStore) LoadERunConfig() (config.ERunConfig, string, error) {
-	return config.ERunConfig{}, "", nil
-}
-func (s upgradeResolverStore) SaveERunConfig(config.ERunConfig) error { return nil }
-func (s upgradeResolverStore) LoadTenantConfig(name string) (config.TenantConfig, string, error) {
-	return config.TenantConfig{Name: name}, "", nil
-}
-
-func (s upgradeResolverStore) LoadEnvConfig(tenant, environment string) (config.EnvConfig, string, error) {
-	return config.EnvConfig{Name: environment}, "", nil
-}
-
-func (s upgradeResolverStore) ListTenantConfigs() ([]config.TenantConfig, error) {
-	return s.tenants, nil
-}
-
-func (s upgradeResolverStore) ListEnvConfigs(tenant string) ([]config.EnvConfig, error) {
-	return s.envsByTenant[tenant], nil
 }

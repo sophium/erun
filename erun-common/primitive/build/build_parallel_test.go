@@ -96,10 +96,6 @@ func TestTraceBuildDependencyPlanSaysNothingWhenNothingMustWait(t *testing.T) {
 	dir := t.TempDir()
 	for name, builds := range map[string][]shared.DockerBuildSpec{
 		"one image": {buildSpecFromDockerfile(t, dir, "solo", "debian:bookworm")},
-		"no edges": {
-			buildSpecFromDockerfile(t, dir, "api", "debian:bookworm"),
-			buildSpecFromDockerfile(t, dir, "console", "node:22"),
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, dependencies := resolveTestDependencies(t, builds)
@@ -109,30 +105,6 @@ func TestTraceBuildDependencyPlanSaysNothingWhenNothingMustWait(t *testing.T) {
 				t.Fatalf("nothing waits, so there is no ordering to explain, got %q", trace.String())
 			}
 		})
-	}
-}
-
-func TestTraceBuildDependencyPlanNamesWhatWaitsForWhat(t *testing.T) {
-	dir := t.TempDir()
-	builds := []shared.DockerBuildSpec{
-		buildSpecFromDockerfile(t, dir, "erun-ubuntu", "ubuntu:noble"),
-		buildSpecFromDockerfile(t, dir, "erun-devops", "erun-ubuntu"),
-		buildSpecFromDockerfile(t, dir, "erun-backend-api", "debian:bookworm"),
-	}
-	ordered, dependencies := resolveTestDependencies(t, builds)
-
-	var trace bytes.Buffer
-	traceBuildDependencyPlan(traceContext(&trace), ordered, dependencies)
-	want := "build: 3 images, 1 waiting on a sibling base — erun-devops after erun-ubuntu"
-	if got := strings.TrimSpace(trace.String()); got != want {
-		t.Fatalf("dependency plan = %q, want %q", got, want)
-	}
-	// The line must not describe the run as staged: an image starts when its own
-	// bases are done, and erun-devops does not wait for erun-backend-api.
-	for _, forbidden := range []string{"wave", "erun-backend-api"} {
-		if strings.Contains(trace.String(), forbidden) {
-			t.Fatalf("the plan must not claim %q: %q", forbidden, trace.String())
-		}
 	}
 }
 

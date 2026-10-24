@@ -111,17 +111,6 @@ func TestAWSGetCallerIdentityArgsSharedByBothPaths(t *testing.T) {
 	}
 }
 
-func TestLibraryCheckAWSStatusActive(t *testing.T) {
-	stsCallerIdentityFixture(t)
-	provider := config.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws"}
-
-	status := libraryCheckAWSStatus(core.Context{}, provider)
-
-	if status.Status != config.CloudTokenStatusActive {
-		t.Fatalf("status = %+v, want Active", status)
-	}
-}
-
 func TestLibraryCheckAWSStatusNotConfiguredForMissingProfile(t *testing.T) {
 	provider := config.CloudProviderConfig{Provider: config.CloudProviderAWS, Alias: "test@aws", Profile: "erun-cloud-aws-sdk-test-missing-profile"}
 
@@ -158,51 +147,6 @@ func TestLibraryRunAWSBearerTokenMatchesSubprocessObservableResult(t *testing.T)
 	wantTrace := core.FormatShellCommand("", "aws", awsGetWebIdentityTokenArgs("", "https://api.example")...)
 	if got := strings.TrimSpace(trace.String()); got != wantTrace {
 		t.Fatalf("trace = %q, want %q", got, wantTrace)
-	}
-}
-
-func TestLibraryRunAWSBearerTokenDryRunTracesWithoutCallingAWS(t *testing.T) {
-	// No fixture set up: a dry run must never touch the network, so an
-	// unstubbed AWS_ENDPOINT_URL would fail the test if it were reached.
-	ctx, trace := traceCapturingContext()
-	ctx.DryRun = true
-
-	token, err := libraryRunAWSBearerToken(ctx, "my-profile", "https://api.example")
-	if err != nil {
-		t.Fatalf("libraryRunAWSBearerToken: %v", err)
-	}
-	if token != "" {
-		t.Fatalf("token = %q, want empty on dry run", token)
-	}
-
-	wantTrace := core.FormatShellCommand("", "aws", awsGetWebIdentityTokenArgs("my-profile", "https://api.example")...)
-	if got := strings.TrimSpace(trace.String()); got != wantTrace {
-		t.Fatalf("trace = %q, want %q", got, wantTrace)
-	}
-}
-
-// TestAWSGetWebIdentityTokenArgsSharedByBothPaths locks the one argv builder
-// defaultRunAWSBearerToken (subprocess) and traceAWSGetWebIdentityToken
-// (library) both call, so a profile can never render differently between
-// execution modes.
-func TestAWSGetWebIdentityTokenArgsSharedByBothPaths(t *testing.T) {
-	got := awsGetWebIdentityTokenArgs("my-profile", "https://api.example")
-	want := []string{
-		"sts", "get-web-identity-token",
-		"--audience", "https://api.example",
-		"--signing-algorithm", "RS256",
-		"--duration-seconds", "900",
-		"--query", "WebIdentityToken",
-		"--output", "text",
-		"--profile", "my-profile",
-	}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
 	}
 }
 

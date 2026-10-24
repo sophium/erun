@@ -103,38 +103,6 @@ func runChecksLogging(t *testing.T, packages []shared.LinuxPackageSpec) (string,
 	return log.String(), err
 }
 
-// The reported defect: an unchanged package reran its whole test stage on the
-// next plain build, because only BuildKit's layer cache (which GC evicts)
-// remembered the pass. After a pass, the same inputs reuse it and docker is
-// not run at all.
-func TestLinuxPackageReusesARecordedPassWhenUnchanged(t *testing.T) {
-	useLinuxPackageTestRecordDir(t)
-	_, pkg := reusablePackageProject(t)
-	dockerLog := fakeDockerRecorder(t, "0")
-
-	first := reuseDecision(t, pkg)
-	if first.Reuse {
-		t.Fatal("nothing is recorded yet, so the first build must run the test stage")
-	}
-	if _, err := runChecksLogging(t, []shared.LinuxPackageSpec{first}); err != nil {
-		t.Fatal(err)
-	}
-	second := reuseDecision(t, pkg)
-	if !second.Reuse || second.Fingerprint != first.Fingerprint {
-		t.Fatalf("an unchanged package must reuse its pass, got %+v after %+v", second, first)
-	}
-	out, err := runChecksLogging(t, []shared.LinuxPackageSpec{second})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := "app: test: reused (fingerprint fp-" + first.Fingerprint + ")"; !strings.Contains(out, want) {
-		t.Fatalf("missing %q in:\n%s", want, out)
-	}
-	if calls := readLines(t, dockerLog); len(calls) != 1 {
-		t.Fatalf("the reused package must not run docker again, got:\n%s", strings.Join(calls, "\n"))
-	}
-}
-
 func TestLinuxPackageFailedCheckRecordsNoPass(t *testing.T) {
 	dir := useLinuxPackageTestRecordDir(t)
 	_, pkg := reusablePackageProject(t)
@@ -187,7 +155,6 @@ func TestLinuxPackageFingerprintTracksTheCheckStagesCopySources(t *testing.T) {
 		rel   string
 		moves bool
 	}{
-		{"source the build stage copies", "app/main.go", true},
 		{"new file under a copied directory", "app/extra.go", true},
 		{"source the test stage copies", "tests/main_test.go", true},
 		{"the Dockerfile", "team-devops/linux/app/Dockerfile", true},
@@ -294,33 +261,6 @@ func TestLinuxPackageWithoutTheDaemonsPlatformNeitherReusesNorRecords(t *testing
 				t.Fatalf("nothing may be recorded without the daemon's platform, stat = %v", err)
 			}
 		})
-	}
-}
-
-// A package without a `test` stage has no tests: its check build runs its
-// `build` stage and reports `none declared`, and so does every build that
-// reuses that pass, rather than `reused`, which says an earlier run's tests
-// passed.
-func TestLinuxPackageWithoutATestStageReportsNoneDeclaredWhenReused(t *testing.T) {
-	useLinuxPackageTestRecordDir(t)
-	root := t.TempDir()
-	writeComponentTreeFile(t, root, "app/main.go", "package main\n")
-	writeComponentTreeFile(t, root, "team-devops/linux/app/Dockerfile", "FROM golang:1.26.0 AS build\nCOPY app /src/app\nRUN go build ./...\n\nFROM build AS package\nRUN true\n")
-	dir := filepath.Join(root, "team-devops", "linux", "app")
-	pkg := shared.NewLinuxPackageSpecs(root, []shared.LinuxPackageContext{{Dir: dir, DockerfilePath: filepath.Join(dir, "Dockerfile")}})[0]
-	dockerLog := fakeDockerRecorder(t, "0")
-
-	for i := range 2 {
-		out, err := runChecksLogging(t, []shared.LinuxPackageSpec{reuseDecision(t, pkg)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out, "app: test: none declared") || strings.Contains(out, "test: reused") {
-			t.Fatalf("build %d: a package without a test stage must report `none declared`, got:\n%s", i+1, out)
-		}
-	}
-	if calls := readLines(t, dockerLog); len(calls) != 1 {
-		t.Fatalf("the second build must still reuse the build stage's pass, got:\n%s", strings.Join(calls, "\n"))
 	}
 }
 

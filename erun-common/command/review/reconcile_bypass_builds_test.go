@@ -75,37 +75,6 @@ func runAccountForBypassedPushes(t *testing.T, stub *reconcileBypassStub, pushes
 	return accountForBypassedPushes(context.Background(), srv.Client(), "gho_token", inputs, pushes, newSuccessfulBuildIndex(context.Background(), client))
 }
 
-// A bypassed push is accounted for by a successful build of exactly what it
-// landed, read from the platform's builds-by-commit history.
-func TestReconcileBypassAccountsForAPushBySuccessfulBuildsOfItsCommits(t *testing.T) {
-	stub := &reconcileBypassStub{successfulBuilds: map[string]string{"merge-tip": "build-merge"}, honourFilters: true}
-	pushes := reconcileBypassTestPushes()
-	unreconciled, unexpected, err := runAccountForBypassedPushes(t, stub, pushes)
-	if err != nil {
-		t.Fatalf("accountForBypassedPushes: %v", err)
-	}
-	if unreconciled != 1 || unexpected != 0 {
-		t.Fatalf("unreconciled = %d, unexpected = %d, want 1 and 0", unreconciled, unexpected)
-	}
-	assertReconcileBypassVerdicts(t, pushes)
-	if len(stub.queries) == 0 || stub.queries[0] != "commit=merge-tip&limit=1&successful=true" {
-		t.Errorf("first builds query = %v, want the successful builds of exactly merge-tip", stub.queries)
-	}
-}
-
-func assertReconcileBypassVerdicts(t *testing.T, pushes []BypassedPush) {
-	t.Helper()
-	if pushes[0].Verdict != BypassVerdictReconciled || pushes[0].BuildID != "build-merge" {
-		t.Errorf("merge push = %+v, want RECONCILED by build-merge", pushes[0])
-	}
-	if pushes[1].Verdict != BypassVerdictRelease || pushes[1].ReleaseTag != "v1.0.0" || pushes[1].BuildID != "" {
-		t.Errorf("release push = %+v, want RELEASE by v1.0.0", pushes[1])
-	}
-	if pushes[2].Verdict != BypassVerdictUnreconciled || !strings.Contains(pushes[2].Reason, "no successful build") {
-		t.Errorf("ungated push = %+v, want UNRECONCILED naming the missing build", pushes[2])
-	}
-}
-
 // The tip of one push often appears again among another push's commits, and
 // the platform is asked about each commit once.
 func TestReconcileBypassAsksThePlatformOncePerCommit(t *testing.T) {

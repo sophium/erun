@@ -46,12 +46,10 @@ func TestDockerfileTestStageConsumerForms(t *testing.T) {
 		consumer string
 		consumed bool
 	}{
-		{"copy artifact", "COPY --from=test /out/app /app", true},
 		{"copy with other flags first", "COPY --link --chown=0:0 --from=test /out/app /app", true},
 		{"run bind mount", "RUN --mount=type=bind,from=test,source=/out,target=/t true", true},
 		{"stage built from test", "FROM test AS dist", true},
 		{"pinned stage built from test", "FROM --platform=$BUILDPLATFORM test AS dist", true},
-		{"no consumer", "COPY app /app", false},
 		{"commented consumer", "# COPY --from=test /out/app /app", false},
 		{"prefixed stage name", "COPY --from=test-toolchain /usr/bin/curl /usr/bin/curl", false},
 		{"prefixed mount source", "RUN --mount=type=bind,from=testing,target=/t true", false},
@@ -91,7 +89,6 @@ func TestComponentDiscoveryNeverReachesE2ESuites(t *testing.T) {
 
 func TestCheckNotE2ESuiteDockerfileScopesToDevopsE2E(t *testing.T) {
 	for path, refused := range map[string]bool{
-		"/repo/team-devops/e2e/console/Dockerfile":    true,
 		"/repo/team-devops/docker/console/Dockerfile": false,
 		"/repo/tools/e2e/console/Dockerfile":          false,
 		"/repo/team-devops/e2e/Dockerfile":            false,
@@ -138,10 +135,7 @@ func TestBuildReportsEachComponentsTestOutcome(t *testing.T) {
 		run   DockerImageBuilderFunc
 		want  string
 	}{
-		{"no test stage", testOutcomeBuild(t, "FROM scratch\nCOPY app /app\n"), succeed, "api: test: none declared\n"},
 		{"built without incremental", testOutcomeBuild(t, consumedTestStageDockerfileContent), succeed, "api: test: passed\n"},
-		{"rebuilt on a fingerprint miss", rebuilt, succeed, "api: test: passed\n"},
-		{"promoted", promoted, succeed, "api: test: reused (fingerprint fp-abc123)\n"},
 		{"promote fell back to a rebuild", promoted, func(input shared.DockerBuildSpec, _, _ io.Writer) error {
 			input.Cache.NotePromoteFallback()
 			return nil

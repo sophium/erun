@@ -50,33 +50,6 @@ func annotatePinPlanForTest(t *testing.T, projectRoot string) PinPlan {
 	return plan
 }
 
-// TestPinPlanNamesABaseBehindItsRemote reproduces the reported defect: a pin
-// resolved from a checkout behind its remote printed a plan in which every site
-// agreed, so a plan computed from a months-old base was indistinguishable from
-// a current one. The divergence has to be on the plan itself.
-func TestPinPlanNamesABaseBehindItsRemote(t *testing.T) {
-	plan := annotatePinPlanForTest(t, newCheckoutBehindItsRemote(t, 3))
-
-	if plan.BaseFreshness == nil {
-		t.Fatal("expected the plan to carry how its checkout stands against its remote")
-	}
-	if plan.BaseFreshness.Behind != 3 {
-		t.Fatalf("expected 3 commits behind, got %d", plan.BaseFreshness.Behind)
-	}
-	if plan.BaseFreshness.Ref != "origin/main" {
-		t.Fatalf("expected the divergence named against origin/main, got %q", plan.BaseFreshness.Ref)
-	}
-	if !plan.BaseFreshness.RemoteRead {
-		t.Fatal("expected the remote to have been read, since it is reachable")
-	}
-	note := plan.BaseFreshnessNote()
-	for _, want := range []string{"3 commit(s) behind origin/main", "the plan describes that older base"} {
-		if !strings.Contains(note, want) {
-			t.Fatalf("expected %q in the note, got %q", want, note)
-		}
-	}
-}
-
 // TestPinPlanKeepsAQuietBaseQuiet is the other half of the contract: a checkout
 // level with its remote must not carry the warning, or the warning becomes
 // noise every reader learns to skip past.

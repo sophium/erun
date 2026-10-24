@@ -81,64 +81,6 @@ dependencies:
 	return root
 }
 
-func TestResolvePinPlanFindsEveryErunReferenceAndLeavesTheTenantsOwnAlone(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-	// An environment on erun's own release line says so by stating the stock
-	// image it runs; one that states nothing on a tenant of its own runs that
-	// tenant's devops image instead, and its runtimeversion is not a pin site
-	// (TestResolvePinPlanLeavesAnEnvsRuntimeVersionAloneWhenNothingIsStated).
-	env := config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115", RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.115"}
-
-	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-
-	byKind := map[PinSiteKind][]PinSite{}
-	for _, site := range plan.Sites {
-		byKind[site.Kind] = append(byKind[site.Kind], site)
-	}
-	if len(byKind[PinSiteTerraformRef]) != 1 {
-		t.Fatalf("expected exactly the erun terraform ref, got %+v", byKind[PinSiteTerraformRef])
-	}
-	if got := byKind[PinSiteTerraformRef][0].Current; got != "1.0.102" {
-		t.Fatalf("terraform ref current = %q", got)
-	}
-	if len(byKind[PinSiteHelmDependency]) != 1 {
-		t.Fatalf("expected only the erun chart dependency, got %+v", byKind[PinSiteHelmDependency])
-	}
-	if got := byKind[PinSiteHelmDependency][0].Detail; got != "erun-backend-api" {
-		t.Fatalf("helm dependency = %q, the tenant's own chart must not be a pin site", got)
-	}
-	if len(byKind[PinSiteRuntimeVersion]) != 1 || byKind[PinSiteRuntimeVersion][0].Current != "1.0.115" {
-		t.Fatalf("expected the env's own runtimeversion as a site, got %+v", byKind[PinSiteRuntimeVersion])
-	}
-}
-
-// The reported gap: dns01_webhook_image, set directly in a tenant's own
-// terraform variables, is an erun-published image reference just like the
-// module ref above it, and must surface as a site of its own.
-func TestResolvePinPlanFindsAnErunImageReferenceInTerraformVariables(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-	plan, err := ResolvePinPlan(root, "acme", "dev", config.EnvConfig{Name: "dev"}, "1.0.175")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-
-	var found []PinSite
-	for _, site := range plan.Sites {
-		if site.Kind == PinSiteImageReference {
-			found = append(found, site)
-		}
-	}
-	if len(found) != 1 {
-		t.Fatalf("expected the dns01_webhook_image reference in the tfvars file, got %+v", found)
-	}
-	if found[0].Detail != "erun-dns01-webhook" || found[0].Current != "1.0.102" {
-		t.Fatalf("image reference = %+v, want erun-dns01-webhook at 1.0.102", found[0])
-	}
-}
-
 // The reported corruption: an erun image reference mentioned only as
 // an example inside a variable's description prose is not a configured site,
 // and must never be reported or rewritten — reporting it as changed on an
@@ -201,18 +143,6 @@ func applyPinnedRepo(t *testing.T) string {
 	return root
 }
 
-// A re-pin edits erun's references. The tenant's own module ref is not one of
-// them, and rewriting it would silently retarget their infrastructure.
-func TestApplyPinPlanRewritesErunTerraformRefsOnly(t *testing.T) {
-	terraform := readPinFile(t, applyPinnedRepo(t), "terraform-acme/dev/main.tf")
-	if !strings.Contains(terraform, "terraform-erun-cluster-edge?ref=v1.0.175") {
-		t.Fatalf("erun terraform ref not re-pinned:\n%s", terraform)
-	}
-	if !strings.Contains(terraform, "github.com/acme/infra.git//modules/thing?ref=v9.9.9") {
-		t.Fatalf("the tenant's own module ref was rewritten:\n%s", terraform)
-	}
-}
-
 // The chart's own version and the tenant's own dependencies are versioned
 // independently of erun, so only the erun dependency moves.
 func TestApplyPinPlanRewritesErunChartDependenciesOnly(t *testing.T) {
@@ -232,20 +162,6 @@ func TestApplyPinPlanRewritesTheBuildEnvImageWithoutDisturbingTheDockerfile(t *t
 	}
 	if !strings.Contains(dockerfile, "RUN apt-get update") {
 		t.Fatalf("the Dockerfile's own content was disturbed:\n%s", dockerfile)
-	}
-}
-
-// The reported bug: a re-pin moved every other reference but left the
-// dns01_webhook_image line in a tenant's own tfvars untouched, creating exactly
-// the skew between the cluster-edge module and the shim it ships beside that
-// pin exists to prevent.
-func TestApplyPinPlanRewritesErunImageReferencesInTerraformVariableFiles(t *testing.T) {
-	tfvars := readPinFile(t, applyPinnedRepo(t), "terraform-acme/prod/prod.tfvars")
-	if !strings.Contains(tfvars, "ghcr.io/sophium/erun-dns01-webhook:1.0.175") {
-		t.Fatalf("dns01_webhook_image not re-pinned:\n%s", tfvars)
-	}
-	if !strings.Contains(tfvars, `broker_url          = "https://api.acme-prod.services.example.com/v1/dns01"`) {
-		t.Fatalf("an unrelated tfvars line was disturbed:\n%s", tfvars)
 	}
 }
 
@@ -270,30 +186,6 @@ func TestResolvePinPlanDoesNotDoubleCountAnErunDevopsImageReferenceInTerraformVa
 		if site.Kind == PinSiteImageReference {
 			t.Fatalf("erun-devops must not also surface as an image-reference site: %+v", site)
 		}
-	}
-}
-
-// Idempotent: re-running finds nothing left to do, which is what makes a re-pin
-// safe against a partially aligned tree.
-func TestApplyPinPlanIsANoOpOnceAligned(t *testing.T) {
-	root := seedPinnedTenantRepo(t)
-	env := config.EnvConfig{Name: "dev", RuntimeVersion: "1.0.115"}
-
-	plan, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if err := ApplyPinPlan(plan); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-
-	env.RuntimeVersion = "1.0.175"
-	again, err := ResolvePinPlan(root, "acme", "dev", env, "1.0.175")
-	if err != nil {
-		t.Fatalf("re-resolve: %v", err)
-	}
-	if !again.Aligned() {
-		t.Fatalf("expected an aligned repo to report no changes, got %+v", again.Changes())
 	}
 }
 

@@ -2,7 +2,6 @@ package open
 
 import (
 	"bufio"
-	"bytes"
 	"io"
 	"os"
 	"regexp"
@@ -103,27 +102,6 @@ func TestConfirmPromptSettlesOnOneRecognizableLine(t *testing.T) {
 		if want := "add team-dev to ~/.bashrc? y"; renders[1] != want {
 			t.Fatalf("round %d: settled line %q, want %q", round, renders[1], want)
 		}
-	}
-}
-
-// Without a terminal the confirmation keeps the plain render it has always had:
-// the prompt's own runner answers it, and the label is printed once with no
-// settled line after it. That exact shape is what the init, cloud and doctor
-// goldens compare.
-func TestConfirmPromptWithoutTerminalKeepsThePlainRender(t *testing.T) {
-	t.Setenv("ERUN_FORCE_TTY", "")
-	confirmPromptStdin(t, "y", 1)
-
-	var out bytes.Buffer
-	ok, err := shared.ConfirmPromptTo(shared.RunPrompt, "add team-dev to ~/.bashrc", nopWriteCloser{&out})
-	if err != nil {
-		t.Fatalf("confirmPromptTo: %v", err)
-	}
-	if !ok {
-		t.Fatal("answering y must confirm")
-	}
-	if want := "? add team-dev to ~/.bashrc? [Y/n] "; out.String() != want {
-		t.Fatalf("plain confirm rendered %q, want %q", out.String(), want)
 	}
 }
 

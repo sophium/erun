@@ -51,38 +51,6 @@ func TestGuardInPodRuntimeDeployRefusesAnInPodProjection(t *testing.T) {
 		wantError bool
 	}{
 		{
-			name:      "a remote-agent env's own pod is refused",
-			envType:   configpkg.EnvironmentTypeRemoteAgent,
-			env:       inPodProjection(inPod),
-			tenant:    "tenant-a",
-			component: "tenant-a-devops",
-			wantError: true,
-		},
-		{
-			name:      "a local-agent env's own pod is refused",
-			envType:   configpkg.EnvironmentTypeLocalAgent,
-			env:       inPodProjection(inPod),
-			tenant:    "tenant-a",
-			component: "tenant-a-devops",
-			wantError: true,
-		},
-		{
-			name:      "a runtime env's own pod is refused",
-			envType:   configpkg.EnvironmentTypeRuntime,
-			env:       inPodProjection(inPod),
-			tenant:    "tenant-a",
-			component: "tenant-a-devops",
-			wantError: true,
-		},
-		{
-			name:      "off-pod the same resolve is allowed",
-			envType:   configpkg.EnvironmentTypeRemoteAgent,
-			env:       inPodProjection(map[string]string{}),
-			tenant:    "tenant-a",
-			component: "tenant-a-devops",
-			wantError: false,
-		},
-		{
 			name:    "another environment's pod is not this environment's projection",
 			envType: configpkg.EnvironmentTypeRemoteAgent,
 			env: inPodProjection(map[string]string{

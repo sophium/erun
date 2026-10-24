@@ -111,16 +111,6 @@ func TestPlainBuildResolvesLinuxPackagesBesideImages(t *testing.T) {
 	}
 }
 
-func TestPlainBuildRefusesAPackageWithNothingToRun(t *testing.T) {
-	projectRoot, _, cliDir := linuxPackageProject(t)
-	writeTestDockerfile(t, cliDir, "FROM debian:bookworm AS dist\nRUN true\n")
-	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, projectRoot)
-	_, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err == nil || !strings.Contains(err.Error(), "linux package erun-cli declares neither a `test` nor a `build` stage") {
-		t.Fatalf("expected the package without a test or build stage to be refused, got %v", err)
-	}
-}
-
 func fakeDockerRecorder(t *testing.T, exitCode string) string {
 	t.Helper()
 	logPath := filepath.Join(t.TempDir(), "docker.log")

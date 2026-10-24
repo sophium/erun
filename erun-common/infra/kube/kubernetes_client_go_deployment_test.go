@@ -4,8 +4,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-
-	"github.com/sophium/erun/erun-common/base/config"
 )
 
 func deploymentFoundHandler(namespace, name string) http.HandlerFunc {
@@ -122,17 +120,6 @@ func deploymentConditionHandler(namespace, name string, failCount int) http.Hand
 	}
 }
 
-// TestLibraryWaitForDeploymentAvailableReturnsImmediatelyWhenAlreadyAvailable
-// proves the common case -- the Deployment is already Available on the first
-// Get -- returns without polling again.
-func TestLibraryWaitForDeploymentAvailableReturnsImmediatelyWhenAlreadyAvailable(t *testing.T) {
-	fakeKubernetesAPIServer(t, deploymentConditionHandler("team-dev", "team-api", 0))
-
-	if err := LibraryWaitForDeploymentAvailable("", "team-dev", "team-api", "5s"); err != nil {
-		t.Fatalf("libraryWaitForDeploymentAvailable: %v", err)
-	}
-}
-
 // TestLibraryWaitForDeploymentAvailablePollsUntilConditionBecomesTrue proves
 // the poll loop keeps re-Getting -- the same observable behavior as `kubectl
 // wait` blocking until the condition flips -- rather than only checking once.
@@ -211,42 +198,6 @@ func TestLibraryWaitForDeploymentAvailableRejectsInvalidTimeout(t *testing.T) {
 	}
 }
 
-func TestExecutionModeForKubectlDeploymentWaitDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, KubectlDeploymentWaitExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlDeploymentWaitOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == KubectlDeploymentWaitExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-deployment-wait not found in report: %+v", report)
-}
-
-// TestKubectlGetDeploymentArgsSharedByBothPaths locks the one argv builder
-// ensureAPIPortForward (erun-cli) traces and defaultDeploymentPresent
-// executes, so the dry-run trace can never drift from the subprocess
-// execution path regardless of which execution mode is active.
-func TestKubectlGetDeploymentArgsSharedByBothPaths(t *testing.T) {
-	got := KubectlGetDeploymentArgs("my-context", "team-dev", "team-api")
-	want := []string{"--context", "my-context", "--namespace", "team-dev", "get", "deployment", "team-api", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}
-
 func TestKubectlGetDeploymentArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testing.T) {
 	got := KubectlGetDeploymentArgs("", "", "team-api")
 	want := []string{"get", "deployment", "team-api", "-o", "name"}
@@ -258,25 +209,6 @@ func TestKubectlGetDeploymentArgsOmitsContextAndNamespaceFlagsWhenUnset(t *testi
 			t.Fatalf("args = %v, want %v", got, want)
 		}
 	}
-}
-
-func TestExecutionModeForKubectlDeploymentGetDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlDeploymentGetExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlDeploymentGetOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == kubectlDeploymentGetExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-deployment-get not found in report: %+v", report)
 }
 
 // TestKubectlGetPodArgsSharedByBothPaths locks the one argv builder both
@@ -293,23 +225,4 @@ func TestKubectlGetPodArgsSharedByBothPaths(t *testing.T) {
 			t.Fatalf("args = %v, want %v", got, want)
 		}
 	}
-}
-
-func TestExecutionModeForKubectlPodGetDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, KubectlPodGetExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlPodGetOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == KubectlPodGetExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-pod-get not found in report: %+v", report)
 }

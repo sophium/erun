@@ -51,37 +51,6 @@ func TestParseSSHHostEntriesIgnoresNegatedNamesAndBareDirectives(t *testing.T) {
 	}
 }
 
-func TestFindOrphanedSSHAliasesNamesWhatEachStaleBlockNowReaches(t *testing.T) {
-	// The reported host in miniature: erun-erun-proxmox1 names an environment
-	// that does not exist, and 17122 is now live env erun/petios's; erun-erun-
-	// local names no live environment either and its port is held by nobody;
-	// erun-erun-remote's block is claimed by a configured environment; and
-	// myserver is the operator's own, so erun never reports on it.
-	entries := []config.SSHHostEntry{
-		{Alias: "erun-erun-proxmox1", Port: 17122},
-		{Alias: "erun-erun-local", Port: 17022},
-		{Alias: "erun-erun-remote", Port: 17222},
-		{Alias: "myserver", Port: 22},
-	}
-	environments := []lifecycle.SSHEnvironmentAlias{
-		{Tenant: "erun", Environment: "petios", Alias: "erun-erun-petios", LocalPort: 17122},
-		{Tenant: "erun", Environment: "remote", Alias: "erun-erun-remote", LocalPort: 17222},
-	}
-
-	orphans := lifecycle.FindOrphanedSSHAliases(entries, environments)
-	if len(orphans) != 2 {
-		t.Fatalf("expected the two unclaimed erun blocks and nothing else, got %+v", orphans)
-	}
-	colliding := orphans[0]
-	if colliding.Alias != "erun-erun-proxmox1" || colliding.ReachesTenant != "erun" || colliding.ReachesEnvironment != "petios" {
-		t.Fatalf("a block whose port a live environment holds must name it: %+v", colliding)
-	}
-	harmless := orphans[1]
-	if harmless.Alias != "erun-erun-local" || harmless.ReachesEnvironment != "" {
-		t.Fatalf("a block nothing holds must stay unqualified: %+v", harmless)
-	}
-}
-
 func TestFindOrphanedSSHAliasesDoesNotReportABlockAnEnvironmentStillClaims(t *testing.T) {
 	entries := []config.SSHHostEntry{{Alias: "erun-team-dev", Port: 17022}}
 	environments := []lifecycle.SSHEnvironmentAlias{

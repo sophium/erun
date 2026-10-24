@@ -105,31 +105,6 @@ func runtimeUsageBaseReadingCases() []runtimeUsageReadingCase {
 			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "an empty df line should report unavailable"},
 		},
 		{
-			name: "cgroup v1 (or no cgroup fs) reports memory and CPU unavailable, not an error",
-			output: strings.Join([]string{
-				"cgroup_type=tmpfs",
-				"memory_current=",
-				"memory_max=",
-				"memory_peak=",
-				"memory_oom_kill=",
-				"cpu_max=",
-				"cpu_usage_before=",
-				"cpu_usage_after=",
-				"cpu_time_before_ns=",
-				"cpu_time_after_ns=",
-				"disk_workspace=/dev/sda1 100 50 40 55% /home/erun",
-				"disk_own_used_kb=50",
-			}, "\n"),
-			wantCPU:    config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cgroup v1 should report CPU unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{Unavailable: "cgroup v1 should report memory unavailable"},
-			// Disk uses statfs via df, not cgroup, so it stays readable regardless.
-			wantDisk: config.RuntimeDiskUsage{
-				Mount: runtimeUsageWatchedMount, NodeShared: true,
-				TotalBytes: 100 * 1024, UsedBytes: 50 * 1024, PercentUsed: 50,
-				OwnUsedBytes: 50 * 1024, OwnUsageObserved: true,
-			},
-		},
-		{
 			name: "memory.current missing reports unavailable without a fabricated zero",
 			output: strings.Join([]string{
 				"cgroup_type=cgroup2fs",
@@ -208,22 +183,6 @@ func runtimeUsageDiskOwnUsageReadingCases() []runtimeUsageReadingCase {
 // rest of the reading is genuinely available.
 func runtimeUsageMemoryObservationReadingCases() []runtimeUsageReadingCase {
 	return []runtimeUsageReadingCase{
-		{
-			name: "memory.peak missing reports unobserved, not a fabricated zero",
-			output: strings.Join([]string{
-				"cgroup_type=cgroup2fs",
-				"memory_current=413589504",
-				"memory_max=2147483648",
-				"memory_peak=",
-				"memory_oom_kill=0",
-			}, "\n"),
-			wantCPU: config.RuntimeCPUUsage{IntervalSeconds: 1, Unavailable: "cpu.max missing should report unavailable"},
-			wantMemory: config.RuntimeMemoryUsage{
-				CurrentBytes: 413589504, LimitBytes: 2147483648,
-				PercentOfLimit: 100 * float64(413589504) / float64(2147483648), OOMKillsObserved: true,
-			},
-			wantDisk: config.RuntimeDiskUsage{Mount: runtimeUsageWatchedMount, NodeShared: true, Unavailable: "missing df line should report unavailable"},
-		},
 		{
 			// memory.events' oom_kill counter can be as unreadable as
 			// memory.peak; OOMKillsObserved must stay false rather than

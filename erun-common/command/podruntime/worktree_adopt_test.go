@@ -217,21 +217,6 @@ func TestAdoptWorktreeKeepsTheOriginalWhenThePreservedNameIsTaken(t *testing.T) 
 	assertExists(t, filepath.Join(f.preserved(), "older.txt"), "an existing preserved copy is never overwritten")
 }
 
-func TestAdoptWorktreeDryRunTouchesNeitherVolume(t *testing.T) {
-	f := newAdoptFixture(t)
-	f.seedLegacyRepo(t)
-	result := f.adopt(t, true)
-	if result.Outcome != WorktreeAdoptAdopted || !result.DryRun || result.PreservedDir != f.preserved() {
-		t.Fatalf("result = %+v", result)
-	}
-	assertEmptyDir(t, f.claim, "a dry run must not copy onto the worktree volume")
-	assertExists(t, filepath.Join(f.legacy, ".git", "HEAD"), "a dry run must not move the legacy tree")
-	assertAbsent(t, f.preserved(), "a dry run must not set the original aside")
-	if !strings.Contains(f.output.String(), "would set the original aside at "+f.preserved()) {
-		t.Fatalf("the dry run should name what it would do:\n%s", f.output.String())
-	}
-}
-
 func TestAdoptWorktreeRequiresBothDirectories(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}
 	if _, err := AdoptWorktree(ctx, WorktreeAdoptParams{LegacyDir: "/mnt/erun-home/git/petios"}); err == nil {

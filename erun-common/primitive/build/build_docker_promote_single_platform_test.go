@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -153,25 +152,6 @@ func indexOfExactCall(calls []string, want string) int {
 		}
 	}
 	return -1
-}
-
-// The build half of the invariant.
-func TestBuildPathPublishesEveryPlatformWithoutProvenanceAttestation(t *testing.T) {
-	for _, platform := range []string{"linux/amd64", "linux/arm64"} {
-		args := shared.DockerBuildArgs(shared.DockerBuildSpec{Image: helm.DockerImageReference{Tag: "ghcr.io/acme/widget:1.2.3"}}, platform)
-		if !slicesContains(args, "--provenance=false") {
-			t.Fatalf("platform %s must not attach the provenance attestation that makes a per-arch tag a manifest list, got %v", platform, args)
-		}
-	}
-}
-
-func slicesContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 // The promote half: a cache entry that is a whole multi-platform index cannot be

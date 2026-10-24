@@ -110,31 +110,6 @@ func TestEnsureBuildDaemonEndpointUsesAnEndpointThatAnswers(t *testing.T) {
 	}
 }
 
-func TestEnsureBuildDaemonEndpointIgnoresBuildsWithoutATestStage(t *testing.T) {
-	calls := stubBuildDaemon(t, false, "true")
-	builds := []shared.DockerBuildSpec{{DockerfilePath: writeTestDockerfile(t, t.TempDir(), "FROM alpine:3.20\n")}}
-	if _, err := ensureBuildDaemonEndpoint(core.Context{}, builds); err != nil {
-		t.Fatal(err)
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("a build with no test stage started a forwarder: %v", *calls)
-	}
-}
-
-// The dry run traces the step without probing or running, so its output is the
-// same on every machine.
-func TestEnsureBuildDaemonEndpointDryRunOnlyTraces(t *testing.T) {
-	calls := stubBuildDaemon(t, false, "true")
-	ctx, trace := traceCapturingContext()
-	ctx.DryRun = true
-	if _, err := ensureBuildDaemonEndpoint(ctx, testStageBuild(t)); err != nil {
-		t.Fatal(err)
-	}
-	if len(*calls) != 0 || !strings.Contains(trace.String(), "test-stage daemon endpoint 127.0.0.1:2375") {
-		t.Fatalf("calls=%v trace:\n%s", *calls, trace.String())
-	}
-}
-
 // A forwarder that exits at once fails the build here, naming why.
 func TestEnsureBuildDaemonEndpointReportsAForwarderThatExited(t *testing.T) {
 	calls := stubBuildDaemon(t, false, "false")

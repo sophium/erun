@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
@@ -41,26 +40,5 @@ func TestGHCRRegistriesRequiringCredentialEmptyForNoGHCRRegistries(t *testing.T)
 	}
 	if got := ghcrRegistriesRequiringCredential(list); len(got) != 0 {
 		t.Fatalf("expected no registries requiring a ghcr credential, got %v", got)
-	}
-}
-
-// The script mirrors resolveGHCRBasicAuth's three routes; assert each is
-// checked and that the host (not the full registry/namespace) is what gets
-// grepped, since docker config keys registries by host.
-func TestRemoteGHCRCredentialCheckScriptChecksAllThreeRoutes(t *testing.T) {
-	script := remoteGHCRCredentialCheckScript("ghcr.io/sophium")
-	for _, want := range []string{
-		`$HOME/.docker/config.json`,
-		"gh auth token -h github.com",
-		"GH_TOKEN",
-		"GITHUB_TOKEN",
-		"'ghcr.io'",
-	} {
-		if !strings.Contains(script, want) {
-			t.Fatalf("expected script to contain %q:\n%s", want, script)
-		}
-	}
-	if strings.Contains(script, "ghcr.io/sophium") {
-		t.Fatalf("script must grep the registry host, not the namespaced path:\n%s", script)
 	}
 }

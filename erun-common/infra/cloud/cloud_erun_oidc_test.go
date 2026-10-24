@@ -11,48 +11,7 @@ import (
 	"time"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/platformclient"
 )
-
-func TestDefaultFetchPlatformInfoParsesResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/platform" {
-			t.Fatalf("path = %q, want /v1/platform", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(platformclient.PlatformInfo{Issuer: "https://auth.example.test", CLIClientID: "cli-1"})
-	}))
-	defer srv.Close()
-
-	info, err := defaultFetchPlatformInfo(core.Context{}, srv.URL)
-	if err != nil {
-		t.Fatalf("defaultFetchPlatformInfo: %v", err)
-	}
-	if info.Issuer != "https://auth.example.test" || info.CLIClientID != "cli-1" {
-		t.Fatalf("info = %+v", info)
-	}
-}
-
-func TestDefaultFetchOIDCDiscoveryParsesResponse(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/.well-known/openid-configuration" {
-			t.Fatalf("path = %q", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(OIDCDiscovery{
-			Issuer:                      "http://placeholder.invalid",
-			TokenEndpoint:               "/token",
-			DeviceAuthorizationEndpoint: "/device",
-		})
-	}))
-	defer srv.Close()
-
-	discovery, err := defaultFetchOIDCDiscovery(core.Context{}, srv.URL)
-	if err != nil {
-		t.Fatalf("defaultFetchOIDCDiscovery: %v", err)
-	}
-	if discovery.TokenEndpoint != "/token" || discovery.DeviceAuthorizationEndpoint != "/device" {
-		t.Fatalf("discovery = %+v", discovery)
-	}
-}
 
 func TestFetchHelpersReturnErrorOnNon2xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

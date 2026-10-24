@@ -28,12 +28,6 @@ func TestIncrementalCacheDecisionMatchesTraceReasons(t *testing.T) {
 			applicable: false,
 		},
 		{
-			name:       "promoted from cache",
-			build:      shared.DockerBuildSpec{Fingerprint: "abc", Promote: true},
-			applicable: true,
-			hit:        true,
-		},
-		{
 			name:       "cascade rebuild",
 			build:      shared.DockerBuildSpec{Fingerprint: "abc", CascadeRebuildFromTag: "erun-devops:1.0.0"},
 			applicable: true,

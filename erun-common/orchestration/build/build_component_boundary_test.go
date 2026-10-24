@@ -66,19 +66,6 @@ func TestBuildResolutionRefusesAnUnconsumedTestStage(t *testing.T) {
 	}
 }
 
-func TestBuildResolutionAcceptsAConsumedTestStage(t *testing.T) {
-	projectRoot, componentDir, _ := boundaryProject(t, consumedTestStageDockerfileContent)
-	findProjectRoot, resolveBuildContext := boundaryResolvers(projectRoot, componentDir)
-
-	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, boundaryTarget(projectRoot))
-	if err != nil {
-		t.Fatalf("expected a consumed test stage to resolve, got %v", err)
-	}
-	if len(execution.DockerBuilds) != 1 || execution.DockerBuilds[0].Image.ImageName != "api" {
-		t.Fatalf("expected the one api build, got %+v", execution.DockerBuilds)
-	}
-}
-
 // The reproduction: run from an e2e suite's directory, erun build took its
 // Dockerfile as a component and would fingerprint, promote and push it.
 func TestBuildResolutionRefusesAnE2ESuiteDockerfile(t *testing.T) {

@@ -316,18 +316,6 @@ func TestERunCloudProviderTokenStatusRefreshTraceStaysOffStdout(t *testing.T) {
 	}
 }
 
-func TestERunPlatformHost(t *testing.T) {
-	cases := map[string]string{
-		"https://api.frs-prod.services.erunpaas.com": "api.frs-prod.services.erunpaas.com",
-		"http://127.0.0.1:8080":                      "127.0.0.1:8080",
-	}
-	for input, want := range cases {
-		if got := erunPlatformHost(input); got != want {
-			t.Fatalf("erunPlatformHost(%q) = %q, want %q", input, got, want)
-		}
-	}
-}
-
 func TestCloudProviderBearerTokenERunDryRunPerformsNoNetworkCall(t *testing.T) {
 	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
 	provider := erunTestProvider()

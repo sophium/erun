@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/cloud"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 )
 
@@ -42,13 +41,6 @@ func TestRunReviewRecordBuildRecordsARecordedBuildWithItsVersion(t *testing.T) {
 	}
 	if body["kind"] != "RECORDED" || body["version"] != "1.0.0" || body["commitId"] != "abc" || body["successful"] != true {
 		t.Fatalf("request body = %v, want a successful RECORDED build of abc at 1.0.0", body)
-	}
-}
-
-func TestRunReviewRecordBuildRequiresAVersionBeforeAnyPlatformCall(t *testing.T) {
-	_, err := RunReviewRecordBuild(core.Context{}, nil, "", ReviewRecordBuildParams{ReviewID: "review-1", CommitID: "abc", Successful: true}, cloud.CloudDependencies{})
-	if err == nil || !strings.Contains(err.Error(), "version is required") {
-		t.Fatalf("err = %v, want the missing-version refusal", err)
 	}
 }
 

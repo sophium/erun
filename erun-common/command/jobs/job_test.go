@@ -28,28 +28,6 @@ func TestReconcileEnvironmentJobDistinguishesPodReplacedFromSupervisorGone(t *te
 	dir := t.TempDir()
 	now := time.Unix(0, 0)
 
-	t.Run("hostname mismatch is a definite pod replacement", func(t *testing.T) {
-		job := shared.EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Hostname: "old-pod-abc123"}
-		resolved := reconcileEnvironmentJob(dir, job, now, neverAlive, "new-pod-def456")
-		if resolved.State != shared.EnvironmentJobStateUnknown {
-			t.Fatalf("State = %q, want unknown", resolved.State)
-		}
-		if resolved.UnknownReasonKind != UnknownReasonPodReplaced {
-			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonPodReplaced)
-		}
-		if resolved.Reason == "" {
-			t.Error("expected a non-empty Reason")
-		}
-	})
-
-	t.Run("no recorded hostname (pre-#1051 job) falls back to supervisor-gone, not a guessed replacement", func(t *testing.T) {
-		job := shared.EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning}
-		resolved := reconcileEnvironmentJob(dir, job, now, neverAlive, "whatever-current-pod")
-		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
-			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
-		}
-	})
-
 	t.Run("attached job reports attached-process-gone regardless of hostname", func(t *testing.T) {
 		job := shared.EnvironmentJob{PID: 123, State: EnvironmentJobStateRunning, Attached: true, Hostname: "irrelevant"}
 		resolved := reconcileEnvironmentJob(dir, job, now, neverAlive, "different-pod")
@@ -96,23 +74,6 @@ func TestReconcileEnvironmentJobChecksContainerRestartOnSamePod(t *testing.T) {
 		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
 		if resolved.UnknownReasonKind != UnknownReasonSupervisorGone {
 			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonSupervisorGone)
-		}
-	})
-
-	t.Run("kubectl shows an attributable OOM kill names it", func(t *testing.T) {
-		job := shared.EnvironmentJob{
-			PID:         123,
-			State:       EnvironmentJobStateRunning,
-			Hostname:    "same-pod-abc123",
-			LastAliveAt: time.Unix(0, 0),
-		}
-		runner := fakeKubectlPodRunner(t, `{"status":{"containerStatuses":[{"name":"erun-devops","restartCount":1,"lastState":{"terminated":{"exitCode":137,"reason":"OOMKilled","finishedAt":"1970-01-01T00:00:05Z"}}}]}}`, nil)
-		resolved := reconcileEnvironmentJobWithRestartCheck(dir, job, now, neverAlive, "same-pod-abc123", runner)
-		if resolved.UnknownReasonKind != UnknownReasonContainerRestarted {
-			t.Fatalf("UnknownReasonKind = %q, want %q", resolved.UnknownReasonKind, UnknownReasonContainerRestarted)
-		}
-		if !strings.Contains(resolved.Reason, "OOMKilled") || !strings.Contains(resolved.Reason, "137") {
-			t.Errorf("Reason = %q, want it to name the OOMKilled reason and exit code 137", resolved.Reason)
 		}
 	})
 

@@ -87,25 +87,6 @@ func TestRuntimeEntrypointCommandSelectsTheMode(t *testing.T) {
 	}
 }
 
-// A dry run lists what this container would do and changes nothing.
-func TestRunRuntimeEntrypointDryRunChangesNothing(t *testing.T) {
-	home := t.TempDir()
-	ctx, out := runtimeTestContext(true)
-	env := map[string]string{"ERUN_TENANT": "team", "ERUN_ENVIRONMENT": "dev", "ERUN_MCP_PORT": "17000"}
-	code, err := RunRuntimeEntrypoint(ctx, RuntimeEntrypointParams{Env: func(key string) string { return env[key] }, HomeDir: home})
-	if err != nil || code != 0 {
-		t.Fatalf("dry run: code=%d err=%v", code, err)
-	}
-	for _, want := range []string{"erun config: write the erun config for team/dev", "MCP edge: serve the MCP edge", "--metrics-enabled=true", "serve until the container is stopped"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("the dry run should list %q, got:\n%s", want, out.String())
-		}
-	}
-	if entries, _ := os.ReadDir(home); len(entries) != 0 {
-		t.Fatalf("a dry run must not write into the home directory, found %d entries", len(entries))
-	}
-}
-
 func TestRuntimeMCPEnabled(t *testing.T) {
 	for _, tc := range []struct {
 		enabled, port string

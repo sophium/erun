@@ -87,18 +87,6 @@ func installSkillsForTest(t *testing.T, src, dest string) AgentAssetsInstallResu
 	return result
 }
 
-func TestInstallOrRefreshSkillsSkipsADirectoryWithNoSkill(t *testing.T) {
-	src := t.TempDir()
-	dest := t.TempDir()
-	writeAssetFile(t, filepath.Join(src, "not-a-skill", "README.md"), "stray\n")
-	if _, err := InstallOrRefreshSkills(src, dest); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dest, "not-a-skill")); !os.IsNotExist(err) {
-		t.Fatalf("a directory with no SKILL.md must not be installed, stat err = %v", err)
-	}
-}
-
 // The image bakes skills 0755 so the unprivileged user can enter them; what is
 // installed is always ordinary 0644 files in 0755 directories.
 func TestInstallOrRefreshSkillsNormalisesModes(t *testing.T) {

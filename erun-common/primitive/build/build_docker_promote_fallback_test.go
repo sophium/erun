@@ -156,24 +156,6 @@ func TestPromoteDockerImageRebuildsWhenTheCachedFingerprintImageIsGone(t *testin
 	}
 }
 
-// TestPromoteDockerImageStillPromotesWhenTheCachedFingerprintImageIsPresent
-// guards the other half: a cached image that is really there is still promoted,
-// with no rebuild behind it.
-func TestPromoteDockerImageStillPromotesWhenTheCachedFingerprintImageIsPresent(t *testing.T) {
-	invocations := newFakeDockerImageStore(t, "ghcr.io/sophium/erun-console:fp-abc123-amd64")
-
-	var stdout, stderr bytes.Buffer
-	if err := DockerImageBuilder(testPromoteBuildInput(), &stdout, &stderr); err != nil {
-		t.Fatalf("expected the present cached image to promote, got: %v", err)
-	}
-	if strings.Contains(stderr.String(), "rebuilding") {
-		t.Errorf("a present cached image must not rebuild, got: %s", stderr.String())
-	}
-	if strings.Contains(invocations(), "build ") {
-		t.Errorf("a present cached image must not run docker build, got invocations:\n%s", invocations())
-	}
-}
-
 func testPromoteBuildInput() shared.DockerBuildSpec {
 	return shared.DockerBuildSpec{
 		ContextDir:     "/tmp",

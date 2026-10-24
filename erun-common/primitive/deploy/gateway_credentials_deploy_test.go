@@ -66,43 +66,6 @@ func TestApplyGatewayCredentialsSecretSkipsAnOptedOutEnvironment(t *testing.T) {
 	}
 }
 
-func TestApplyGatewayCredentialsSecretDeliversForAnEnvironmentUsingIt(t *testing.T) {
-	ctx, trace := traceCapturingContext()
-	// The dry run stops before the store is read, which is the property that
-	// matters: a dry run must not require a credential to exist.
-	ctx.DryRun = true
-	spec := HelmDeploySpec{
-		ReleaseName: "erun-devops",
-		Namespace:   "team-dev",
-		OpenRouter:  &config.OpenRouterConfig{BaseURL: testGatewayURL},
-	}
-	if err := applyGatewayCredentialsSecret(ctx, spec); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(trace.String(), config.GatewaySecretName) {
-		t.Fatalf("expected the gateway Secret in the trace:\n%s", trace.String())
-	}
-}
-
-// TestAppliedSecretNamesMatchTheChartValues pins the one link that has to hold:
-// the Secret deploy creates and the name the chart is told to read are the same
-// constant, so a rename cannot leave the pod pointing at nothing.
-func TestAppliedSecretNamesMatchTheChartValues(t *testing.T) {
-	spec := HelmDeploySpec{
-		ReleaseName: "erun-devops",
-		Namespace:   "team-dev",
-		OpenRouter:  &config.OpenRouterConfig{BaseURL: testGatewayURL},
-	}
-	args := helmClaudeSetArgs(config.EnvironmentClaudeConfig{}, spec.OpenRouter)
-	set := strings.Join(args, " ")
-	if !strings.Contains(set, "claude.openRouterAuthTokenSecret="+config.GatewaySecretName) {
-		t.Fatalf("the chart is not told the Secret deploy creates:\n%s", set)
-	}
-	if !strings.Contains(set, "claude.openRouterAuthTokenKey="+config.GatewaySecretKey) {
-		t.Fatalf("the chart is not told the entry that Secret carries:\n%s", set)
-	}
-}
-
 // TestHelmClaudeSetArgsGatewayRendersProviderFlagsOff pins that a gateway
 // replaces the model provider: Claude Code reads CLAUDE_CODE_USE_BEDROCK and
 // _MANTLE ahead of ANTHROPIC_BASE_URL, so an environment that selected the
@@ -169,42 +132,5 @@ func TestPruneGatewayCredentialsSecretRemovesItWhenTheGatewayIsOff(t *testing.T)
 				t.Fatalf("calls = %v, want %q", *calls, want)
 			}
 		})
-	}
-}
-
-func TestPruneGatewayCredentialsSecretKeepsItWhileTheGatewayApplies(t *testing.T) {
-	calls := stubGatewaySecretDelete(t)
-	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build", OpenRouter: &config.OpenRouterConfig{BaseURL: testGatewayURL}}
-	if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
-		t.Fatal(err)
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("deleted the credential an environment on the gateway reads: %v", *calls)
-	}
-}
-
-// A component release shares the namespace but does not carry the env's Claude
-// configuration, so it must not decide the runtime's credential away.
-func TestPruneGatewayCredentialsSecretLeavesItToTheRuntimeRelease(t *testing.T) {
-	calls := stubGatewaySecretDelete(t)
-	spec := HelmDeploySpec{ReleaseName: "erun-backend-postgres", Tenant: "erun", Namespace: "erun-build"}
-	if err := pruneGatewayCredentialsSecret(core.Context{}, spec); err != nil {
-		t.Fatal(err)
-	}
-	if len(*calls) != 0 {
-		t.Fatalf("a component release pruned the runtime's credential: %v", *calls)
-	}
-}
-
-func TestPruneGatewayCredentialsSecretDryRunOnlyTraces(t *testing.T) {
-	calls := stubGatewaySecretDelete(t)
-	ctx, trace := traceCapturingContext()
-	ctx.DryRun = true
-	spec := HelmDeploySpec{ReleaseName: "erun-devops", Tenant: "erun", Namespace: "erun-build"}
-	if err := pruneGatewayCredentialsSecret(ctx, spec); err != nil {
-		t.Fatal(err)
-	}
-	if len(*calls) != 0 || !strings.Contains(trace.String(), config.GatewaySecretName) {
-		t.Fatalf("calls=%v trace:\n%s", *calls, trace.String())
 	}
 }

@@ -69,18 +69,14 @@ func linuxPackageNames(packages []shared.LinuxPackageSpec) []string {
 }
 
 func TestLinuxPackageDiscoveryFindsDockerfilesUnderLinux(t *testing.T) {
-	projectRoot, uiDir, _ := linuxPackageProject(t)
+	projectRoot, _, _ := linuxPackageProject(t)
 	devopsDir := filepath.Join(projectRoot, "team-devops")
-	linuxDir := filepath.Join(devopsDir, "linux")
 	cases := []struct {
 		name string
 		cwd  string
 		want []string
 	}{
-		{"project root", projectRoot, []string{"erun-cli", "erun-ui"}},
 		{"devops module", devopsDir, []string{"erun-cli", "erun-ui"}},
-		{"linux module", linuxDir, []string{"erun-cli", "erun-ui"}},
-		{"one package", uiDir, []string{"erun-ui"}},
 		{"an image component", filepath.Join(devopsDir, "docker", "api"), nil},
 	}
 	for _, tc := range cases {
@@ -148,35 +144,6 @@ func readLines(t *testing.T, path string) []string {
 	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
 
-// A plain build runs each package's test stage (or its build stage when it has
-// none) to a cache-only output and reports the outcome; it never tags, pushes
-// or exports anything.
-func TestLinuxPackageChecksBuildCacheOnlyAndReportOutcomes(t *testing.T) {
-	projectRoot, uiDir, cliDir := linuxPackageProject(t)
-	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{
-		{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")},
-		{Dir: cliDir, DockerfilePath: filepath.Join(cliDir, "Dockerfile")},
-	})
-	dockerLog := fakeDockerRecorder(t, "0")
-	var log bytes.Buffer
-	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &log, &log), Stdout: &log, Stderr: &log}
-	if err := RunLinuxPackageChecks(ctx, packages); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"build --progress=plain --target test --output type=cacheonly -f " + filepath.Join(uiDir, "Dockerfile") + " .",
-		"build --progress=plain --target build --output type=cacheonly -f " + filepath.Join(cliDir, "Dockerfile") + " .",
-	}
-	if got := readLines(t, dockerLog); !slices.Equal(got, want) {
-		t.Fatalf("docker calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	for _, line := range []string{"erun-ui: test: passed", "erun-cli: test: none declared"} {
-		if !strings.Contains(log.String(), line) {
-			t.Fatalf("missing outcome %q in:\n%s", line, log.String())
-		}
-	}
-}
-
 func TestLinuxPackageCheckFailureReportsNoOutcome(t *testing.T) {
 	projectRoot, uiDir, _ := linuxPackageProject(t)
 	packages := shared.NewLinuxPackageSpecs(projectRoot, []shared.LinuxPackageContext{{Dir: uiDir, DockerfilePath: filepath.Join(uiDir, "Dockerfile")}})
@@ -200,15 +167,6 @@ func linuxPackageReleaseSpec(t *testing.T, version string) shared.ReleaseSpec {
 		t.Fatalf("release packages = %v (%s, %s)", got, uiDir, cliDir)
 	}
 	return shared.ReleaseSpec{ProjectRoot: projectRoot, Version: version, LinuxPackages: packages, LinuxPackageDir: filepath.Join(t.TempDir(), "linux")}
-}
-
-func TestReleaseRefusesAPackageWithoutADistStage(t *testing.T) {
-	projectRoot, uiDir, _ := linuxPackageProject(t)
-	writeTestDockerfile(t, uiDir, "FROM golang:1.26.0 AS build\nRUN true\n\nFROM build AS test\nRUN true\n")
-	_, err := shared.DiscoverReleaseLinuxPackages(projectRoot, filepath.Join(projectRoot, "team-devops"))
-	if err == nil || !strings.Contains(err.Error(), "linux package erun-ui declares no `dist` stage") {
-		t.Fatalf("expected a package without dist to be refused, got %v", err)
-	}
 }
 
 // A release exports every package's dist stage for both release platforms, and

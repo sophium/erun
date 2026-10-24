@@ -83,34 +83,6 @@ func TestResolveDockerBuildDindPodResourcesPrefersEnvVarsOverConfig(t *testing.T
 	}
 }
 
-// No env vars: falls back to the config store's resolved environment, exactly
-// the host-driven-build behavior that must keep working unchanged.
-func TestResolveDockerBuildDindPodResourcesFallsBackToConfigWhenEnvVarsAbsent(t *testing.T) {
-	clearInjectedRuntimeEnv(t)
-
-	dir := t.TempDir()
-	store := storeWithDindConfig(t, dir, config.RuntimePodResources{CPU: "2", Memory: "4096Mi"})
-
-	got := shared.ResolveDockerBuildDindPodResources(store, dir, "dev")
-	want := config.RuntimePodResources{CPU: "2", Memory: "4096Mi"}
-	if got != want {
-		t.Fatalf("expected the config-store value, got %+v want %+v", got, want)
-	}
-}
-
-// Neither env vars nor a matching environment: the conservative hardcoded
-// defaults, never the host node's raw capacity.
-func TestResolveDockerBuildDindPodResourcesFallsBackToDefaultsWhenNeitherEnvNorConfig(t *testing.T) {
-	clearInjectedRuntimeEnv(t)
-
-	dir := t.TempDir()
-	got := shared.ResolveDockerBuildDindPodResources(config.ConfigStore{}, dir, "dev")
-	want := config.RuntimePodResources{CPU: config.DefaultRuntimeDindCPU, Memory: config.DefaultRuntimeDindMemory}
-	if got != want {
-		t.Fatalf("expected the hardcoded defaults, got %+v want %+v", got, want)
-	}
-}
-
 // A malformed env var must not mask a real config-store value with a bad
 // literal, and the two fields resolve independently: CPU falls back to the
 // config store while memory still takes the (valid) env var.

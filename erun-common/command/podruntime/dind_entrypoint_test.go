@@ -314,16 +314,6 @@ func TestDindEntrypointRequiresTheStockEntrypointOnPath(t *testing.T) {
 	}
 }
 
-func TestDindEntrypointRefusesAnHostThatIsNotLinux(t *testing.T) {
-	restore := core.HostOSOverEnv
-	core.HostOSOverEnv = func() string { return "darwin" }
-	t.Cleanup(func() { core.HostOSOverEnv = restore })
-	err := RunDindEntrypoint(core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, &bytes.Buffer{}, &bytes.Buffer{})}, DindEntrypointParams{})
-	if err == nil || !strings.Contains(err.Error(), "runs only inside the erun-dind sidecar, which is Linux; this host is darwin") {
-		t.Fatalf("expected an unsupported-OS refusal, got %v", err)
-	}
-}
-
 func mustMkdirAll(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

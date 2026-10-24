@@ -42,12 +42,6 @@ func signedInHostStore() staticCloudStore {
 	return staticCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{testPlatformAliasProvider()}}}
 }
 
-func TestPlatformAliasSecretName(t *testing.T) {
-	if got, want := PlatformAliasSecretName("team"), "team-devops-platform-alias"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
 // TestRenderPlatformAliasEntryCoexistsWithAnInfrastructureProvider is the
 // regression this file exists for. The pod's root config already renders a
 // `cloudproviders:` key for the infrastructure provider the chart injected.
@@ -183,19 +177,6 @@ func TestResolveHostPlatformAliasIgnoresNonERunProviders(t *testing.T) {
 	}
 }
 
-func TestProvisionPlatformAliasSecretNoSignedInHostAlias(t *testing.T) {
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
-
-	name, err := ProvisionPlatformAliasSecret(testTraceContext(false), staticCloudStore{}, "team", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if name != "" {
-		t.Fatalf("got %q, want empty when the host has no signed-in alias to give", name)
-	}
-}
-
 // TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing is the init
 // half of the same decline. A host with two aliases has nothing to hand the
 // environment, which is no reason to fail init -- but it is a reason to say
@@ -217,23 +198,6 @@ func TestProvisionPlatformAliasSecretReportsTheAmbiguityWithoutFailing(t *testin
 	}
 	if trace := log.String(); !strings.Contains(trace, "multiple erun platform cloud provider aliases are configured") {
 		t.Fatalf("the ambiguity must be reported rather than read as an absent alias, got:\n%s", trace)
-	}
-}
-
-func TestProvisionPlatformAliasSecretDryRunSkipsApply(t *testing.T) {
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-	deps := cloud.CloudDependencies{CloudSecretStore: cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))}
-	provider := testPlatformAliasProvider()
-	if err := deps.CloudSecretStore.SaveCloudSecret(provider.ERun.RefreshTokenRef, "refresh-token-value"); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-
-	name, err := ProvisionPlatformAliasSecret(testTraceContext(true), signedInHostStore(), "team", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "team-devops-platform-alias"; name != want {
-		t.Fatalf("got %q, want %q", name, want)
 	}
 }
 

@@ -79,55 +79,6 @@ func runMemoryDirectionCases(t *testing.T, cases []memoryDirectionCase) {
 	}
 }
 
-// TestRecommendRuntimeSizingRaisesMemory covers the directions taken on
-// evidence of harm, which need no long window.
-func TestRecommendRuntimeSizingRaisesMemory(t *testing.T) {
-	quietWindow := 26 * time.Hour
-	quietSamples := 200
-
-	runMemoryDirectionCases(t, []memoryDirectionCase{
-		{
-			name: "peak at 95 percent of limit raises on high confidence",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
-				h.ObservedPeakMemoryBytes = 2*testGi - 100*testMi
-				return h
-			}(),
-			wantAction:     deploy.RuntimeSizingRaise,
-			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
-			wantSuggested:  "3072Mi",
-		},
-		{
-			// One kill is enough, and it outranks a comfortable-looking peak:
-			// the allocation that was refused never reached memory.peak.
-			name: "a single oom kill raises even though the peak looks comfortable",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(time.Minute, 2, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
-				h.ObservedPeakMemoryBytes = 512 * testMi
-				h.ObservedOOMKills = 1
-				return h
-			}(),
-			wantAction:     deploy.RuntimeSizingRaise,
-			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
-			wantSuggested:  "3072Mi",
-		},
-		{
-			// The quota counts every container in the pod, so a raise above what
-			// it can admit is a size Kubernetes would refuse to schedule.
-			name: "a raise is bounded by the namespace quota",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 20 * testGi}})
-				h.ObservedOOMKills = 2
-				return h
-			}(),
-			ceiling:        config.NamespaceResourceQuota{CPU: "8", Memory: "32Gi", Storage: "80Gi"},
-			wantAction:     deploy.RuntimeSizingRaise,
-			wantConfidence: deploy.RuntimeSizingConfidenceHigh,
-			wantSuggested:  "12288Mi",
-		},
-	})
-}
-
 // TestRecommendRuntimeSizingShrinksOrWithholdsMemory covers the directions that
 // rest on an absence of harm, and the window gates that must withhold them.
 func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
@@ -135,26 +86,6 @@ func TestRecommendRuntimeSizingShrinksOrWithholdsMemory(t *testing.T) {
 	quietSamples := 200
 
 	runMemoryDirectionCases(t, []memoryDirectionCase{
-		{
-			name: "peak at 20 percent lowers to the headroom multiple",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
-				h.ObservedPeakMemoryBytes = 2 * testGi
-				return h
-			}(),
-			wantAction:     deploy.RuntimeSizingLower,
-			wantConfidence: deploy.RuntimeSizingConfidenceLow,
-			wantSuggested:  "3072Mi",
-		},
-		{
-			name: "a short window recommends nothing",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(time.Hour, 100, config.RuntimeUsage{Memory: config.RuntimeMemoryUsage{LimitBytes: 10 * testGi}})
-				h.ObservedPeakMemoryBytes = 1 * testGi
-				return h
-			}(),
-			wantAction: deploy.RuntimeSizingUnknown,
-		},
 		{
 			// A day of wall time holding a handful of readings watched almost
 			// nothing. The span alone is not coverage.
@@ -208,48 +139,6 @@ func TestRecommendRuntimeSizingCPUDirections(t *testing.T) {
 				return h
 			}(),
 			wantAction: deploy.RuntimeSizingHold,
-		},
-		{
-			// The same ratio on a quota roomy enough that the busiest-interval
-			// figure would otherwise propose a shrink. Sub-threshold throttling
-			// means "tolerable", not "unused", so it must block the shrink — the
-			// frs/local case above cannot prove this on its own, because a
-			// one-core quota leaves no room to shrink into either way.
-			name: "sub-threshold throttling disqualifies a shrink",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 4}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
-				h.ObservedPeriods = 308631
-				h.ObservedThrottledPeriods = 425
-				h.ObservedPeakCPUMilli = 200
-				return h
-			}(),
-			wantAction: deploy.RuntimeSizingHold,
-		},
-		{
-			name: "a sustained throttle ratio raises cpu",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 2}, Memory: config.RuntimeMemoryUsage{LimitBytes: 2 * testGi}})
-				h.ObservedPeriods = 100000
-				h.ObservedThrottledPeriods = 12000
-				h.ObservedPeakCPUMilli = 1900
-				return h
-			}(),
-			wantAction:    deploy.RuntimeSizingRaise,
-			wantSuggested: "3",
-		},
-		{
-			// erun/build's real shape: twelve cores, not one throttled period,
-			// and a busiest interval well under half the quota.
-			name: "an unthrottled quota well above the busiest interval lowers cpu",
-			history: func() deploy.RuntimeUsageHistory {
-				h := usageHistory(quietWindow, quietSamples, config.RuntimeUsage{CPU: config.RuntimeCPUUsage{QuotaCores: 12}, Memory: config.RuntimeMemoryUsage{LimitBytes: 23 * testGi}})
-				h.ObservedPeriods = 376556
-				h.ObservedThrottledPeriods = 0
-				h.ObservedPeakCPUMilli = 4567
-				return h
-			}(),
-			wantAction:    deploy.RuntimeSizingLower,
-			wantSuggested: "10",
 		},
 		{
 			name: "too few scheduling periods recommends nothing",

@@ -2,58 +2,9 @@ package shared
 
 import (
 	"errors"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
-
-	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/gitx"
 )
-
-// The two directions of the misdiagnosed release push, as unit tests over the
-// push itself.
-//
-// The release pushes main, develop and the tag in one command. Only a base
-// branch that moved is repaired by rebasing the base branch; a develop rejected
-// as a non-fast-forward is a different failure, and rebasing main onto an
-// origin/main that never moved spends every retry without ever touching the ref
-// git refused.
-
-// developRejection is the 1.0.258 shape: main pushed, develop was rejected as a
-// non-fast-forward because another release had advanced origin/develop while
-// this release's own sync-develop added commits locally.
-const developRejection = "To github.com:sophium/erun.git\n" +
-	"   46e01916..ae29151f  main -> main\n" +
-	" ! [rejected]        develop -> develop (non-fast-forward)\n" +
-	"error: failed to push some refs to 'github.com:sophium/erun.git'\n"
-
-const movedMainRejection = "To github.com:sophium/erun.git\n" +
-	" * [new tag]         v1.4.2 -> v1.4.2\n" +
-	" ! [rejected]        main -> main (fetch first)\n" +
-	"error: failed to push some refs to 'github.com:sophium/erun.git'\n"
-
-// recordingReleasePushRunner stands in for git's push. It fails the first push
-// with the given rejection, then succeeds, recording every invocation so a test
-// can assert which remediation ran — the point is that the wrong
-// one did.
-func recordingReleasePushRunner(rejection string) (gitx.GitCommandRunnerFunc, *[][]string) {
-	calls := &[][]string{}
-	pushed := false
-	runner := func(root string, stdout, stderr io.Writer, args ...string) error {
-		*calls = append(*calls, append([]string{}, args...))
-		if args[0] != "push" {
-			return nil
-		}
-		if pushed {
-			return nil
-		}
-		pushed = true
-		_, _ = fmt.Fprint(stderr, rejection)
-		return errors.New("exit status 1")
-	}
-	return runner, calls
-}
 
 func releasePushTestSpec() ReleaseSpec {
 	return ReleaseSpec{
@@ -63,99 +14,12 @@ func releasePushTestSpec() ReleaseSpec {
 	}
 }
 
-func releasePushTestCommand(dir string) ReleaseCommandSpec {
-	return ReleaseCommandSpec{
-		Dir:  dir,
-		Name: "git",
-		Args: []string{"push", "--follow-tags", "origin", "main", "develop"},
-	}
-}
-
-func releasePushTestContext() core.Context {
-	return core.Context{Stdout: io.Discard, Stderr: io.Discard}
-}
-
-func TestReleasePushRejectionOfDevelopIsNotAttributedToMainHavingMoved(t *testing.T) {
-	runGit, calls := recordingReleasePushRunner(developRejection)
-
-	err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit)
-	if err == nil {
-		t.Fatal("a rejected develop must fail the release")
-	}
-
-	message := err.Error()
-	if !strings.Contains(message, "develop") || !strings.Contains(message, "non-fast-forward") {
-		t.Fatalf("the error must name the rejected ref and git's own reason, got:\n%s", message)
-	}
-	if strings.Contains(message, "origin/main moved during the release") {
-		t.Fatalf("a develop rejection must not be attributed to origin/main having moved, got:\n%s", message)
-	}
-	// The silent half: the error has to say what is still missing rather
-	// than read as the pre-publication shape whose recovery would delete a
-	// public tag.
-	if !strings.Contains(message, "GitHub Release") || !strings.Contains(message, "do not delete tag v1.4.2") {
-		t.Fatalf("the error must name the missing GitHub Release object and warn against deleting the tag, got:\n%s", message)
-	}
-
-	assertNoUnrequestedRemediation(t, *calls)
-}
-
-// assertNoUnrequestedRemediation pins the other half of the develop case: the
-// rejected ref was develop, so no fetch, rebase, or retry may run at all.
-func assertNoUnrequestedRemediation(t *testing.T, calls [][]string) {
-	t.Helper()
-	for _, call := range calls {
-		if call[0] == "rebase" || call[0] == "fetch" {
-			t.Fatalf("a develop rejection must not rebase or fetch, ran %v", call)
-		}
-	}
-	if len(calls) != 1 {
-		t.Fatalf("a develop rejection must not be retried, ran %d git commands: %v", len(calls), calls)
-	}
-}
-
-func TestReleasePushRetryRebasesTheBaseBranchThatActuallyMoved(t *testing.T) {
-	runGit, calls := recordingReleasePushRunner(movedMainRejection)
-
-	if err := RunReleaseBranchPush(releasePushTestContext(), releasePushTestSpec(), releasePushTestCommand(t.TempDir()), runGit); err != nil {
-		t.Fatalf("a base branch that moved must still be absorbed, got: %v", err)
-	}
-
-	var rebased, repushed bool
-	for _, call := range *calls {
-		switch call[0] {
-		case "fetch", "rebase":
-			if call[0] == "rebase" {
-				rebased = true
-			}
-		case "push":
-			repushed = true
-		}
-	}
-	if !rebased {
-		t.Fatalf("a moved base branch must be rebased onto, ran %v", *calls)
-	}
-	if !repushed || len(*calls) < 3 {
-		t.Fatalf("the push must be retried after the rebase, ran %v", *calls)
-	}
-}
-
 func TestParseReleasePushRejections(t *testing.T) {
 	cases := []struct {
 		name   string
 		output string
 		want   []ReleasePushRejection
 	}{
-		{
-			name:   "develop non-fast-forward alongside a landed main",
-			output: developRejection,
-			want:   []ReleasePushRejection{{Ref: "develop", Reason: "non-fast-forward"}},
-		},
-		{
-			name:   "a base branch rejected because the remote moved first",
-			output: movedMainRejection,
-			want:   []ReleasePushRejection{{Ref: "main", Reason: "fetch first"}},
-		},
 		{
 			name:   "several refs rejected at once",
 			output: " ! [rejected]        main -> main (fetch first)\n ! [rejected]        develop -> develop (non-fast-forward)\n",
@@ -344,18 +208,6 @@ func TestReleasePushRejectedTheMovedBaseBranch(t *testing.T) {
 		wantRebase bool
 		why        string
 	}{
-		{
-			name:       "the base branch moved",
-			output:     movedMainRejection,
-			branch:     "main",
-			wantRebase: true,
-		},
-		{
-			name:   "develop diverged while main was never rejected",
-			output: developRejection,
-			branch: "main",
-			why:    "rebasing main onto an unmoved origin/main is a no-op",
-		},
 		{
 			name:   "the base branch was rejected together with another ref",
 			output: " ! [rejected]        main -> main (fetch first)\n ! [rejected]        develop -> develop (non-fast-forward)\n",

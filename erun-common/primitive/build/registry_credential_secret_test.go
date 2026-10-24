@@ -1,16 +1,9 @@
 package build
 
 import (
-	"io"
 	"os"
 	"testing"
-
-	"github.com/sophium/erun/erun-common/base/core"
 )
-
-func testTraceContext(dryRun bool) core.Context {
-	return core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard), DryRun: dryRun}
-}
 
 // failingBinaryPath writes a script that fails the test if ever executed, so a
 // test asserting "kubectl must not run" catches a regression as a hard

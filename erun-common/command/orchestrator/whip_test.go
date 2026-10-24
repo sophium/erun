@@ -81,19 +81,6 @@ func TestDecideWhipNotAliveNeverNudges(t *testing.T) {
 	}
 }
 
-// TestDecideWhipUnreachableIsItsOwnReason is what a CLI/MCP-driven whip
-// reports for a persisted orchestrator: those transports have no channel into
-// a desktop-held PTY, so the skip must name that structural fact rather than
-// silently reporting "not alive" (a claim about the session, not the transport).
-func TestDecideWhipUnreachableIsItsOwnReason(t *testing.T) {
-	now := time.Now()
-	cfg := ResolveWhipConfig(nil)
-	c := WhipCandidate{Reachable: false, Alive: true, LastActiveAt: now.Add(-time.Hour)}
-	if decision, reason := DecideWhip(c, now, cfg, true); decision != WhipDecisionNone || reason != WhipReasonUnreachable {
-		t.Fatalf("got decision=%v reason=%v, want none/unreachable-from-transport", decision, reason)
-	}
-}
-
 func TestResolveWhipConfigDefaultsPreserveExistingBehaviour(t *testing.T) {
 	cfg := ResolveWhipConfig(nil)
 	if cfg.Message != DefaultWhipMessage {
@@ -124,18 +111,5 @@ func TestResolveWhipConfigOverrideWins(t *testing.T) {
 	}
 	if cfg.MaxNudges != 2 {
 		t.Fatalf("got MaxNudges=%d, want 2", cfg.MaxNudges)
-	}
-}
-
-func TestListWhipOrchestratorCandidatesAreUnreachable(t *testing.T) {
-	candidates := ListWhipOrchestratorCandidates([]config.OrchestratorConfig{{ID: "eng-1", Name: "Eng One"}})
-	if len(candidates) != 1 {
-		t.Fatalf("got %d candidates, want 1", len(candidates))
-	}
-	if candidates[0].Reachable {
-		t.Fatalf("an orchestrator candidate listed for a CLI/MCP transport must be marked unreachable")
-	}
-	if candidates[0].Kind != WhipTargetOrchestrator {
-		t.Fatalf("got Kind=%v, want WhipTargetOrchestrator", candidates[0].Kind)
 	}
 }

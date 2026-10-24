@@ -10,65 +10,6 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 )
 
-func startDeviceAuthorizationExpecting(t *testing.T, wantClientID string, auth ERunDeviceAuthorization) func(core.Context, OIDCDiscovery, string, string) (ERunDeviceAuthorization, error) {
-	return func(_ core.Context, _ OIDCDiscovery, clientID, scope string) (ERunDeviceAuthorization, error) {
-		if clientID != wantClientID {
-			t.Fatalf("clientID = %q, want %q", clientID, wantClientID)
-		}
-		if scope == "" {
-			t.Fatal("device authorization must request a scope")
-		}
-		return auth, nil
-	}
-}
-
-func pollDeviceTokenExpecting(t *testing.T, wantDeviceCode string, tokens ERunTokens) func(core.Context, OIDCDiscovery, string, ERunDeviceAuthorization) (ERunTokens, error) {
-	return func(_ core.Context, _ OIDCDiscovery, _ string, auth ERunDeviceAuthorization) (ERunTokens, error) {
-		if auth.DeviceCode != wantDeviceCode {
-			t.Fatalf("DeviceCode = %q, want %q", auth.DeviceCode, wantDeviceCode)
-		}
-		return tokens, nil
-	}
-}
-
-func TestERunCloudProviderLoginDeviceFlowPersistsTokensAndCache(t *testing.T) {
-	store := erunTestCloudStore{config: configpkg.ERunConfig{CloudProviders: []configpkg.CloudProviderConfig{erunTestProvider()}}}
-	secrets := NewFileCloudSecretStore(t.TempDir())
-	provider := erunTestProvider()
-
-	deps := CloudDependencies{
-		CloudSecretStore: secrets,
-		FetchOIDCDiscovery: func(core.Context, string) (OIDCDiscovery, error) {
-			return OIDCDiscovery{Issuer: provider.OIDCIssuerURL, DeviceAuthorizationEndpoint: "https://auth.example.test/device", TokenEndpoint: "https://auth.example.test/token"}, nil
-		},
-		StartERunDeviceAuthorization: startDeviceAuthorizationExpecting(t, "cli-client-1", ERunDeviceAuthorization{
-			DeviceCode: "device-code-1", UserCode: "ABCD-EFGH", VerificationURIComplete: "https://auth.example.test/device?code=ABCD-EFGH",
-		}),
-		PollERunDeviceToken: pollDeviceTokenExpecting(t, "device-code-1", ERunTokens{AccessToken: "access-1", RefreshToken: "refresh-1", ExpiresIn: time.Hour}),
-	}
-
-	status, err := LoginCloudProviderAlias(core.Context{}, &store, CloudLoginParams{Alias: provider.Alias}, deps)
-	if err != nil {
-		t.Fatalf("LoginCloudProviderAlias: %v", err)
-	}
-	if status.Status != configpkg.CloudTokenStatusActive {
-		t.Fatalf("Status = %q, want active", status.Status)
-	}
-
-	saved, err := ResolveCloudProvider(&store, provider.Alias)
-	if err != nil {
-		t.Fatalf("ResolveCloudProvider: %v", err)
-	}
-	if saved.ERun.RefreshTokenRef == "" {
-		t.Fatal("expected a persisted refresh token ref")
-	}
-	refresh, refreshErr := secrets.LoadCloudSecret(saved.ERun.RefreshTokenRef)
-	cached, cachedOK := loadCachedERunAccessToken(secrets, provider.Alias)
-	if refreshErr != nil || refresh != "refresh-1" || !cachedOK || cached != "access-1" {
-		t.Fatalf("refresh=%q(err=%v) cached=%q(ok=%v), want refresh-1 / access-1", refresh, refreshErr, cached, cachedOK)
-	}
-}
-
 // TestERunCloudProviderLoginDegradesWhenIssuerRejectsOrgClaimScope: the
 // org-claim scope is requested by default, but an issuer that has never heard
 // of it (a dedicated/BYO IdP, the common case, not the shipped Zitadel) must

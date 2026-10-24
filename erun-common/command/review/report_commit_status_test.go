@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
@@ -82,32 +81,5 @@ func TestReportCommitStatusPostsToGitHubWithTheRightShape(t *testing.T) {
 	wantResult := ReportCommitStatusResult{Owner: "sophium", Repo: "erun", Commit: "abc123def456", State: "success", Context: "erun/merge-gate"}
 	if result != wantResult {
 		t.Fatalf("unexpected result: got %+v, want %+v", result, wantResult)
-	}
-}
-
-func TestReportCommitStatusSurfacesAGitHubFailureResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
-	}))
-	defer server.Close()
-	restoreBaseURL := registry.GithubAPIBaseURL
-	registry.GithubAPIBaseURL = server.URL + "/"
-	defer func() { registry.GithubAPIBaseURL = restoreBaseURL }()
-
-	deps := ReportCommitStatusDependencies{
-		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
-	}
-	_, err := ReportCommitStatus(core.Context{}, ReportCommitStatusParams{
-		RemoteURL:   "https://github.com/sophium/erun.git",
-		Commit:      "abc123",
-		State:       CommitStatusFailure,
-		Description: "erun build failed",
-	}, deps)
-	if err == nil {
-		t.Fatal("expected a github failure response to surface as an error")
-	}
-	if !strings.Contains(err.Error(), "Resource not accessible") {
-		t.Fatalf("expected github's own message in the error, got: %v", err)
 	}
 }

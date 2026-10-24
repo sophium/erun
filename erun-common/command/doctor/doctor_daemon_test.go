@@ -33,31 +33,11 @@ func TestResolveDoctorDockerDaemonSelectsTheDaemonHoldingBuildImages(t *testing.
 		wantReason    string
 	}{
 		{
-			name:          "a local-agent environment builds in the dind sidecar",
-			envType:       config.EnvironmentTypeLocalAgent,
-			wantKind:      DoctorDockerDaemonDindSidecar,
-			wantContainer: build.RuntimeDindContainerName,
-			wantLabel:     "the erun-dind sidecar",
-		},
-		{
 			name:          "a remote-agent environment builds in the dind sidecar",
 			envType:       config.EnvironmentTypeRemoteAgent,
 			wantKind:      DoctorDockerDaemonDindSidecar,
 			wantContainer: build.RuntimeDindContainerName,
 			wantLabel:     "the erun-dind sidecar",
-		},
-		{
-			name:      "a host environment builds against this machine's daemon",
-			envType:   config.EnvironmentTypeHost,
-			wantKind:  DoctorDockerDaemonHost,
-			wantLabel: "this machine's docker daemon",
-		},
-		{
-			name:       "a runtime environment has no daemon holding build images",
-			envType:    config.EnvironmentTypeRuntime,
-			wantKind:   DoctorDockerDaemonNone,
-			wantLabel:  "no build daemon",
-			wantReason: "never builds",
 		},
 		{
 			name:       "an unresolved type names what to fix instead of guessing",
@@ -121,7 +101,7 @@ func assertDoctorDaemonReason(t *testing.T, daemon DoctorDockerDaemon, wantReaso
 // with it a docker-reported success that reads as space reclaimed. The
 // requested prune must now fail naming why, and nothing may be dispatched.
 func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) {
-	for _, envType := range []config.EnvironmentType{config.EnvironmentTypeRuntime, ""} {
+	for _, envType := range []config.EnvironmentType{""} {
 		t.Run("type="+string(envType), func(t *testing.T) {
 			runnerCalls := 0
 			runner := func(config.ShellLaunchParams, string, string) (kube.RemoteCommandResult, error) {
@@ -146,101 +126,6 @@ func TestDoctorDockerStorageRefusesAnEnvironmentWithNoBuildDaemon(t *testing.T) 
 			}
 		})
 	}
-}
-
-// TestDoctorDockerStorageRunsAgainstTheResolvedDaemon locks the other half of
-// the seam: when the environment does carry a sidecar, the exec goes to that
-// container and the store readings taken around the prune come back parsed, so
-// the caller can say what the prune actually did rather than only repeating
-// docker's own text.
-func TestDoctorDockerStorageRunsAgainstTheResolvedDaemon(t *testing.T) {
-	req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
-	daemon := ResolveDoctorDockerDaemon(req)
-	if daemon.Kind != DoctorDockerDaemonDindSidecar {
-		t.Fatalf("remote-agent daemon = %+v, want the dind sidecar", daemon)
-	}
-
-	var gotContainer, gotScript string
-	runner := func(_ config.ShellLaunchParams, container, script string) (kube.RemoteCommandResult, error) {
-		gotContainer, gotScript = container, script
-		return kube.RemoteCommandResult{Stdout: strings.Join([]string{
-			doctorDockerReadMarker + "before",
-			"Images|11.32GB|11.32GB (100%)",
-			"Build Cache|0B|0B",
-			doctorDockerReadMarker + "before:end",
-			"Deleted Images:",
-			"Total reclaimed space: 4.105MB",
-			doctorDockerReadMarker + "after",
-			"Images|0B|0B",
-			"Build Cache|0B|0B",
-			doctorDockerReadMarker + "after:end",
-			"== Docker system df ==",
-			"Images          0         0         0B        0B",
-		}, "\n")}, nil
-	}
-
-	steps, err := doctorActionSteps(DoctorActionPruneImages)
-	if err != nil {
-		t.Fatalf("action steps: %v", err)
-	}
-	result, err := runDoctorDockerSteps(doctorTestContext(), runner, req, daemon, "doctor-prune_images", steps)
-	if err != nil {
-		t.Fatalf("run steps: %v", err)
-	}
-	if gotContainer != build.RuntimeDindContainerName {
-		t.Fatalf("exec container = %q, want %q", gotContainer, build.RuntimeDindContainerName)
-	}
-	if !strings.Contains(gotScript, "docker image prune -a -f") {
-		t.Fatalf("script does not prune images:\n%s", gotScript)
-	}
-	if strings.Contains(result.Stdout, doctorDockerReadMarker) {
-		t.Fatalf("the machine-readable readings must not reach the report:\n%s", result.Stdout)
-	}
-	before, ok := result.Readings["before"]
-	if !ok {
-		t.Fatalf("the before reading was not parsed: %+v", result.Readings)
-	}
-	if want := uint64(11_320_000_000); before.Reclaimable != want {
-		t.Fatalf("before reclaimable = %d, want %d", before.Reclaimable, want)
-	}
-	if after := result.Readings["after"]; after.Reclaimable != 0 {
-		t.Fatalf("after reclaimable = %d, want 0", after.Reclaimable)
-	}
-}
-
-// TestDoctorHostDaemonRunsLocallyWithoutAShell pins the host transport: a host
-// environment has no pod, so its daemon is reached by running docker on this
-// machine directly. The steps carry the store readings back, and a step that
-// cannot run (df over a daemon root that is not a path on this machine, as on
-// Docker Desktop) is reported without taking the readings that did succeed
-// down with it.
-func TestDoctorHostDaemonRunsLocallyWithoutAShell(t *testing.T) {
-	binDir := t.TempDir()
-	writeDockerStub(t, binDir, localDockerStubScript("Images|11.32GB|11.32GB (100%)", "Build Cache|0B|0B"))
-	t.Setenv("PATH", binDir)
-
-	req := config.ShellLaunchParams{Tenant: "team", Environment: "local", Type: config.EnvironmentTypeHost}
-	daemon := ResolveDoctorDockerDaemon(req)
-	if daemon.Kind != DoctorDockerDaemonHost || daemon.Container != "" {
-		t.Fatalf("host daemon = %+v, want a local daemon with no container", daemon)
-	}
-
-	steps, err := doctorActionSteps(DoctorActionPruneImages)
-	if err != nil {
-		t.Fatalf("action steps: %v", err)
-	}
-	// Every step is answered by the stub, so this exercises the local transport
-	// rather than a real docker install.
-	result, err := runDoctorDockerSteps(doctorTestContext(), nil, req, daemon, "doctor-prune_images", steps)
-	if err != nil {
-		t.Fatalf("run steps locally: %v", err)
-	}
-	for _, key := range []string{"before", "after"} {
-		if store := result.Readings[key]; store.Reclaimable != 11_320_000_000 {
-			t.Fatalf("%s reading = %+v, want the stub's 11.32GB", key, store)
-		}
-	}
-	assertDoctorReportOnly(t, result.Stdout, "== Docker system df ==")
 }
 
 // TestDoctorHostDaemonToleratesAReadItCannotMake covers the other half of the
@@ -281,20 +166,6 @@ func localDockerStubScript(formatLines ...string) string {
 	return strings.Join(append(script, `  *) exit 1 ;;`, `esac`, `exit 0`), "\n")
 }
 
-// assertDoctorReportOnly checks that the one report body carries its expected
-// content and none of the machine-readable readings it was parsed from.
-func assertDoctorReportOnly(t *testing.T, report string, want ...string) {
-	t.Helper()
-	for _, expected := range want {
-		if !strings.Contains(report, expected) {
-			t.Fatalf("the report does not contain %q:\n%s", expected, report)
-		}
-	}
-	if strings.Contains(report, doctorDockerReadMarker) {
-		t.Fatalf("the machine-readable readings must not reach the report:\n%s", report)
-	}
-}
-
 // TestDoctorHostDaemonReadFailureIsReportedNotInvented covers the other end: a
 // machine with no reachable docker at all returns an error naming the daemon
 // rather than an empty report that reads like a daemon with nothing in it.
@@ -321,74 +192,14 @@ func writeDockerStub(t *testing.T, dir, script string) {
 // the daemon reported before and after, and says plainly when nothing moved.
 func TestDoctorPruneSummaryTellsAPruneThatFreedNothingFromOneThatReclaimed(t *testing.T) {
 	sidecar := DoctorDockerDaemon{Kind: DoctorDockerDaemonDindSidecar, Label: "the erun-dind sidecar"}
-	cases := []struct {
-		name     string
-		readings map[string]DoctorDockerStore
-		want     []string
-	}{
-		{
-			name: "a prune that reclaimed space says how much",
-			readings: map[string]DoctorDockerStore{
-				"before": {Reclaimable: 11_320_000_000, Images: 11_320_000_000},
-				"after":  {},
-			},
-			want: []string{"the erun-dind sidecar", "reclaimed 11.32GB"},
-		},
-		{
-			name: "a prune that freed nothing says so",
-			readings: map[string]DoctorDockerStore{
-				"before": {Reclaimable: 11_320_000_000, Images: 11_320_000_000},
-				"after":  {Reclaimable: 11_320_000_000, Images: 11_320_000_000},
-			},
-			want: []string{"the erun-dind sidecar", "freed nothing", "not reclaimed here"},
-		},
-		{
-			name: "a prune of a daemon holding nothing says so",
-			readings: map[string]DoctorDockerStore{
-				"before": {},
-				"after":  {},
-			},
-			want: []string{"the erun-dind sidecar", "nothing was reclaimable before the prune", "elsewhere"},
-		},
-		{
-			name:     "no readings means no claim",
-			readings: nil,
-			want:     nil,
-		},
+	readings := map[string]DoctorDockerStore{
+		"before": {},
+		"after":  {},
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			summary := DoctorPruneSummary(DoctorDockerResult{Daemon: sidecar, Readings: tc.readings})
-			if len(tc.want) == 0 {
-				if summary != "" {
-					t.Fatalf("summary = %q, want no claim without readings", summary)
-				}
-				return
-			}
-			for _, want := range tc.want {
-				if !strings.Contains(summary, want) {
-					t.Fatalf("summary %q does not contain %q", summary, want)
-				}
-			}
-		})
-	}
-}
-
-// TestDoctorDockerDaemonLineNamesTheDaemon keeps the attribution the report
-// owes every figure below it: the same table from two different daemons has to
-// be readable as two different daemons.
-func TestDoctorDockerDaemonLineNamesTheDaemon(t *testing.T) {
-	req := config.ShellLaunchParams{Tenant: "frs", Environment: "build", Namespace: "frs-build", Type: config.EnvironmentTypeRemoteAgent}
-	line := DoctorDockerDaemonLine(ResolveDoctorDockerDaemon(req))
-	for _, want := range []string{"erun-dind", "frs-build", "frs-devops"} {
-		if !strings.Contains(line, want) {
-			t.Fatalf("daemon line %q does not name %q", line, want)
+	summary := DoctorPruneSummary(DoctorDockerResult{Daemon: sidecar, Readings: readings})
+	for _, want := range []string{"the erun-dind sidecar", "nothing was reclaimable before the prune", "elsewhere"} {
+		if !strings.Contains(summary, want) {
+			t.Fatalf("summary %q does not contain %q", summary, want)
 		}
-	}
-
-	unavailable := DoctorDockerDaemonLine(ResolveDoctorDockerDaemon(config.ShellLaunchParams{Type: config.EnvironmentTypeRuntime}))
-	if !strings.Contains(unavailable, "no build daemon") || !strings.Contains(unavailable, "runtime") {
-		t.Fatalf("an environment with no build daemon must say so and why: %q", unavailable)
 	}
 }

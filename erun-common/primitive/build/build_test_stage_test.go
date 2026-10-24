@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/infra/helm"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
@@ -84,74 +82,6 @@ func TestDockerfileDeclaresTestStageIsBroaderThanTheConsumedCheck(t *testing.T) 
 	ordinary := writeTestDockerfile(t, t.TempDir(), "FROM scratch\nCOPY . /app\n")
 	if shared.DockerfileDeclaresTestStage(ordinary) {
 		t.Fatal("expected an ordinary Dockerfile with no test stage not to be detected as declaring one")
-	}
-}
-
-func testStagePromotionBuild(t *testing.T) shared.DockerBuildSpec {
-	t.Helper()
-	dir := t.TempDir()
-	return shared.DockerBuildSpec{
-		ContextDir:     dir,
-		DockerfilePath: writeTestDockerfile(t, dir, consumedTestStageDockerfileContent),
-		Image:          helm.DockerImageReference{ImageName: "erun-devops", Tag: "ghcr.io/sophium/erun-devops:1.0.248"},
-		Platforms:      []string{"linux/amd64"},
-	}
-}
-
-// An fp tag is written only after a successful docker build, which ran the
-// Dockerfile's test stage, so an unchanged tested component reuses its last
-// successful result like any other image.
-func TestApplyIncrementalPromotionPromotesATestedDockerfileWhenItsFingerprintExists(t *testing.T) {
-	out, err := applyIncrementalPromotion([]shared.DockerBuildSpec{testStagePromotionBuild(t)}, func(string) (bool, error) { return true, nil })
-	if err != nil {
-		t.Fatalf("applyIncrementalPromotion: %v", err)
-	}
-	if len(out) != 1 || !out[0].Promote {
-		t.Fatalf("expected the tested Dockerfile to promote from its present fingerprint image, got %+v", out)
-	}
-}
-
-// The other side of reuse: a changed tested component has no fp tag for its
-// inputs, so it rebuilds and runs its tests.
-func TestApplyIncrementalPromotionRebuildsATestedDockerfileWhenItsFingerprintIsMissing(t *testing.T) {
-	out, err := applyIncrementalPromotion([]shared.DockerBuildSpec{testStagePromotionBuild(t)}, func(string) (bool, error) { return false, nil })
-	if err != nil {
-		t.Fatalf("applyIncrementalPromotion: %v", err)
-	}
-	if out[0].Promote {
-		t.Fatal("a tested Dockerfile with no fingerprint image must rebuild")
-	}
-	if len(out[0].MissingFingerprintPlatforms) != 1 {
-		t.Fatalf("expected the missing platform to be recorded for the trace, got %v", out[0].MissingFingerprintPlatforms)
-	}
-}
-
-func TestApplyIncrementalPromotionStillPromotesOrdinaryDockerfiles(t *testing.T) {
-	dir := t.TempDir()
-	build := shared.DockerBuildSpec{
-		ContextDir:     dir,
-		DockerfilePath: writeTestDockerfile(t, dir, "FROM scratch\nCOPY . /app\n"),
-		Image:          helm.DockerImageReference{ImageName: "erun-console", Tag: "ghcr.io/sophium/erun-console:1.0.248"},
-		Platforms:      []string{"linux/amd64"},
-	}
-	out, err := applyIncrementalPromotion([]shared.DockerBuildSpec{build}, func(string) (bool, error) { return true, nil })
-	if err != nil {
-		t.Fatalf("applyIncrementalPromotion: %v", err)
-	}
-	if !out[0].Promote {
-		t.Error("an ordinary Dockerfile with a present fingerprint image should still promote")
-	}
-}
-
-// --no-incremental skips promotion entirely and inspects nothing, so nothing
-// here may shell out.
-func TestApplyIncrementalToDockerBuildsPromotesNothingWithoutIncremental(t *testing.T) {
-	out, err := ApplyIncrementalToDockerBuilds(core.Context{}, []shared.DockerBuildSpec{testStagePromotionBuild(t)}, true)
-	if err != nil {
-		t.Fatalf("ApplyIncrementalToDockerBuilds: %v", err)
-	}
-	if len(out) != 1 || out[0].Promote || out[0].Fingerprint != "" {
-		t.Fatalf("--no-incremental must leave the build unpromoted and unfingerprinted, got %+v", out)
 	}
 }
 

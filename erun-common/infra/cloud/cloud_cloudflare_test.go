@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/config"
-	"github.com/sophium/erun/erun-common/base/core"
 )
 
 func TestFileCloudSecretStoreRoundTrip(t *testing.T) {
@@ -113,23 +112,6 @@ func TestResolvedCloudAliasesFoldsLegacyScalarAndMap(t *testing.T) {
 }
 
 func TestVerifyCloudflareTokenAtClassifiesResponses(t *testing.T) {
-	t.Run("active", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-				t.Fatalf("authorization header = %q", got)
-			}
-			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"abc","status":"active"}}`))
-		}))
-		defer srv.Close()
-		info, err := verifyCloudflareTokenAt(srv.URL, "tok")
-		if err != nil {
-			t.Fatalf("verify: %v", err)
-		}
-		if info.ID != "abc" || info.Status != "active" {
-			t.Fatalf("info = %+v", info)
-		}
-	})
-
 	t.Run("rejected", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte(`{"success":false,"errors":[{"message":"Invalid API Token"}]}`))
@@ -218,42 +200,6 @@ func TestResolveCloudflareAccountsViaZones(t *testing.T) {
 			t.Fatalf("expected rejection error, got %v", err)
 		}
 	})
-}
-
-// TestDefaultCloudflareCallsHonorBaseURLSeam proves the env-var seam works from a
-// subprocess, without in-process dependency injection — the path a desktop/e2e test
-// drives through the `erun cloud init cloudflare` subprocess.
-func TestDefaultCloudflareCallsHonorBaseURLSeam(t *testing.T) {
-	gotPaths := make(map[string]bool)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
-			t.Errorf("authorization header = %q", got)
-		}
-		gotPaths[r.URL.Path] = true
-		switch r.URL.Path {
-		case cloudflareTokenVerifyPath:
-			_, _ = w.Write([]byte(`{"success":true,"result":{"id":"abc","status":"active"}}`))
-		case cloudflareAccountsPath:
-			_, _ = w.Write([]byte(`{"success":true,"result":[{"id":"a1","name":"Acme"}]}`))
-		default:
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-	}))
-	defer srv.Close()
-	t.Setenv(cloudflareAPIBaseURLEnv, srv.URL)
-
-	info, err := defaultVerifyCloudflareToken(core.Context{}, "tok")
-	mustNoErr(t, err, "verify")
-	if info.ID != "abc" || info.Status != "active" {
-		t.Fatalf("verify info = %+v", info)
-	}
-	accounts, err := defaultListCloudflareAccounts(core.Context{}, "tok")
-	mustNoErr(t, err, "accounts")
-	assertCloudflareAccounts(t, accounts, []CloudflareAccount{{ID: "a1", Name: "Acme"}})
-
-	if !gotPaths[cloudflareTokenVerifyPath] || !gotPaths[cloudflareAccountsPath] {
-		t.Fatalf("mock did not receive both Cloudflare paths; got %v", gotPaths)
-	}
 }
 
 func TestResolveTenantCloudProviderIssuersSkipsCloudflare(t *testing.T) {

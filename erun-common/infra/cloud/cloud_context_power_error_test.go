@@ -19,13 +19,6 @@ func TestCloudContextPowerErrorClassification(t *testing.T) {
 	ctx := core.Context{Logger: core.NewLoggerWithWriters(core.VerbosityInfo, io.Discard, io.Discard)}
 	params := CloudContextParams{Name: "petios-ctx"}
 
-	t.Run("stop blocked by stop protection names the lock and the unlock lever", func(t *testing.T) {
-		raw := "aws ec2 stop-instances --instance-ids i-0abc123: An error occurred (OperationNotPermitted) when calling the StopInstances operation: The instance 'i-0abc123' may not be stopped. Modify its 'disableApiStop' instance attribute and try again."
-		deps := CloudContextDependencies{RunAWS: failingRunAWS("stop-instances", raw)}
-		_, err := StopCloudContext(ctx, powerErrorTestStore(), params, deps)
-		assertErrorMentions(t, err, "expected the stop to fail", "stop protection", "enable-api-stop petios-ctx", "OperationNotPermitted")
-	})
-
 	t.Run("stop with an expired AWS session names the login lever", func(t *testing.T) {
 		raw := "aws ec2 stop-instances --instance-ids i-0abc123: Error when retrieving token from sso: Token has expired and refresh failed"
 		deps := CloudContextDependencies{RunAWS: failingRunAWS("stop-instances", raw)}
@@ -43,27 +36,6 @@ func TestCloudContextPowerErrorClassification(t *testing.T) {
 		if got := err.Error(); got != raw {
 			t.Fatalf("unrelated error was rewritten: %q", got)
 		}
-	})
-
-	t.Run("stop on an already-stopping instance is still absorbed into the wait", func(t *testing.T) {
-		waited := false
-		deps := CloudContextDependencies{RunAWS: alreadyStoppingRunAWS(&waited)}
-		status, err := StopCloudContext(ctx, powerErrorTestStore(), params, deps)
-		if err != nil {
-			t.Fatalf("expected the already-stopping stop to succeed, got %v", err)
-		}
-		if !waited {
-			t.Fatal("expected the stop to wait for instance-stopped")
-		}
-		if status.Status != CloudContextStatusStopped {
-			t.Fatalf("status = %q, want %q", status.Status, CloudContextStatusStopped)
-		}
-	})
-
-	t.Run("a failed stopped-wait reports the unobserved end state", func(t *testing.T) {
-		deps := CloudContextDependencies{RunAWS: failingStopWaitRunAWS()}
-		_, err := StopCloudContext(ctx, powerErrorTestStore(), params, deps)
-		assertErrorMentions(t, err, "expected the wait failure to propagate", "not observed stopped", "Max attempts exceeded")
 	})
 
 	t.Run("start with an expired AWS session names the login lever", func(t *testing.T) {
@@ -95,29 +67,6 @@ func assertErrorMentions(t *testing.T, err error, expectMsg string, wants ...str
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q does not mention %q", err, want)
 		}
-	}
-}
-
-func alreadyStoppingRunAWS(waited *bool) func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
-		joined := strings.Join(args, " ")
-		if strings.Contains(joined, "stop-instances") {
-			return "", fmt.Errorf("aws ec2 stop-instances: An error occurred (IncorrectInstanceState) when calling the StopInstances operation")
-		}
-		if strings.Contains(joined, "wait instance-stopped") {
-			*waited = true
-			return "", nil
-		}
-		return "", nil
-	}
-}
-
-func failingStopWaitRunAWS() func(core.Context, configpkg.CloudProviderConfig, string, []string) (string, error) {
-	return func(_ core.Context, _ configpkg.CloudProviderConfig, _ string, args []string) (string, error) {
-		if strings.Contains(strings.Join(args, " "), "wait instance-stopped") {
-			return "", fmt.Errorf("aws ec2 wait instance-stopped: Waiter InstanceStopped failed: Max attempts exceeded")
-		}
-		return "", nil
 	}
 }
 

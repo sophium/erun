@@ -7,8 +7,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/config"
 )
 
-// TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort is the
-// reproduction for the environment whose api-port is not the canonical 17033.
+// TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort keeps the
+// canonical-block and no-port-block cases; the off-block reproduction is
+// erun-integration's open/api_forward_targets_the_environments_own_service_port.
 // The API component chart publishes its Service on `{{ default 17033
 // .Values.apiPort }}`, which the deploy sets from the environment's own port
 // block, so the remote side of the forward has to come from that same block.
@@ -29,12 +30,6 @@ func TestKubectlAPIPortForwardArgsResolvesTheEnvironmentsOwnServicePort(t *testi
 		wantLocal int
 		wantMap   string
 	}{
-		{
-			name:      "an env outside the 17000 block forwards to its own service port",
-			rangeSt:   17300,
-			wantLocal: 17333,
-			wantMap:   "17333:17333",
-		},
 		{
 			name:      "the canonical-block env still forwards to 17033",
 			rangeSt:   17000,

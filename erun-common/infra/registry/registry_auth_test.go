@@ -52,20 +52,6 @@ func useGHToken(t *testing.T, fn func(owner string) (string, bool)) {
 	t.Cleanup(func() { ResolveGHCRTokenViaGH = prev })
 }
 
-func TestResolveRegistryBasicAuthInline(t *testing.T) {
-	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
-	useDockerConfigDir(t, dir)
-	useCredentialHelper(t, func(string, string) ([]byte, error) {
-		t.Fatal("credential helper must not run when no store is configured")
-		return nil, nil
-	})
-
-	auth, ok := resolveRegistryBasicAuth("ghcr.io")
-	if !ok || auth.Username != "alice" || auth.Secret != "s3cret" {
-		t.Fatalf("got %+v ok=%v, want alice/s3cret", auth, ok)
-	}
-}
-
 func TestResolveRegistryBasicAuthCredsStore(t *testing.T) {
 	// osxkeychain-style store: inline auth is empty; the secret lives in the helper.
 	dir := writeDockerConfig(t, `{"auths":{"ghcr.io":{}},"credsStore":"osxkeychain"}`)

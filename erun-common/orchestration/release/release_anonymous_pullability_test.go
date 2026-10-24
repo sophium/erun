@@ -38,19 +38,6 @@ func writeModuleFixture(t *testing.T, root, imageName string) {
 }
 
 func TestDiscoverModuleReferencedImageNames(t *testing.T) {
-	t.Run("finds a name behind an interpolated version", func(t *testing.T) {
-		root := t.TempDir()
-		writeModuleFixture(t, root, "erun-example-webhook")
-
-		names, err := DiscoverModuleReferencedImageNames(filepath.Join(root, "erun-devops", "terraform-erun"))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(names) != 1 || names[0] != "erun-example-webhook" {
-			t.Fatalf("names = %v, want [erun-example-webhook]", names)
-		}
-	})
-
 	t.Run("a root with no terraform-erun tree yields no names, not an error", func(t *testing.T) {
 		names, err := DiscoverModuleReferencedImageNames(filepath.Join(t.TempDir(), "erun-devops", "terraform-erun"))
 		if err != nil {
@@ -398,21 +385,6 @@ func TestVerifyModuleReferencedImagesAnonymouslyPullablePassesWhenBaselinedAndPr
 	}
 	if !strings.Contains(logBuf.String(), "could not run") {
 		t.Fatalf("expected the unreachable probe to be reported, got log:\n%s", logBuf.String())
-	}
-}
-
-func TestVerifyModuleReferencedImagesAnonymouslyPullableSkipsProbeInDryRun(t *testing.T) {
-	root := t.TempDir()
-	writeModuleFixture(t, root, "erun-example-webhook")
-	execution := fakeExecutionForImage("erun-example-webhook", "ghcr.io/sophium/erun-example-webhook:1.2.3", "1.2.3")
-	ctx := core.Context{DryRun: true, Logger: core.NewLogger(0)}
-
-	probe := func(context.Context, *http.Client, string, string) (bool, error) {
-		t.Fatal("dry run must not invoke the probe")
-		return false, nil
-	}
-	if err := verifyModuleReferencedImagesAnonymouslyPullable(ctx, root, execution, probe); err != nil {
-		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

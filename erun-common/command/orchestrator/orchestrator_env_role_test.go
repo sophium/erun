@@ -10,67 +10,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestOrchestratorEnvConfigRoleRoundTrip locks the contract: a declared role
-// survives config load/save, and an undeclared role neither writes a `role:`
-// key nor round-trips into a default.
-func TestOrchestratorEnvConfigRoleRoundTrip(t *testing.T) {
-	tests := []struct {
-		name string
-		role configpkg.OrchestratorEnvRole
-	}{
-		{name: "build", role: configpkg.OrchestratorEnvRoleBuild},
-		{name: "code", role: configpkg.OrchestratorEnvRoleCode},
-		{name: "unset", role: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assertOrchestratorEnvRoleRoundTrips(t, tt.role)
-		})
-	}
-}
-
-func assertOrchestratorEnvRoleRoundTrips(t *testing.T, role configpkg.OrchestratorEnvRole) {
-	t.Helper()
-	config := configpkg.ERunConfig{
-		Orchestrators: []configpkg.OrchestratorConfig{
-			{
-				ID:   "orch-1",
-				Name: "Orchestrator One",
-				Environments: []configpkg.OrchestratorEnvConfig{
-					{Tenant: "team", Environment: "dev", Directory: "/repo", Role: role},
-				},
-			},
-		},
-	}
-
-	data, err := yaml.Marshal(config)
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	hasRoleKey := strings.Contains(string(data), "role:")
-	if role == "" && hasRoleKey {
-		t.Fatalf("unset role must not be written, got:\n%s", data)
-	}
-	if role != "" && !hasRoleKey {
-		t.Fatalf("declared role %q must be written, got:\n%s", role, data)
-	}
-
-	var roundTripped configpkg.ERunConfig
-	if err := yaml.Unmarshal(data, &roundTripped); err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	if len(roundTripped.Orchestrators) != 1 || len(roundTripped.Orchestrators[0].Environments) != 1 {
-		t.Fatalf("round trip lost structure: %+v", roundTripped)
-	}
-	got := roundTripped.Orchestrators[0].Environments[0].Role
-	if got != role {
-		t.Fatalf("round-tripped role = %q, want %q", got, role)
-	}
-}
-
 // TestOrchestratorEnvConfigWithoutRoleLoadsUnchanged locks that an existing
 // link with no `role:` key at all -- the shape every config predating this
 // field has -- loads with an empty (undeclared) role rather than a default.

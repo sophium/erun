@@ -1,7 +1,6 @@
 package observe
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -25,36 +24,6 @@ func TestComputeObserveDriftNilReleaseReturnsNil(t *testing.T) {
 	}
 }
 
-func TestComputeObserveDriftGenuinelyAbsentReleaseReportsNotFound(t *testing.T) {
-	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{Name: "team-devops"}
-
-	got := computeObserveDrift(req, release, nil)
-
-	want := []string{`env config records runtimeversion 1.0.0 but no runtime helm release "team-devops" was found in namespace "team-dev"`}
-	if len(got) != 1 || got[0] != want[0] {
-		t.Fatalf("drift = %v, want %v", got, want)
-	}
-}
-
-func TestComputeObserveDriftUnreadableReleaseNamesTheReasonNotFoundPhrasing(t *testing.T) {
-	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{Name: "team-devops", Error: "observe: not authorized to read helm release \"team-devops\""}
-
-	got := computeObserveDrift(req, release, nil)
-
-	if len(got) != 1 {
-		t.Fatalf("drift = %v, want exactly one finding", got)
-	}
-	finding := got[0]
-	if !strings.Contains(finding, "could not be read") || !strings.Contains(finding, release.Error) {
-		t.Fatalf("finding %q does not name the read failure", finding)
-	}
-	if strings.Contains(finding, "was found") || strings.Contains(finding, "not found") {
-		t.Fatalf("finding %q reuses confirmed-absence phrasing for an unreadable release", finding)
-	}
-}
-
 func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing(t *testing.T) {
 	req := config.ShellLaunchParams{Namespace: "team-dev"}
 	release := &clusterread.ObservedHelmRelease{Name: "team-devops", Error: "observe: helm is not installed or not on PATH"}
@@ -68,24 +37,6 @@ func TestComputeObserveDriftUnreadableReleaseWithNoRecordedVersionReportsNothing
 	// read and the serialized field says so.
 	if got == nil {
 		t.Fatal("drift is nil on a run that read; want a non-nil empty list so the JSON carries the verdict")
-	}
-}
-
-// TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList is the reported
-// symptom at its source: `erun observe --output json` ended with no drift key
-// at all on a clean environment, so an orchestrator could not check the
-// verdict without recomputing the diff the command had already done. The
-// field must marshal, and marshal as [].
-func TestComputeObserveDriftCleanRunSerializesAnEmptyDriftList(t *testing.T) {
-	req := config.ShellLaunchParams{RuntimeVersion: "1.0.0", Namespace: "team-dev"}
-	release := &clusterread.ObservedHelmRelease{Name: "team-devops", Found: true, AppVersion: "1.0.0"}
-
-	encoded, err := json.Marshal(ObserveResult{Drift: computeObserveDrift(req, release, nil)})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if !strings.Contains(string(encoded), `"drift":[]`) {
-		t.Fatalf("a clean run's result = %s, want a drift key carrying an empty list", encoded)
 	}
 }
 

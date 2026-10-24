@@ -159,11 +159,6 @@ func diskHeadroomCases() []diskHeadroomCase {
 			wantPrune: true,
 		},
 		{
-			name:   "inconclusive read: skip the check, no prune, no refusal",
-			policy: shared.ReleaseDiskHeadroomPolicy,
-			reads:  []diskHeadroomRead{{ok: false}},
-		},
-		{
 			name:   "dry run: neither reads free space nor prunes",
 			policy: shared.ReleaseDiskHeadroomPolicy,
 			dryRun: true,

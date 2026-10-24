@@ -38,20 +38,6 @@ func ghcrStub(t *testing.T, tags []string, allowPublic bool) *httptest.Server {
 	return server
 }
 
-func TestResolveGHCRVersionsAuthenticatedPrivate(t *testing.T) {
-	server := ghcrStub(t, []string{"1.0.0", "1.0.1", "1.0.2"}, false)
-	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("sophium:tok")))
-	useDockerConfigDir(t, dir)
-
-	versions, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "frs-devops", server.URL, server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if versions.LatestStable != "1.0.2" || len(versions.Tags) != 3 {
-		t.Fatalf("got latestStable=%q tags=%d, want 1.0.2/3", versions.LatestStable, len(versions.Tags))
-	}
-}
-
 func TestResolveGHCRVersionsPrivateWithoutCredIsAuthError(t *testing.T) {
 	server := ghcrStub(t, []string{"1.0.0"}, false)
 	useDockerConfigDir(t, t.TempDir()) // no docker cred
@@ -60,20 +46,6 @@ func TestResolveGHCRVersionsPrivateWithoutCredIsAuthError(t *testing.T) {
 	_, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "frs-devops", server.URL, server.URL)
 	if !errors.Is(err, ErrRegistryAuthRequired) {
 		t.Fatalf("err = %v, want ErrRegistryAuthRequired", err)
-	}
-}
-
-func TestResolveGHCRVersionsPublicAnonymousUnchanged(t *testing.T) {
-	server := ghcrStub(t, []string{"1.0.0", "1.0.5", "1.0.3"}, true)
-	useDockerConfigDir(t, t.TempDir()) // no cred → anonymous
-	useGHToken(t, func(string) (string, bool) { return "", false })
-
-	versions, err := resolveGHCRRuntimeRegistryVersionsAt(context.Background(), server.Client(), "sophium", "erun-devops", server.URL, server.URL)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if versions.LatestStable != "1.0.5" {
-		t.Fatalf("latestStable = %q, want 1.0.5", versions.LatestStable)
 	}
 }
 

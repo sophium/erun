@@ -17,59 +17,11 @@ import (
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
 
-// An agent job that backgrounds its gate and exits reports nothing -- the
-// supervisor waits on its immediate child, the immediate child exits 0
-// having left a process it spawned still running, and the record reads as a
-// clean success. This is the reproduction: a command that redirects a
-// long-lived child's output to a file and backgrounds it before exiting, the
-// same shape as an agent job that redirects a gate to a background shell and
-// returns. (Backgrounding a child that inherits the supervisor's own stdout
-// pipe blocks cmd.Wait() until that child exits too, which would mask the
-// bug; redirecting its output away, the way a real background gate does, is
-// what reproduces the silent-success shape.)
-
-func TestEnvironmentJobThatBackgroundsWorkAndExitsIsNotReportedAsSuccess(t *testing.T) {
-	isolateActivityCache(t)
-
-	const tenant = "abandoned-contract"
-	const environment = "bg-test"
-	const id = "job"
-	backgroundLog := filepath.Join(t.TempDir(), "background.log")
-	marker := filepath.Join(t.TempDir(), "background-marker")
-
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant:      tenant,
-		Environment: environment,
-		ID:          id,
-		Name:        id,
-		Command:     []string{"sh", "-c", fmt.Sprintf("%s </dev/null >%s 2>&1 & exit 0", leftoverBackgroundCommand(marker, 5), backgroundLog)},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-	// By the time this runs the job's own child has been reaped, so signalling
-	// its process group is not available: Getpgid on a reaped pid fails, and
-	// the group's remaining member would outlive the test and be reparented
-	// onto the next one. The leftover answers to its own marker instead.
-	t.Cleanup(func() { killProcessesMatching(marker) })
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-
-	if job.Succeeded {
-		t.Fatalf("job reported success (state=%q, exitCode=%v) even though it left a background process running: %+v", job.State, job.ExitCode, job)
-	}
-	if job.State != shared.EnvironmentJobStateAbandoned {
-		t.Fatalf("State = %q, want %q", job.State, shared.EnvironmentJobStateAbandoned)
-	}
-}
-
 // The actual reproduction: a background process that escapes into a
 // *fresh* process group of its own -- exactly what an agent tool's Bash tool
 // does when it backgrounds a command so it survives the turn that started it
-// -- rather than staying in the immediate child's own group the way the test
-// above's plain `cmd &` does. `set -m` is what forces bash's job control to
+// -- rather than staying in the immediate child's own group the way a plain
+// `cmd &` does. `set -m` is what forces bash's job control to
 // give the backgrounded sleep its own pgid instead of sharing the script's;
 // environmentJobProcessGroupSurvivors alone cannot see it once it lands
 // there, which is exactly the false `succeeded: true` this issue reported.

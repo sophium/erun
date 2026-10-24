@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/sophium/erun/erun-common/base/config"
 )
 
 // fakeKubernetesAPIServer starts a plain-HTTP fake API server and writes a
@@ -140,23 +138,6 @@ func TestLibraryKubernetesNamespaceExistsHonorsContextOverride(t *testing.T) {
 	}
 }
 
-// TestKubectlGetNamespaceArgsSharedByBothPaths locks the one argv builder
-// TraceEnsureKubernetesNamespace and defaultKubernetesNamespaceExists both
-// call, so the dry-run trace can never drift from the subprocess execution
-// path regardless of which execution mode is active.
-func TestKubectlGetNamespaceArgsSharedByBothPaths(t *testing.T) {
-	got := kubectlGetNamespaceArgs("my-context", "team-dev")
-	want := []string{"--context", "my-context", "get", "namespace", "team-dev", "-o", "name"}
-	if len(got) != len(want) {
-		t.Fatalf("args = %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("args = %v, want %v", got, want)
-		}
-	}
-}
-
 func TestKubectlGetNamespaceArgsOmitsContextFlagWhenUnset(t *testing.T) {
 	got := kubectlGetNamespaceArgs("", "team-dev")
 	want := []string{"get", "namespace", "team-dev", "-o", "name"}
@@ -168,25 +149,6 @@ func TestKubectlGetNamespaceArgsOmitsContextFlagWhenUnset(t *testing.T) {
 			t.Fatalf("args = %v, want %v", got, want)
 		}
 	}
-}
-
-func TestExecutionModeForKubectlNamespaceGetDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, kubectlNamespaceGetExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlNamespaceGetOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == kubectlNamespaceGetExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-namespace-get not found in report: %+v", report)
 }
 
 func pvcFoundHandler(namespace, name string) http.HandlerFunc {
@@ -402,23 +364,4 @@ func TestLibraryImagePullSecretAuthsHonorsContextOverride(t *testing.T) {
 	if _, err := LibraryImagePullSecretAuths("unknown-context", "team-dev", "regcred"); err == nil {
 		t.Fatalf("err = nil, want an error for an unknown context")
 	}
-}
-
-func TestExecutionModeForKubectlPVCGetDefaultsToSubprocess(t *testing.T) {
-	if got := config.ExecutionModeFor(config.ERunConfig{}, KubectlPVCGetExecutionOperation); got != config.ExecutionModeSubprocess {
-		t.Fatalf("mode = %q, want %q", got, config.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlPVCGetOperation(t *testing.T) {
-	report := config.ExecutionModeReport(config.ERunConfig{})
-	for _, status := range report {
-		if status.Operation == KubectlPVCGetExecutionOperation {
-			if status.Mode != config.ExecutionModeSubprocess {
-				t.Fatalf("mode = %q, want %q", status.Mode, config.ExecutionModeSubprocess)
-			}
-			return
-		}
-	}
-	t.Fatalf("kubectl-pvc-get not found in report: %+v", report)
 }

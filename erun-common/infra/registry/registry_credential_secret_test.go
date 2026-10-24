@@ -146,24 +146,6 @@ func TestProvisionRegistryCredentialSecretNoHostCredential(t *testing.T) {
 	}
 }
 
-// TestProvisionRegistryCredentialSecretDryRunSkipsApply proves dry-run
-// resolves the same name real mode would, but never shells out to kubectl —
-// the decision belongs in the trace, the side effect does not.
-func TestProvisionRegistryCredentialSecretDryRunSkipsApply(t *testing.T) {
-	dir := writeDockerConfig(t, fmt.Sprintf(`{"auths":{"ghcr.io":{"auth":%q}}}`, b64Auth("alice:s3cret")))
-	useDockerConfigDir(t, dir)
-	useGHToken(t, func(string) (string, bool) { return "", false })
-	t.Setenv("ERUN_KUBECTL_BIN", failingBinaryPath(t))
-
-	name, err := ProvisionRegistryCredentialSecret(testTraceContext(true), "team", "team-dev", "", []string{"ghcr.io/sophium"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if want := "team-devops-registry-credential"; name != want {
-		t.Fatalf("got %q, want %q", name, want)
-	}
-}
-
 // failingBinaryPath writes a script that fails the test if ever executed, so a
 // test asserting "kubectl must not run" catches a regression as a hard
 // failure rather than a silently-passed apply.

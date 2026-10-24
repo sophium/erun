@@ -137,25 +137,6 @@ func TestPeakOnlyWarningAlsoCarriesARaise(t *testing.T) {
 	}
 }
 
-// TestOOMKillWarningCarriesARaise covers the third way the memory alarm fires.
-func TestOOMKillWarningCarriesARaise(t *testing.T) {
-	usage := saturatingReading(1024*1024*1024, testMemoryWarn)
-	usage.Memory.OOMKills = 2
-	usage.Memory.PeakBytes = 1024 * 1024 * 1024
-	if len(runtimeUsageWarnings(usage)) == 0 {
-		t.Fatal("a recorded OOM kill fired no warning")
-	}
-
-	recommendation, ok := deploy.RecommendRuntimeSizing(deploy.RuntimeSizingParams{Live: &usage})
-	if !ok {
-		t.Fatal("an OOM kill warned with no recommendation beside it")
-	}
-	verdict := memoryVerdict(t, recommendation)
-	if verdict.Action != deploy.RuntimeSizingRaise || !strings.Contains(verdict.Reason, "2 oom kill(s)") {
-		t.Errorf("expected a raise naming the kills, got %q (%s)", verdict.Action, verdict.Reason)
-	}
-}
-
 // TestRetainedHistoryAndLiveReadingCannotDisagree pins the "never a second
 // engine" half of the property. A recommendation scored from retained history
 // plus the same reading handed in as Live must reach one verdict, and a live

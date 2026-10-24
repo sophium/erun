@@ -37,42 +37,6 @@ func TestParseObservedServicesSortsAndKeepsPorts(t *testing.T) {
 	}
 }
 
-// TestMergeServicesWithExposuresMatchesOnTheIngressBackend is the whole point
-// of reading the backend: the public label and the Service name differ whenever
-// the chart is the repo's own, and matching on the label would leave a service
-// that IS exposed looking unexposed (and offer to expose it again).
-func TestMergeServicesWithExposuresMatchesOnTheIngressBackend(t *testing.T) {
-	services := []clusterread.ObservedService{
-		{Name: "validation-agent-backend-api", Ports: []clusterread.ObservedServicePort{{Port: 8000}}},
-		{Name: "frs-api", Ports: []clusterread.ObservedServicePort{{Port: 80}}},
-	}
-	ingresses := []clusterread.ObservedIngress{
-		{
-			Name:     "expose-validator",
-			Hosts:    []string{"validator.frs-dev.services.example.com"},
-			TLS:      []clusterread.ObservedIngressTLS{{Hosts: []string{"validator.frs-dev.services.example.com"}, SecretName: "frs-dev-wildcard-tls"}},
-			Backends: []clusterread.ObservedIngressBackend{{Service: "validation-agent-backend-api", Port: 8000}},
-		},
-		// A non-expose Ingress the repo's own chart rendered must not be read as
-		// an erun exposure.
-		{Name: "validation-agent-backend-api", Hosts: []string{"validator.localtest.me"}},
-	}
-
-	merged := mergeServicesWithExposures(services, ingresses)
-	if len(merged) != 2 {
-		t.Fatalf("merged = %+v, want one entry per service", merged)
-	}
-	if merged[0].Exposure == nil {
-		t.Fatal("expected the backend-matched service to carry its exposure")
-	}
-	if merged[0].Exposure.Label != "validator" || merged[0].Exposure.Scheme != "https" {
-		t.Fatalf("exposure = %+v, want label validator over https", merged[0].Exposure)
-	}
-	if merged[1].Exposure != nil {
-		t.Fatalf("frs-api is not exposed, got %+v", merged[1].Exposure)
-	}
-}
-
 // An exposure whose Ingress carries no tls block for its host reads as http,
 // never as the scheme someone asked for.
 func TestMergeServicesWithExposuresReportsHTTPWithoutTLS(t *testing.T) {

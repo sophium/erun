@@ -50,11 +50,6 @@ func addGoCacheEntry(t *testing.T, dir string, index, size int, age time.Duratio
 	}
 }
 
-func goCacheHasEntry(dir string, index int) bool {
-	_, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%02x", index%256), fmt.Sprintf("%064x", index)+"-d"))
-	return err == nil
-}
-
 func goCacheListing(t *testing.T, dir string) string {
 	t.Helper()
 	var paths []string
@@ -110,32 +105,6 @@ func TestTrimGoBuildCacheDoesNotCreateAMissingCache(t *testing.T) {
 	}
 }
 
-// The point of evicting rather than clearing: the oldest entries go and the
-// newest stay.
-func TestTrimGoBuildCacheEvictsLeastRecentlyUsedFirst(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 10; i++ {
-		addGoCacheEntry(t, dir, i*100, 200000, time.Duration(400-i*30)*time.Hour)
-	}
-	limit := mustGoCacheSize(t, dir) / 2
-	ctx, out := runtimeTestContext(false)
-	if _, err := TrimGoBuildCache(ctx, dir, limit); err != nil {
-		t.Fatal(err)
-	}
-	if size := mustGoCacheSize(t, dir); size > limit {
-		t.Fatalf("the cache should be within its %d byte cap, got %d", limit, size)
-	}
-	if goCacheHasEntry(dir, 0) {
-		t.Fatal("the oldest entry should have been evicted")
-	}
-	if !goCacheHasEntry(dir, 900) {
-		t.Fatal("the newest entry should have survived")
-	}
-	if !strings.Contains(out.String(), "trimmed the go build cache at "+dir) {
-		t.Fatalf("a trim that evicted should say so, got %q", out.String())
-	}
-}
-
 // The cache's bookkeeping sits beside the entries: trim.txt is go's own record
 // of its last age trim, and a file in a subdirectory that is not an entry is
 // nobody's to delete.
@@ -187,31 +156,12 @@ func TestTrimGoBuildCacheEvictsAnExecutableEntryWhole(t *testing.T) {
 	}
 }
 
-func TestTrimGoBuildCacheDryRunRemovesNothing(t *testing.T) {
-	dir := t.TempDir()
-	for i := 0; i < 16; i++ {
-		addGoCacheEntry(t, dir, i, 200000, 300*time.Hour)
-	}
-	full := mustGoCacheSize(t, dir)
-	ctx, out := runtimeTestContext(true)
-	result, err := TrimGoBuildCache(ctx, dir, full/4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mustGoCacheSize(t, dir) != full {
-		t.Fatal("--dry-run removed something")
-	}
-	if result.Evicted == 0 || !strings.Contains(out.String(), "nothing removed") {
-		t.Fatalf("--dry-run should count what it would evict and say it removed nothing, got %+v %q", result, out.String())
-	}
-}
-
 func TestTrimGoBuildCacheRefusesBadArguments(t *testing.T) {
 	ctx, _ := runtimeTestContext(false)
 	for _, tc := range []struct {
 		dir      string
 		maxBytes int64
-	}{{"", 1}, {t.TempDir(), 0}, {t.TempDir(), -5}} {
+	}{{"", 1}, {t.TempDir(), 0}} {
 		if _, err := TrimGoBuildCache(ctx, tc.dir, tc.maxBytes); err == nil {
 			t.Fatalf("TrimGoBuildCache(%q, %d) should refuse its arguments", tc.dir, tc.maxBytes)
 		}

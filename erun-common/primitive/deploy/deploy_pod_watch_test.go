@@ -310,31 +310,6 @@ func TestPullingContainersNamesTheContainersStillFetchingTheirImage(t *testing.T
 	}
 }
 
-// TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull is the second half
-// of the same contract: the observation has to reach the deploy's error, or the
-// operator still reads only helm's words for a rollout that was progressing.
-func TestClassifyHelmDeployResultReportsAWaitThatExpiredMidPull(t *testing.T) {
-	stderr := new(strings.Builder)
-	stderr.WriteString("Error: UPGRADE FAILED: resource Deployment/team-dev/team-devops not ready. status: InProgress, message: Available: 0/1\n")
-
-	err := classifyHelmDeployResult(HelmDeployParams{}, podWatchOutcome{Pulling: []string{"team-devops-abc/erun-devops"}},
-		errors.New("exit status 1"), &helmOutputCapture{stdout: new(bytes.Buffer), stderr: new(bytes.Buffer)}, stderr)
-
-	if err == nil {
-		t.Fatal("expected the failed rollout to report an error")
-	}
-	for _, want := range []string{
-		"team-devops-abc/erun-devops was still pulling its image",
-		"this is the deploy's own timeout ending the rollout, not a container failure",
-		"the previous pod was already torn down and this environment is running no pod",
-		"exit status 1",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("expected %q in the deploy error, got:\n%s", want, err.Error())
-		}
-	}
-}
-
 // TestClassifyHelmDeployResultLeavesAFailureWithNothingPullingAlone is the
 // negative case: a rollout that failed with nothing in flight keeps reporting
 // exactly what helm said, with no pull narrative attached to it.

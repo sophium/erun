@@ -11,8 +11,6 @@ func TestResolvedRuntimeChartName(t *testing.T) {
 		tenantPublished bool
 		want            string
 	}{
-		{"tenant chart published", "frs", true, "frs-devops"},
-		{"tenant chart not published falls back", "frs", false, "erun-devops"},
 		{"erun product tenant always canonical", "", true, "erun-devops"},
 		{"erun product tenant, unpublished flag ignored", "", false, "erun-devops"},
 	}

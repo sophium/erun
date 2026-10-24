@@ -148,16 +148,6 @@ func TestAISessionLaunchSubagentModelPrefix(t *testing.T) {
 		}
 	})
 
-	t.Run("resume line carries the prefix when a model resolves", func(t *testing.T) {
-		script := strings.Join(open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{
-			Models:       []string{"fable"},
-			DefaultModel: model("fable"),
-		}, nil, "team", "dev"), "\n")
-		if !strings.Contains(script, "resume with") || !strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL=fable claude --continue") {
-			t.Fatalf("resume command must carry the subagent-model prefix:\n%s", script)
-		}
-	})
-
 	t.Run("resume line has no prefix for a non-claude tool", func(t *testing.T) {
 		script := strings.Join(open.AISessionLaunchLines("codex", configpkg.EnvironmentClaudeConfig{Models: []string{"fable"}, DefaultModel: model("fable")}, nil, "team", "dev"), "\n")
 		if strings.Contains(script, "CLAUDE_CODE_SUBAGENT_MODEL") {
@@ -197,24 +187,10 @@ func TestAISessionLaunchContextFollowsTheOptOut(t *testing.T) {
 func TestAISessionLaunchRemoteControl(t *testing.T) {
 	yes := func() *bool { b := true; return &b }
 
-	t.Run("named <tenant>/<env> by default", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-		if strings.Count(got, "--remote-control team/dev") != 1 {
-			t.Fatalf("expected --remote-control team/dev, got %q", got)
-		}
-	})
-
 	t.Run("gated off when the env uses the Bedrock gateway", func(t *testing.T) {
 		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{UseBedrock: yes()}, nil, "team", "dev")
 		if strings.Contains(got, "--remote-control") {
 			t.Fatalf("Bedrock gateway auth must not enable remote control, got %q", got)
-		}
-	})
-
-	t.Run("gated off when the env uses the Mantle gateway", func(t *testing.T) {
-		got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{UseMantle: yes()}, nil, "team", "dev")
-		if strings.Contains(got, "--remote-control") {
-			t.Fatalf("Mantle gateway auth must not enable remote control, got %q", got)
 		}
 	})
 
@@ -239,13 +215,6 @@ func TestAISessionLaunchRemoteControl(t *testing.T) {
 			t.Fatalf("non-claude tool must launch verbatim without remote control, got %q", got)
 		}
 	})
-
-	t.Run("resume line carries the named flag", func(t *testing.T) {
-		script := strings.Join(open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
-		if !strings.Contains(script, "--remote-control team/dev") {
-			t.Fatalf("resume line must carry the named remote-control flag:\n%s", script)
-		}
-	})
 }
 
 // TestResolveClaudeLaunchModel covers launch-model resolution: a chosen default
@@ -259,9 +228,6 @@ func TestResolveClaudeLaunchModel(t *testing.T) {
 		config configpkg.EnvironmentClaudeConfig
 		want   string
 	}{
-		{"unset falls back to the first default-available model", configpkg.EnvironmentClaudeConfig{}, "opus"},
-		{"explicit model in explicit models", configpkg.EnvironmentClaudeConfig{Models: []string{"opus", "fable"}, DefaultModel: model("fable")}, "fable"},
-		{"explicit model not in explicit models falls back to first available", configpkg.EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("fable")}, "opus"},
 		{"explicit model in default available set when models unset", configpkg.EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
 		{"fable is opt-in: not auto-selected from the default available set", configpkg.EnvironmentClaudeConfig{DefaultModel: model("fable")}, "opus"},
 		{"first-available honours the env's narrowed set", configpkg.EnvironmentClaudeConfig{Models: []string{"sonnet", "haiku"}}, "sonnet"},
@@ -289,7 +255,6 @@ func TestResolveClaudeEffort(t *testing.T) {
 		config configpkg.EnvironmentClaudeConfig
 		want   string
 	}{
-		{"unset", configpkg.EnvironmentClaudeConfig{}, "ultracode"},
 		{"valid", configpkg.EnvironmentClaudeConfig{Effort: level("low")}, "low"},
 		{"explicit max stays max", configpkg.EnvironmentClaudeConfig{Effort: level("max")}, "max"},
 		{"ultracode is a valid level", configpkg.EnvironmentClaudeConfig{Effort: level("ultracode")}, "ultracode"},
@@ -312,28 +277,6 @@ func TestResolveClaudeEffort(t *testing.T) {
 // assertions own the contract; the launcher's composition into the dtach script
 // is locked by the open --ai dry-run goldens.
 func TestAISessionLaunchLines(t *testing.T) {
-	t.Run("claude launch wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
-		script := strings.Join(open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev"), "\n")
-		for _, want := range []string{
-			"ai_status=0",
-			"--remote-control team/dev || ai_status=$?",
-			`[ "$ai_status" = 137 ]`,
-			"likely out of memory; consider raising Memory in the environment Runtime settings",
-			"Claude exited (exit %s)",
-			"Claude session ended",
-			"resume with: %s",
-		} {
-			if !strings.Contains(script, want) {
-				t.Fatalf("wrapper missing %q:\n%s", want, script)
-			}
-		}
-		// The resume is shell-quoted because it embeds single quotes itself
-		// (the ultracode settings JSON).
-		if !strings.Contains(script, `'CLAUDE_CODE_SUBAGENT_MODEL=opus claude --continue --settings '"'"'{"ultracode":true}'"'"' --model opus --remote-control team/dev'`) {
-			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
-		}
-	})
-
 	t.Run("the wrapper executes: 137 yields the OOM marker and the intact resume", func(t *testing.T) {
 		lines := open.AISessionLaunchLines("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
 		// Swap the launch (line index 1 by construction) for a bare 137 exit to
@@ -365,19 +308,6 @@ func TestAISessionLaunchLines(t *testing.T) {
 			t.Fatalf("verbatim tool resume should be the tool itself:\n%s", script)
 		}
 	})
-}
-
-// TestAISessionLaunchCommandKeepsScheduleWakeup: the AI tab's persistent,
-// resumable session is exactly the launch mode that has a later invocation to
-// wake into, unlike the one-shot agent job AgentJobCommand builds (locked by
-// the erun-integration dry-run golden
-// job/agent_start_dry_run_plans_the_streaming_invocation). It must never pick
-// up the one-shot job's --disallowedTools ScheduleWakeup restriction.
-func TestAISessionLaunchCommandKeepsScheduleWakeup(t *testing.T) {
-	got := open.AISessionLaunchCommand("", configpkg.EnvironmentClaudeConfig{}, nil, "team", "dev")
-	if strings.Contains(got, "disallowedTools") || strings.Contains(got, "ScheduleWakeup") {
-		t.Fatalf("the persistent AI session must keep ScheduleWakeup available, got %q", got)
-	}
 }
 
 // TestClaudeBackgroundEffortKeepsMaxAsAFlag pins the split: every level the

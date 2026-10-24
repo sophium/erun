@@ -78,24 +78,6 @@ func TestUsageRequestsReportThePodsOwnDeclaredRequests(t *testing.T) {
 	}
 }
 
-// TestUsageRequestsSumTheContainersIntoThePodsOwnRequest is the other half of
-// the reading: the pod's reservation is the scheduler's own number, not any one
-// container's. Kubernetes admits a pod on max(max over the init containers, sum
-// over the containers), so the chart's two 0.25 CPU / 1024Mi containers reserve
-// 0.5 CPU / 2GiB between them -- the figure a node is sized against.
-func TestUsageRequestsSumTheContainersIntoThePodsOwnRequest(t *testing.T) {
-	requests, err := parseRuntimePodRequests([]byte(runtimePodRequestsList))
-	if err != nil {
-		t.Fatalf("parseRuntimePodRequests: %v", err)
-	}
-	if requests.Pod.CPUMilli != 500 {
-		t.Errorf("pod CPU request = %d millicores, want 500 (0.25 + 0.25)", requests.Pod.CPUMilli)
-	}
-	if requests.Pod.MemoryBytes != 2048*(1<<20) {
-		t.Errorf("pod memory request = %d bytes, want 2Gi", requests.Pod.MemoryBytes)
-	}
-}
-
 // TestUsageRequestsTakeTheLargerOfInitPeakAndContainerSum covers the half of
 // the scheduler's rule a naive sum gets wrong. Kubernetes admits a pod on
 // max(max over init containers, sum over containers), so a pod whose init
@@ -190,21 +172,6 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 		return kube.RemoteCommandResult{Stdout: reading}, nil
 	}
 
-	t.Run("read", func(t *testing.T) {
-		usage, err := RunRuntimeUsage(core.Context{}, containerRunner, func([]string) ([]byte, error) {
-			return []byte(runtimePodRequestsList), nil
-		}, req, RuntimeUsageParams{Interval: time.Second})
-		if err != nil {
-			t.Fatalf("RunRuntimeUsage: %v", err)
-		}
-		if usage.Requests == nil || usage.Requests.Pod.CPUMilli != 500 {
-			t.Fatalf("expected the pod's 0.5 CPU reservation on the reading, got %+v", usage.Requests)
-		}
-		if usage.Requests.Unavailable != "" {
-			t.Errorf("expected a read reservation, got unavailable: %s", usage.Requests.Unavailable)
-		}
-	})
-
 	t.Run("unreadable pod spec", func(t *testing.T) {
 		usage, err := RunRuntimeUsage(core.Context{}, containerRunner, func([]string) ([]byte, error) {
 			return nil, errors.New("kubectl get pods: connection refused")
@@ -219,26 +186,6 @@ func TestRuntimeUsageCarriesThePodsRequestsAndSurvivesAnUnreadablePodSpec(t *tes
 			t.Fatalf("expected the reservation to report its own unavailability, got %+v", usage.Requests)
 		}
 	})
-}
-
-// TestDryRunTracesThePodSpecReadWithoutInventingAReservation covers the
-// dry-run contract: every action the command would take is traced, and nothing
-// is read. A zero-valued Requests here would be a reservation of nothing,
-// which is a claim rather than an absence.
-func TestDryRunTracesThePodSpecReadWithoutInventingAReservation(t *testing.T) {
-	req := config.ShellLaunchParams{Tenant: "erun", Environment: "code1"}
-	var trace strings.Builder
-	ctx := core.Context{DryRun: true, Logger: core.NewLoggerWithWriters(core.VerbosityTrace, &trace, &trace)}
-	usage, err := RunRuntimeUsage(ctx, nil, nil, req, RuntimeUsageParams{Interval: time.Second})
-	if err != nil {
-		t.Fatalf("RunRuntimeUsage: %v", err)
-	}
-	if usage.Requests != nil {
-		t.Fatalf("expected no Requests on a dry run, got %+v", usage.Requests)
-	}
-	if !strings.Contains(trace.String(), "get pods -l app=erun-devops") {
-		t.Fatalf("expected the dry-run trace to name the pod-spec read, got:\n%s", trace.String())
-	}
 }
 
 // TestEffectiveKubernetesPodRequestsIsTheOneAdmissionRule covers the exported

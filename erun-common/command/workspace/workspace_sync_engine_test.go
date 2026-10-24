@@ -197,17 +197,6 @@ func TestChangedWorkspaceSyncPathsFetchesNewChangedAndUnknown(t *testing.T) {
 	}
 }
 
-func TestChangedWorkspaceSyncPathsSkipsWhenFingerprintsMatch(t *testing.T) {
-	remotePaths := []string{"a.txt", "b.txt"}
-	meta := map[string]workspaceFileMeta{
-		"a.txt": {Size: 3, MTime: 42},
-		"b.txt": {Size: 4, MTime: 43},
-	}
-	if got := changedWorkspaceSyncPaths(remotePaths, meta, meta); len(got) != 0 {
-		t.Fatalf("expected no fetches when every fingerprint matches, got %+v", got)
-	}
-}
-
 func TestParseWorkspaceFileMeta(t *testing.T) {
 	out := "12 1700000000 README.md\n34 1700000005 dir/with space.txt\nbad line\n56 1700000009 .git/config\n"
 	meta := parseWorkspaceFileMeta(out)

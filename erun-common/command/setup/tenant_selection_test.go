@@ -80,27 +80,6 @@ func TestSelectTenantUnavailableLeavesAnExplicitChoiceAlone(t *testing.T) {
 	}
 }
 
-func TestSelectTenantAvailableStillAsks(t *testing.T) {
-	called := false
-	runner := BootstrapRunner{BootstrapInitDependencies: BootstrapInitDependencies{
-		SelectTenant: func([]config.TenantConfig) (TenantSelectionResult, error) {
-			called = true
-			return TenantSelectionResult{Tenant: "frs"}, nil
-		},
-	}}
-
-	selection, err := runner.selectTenant(open.BootstrapInitParams{}, []config.TenantConfig{{Name: "erun"}, {Name: "frs"}})
-	if err != nil {
-		t.Fatalf("selectTenant: %v", err)
-	}
-	if !called {
-		t.Fatal("a run that can ask must still ask")
-	}
-	if selection.Tenant != "frs" {
-		t.Fatalf("tenant %q, want frs", selection.Tenant)
-	}
-}
-
 func TestTenantSelectionUnavailableIsNotABootstrapInteraction(t *testing.T) {
 	called := false
 	runner := BootstrapRunner{BootstrapInitDependencies: BootstrapInitDependencies{

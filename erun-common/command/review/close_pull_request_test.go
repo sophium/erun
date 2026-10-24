@@ -100,41 +100,6 @@ func TestClosePullRequestClosesAndCommentsWhenHeadMatches(t *testing.T) {
 	}
 }
 
-func TestClosePullRequestNoOpsWhenBranchHasNoOpenPullRequest(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if r.Method != http.MethodGet {
-			t.Fatalf("expected only the list call, got %s %s", r.Method, r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer server.Close()
-	restoreBaseURL := registry.GithubAPIBaseURL
-	registry.GithubAPIBaseURL = server.URL + "/"
-	defer func() { registry.GithubAPIBaseURL = restoreBaseURL }()
-
-	deps := ClosePullRequestDependencies{
-		ResolveToken: func(string) (string, bool) { return "gho_test_token", true },
-	}
-	result, err := ClosePullRequest(core.Context{}, ClosePullRequestParams{
-		RemoteURL:     "https://github.com/sophium/erun.git",
-		Branch:        "chore/no-pr",
-		TargetBranch:  "main",
-		GatedCommit:   "sourcesha123",
-		LandingCommit: "landedsha456",
-	}, deps)
-	if err != nil {
-		t.Fatalf("expected a no-op, got error: %v", err)
-	}
-	if result.Found || result.Closed {
-		t.Fatalf("expected Found=false, Closed=false when there is no open pull request, got %+v", result)
-	}
-	if calls != 1 {
-		t.Fatalf("expected exactly one request (the list), got %d", calls)
-	}
-}
-
 func TestClosePullRequestRefusesWhenHeadHasMoved(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

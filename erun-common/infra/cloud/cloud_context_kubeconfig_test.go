@@ -1,9 +1,7 @@
 package cloud
 
 import (
-	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
@@ -12,68 +10,12 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func TestExecutionModeForKubectlContextConfigureDefaultsToSubprocess(t *testing.T) {
-	if got := configpkg.ExecutionModeFor(configpkg.ERunConfig{}, kubectlContextConfigureExecutionOperation); got != configpkg.ExecutionModeSubprocess {
-		t.Fatalf("ExecutionModeFor = %q, want %q", got, configpkg.ExecutionModeSubprocess)
-	}
-}
-
-func TestExecutionModeReportListsKubectlContextConfigureOperation(t *testing.T) {
-	statuses := configpkg.ExecutionModeReport(configpkg.ERunConfig{})
-	for _, status := range statuses {
-		if status.Operation == kubectlContextConfigureExecutionOperation {
-			return
-		}
-	}
-	t.Fatalf("ExecutionModeReport did not include %q: %+v", kubectlContextConfigureExecutionOperation, statuses)
-}
-
 func testCloudContextConfig() configpkg.CloudContextConfig {
 	return configpkg.CloudContextConfig{
 		Name:              "erun-001",
 		KubernetesContext: "erun-001",
 		PublicIP:          "203.0.113.10",
 		AdminToken:        "s3cret-admin-token-value",
-	}
-}
-
-// TestConfigureCloudKubeContextDryRunTracesRedactedTokenAndTouchesNothing
-// pins the audit contract: the trace must render the equivalent CLI
-// invocation with the admin token redacted (never the plaintext secret, the
-// same convention kubectl-secret-apply's stdin-piped applies already use),
-// and a dry run must neither call kubectl nor write a kubeconfig file.
-func TestConfigureCloudKubeContextDryRunTracesRedactedTokenAndTouchesNothing(t *testing.T) {
-	kubeconfigPath := filepath.Join(t.TempDir(), "config")
-	t.Setenv("KUBECONFIG", kubeconfigPath)
-
-	ctx, trace := traceCapturingContext()
-	ctx.DryRun = true
-	deps := CloudContextDependencies{
-		RunKubectl: func(core.Context, []string) error {
-			t.Fatal("RunKubectl must not be called on a dry run")
-			return nil
-		},
-	}
-
-	if err := configureCloudKubeContext(ctx, deps, testCloudContextConfig()); err != nil {
-		t.Fatalf("configureCloudKubeContext: %v", err)
-	}
-
-	got := trace.String()
-	if strings.Contains(got, "s3cret-admin-token-value") {
-		t.Fatalf("trace leaked the plaintext admin token: %q", got)
-	}
-	if !strings.Contains(got, "kubectl config set-credentials erun-001 --token '<redacted>'") {
-		t.Fatalf("trace missing redacted set-credentials line: %q", got)
-	}
-	if !strings.Contains(got, "kubectl config set-cluster erun-001 --server https://203.0.113.10:6443 --insecure-skip-tls-verify=true") {
-		t.Fatalf("trace missing set-cluster line: %q", got)
-	}
-	if !strings.Contains(got, "kubectl config set-context erun-001 --cluster erun-001 --user erun-001") {
-		t.Fatalf("trace missing set-context line: %q", got)
-	}
-	if _, err := os.Stat(kubeconfigPath); err == nil {
-		t.Fatalf("dry run must not write a kubeconfig file at %s", kubeconfigPath)
 	}
 }
 

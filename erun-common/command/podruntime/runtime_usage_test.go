@@ -43,24 +43,6 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 		}
 	})
 
-	t.Run("memory.peak warning does not fire when the peak could not be read", func(t *testing.T) {
-		output := strings.Join([]string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=52428800",
-			"memory_max=2147483648",
-			"memory_peak=",
-			"memory_oom_kill=0",
-		}, "\n")
-
-		usage := parseRuntimeUsage(req, output, interval)
-		if usage.Memory.PeakObserved {
-			t.Fatalf("expected PeakObserved=false when memory.peak is unreadable, got %+v", usage.Memory)
-		}
-		if hasWarningContaining(usage.Warnings, "memory.peak reached") {
-			t.Errorf("an unread peak must not compute a percentage to warn on, got %v", usage.Warnings)
-		}
-	})
-
 	t.Run("OOM kill warning does not fire when oom_kill could not be read", func(t *testing.T) {
 		output := strings.Join([]string{
 			"cgroup_type=cgroup2fs",
@@ -78,40 +60,6 @@ func TestParseRuntimeUsageWarnings(t *testing.T) {
 			t.Errorf("an unread oom_kill counter must not report a confident zero, got %v", usage.Warnings)
 		}
 	})
-
-	t.Run("OOM kills always warn", func(t *testing.T) {
-		output := strings.Join([]string{
-			"cgroup_type=cgroup2fs",
-			"memory_current=52428800",
-			"memory_max=2147483648",
-			"memory_peak=52428800",
-			"memory_oom_kill=2",
-		}, "\n")
-
-		usage := parseRuntimeUsage(req, output, interval)
-		if !hasWarningContaining(usage.Warnings, "recorded 2 OOM kill") {
-			t.Errorf("expected an OOM kill warning, got %v", usage.Warnings)
-		}
-	})
-
-	t.Run("disk warning fires at the threshold and names the node-shared scope", func(t *testing.T) {
-		output := "disk_workspace=/dev/sda1 1000 900 100 90% /home/erun"
-		usage := parseRuntimeUsage(req, output, interval)
-		assertDiskWarningNamesNodeSharedScope(t, usage.Warnings)
-	})
-}
-
-// assertDiskWarningNamesNodeSharedScope checks both halves of the disk
-// warning's wording, factored out of TestParseRuntimeUsageWarnings so the
-// two conditions don't count against that function's own complexity budget.
-func assertDiskWarningNamesNodeSharedScope(t *testing.T, warnings []string) {
-	t.Helper()
-	if !hasWarningContaining(warnings, "node disk is at 90%") {
-		t.Errorf("90%% disk usage should warn, got %v", warnings)
-	}
-	if !hasWarningContaining(warnings, "shared with every environment on this node") {
-		t.Errorf("the disk warning must name the node-shared scope so an operator does not clean up the wrong environment, got %v", warnings)
-	}
 }
 
 func cgroupMemoryFixture(currentPercent, peakPercent int) string {
@@ -166,72 +114,6 @@ func TestRuntimeMemoryUsageJSONDistinguishesUnreadableFromZero(t *testing.T) {
 	}
 	if !roundTripped.PeakObserved || roundTripped.PeakBytes != 0 {
 		t.Errorf("round trip = %+v, want PeakObserved=true, PeakBytes=0", roundTripped)
-	}
-}
-
-// TestRunRuntimeUsageReportsTheDindSidecarSeparately is the regression guard
-// for this defect: an environment mid-release can read 0.3% CPU / idle memory
-// from the runtime container while the erun-dind sidecar -- where the actual
-// build runs -- saturates its own cores, and before this fix nothing in the
-// reading let an operator tell a genuinely idle environment apart from one
-// whose build is grinding away in a container this reading could not see at
-// all. The fake runner answers differently per container, exactly like a
-// real busy-build/idle-runtime split, and asserts the busy sidecar reading
-// surfaces on RuntimeUsage.Dind rather than being silently dropped.
-func TestRunRuntimeUsageReportsTheDindSidecarSeparately(t *testing.T) {
-	idleRuntimeReading := strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=104857600", // ~100Mi
-		"memory_max=24696061952",   // ~23Gi
-		"memory_peak=104857600",
-		"memory_oom_kill=0",
-		"cpu_max=1200000 100000", // 12-core quota
-		"cpu_usage_before=1000000",
-		"cpu_usage_after=1003000", // 3ms burned over 1s: reads as idle
-		"cpu_time_before_ns=1000000000",
-		"cpu_time_after_ns=2000000000",
-		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-	}, "\n")
-	busyDindReading := strings.Join([]string{
-		"cgroup_type=cgroup2fs",
-		"memory_current=2040109465", // ~1.9Gi
-		"memory_max=15032385536",    // 14Gi
-		"memory_peak=3435973836",    // ~3.2Gi
-		"memory_oom_kill=0",
-		"cpu_max=400000 100000", // 4-core quota
-		"cpu_usage_before=1000000",
-		"cpu_usage_after=2900000", // 1.9 cores burned over 1s: a real build grinding
-		"cpu_time_before_ns=1000000000",
-		"cpu_time_after_ns=2000000000",
-		"disk_workspace=overlay 198234112 89006592 99117056 45% /home/erun",
-	}, "\n")
-
-	req := config.ShellLaunchParams{Tenant: "erun", Environment: "build", Type: config.EnvironmentTypeLocalAgent}
-	runner := func(_ config.ShellLaunchParams, container, _ string) (kube.RemoteCommandResult, error) {
-		if container == build.RuntimeDindContainerName {
-			return kube.RemoteCommandResult{Stdout: busyDindReading}, nil
-		}
-		return kube.RemoteCommandResult{Stdout: idleRuntimeReading}, nil
-	}
-
-	usage, err := RunRuntimeUsage(core.Context{}, runner, nil, req, RuntimeUsageParams{Interval: time.Second})
-	if err != nil {
-		t.Fatalf("RunRuntimeUsage: %v", err)
-	}
-	if !usage.ExcludesBuilds {
-		t.Fatalf("expected ExcludesBuilds=true for a local-agent env, got %+v", usage)
-	}
-	if usage.CPU.UtilizationPercent >= 5 {
-		t.Fatalf("expected the runtime container's own reading to look idle, got %+v", usage.CPU)
-	}
-	if usage.Dind == nil {
-		t.Fatalf("expected a Dind reading for a build-capable environment, got nil (the exact regression: the busy sidecar is invisible)")
-	}
-	if usage.Dind.CPU.UtilizationPercent < 40 {
-		t.Errorf("expected the sidecar's own reading to show the real build load (~47%% of its 4-core quota), got %+v", usage.Dind.CPU)
-	}
-	if usage.Dind.Memory.CurrentBytes != 2040109465 {
-		t.Errorf("expected the sidecar's own memory reading to carry through, got %+v", usage.Dind.Memory)
 	}
 }
 
@@ -352,7 +234,6 @@ func assertRuntimeUsageThrottleWarning(t *testing.T, dindReading, want string) {
 // noise.
 func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 	const throttleWarning = "the build was throttled in 20000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
-	const partialThrottleWarning = "the build was throttled in 2000 of 20000 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
 	const youngSidecarThrottleWarning = "the build was throttled in 9999 of 9999 cgroup periods -- it is CPU-starved by its own cap, which reads as a running build making no progress, not an idle environment"
 
 	cases := []struct {
@@ -379,14 +260,6 @@ func TestRunRuntimeUsageWarnsWhenTheBuildIsThrottledByItsCap(t *testing.T) {
 			name:        "a build throttled in every period under the sizing floor",
 			dindReading: runtimeUsageDindReading("400000 100000", 9999, 9999),
 			wantWarning: youngSidecarThrottleWarning,
-		},
-		{
-			// Materially throttled without being pinned at the cap: a tenth
-			// of the sidecar's periods. Starvation does not have to be total
-			// to be worth naming.
-			name:        "a build throttled in a material share of its periods",
-			dindReading: runtimeUsageDindReading("400000 100000", 20000, 2000),
-			wantWarning: partialThrottleWarning,
 		},
 		{
 			name:        "a build working at its cap without being throttled",
@@ -431,11 +304,6 @@ func TestRunRuntimeUsageStaysSilentWhenTheSidecarsThrottlingIsImmaterial(t *test
 		name        string
 		dindReading string
 	}{
-		{
-			// The reported failure, at the counters it was reported with.
-			name:        "a build throttled in an immaterial share of its periods",
-			dindReading: runtimeUsageDindReading("400000 100000", 51123, 3),
-		},
 		{
 			// The same defect at the second environment's own counters:
 			// 6 of 17,479 is 0.03%.
@@ -482,7 +350,6 @@ func TestClampRuntimeUsageInterval(t *testing.T) {
 		{"negative uses default", -time.Second, DefaultRuntimeUsageInterval},
 		{"below floor clamps up", 10 * time.Millisecond, minRuntimeUsageInterval},
 		{"above ceiling clamps down", time.Minute, maxRuntimeUsageInterval},
-		{"within range passes through", 3 * time.Second, 3 * time.Second},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

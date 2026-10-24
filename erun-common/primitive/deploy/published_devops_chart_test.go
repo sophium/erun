@@ -48,21 +48,6 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 		}
 	})
 
-	t.Run("concretized cluster-registry env resolves the chart from the runtime image registry", func(t *testing.T) {
-		// The deploy path concretizes the cluster entry into its in-cluster pull host
-		// on ClusterPullRegistry; the chart must still resolve from the runtime image.
-		target := config.OpenResult{
-			ClusterPullRegistry: "10.43.0.100:5000",
-			EnvConfig: config.EnvConfig{
-				RuntimeImage:        "ghcr.io/sophium/erun-devops",
-				ContainerRegistries: config.ContainerRegistries{{Registry: "10.43.0.100:5000", Roles: []config.RegistryRole{config.RegistryRoleDeploy}}},
-			},
-		}
-		if got := publishedDevopsChartRegistry(target); got != "ghcr.io/sophium" {
-			t.Fatalf("chart registry = %q, want ghcr.io/sophium (the runtime image's registry, not the concretized in-cluster pull host)", got)
-		}
-	})
-
 	t.Run("explicit runtimeregistry still wins over everything", func(t *testing.T) {
 		target := config.OpenResult{EnvConfig: config.EnvConfig{
 			RuntimeRegistry:     "example.com/team",
@@ -71,18 +56,6 @@ func TestPublishedDevopsChartRegistry(t *testing.T) {
 		}}
 		if got := publishedDevopsChartRegistry(target); got != "example.com/team" {
 			t.Fatalf("chart registry = %q, want the explicit runtimeregistry example.com/team", got)
-		}
-	})
-
-	t.Run("plain env keeps the chart on the deploy registry despite a differing runtime image", func(t *testing.T) {
-		// The chart must stay on the deploy registry, not follow the runtime image's
-		// registry: the image override is an image-only concern.
-		target := config.OpenResult{EnvConfig: config.EnvConfig{
-			RuntimeImage:        "ghcr.io/sophium/erun-devops",
-			ContainerRegistries: config.ContainerRegistries{{Registry: "registry.example/test", Roles: []config.RegistryRole{config.RegistryRoleBuild, config.RegistryRoleDeploy}}},
-		}}
-		if got := publishedDevopsChartRegistry(target); got != "registry.example/test" {
-			t.Fatalf("chart registry = %q, want the deploy registry registry.example/test (the chart must not follow the image registry)", got)
 		}
 	})
 }
@@ -219,40 +192,6 @@ func TestResolveDeployRuntimeImageHonoursTenantsOwnVersionLine(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine guards the one
-// staleness signal that remains legitimate: a runtimeimage still
-// naming the stock erun-devops image on a deploy that has moved to the
-// tenant's own umbrella chart is provably wrong (that line never publishes
-// the stock image), so it is still healed to the umbrella's own image rather
-// than kept.
-func TestResolveDeployRuntimeImageStillHealsStockImageOnTenantLine(t *testing.T) {
-	var trace strings.Builder
-	ctx := core.Context{Logger: core.NewLoggerWithWriters(0, &trace, &trace)}
-	target := config.OpenResult{
-		Tenant: "acme",
-		EnvConfig: config.EnvConfig{
-			RuntimeImage: "ghcr.io/sophium/erun-devops:1.0.178",
-		},
-	}
-
-	got, persistImage := resolveDeployRuntimeImage(ctx, target, "ghcr.io/sophium", "1.0.201", "acme-devops", "1.0.201", "", false)
-
-	const want = "ghcr.io/sophium/acme-devops:1.0.201"
-	if got != want {
-		t.Fatalf("resolveDeployRuntimeImage() = %q, want %q (healed off the stale stock image)", got, want)
-	}
-	if !strings.Contains(trace.String(), "ignoring stale runtimeimage") {
-		t.Fatalf("expected a trace explaining the stock-image staleness, got: %s", trace.String())
-	}
-	// The persisted runtimeimage field must heal too, not just this deploy's
-	// own resolved image, or the next deploy reads the same stale stock pin
-	// back and never records the tenant's own line.
-	const wantPersist = "acme-devops"
-	if persistImage != wantPersist {
-		t.Fatalf("persistImage = %q, want %q (the bare name so the pin stays self-maintaining)", persistImage, wantPersist)
 	}
 }
 

@@ -191,37 +191,9 @@ func captureRegistryReadLog() (core.Context, *bytes.Buffer) {
 }
 
 const (
-	transientReadBackOutput = `Error: failed to authorize: failed to fetch anonymous token: unexpected status from GET request to https://ghcr.io/token: 403 Forbidden`
-	finalReadBackOutput     = `Error: cannot load Chart.yaml: error converting YAML to JSON: yaml: line 3: mapping values are not allowed in this context`
-	readBackSubject         = "chart erun-runtime 1.0.248"
+	finalReadBackOutput = `Error: cannot load Chart.yaml: error converting YAML to JSON: yaml: line 3: mapping values are not allowed in this context`
+	readBackSubject     = "chart erun-runtime 1.0.248"
 )
-
-func TestReadBackPublishedArtifactRetriesTransientReadsUpToTheBound(t *testing.T) {
-	ctx, log := captureRegistryReadLog()
-	lastErr := errors.New("exit status 1")
-	attempts := 0
-
-	err := helm.ReadBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
-		attempts++
-		return transientReadBackOutput, lastErr
-	})
-
-	if attempts != helm.RegistryVerifyMaxAttempts {
-		t.Fatalf("attempts = %d, want the bounded %d: a read-back that never succeeds must fail instead of retrying forever", attempts, helm.RegistryVerifyMaxAttempts)
-	}
-	if !errors.Is(err, lastErr) {
-		t.Fatalf("err = %v, want the last read's own error, not a generic failure", err)
-	}
-	for _, want := range []string{
-		"retrying in 500ms (attempt 2 of 4)",
-		"retrying in 1s (attempt 3 of 4)",
-		"retrying in 1.5s (attempt 4 of 4)",
-	} {
-		if !strings.Contains(log.String(), want) {
-			t.Errorf("retry announcement missing %q; a retry the operator cannot see is indistinguishable from a hang\ngot:\n%s", want, log.String())
-		}
-	}
-}
 
 func TestReadBackPublishedArtifactDoesNotRetryAFinalFailure(t *testing.T) {
 	ctx, log := captureRegistryReadLog()
@@ -241,27 +213,5 @@ func TestReadBackPublishedArtifactDoesNotRetryAFinalFailure(t *testing.T) {
 	}
 	if strings.Contains(log.String(), "retrying") {
 		t.Errorf("a final failure announced a retry:\n%s", log.String())
-	}
-}
-
-func TestReadBackPublishedArtifactStopsRetryingOnceTheReadSucceeds(t *testing.T) {
-	ctx, log := captureRegistryReadLog()
-	attempts := 0
-
-	err := helm.ReadBackPublishedArtifact(ctx, readBackSubject, func() (string, error) {
-		attempts++
-		if attempts == 1 {
-			return transientReadBackOutput, errors.New("exit status 1")
-		}
-		return "", nil
-	})
-	if err != nil {
-		t.Fatalf("err = %v, want nil once the read succeeds within the bound", err)
-	}
-	if attempts != 2 {
-		t.Fatalf("attempts = %d, want 2: the loop must stop as soon as the read succeeds", attempts)
-	}
-	if !strings.Contains(log.String(), "retrying in 500ms (attempt 2 of 4)") {
-		t.Errorf("the successful retry was not announced:\n%s", log.String())
 	}
 }

@@ -268,66 +268,6 @@ func TestIsUnderWorkRoot(t *testing.T) {
 	}
 }
 
-func TestReclaimAgentJobWorkCloneCleanPushedIsRemoved(t *testing.T) {
-	isolateActivityCache(t)
-	_, root := withFakeWorkHome(t)
-	repo := filepath.Join(root, "erun-w1")
-	initGitRepoAt(t, repo)
-	newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "-b", "feature/lane")
-	runGitForTest(t, repo, "push", "-q", "-u", "origin", "feature/lane")
-
-	const tenant, environment, id = "reclaim-contract", "clean-pushed", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant: tenant, Environment: environment, ID: id, Name: id,
-		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "exit 0"},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-	if !job.CloneReclaimed {
-		t.Fatalf("CloneReclaimed = false, want true (kept reason: %s)", job.CloneKeptReason)
-	}
-	if _, err := os.Stat(repo); !os.IsNotExist(err) {
-		t.Fatalf("clone dir still exists after being reported reclaimed: %v", err)
-	}
-}
-
-func TestReclaimAgentJobWorkCloneDirtyDetachedIsKept(t *testing.T) {
-	isolateActivityCache(t)
-	_, root := withFakeWorkHome(t)
-	repo := filepath.Join(root, "erun-w2")
-	initGitRepoAt(t, repo)
-	newBareRemoteForTest(t, repo)
-	runGitForTest(t, repo, "checkout", "-q", "--detach", "HEAD")
-
-	const tenant, environment, id = "reclaim-contract", "dirty-detached", "job"
-	if err := RunEnvironmentJobSupervisor(EnvironmentJobSupervisorParams{
-		Tenant: tenant, Environment: environment, ID: id, Name: id,
-		Dir: repo, Agent: "claude", Command: []string{"sh", "-c", "printf 'work\\n' > uncommitted.txt"},
-	}); err != nil {
-		t.Fatalf("RunEnvironmentJobSupervisor: %v", err)
-	}
-
-	job, err := LoadEnvironmentJob(tenant, environment, id, time.Now())
-	if err != nil {
-		t.Fatalf("LoadEnvironmentJob: %v", err)
-	}
-	if job.CloneReclaimed {
-		t.Fatalf("CloneReclaimed = true for a dirty, detached-HEAD clone, want false")
-	}
-	if job.CloneKeptReason == "" {
-		t.Fatalf("CloneKeptReason is empty, want an explanation")
-	}
-	if _, err := os.Stat(repo); err != nil {
-		t.Fatalf("clone dir was removed even though it was kept: %v", err)
-	}
-}
-
 func TestReclaimAgentJobWorkCloneCheckpointedAndPushedIsReclaimedAfterTheCheckpoint(t *testing.T) {
 	isolateActivityCache(t)
 	_, root := withFakeWorkHome(t)

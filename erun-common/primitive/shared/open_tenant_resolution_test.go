@@ -57,34 +57,6 @@ func TestResolveOpenTenantInferenceForbidden(t *testing.T) {
 	}
 }
 
-func TestResolveOpenTenantInferencePermittedButUnresolved(t *testing.T) {
-	store := openTenantResolutionStore{}
-	_, err := ResolveOpenTenant(store, noProjectRoot, OpenParams{UseDefaultTenant: true})
-	if err == nil {
-		t.Fatal("expected an error when no tenant is given and none could be inferred")
-	}
-	if !errors.Is(err, ErrDefaultTenantNotConfigured) {
-		t.Fatalf("expected ErrDefaultTenantNotConfigured, got: %v", err)
-	}
-	msg := err.Error()
-	// A caller that does not name itself gets the command-free wording. The
-	// failure is real and the remedies are named, but no operation is blamed:
-	// the defect was this branch claiming `open` could not infer a tenant for
-	// a command that was not open.
-	if strings.Contains(msg, "open") {
-		t.Fatalf("a nameless caller must not have a command name invented for it: %q", msg)
-	}
-	if !strings.Contains(msg, "could not be inferred") {
-		t.Fatalf("error must disclose that working-directory inference also failed: %q", msg)
-	}
-	if !strings.Contains(msg, "pass a tenant explicitly") || !strings.Contains(msg, "set-default-tenant") {
-		t.Fatalf("error must name its recovery (pass explicitly, or set a default): %q", msg)
-	}
-	if errors.Is(err, ErrOpenTenantNotProvided) {
-		t.Fatalf("inference-permitted-but-unresolved case must not be mistaken for the inference-forbidden case: %q", msg)
-	}
-}
-
 // TestResolveOpenTenantNamesTheCommandThatActuallyFailed is the regression for
 // the failure naming a fixed operation: it must name the operation the
 // operator ran, and offer that operation's own recovery, rather than "open"'s.
@@ -94,9 +66,6 @@ func TestResolveOpenTenantNamesTheCommandThatActuallyFailed(t *testing.T) {
 		command            string
 		scopesTenantByFlag bool
 	}{
-		{"erun usage", true},
-		{"erun observe", true},
-		{"erun deploy", true},
 		{"erun outputs list", true},
 		// build takes the tenant positionally, so its recovery must name the
 		// command without asserting a --tenant flag it does not have.

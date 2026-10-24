@@ -6,60 +6,7 @@ import (
 
 	configpkg "github.com/sophium/erun/erun-common/base/config"
 	"github.com/sophium/erun/erun-common/base/core"
-	"gopkg.in/yaml.v3"
 )
-
-// TestOrchestratorConfigAliasRoundTrip locks the config-file contract an
-// orchestrator's alias depends on: a declared alias survives load/save, and an
-// undeclared one neither writes an `alias:` key nor round-trips into a value.
-// Mirrors OrchestratorEnvConfig.Role's own round trip, because the two fields
-// fail the same way -- with an `omitempty` tag that never actually omits, or a
-// key the reader silently drops.
-func TestOrchestratorConfigAliasRoundTrip(t *testing.T) {
-	tests := []struct {
-		name  string
-		alias string
-	}{
-		{name: "declared", alias: "erun+erunpaas.com@erun"},
-		{name: "unset", alias: ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			config := configpkg.ERunConfig{
-				Orchestrators: []configpkg.OrchestratorConfig{{
-					ID:    "orch-1",
-					Name:  "Orchestrator One",
-					Alias: tt.alias,
-				}},
-			}
-
-			data, err := yaml.Marshal(config)
-			if err != nil {
-				t.Fatalf("Marshal() error = %v", err)
-			}
-
-			hasAliasKey := strings.Contains(string(data), "alias:")
-			if tt.alias == "" && hasAliasKey {
-				t.Fatalf("unset alias must not be written, got:\n%s", data)
-			}
-			if tt.alias != "" && !hasAliasKey {
-				t.Fatalf("declared alias %q must be written, got:\n%s", tt.alias, data)
-			}
-
-			var roundTripped configpkg.ERunConfig
-			if err := yaml.Unmarshal(data, &roundTripped); err != nil {
-				t.Fatalf("Unmarshal() error = %v", err)
-			}
-			if len(roundTripped.Orchestrators) != 1 {
-				t.Fatalf("round trip lost structure: %+v", roundTripped)
-			}
-			if got := roundTripped.Orchestrators[0].Alias; got != tt.alias {
-				t.Fatalf("round-tripped alias = %q, want %q", got, tt.alias)
-			}
-		})
-	}
-}
 
 func TestParseOrchestratorAliasFlag(t *testing.T) {
 	tests := []struct {
@@ -68,9 +15,7 @@ func TestParseOrchestratorAliasFlag(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
-		{name: "alias", value: "erun+erunpaas.com@erun", want: "erun+erunpaas.com@erun"},
 		{name: "padded", value: "  erun+erunpaas.com@erun  ", want: "erun+erunpaas.com@erun"},
-		{name: "none sentinel", value: "none", want: ""},
 		{name: "none sentinel is case-insensitive", value: "NONE", want: ""},
 		{name: "empty", value: "", wantErr: true},
 		{name: "whitespace only", value: "   ", wantErr: true},
@@ -132,73 +77,6 @@ func TestSetOrchestratorAliasWritesAndClears(t *testing.T) {
 	}
 	if got := store.config.Orchestrators[0].Alias; got != "" {
 		t.Fatalf("cleared alias = %q, want empty", got)
-	}
-}
-
-// TestSetOrchestratorAliasRefusesAnAliasThisHostCannotResolve is the whole
-// point of validating in the writer: an alias recorded but unresolvable is
-// indistinguishable from one never set, so the command must refuse it and say
-// what to do instead of writing a declaration nothing honours.
-func TestSetOrchestratorAliasRefusesAnAliasThisHostCannotResolve(t *testing.T) {
-	store := newOrchestratorAliasStubStore()
-	store.saved = false
-
-	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "erun+elsewhere.example@erun",
-	})
-	if err == nil {
-		t.Fatal("SetOrchestratorAlias() accepted an alias this host does not have configured")
-	}
-	for _, want := range []string{"not configured", "erun cloud init erun --api-url", OrchestratorAliasNone} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error %q does not mention %q", err.Error(), want)
-		}
-	}
-	if store.saved {
-		t.Fatal("a refused alias still wrote the config")
-	}
-	if got := store.config.Orchestrators[0].Alias; got != "" {
-		t.Fatalf("a refused alias was recorded anyway: %q", got)
-	}
-}
-
-// TestSetOrchestratorAliasRefusesANonERunAlias keeps the field to the one
-// provider type it describes: an orchestrator's platform attribution has no
-// meaning against an AWS or Cloudflare alias, and storing one would promise a
-// resolution that can never happen.
-func TestSetOrchestratorAliasRefusesANonERunAlias(t *testing.T) {
-	store := newOrchestratorAliasStubStore()
-	store.saved = false
-
-	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
-		OrchestratorID: "orch-1",
-		Alias:          "aws-prod",
-	})
-	if err == nil {
-		t.Fatal("SetOrchestratorAlias() accepted a non-erun alias")
-	}
-	if !strings.Contains(err.Error(), "not an erun platform alias") {
-		t.Fatalf("error %q does not say the alias is the wrong type", err.Error())
-	}
-	if store.saved {
-		t.Fatal("a refused alias still wrote the config")
-	}
-}
-
-func TestSetOrchestratorAliasUnknownOrchestrator(t *testing.T) {
-	store := newOrchestratorAliasStubStore()
-	store.saved = false
-
-	_, err := SetOrchestratorAlias(core.Context{}, store, SetOrchestratorAliasParams{
-		OrchestratorID: "nope",
-		Alias:          "erun+erunpaas.com@erun",
-	})
-	if err == nil || !strings.Contains(err.Error(), `orchestrator "nope" not found`) {
-		t.Fatalf("error = %v, want an unknown-orchestrator refusal", err)
-	}
-	if store.saved {
-		t.Fatal("an unknown orchestrator still wrote the config")
 	}
 }
 

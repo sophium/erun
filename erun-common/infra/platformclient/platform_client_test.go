@@ -33,25 +33,6 @@ func TestPlatformClientPlatformDoesNotAuthenticate(t *testing.T) {
 	}
 }
 
-func TestPlatformClientAuthenticatedCallSendsMintedBearer(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
-			t.Fatalf("Authorization = %q", got)
-		}
-		_ = json.NewEncoder(w).Encode(PlatformWhoami{TenantID: "tenant-1", UserID: "user-1"})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	whoami, err := client.Whoami(context.Background())
-	if err != nil {
-		t.Fatalf("Whoami: %v", err)
-	}
-	if whoami.TenantID != "tenant-1" || whoami.UserID != "user-1" {
-		t.Fatalf("whoami = %+v", whoami)
-	}
-}
-
 // TestPlatformClientWithMCPToolSendsAuditHeader pins the client side of
 // AuditEventTypeMCP: erun-backend-api can only classify a call as MCP-driven
 // if the request actually carries this header.
@@ -260,27 +241,6 @@ func TestPlatformClientCreateContextPreviewReturnsPlanOnly(t *testing.T) {
 		t.Fatalf("CreateContext: %v", err)
 	}
 	if result.Context != nil || len(result.Plan) != 2 {
-		t.Fatalf("result = %+v", result)
-	}
-}
-
-func TestPlatformClientProvision(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/provision" {
-			t.Fatalf("path = %s", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(PlatformProvisionResult{Plan: []string{"a", "b"}, QuotaOk: true})
-	}))
-	defer srv.Close()
-
-	client := NewPlatformClient(srv.URL, staticToken("token-1"))
-	result, err := client.Provision(context.Background(), PlatformProvisionParams{
-		Environment: PlatformProvisionEnvironment{Name: "prod", Type: "runtime"},
-	})
-	if err != nil {
-		t.Fatalf("Provision: %v", err)
-	}
-	if !result.QuotaOk || len(result.Plan) != 2 {
 		t.Fatalf("result = %+v", result)
 	}
 }

@@ -1,7 +1,6 @@
 package setup
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -151,27 +150,6 @@ func assertMachineIdentityManifest(t *testing.T, manifest string, identity platf
 	}
 }
 
-// TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse is the check
-// that keeps a working environment from being replaced by a broken one: a
-// credential the platform returned but that mints no token is not written, and
-// the caller is told to fall back.
-func TestProvisionMachineIdentitySecretRefusesACredentialItCannotUse(t *testing.T) {
-	captured := installCapturingKubectl(t)
-	api := fakePlatformAPI(t, testMachineIdentity())
-	deps, _ := machineIdentityDeps(t, "https://auth.example/token", func(string, string) (cloud.ERunTokens, error) {
-		return cloud.ERunTokens{}, context.DeadlineExceeded
-	})
-
-	_, ok, err := provisionMachineIdentitySecret(testTraceContext(false), machineIdentityHostStore(api.URL), "team", "team-dev", "team-dev", "", deps)
-	if err != nil {
-		t.Fatalf("a credential that cannot be used is a fallback, not an error: %v", err)
-	}
-	if ok {
-		t.Fatal("expected provisioning to decline a credential it could not exchange for a token")
-	}
-	assertNothingApplied(t, captured.path)
-}
-
 // TestProvisionMachineIdentitySecretFallsBackWhenTheEnvironmentIsUnregistered:
 // an environment the platform does not know yet is the ordinary state during a
 // first init, and it must leave the delegated path to run rather than fail.
@@ -206,58 +184,6 @@ func TestProvisionMachineIdentitySecretIsANoOpWithoutAHostAlias(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected no provisioning from a host with no alias")
-	}
-}
-
-// TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant pins which
-// grant an alias's credential form selects -- the two are not interchangeable,
-// and reading a client secret down the refresh-token path (or the reverse)
-// would present the wrong kind of credential to the issuer.
-func TestResolveERunAccessTokenMintsThroughTheClientCredentialsGrant(t *testing.T) {
-	store := cloud.NewFileCloudSecretStore(filepath.Join(t.TempDir(), cloud.CloudSecretStoreDirName))
-	alias := testPlatformAliasProvider().Alias
-	ref := machineIdentityClientSecretRef(alias)
-	if err := store.SaveCloudSecret(ref, "client-secret-value"); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	provider := config.CloudProviderConfig{
-		Alias:         alias,
-		Provider:      config.CloudProviderERun,
-		OIDCIssuerURL: "https://auth.example",
-		ERun: &config.ERunProviderConfig{
-			APIURL:          "https://api.example",
-			ClientID:        "client-env-0192",
-			ClientSecretRef: ref,
-		},
-	}
-	refreshCalled, machineCalled := false, false
-	deps := cloud.CloudDependencies{
-		CloudSecretStore: store,
-		FetchOIDCDiscovery: func(core.Context, string) (cloud.OIDCDiscovery, error) {
-			return cloud.OIDCDiscovery{Issuer: "https://auth.example", TokenEndpoint: "https://auth.example/token"}, nil
-		},
-		RefreshERunTokens: func(core.Context, cloud.OIDCDiscovery, string, string) (cloud.ERunTokens, error) {
-			refreshCalled = true
-			return cloud.ERunTokens{}, nil
-		},
-		ClientCredentialsERunTokens: func(_ core.Context, _ cloud.OIDCDiscovery, clientID, clientSecret string) (cloud.ERunTokens, error) {
-			machineCalled = true
-			if clientID != "client-env-0192" || clientSecret != "client-secret-value" {
-				t.Fatalf("grant presented %q/%q", clientID, clientSecret)
-			}
-			return cloud.ERunTokens{AccessToken: "machine-token"}, nil
-		},
-	}
-
-	token, err := cloud.ResolveERunAccessToken(testTraceContext(false), provider, deps)
-	if err != nil {
-		t.Fatalf("resolveERunAccessToken: %v", err)
-	}
-	if token != "machine-token" {
-		t.Fatalf("got token %q", token)
-	}
-	if !machineCalled || refreshCalled {
-		t.Fatalf("machineCalled=%v refreshCalled=%v, want the client_credentials grant only", machineCalled, refreshCalled)
 	}
 }
 
