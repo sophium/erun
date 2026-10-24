@@ -8,7 +8,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/orchestration"
+	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/release"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 	sharedpkg "github.com/sophium/erun/erun-mcp/tools/shared"
@@ -32,7 +32,7 @@ func ReleaseTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.Cal
 				if err != nil {
 					return err
 				}
-				resolved, ok := orchestration.BuildExecutionReleaseSpec(execution)
+				resolved, ok := executepkg.BuildExecutionReleaseSpec(execution)
 				if !ok {
 					return errors.New("release: the resolved plan is not a release")
 				}

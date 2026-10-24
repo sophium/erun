@@ -1,4 +1,4 @@
-package orchestration
+package build
 
 import (
 	"bytes"
@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/erun-common/base/core"
-	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/shared"
 )
@@ -339,7 +338,7 @@ func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 
 	target := boundaryTarget(root)
 	target.NoIncremental = false
-	execution, err := buildrun.ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	execution, err := ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +347,7 @@ func TestBuildExecutionReuseDecisionRespectsNoIncremental(t *testing.T) {
 	}
 
 	target.NoIncremental = true
-	execution, err = buildrun.ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
+	execution, err = ResolveBuildExecution(core.Context{DryRun: true}, nil, findProjectRoot, resolveBuildContext, nil, target)
 	if err != nil {
 		t.Fatal(err)
 	}

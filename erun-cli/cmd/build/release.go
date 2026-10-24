@@ -8,8 +8,8 @@ import (
 	"github.com/sophium/erun/cmd/shared"
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/gitx"
-	"github.com/sophium/erun/erun-common/orchestration"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
+	"github.com/sophium/erun/erun-common/orchestration/execute"
 	"github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/release"
 	sharedpkg "github.com/sophium/erun/erun-common/primitive/shared"
@@ -62,7 +62,7 @@ func runReleaseCommand(ctx core.Context, store sharedpkg.DockerStore, findProjec
 	// Source control only: release stamps, commits, tags and pushes the version
 	// and never builds or publishes an artifact. Build and publish are
 	// `erun build --release` and `erun push --version`. See RunReleaseSpec.
-	spec, ok := orchestration.BuildExecutionReleaseSpec(execution)
+	spec, ok := execute.BuildExecutionReleaseSpec(execution)
 	if !ok {
 		return fmt.Errorf("release: the resolved plan is not a release")
 	}

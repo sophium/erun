@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sophium/erun/erun-common/base/core"
-	"github.com/sophium/erun/erun-common/orchestration"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
+	executepkg "github.com/sophium/erun/erun-common/orchestration/execute"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/push"
 	"github.com/sophium/erun/erun-common/primitive/shared"
@@ -53,7 +53,7 @@ func BuildTool(runtime sharedpkg.RuntimeConfig) func(context.Context, *mcp.CallT
 				}
 				// build is a pure primitive that only builds and mints the version;
 				// MCP composes primitives itself rather than exposing a deploy switch.
-				if err := orchestration.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime), runtime.Store, sharedpkg.CloudDependencies()); err != nil {
+				if err := executepkg.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, sharedpkg.RuntimePushFunc(runtime), runtime.Store, sharedpkg.CloudDependencies()); err != nil {
 					return err
 				}
 				built := buildrun.NewBuildResult(execution)

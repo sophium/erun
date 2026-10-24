@@ -12,9 +12,9 @@ import (
 	"github.com/sophium/erun/erun-common/base/core"
 	"github.com/sophium/erun/erun-common/infra/cloud"
 	registrypkg "github.com/sophium/erun/erun-common/infra/registry"
-	"github.com/sophium/erun/erun-common/orchestration"
 	buildrun "github.com/sophium/erun/erun-common/orchestration/build"
 	deployrun "github.com/sophium/erun/erun-common/orchestration/deploy"
+	"github.com/sophium/erun/erun-common/orchestration/execute"
 	buildpkg "github.com/sophium/erun/erun-common/primitive/build"
 	"github.com/sophium/erun/erun-common/primitive/deploy"
 	pushpkg "github.com/sophium/erun/erun-common/primitive/push"
@@ -102,7 +102,7 @@ func runBuildCommand(ctx core.Context, store sharedpkg.DockerStore, findProjectR
 		)
 	}
 	if !target.Deploy {
-		if err := orchestration.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
+		if err := execute.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 			return err
 		}
 		return ctx.WriteResult(buildrun.NewBuildResult(execution))
@@ -130,7 +130,7 @@ func runBuildAndDeploy(ctx core.Context, store sharedpkg.DockerStore, findProjec
 		return err
 	}
 
-	return orchestration.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps)
+	return execute.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart, cloudStore, cloudDeps)
 }
 
 func NewPushCmd(store sharedpkg.DockerStore, findProjectRoot sharedpkg.ProjectFinderFunc, resolveBuildContext sharedpkg.BuildContextResolverFunc, now sharedpkg.NowFunc, buildDockerImage buildpkg.DockerImageBuilderFunc, loginToDockerRegistry buildpkg.DockerRegistryLoginFunc, selectRunner shared.SelectRunner, push buildpkg.DockerPushFunc) *cobra.Command {
@@ -260,7 +260,7 @@ func runPushBuildStep(ctx core.Context, store sharedpkg.DockerStore, findProject
 		return err
 	}
 	buildWithRetry := pushBuildWithRetry(ctx, buildDockerImage, loginToDockerRegistry, selectRunner)
-	if err := orchestration.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
+	if err := execute.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push, cloudStore, cloudDeps); err != nil {
 		return err
 	}
 	version := strings.TrimSpace(buildrun.NewBuildResult(execution).Version)
