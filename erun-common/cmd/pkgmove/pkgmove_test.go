@@ -394,7 +394,10 @@ func TestApplyDropsACopyWhoseOwnPackageIsEmptied(t *testing.T) {
 		"root_test.go":       "package fixture\n\nimport \"testing\"\n\nfunc TestRoot(t *testing.T) {\n\tif Root()+helper() != 3 {\n\t\tt.Fatal()\n\t}\n}\n",
 		"sub/sub.go":         "package sub\n\nfunc Sub() int { return 0 }\n",
 		"sub/helper_test.go": "package sub\n\nfunc helper() int { return 2 }\n",
-		"packages.map":       "sub root.go\nsub root_test.go\nsub helper_test.go\n",
+		"other.go":           "package fixture\n\nfunc Other() int { return 4 }\n",
+		"other_test.go":      "package fixture\n\nimport \"testing\"\n\nconst (\n\tfour = 4\n\ttwo  = 2\n)\n\nfunc TestOther(t *testing.T) {\n\tif Other() != four || helper() != two {\n\t\tt.Fatal()\n\t}\n}\n",
+		"sub/consts_test.go": "package sub\n\nconst (\n\ttwo = 2\n)\n",
+		"packages.map":       "sub root.go\nsub root_test.go\nsub helper_test.go\nother other.go\nother other_test.go\n",
 	})
 	if out, err := runPkgmove(t, dir, "apply", "-map", filepath.Join(dir, "packages.map")); err != nil {
 		t.Fatalf("apply: %v\n%s", err, out)

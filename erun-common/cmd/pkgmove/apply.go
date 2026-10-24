@@ -188,10 +188,9 @@ func allDropped(entries []declTarget) bool {
 }
 
 func (p *fragmentPlan) place(e declTarget, rg [2]int) {
-	if e.drop {
-		return
+	if !e.drop {
+		p.get(e.dir, false).addRange(rg)
 	}
-	p.get(e.dir, false).addRange(rg)
 	for _, dir := range sortedKeys(e.dups) {
 		p.get(dir, true).addRange(rg)
 	}
@@ -205,19 +204,19 @@ func (p *fragmentPlan) placeGroup(sf *sourceFile, specs []declTarget, prev int) 
 	group := genDeclAt(sf, specs[0].group)
 	end := sf.fset.Position(group.End()).Offset
 	dirs := groupDirs(specs)
-	if len(dirs) == 1 {
+	if len(dirs) == 1 && !anyDropped(specs) {
 		p.get(dirs[0], false).addRange([2]int{prev, end})
 		return end
 	}
 	for _, dir := range dirs {
 		f := p.get(dir, !specsIn(specs, dir))
-		if dir == specs[0].dir {
+		if dir == specs[0].dir && !specs[0].drop {
 			f.addRange([2]int{prev, specs[0].start})
 		} else {
 			f.addLit("\n\n" + specs[0].tok + " (")
 		}
 		for _, spec := range specs {
-			if spec.dir == dir || spec.dups[dir] {
+			if (spec.dir == dir && !spec.drop) || spec.dups[dir] {
 				f.addRange([2]int{spec.start, spec.end})
 			}
 		}
@@ -237,6 +236,15 @@ func specsIn(specs []declTarget, dir string) bool {
 
 // groupDirs are the packages a group's specs and their copies go to, in the
 // order they first appear.
+func anyDropped(specs []declTarget) bool {
+	for _, spec := range specs {
+		if spec.drop {
+			return true
+		}
+	}
+	return false
+}
+
 func groupDirs(specs []declTarget) []string {
 	var dirs []string
 	seen := map[string]bool{}
@@ -247,7 +255,9 @@ func groupDirs(specs []declTarget) []string {
 		}
 	}
 	for _, spec := range specs {
-		add(spec.dir)
+		if !spec.drop {
+			add(spec.dir)
+		}
 		for _, dir := range sortedKeys(spec.dups) {
 			add(dir)
 		}
